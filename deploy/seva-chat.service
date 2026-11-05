@@ -1,0 +1,40 @@
+# Seva Chat. Installed by deploy/release.sh.
+[Unit]
+Description=Seva Chat
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=simple
+User=seva-chat
+Group=seva-chat
+WorkingDirectory=/srv/seva-chat/current
+EnvironmentFile=/etc/seva-chat/env
+ExecStart=/usr/bin/node .output/server/index.mjs
+# A crash restarts it in 2 seconds; replies in progress go on (durable workflow runs).
+Restart=always
+RestartSec=2
+# On stop, the server finishes the step in progress for up to 10 seconds (server/startup.ts).
+KillSignal=SIGTERM
+TimeoutStopSec=20
+# Deno's cache for the Python sandbox: /var/cache/seva-chat.
+CacheDirectory=seva-chat
+# Limits, so a runaway cannot take the database down with it.
+MemoryMax=75%
+TasksMax=512
+LimitNOFILE=65536
+# Hardening: the service can write only its cache folder.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

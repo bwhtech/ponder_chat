@@ -1,0 +1,6 @@
+[Unit]
+Description=Seva Chat checks and alerts
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sentinel.sh

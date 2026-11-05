@@ -1,0 +1,36 @@
+# Seva Chat behind Caddy, which gets and renews the HTTPS certificate.
+# Installed by deploy/release.sh, with DOMAIN from /srv/seva-chat/domain.
+{$DOMAIN} {
+	# The workflow's internal route has no authentication. The worker reaches it on
+	# 127.0.0.1; nobody outside may.
+	@workflow path /.well-known/workflow/*
+	respond @workflow 404
+
+	request_body {
+		max_size 12MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	reverse_proxy 127.0.0.1:3500 {
+		# Replies stream as server-sent events: pass each chunk on at once.
+		flush_interval -1
+		# During a deploy or a restart the server is down for a few seconds. Caddy holds
+		# new requests and tries again, so the page sees a slow request, not an error.
+		# A request is retried only when it could not connect, so a message is never sent twice.
+		lb_try_duration 30s
+		lb_try_interval 250ms
+	}
+
+	log {
+		output file /var/log/caddy/seva-chat.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+	}
+}

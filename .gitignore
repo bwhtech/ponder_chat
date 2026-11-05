@@ -1,0 +1,15 @@
+node_modules
+dist
+.env
+.env.*
+*.log
+.DS_Store
+.devtools
+data
+.wrangler
+deploy/worker-configuration.d.ts
+sandbox/pyodide/vendor
+sandbox/pyodide/.deno
+/.swc
+.output
+.nitro

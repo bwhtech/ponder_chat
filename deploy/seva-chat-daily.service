@@ -1,0 +1,6 @@
+[Unit]
+Description=Seva Chat daily summary
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/sentinel.sh --daily

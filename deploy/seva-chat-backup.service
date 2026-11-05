@@ -1,0 +1,8 @@
+[Unit]
+Description=Seva Chat database backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/backup.sh
+Nice=10
