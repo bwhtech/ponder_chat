@@ -13,7 +13,6 @@ export type ChatTurn = {
 	/** Set by the route, so the prompt does not read the clock inside the workflow. */
 	today: string;
 	maxSteps: number;
-	maxOutputTokens: number;
 };
 
 /**
@@ -40,7 +39,6 @@ export async function chatTurn(turn: ChatTurn) {
 					}),
 				}
 			: {},
-		maxOutputTokens: turn.maxOutputTokens,
 		// Credits are charged from what each model call cost (steps.ts).
 		onStepEnd: async (step) => {
 			const metadata = step.providerMetadata?.openrouter as { usage?: { cost?: number } } | undefined;

@@ -25,8 +25,6 @@ import { activeRun, latestRun, setActiveRun } from "./workflow/runs.ts";
  * work (migrations, the Postgres World's worker) is in server/plugins/startup.ts.
  */
 const MAX_STEPS = Number(process.env.CHAT_MAX_STEPS ?? 10);
-/** Bounds the cost of one reply, since credits are checked before it starts, not during. */
-const MAX_OUTPUT_TOKENS = Number(process.env.CHAT_MAX_OUTPUT_TOKENS ?? 8000);
 
 type Env = { Variables: { user: SignedIn } };
 const app = new Hono<Env>();
@@ -110,7 +108,6 @@ app.post("/api/chat", async (c) => {
 			python: await pythonReady,
 			today: new Date().toDateString(),
 			maxSteps: MAX_STEPS,
-			maxOutputTokens: MAX_OUTPUT_TOKENS,
 		},
 	]);
 	await setActiveRun(body.id, started.runId, model.id);

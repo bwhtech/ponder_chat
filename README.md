@@ -19,7 +19,6 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 | --- | --- | --- |
 | `CHAT_DAILY_CREDITS` | 100 | Credits for each person each day. |
 | `CHAT_CREDITS_PER_USD` | 1000 | Credits per US dollar of OpenRouter cost. With 1000, one credit is $0.001. |
-| `CHAT_MAX_OUTPUT_TOKENS` | 8000 | The maximum length of one reply. This limits how far one reply can go past the limit. |
 
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`), including the calls that write chat names.
 - The count starts again at midnight UTC.

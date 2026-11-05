@@ -9,7 +9,8 @@ import { sql } from "./db.ts";
  * Spending is read from the `runs` table (telemetry), which records OpenRouter's cost
  * for every model call, including thread titles. Nothing is reserved up front: a person
  * with credits left can start a reply, and that one reply may take them past the limit.
- * The next one is refused. CHAT_MAX_OUTPUT_TOKENS (chat.ts) bounds how far one reply goes.
+ * The next one is refused. Replies have no length cap of their own: going over by one
+ * reply is accepted.
  *
  * CHAT_DAILY_CREDITS sets everyone's limit. A row in `credit_limits` sets one person's.
  */
