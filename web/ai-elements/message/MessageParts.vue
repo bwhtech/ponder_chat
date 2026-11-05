@@ -2,6 +2,8 @@
 import type { ReasoningUIPart, SourceUrlUIPart, UIMessage } from "ai";
 import { computed } from "vue";
 import Attachment from "../attachment/Attachment.vue";
+import Bubble from "../bubble/Bubble.vue";
+import BubbleContent from "../bubble/BubbleContent.vue";
 import ConfirmationBatch from "../confirmation/ConfirmationBatch.vue";
 import ReasoningPart from "../reasoning/ReasoningPart.vue";
 import { UPDATE_PLAN_TOOL, type ProposePlanOutput, type UpdatePlanInput } from "../plan/build-plan";
@@ -36,7 +38,12 @@ const emit = defineEmits<{
 }>();
 
 type Part = UIMessage["parts"][number];
-type Group = { kind: "steps"; parts: Part[] } | { kind: "part"; part: Part } | { kind: "plan-item"; id: string; parts: Part[] };
+type FilePart = Extract<Part, { type: "file" }>;
+type Group =
+	| { kind: "steps"; parts: Part[] }
+	| { kind: "part"; part: Part }
+	| { kind: "files"; parts: FilePart[] }
+	| { kind: "plan-item"; id: string; parts: Part[] };
 
 const role = useMessageRole();
 const customTools = new Set(Object.keys(useToolRenderers()));
@@ -55,7 +62,7 @@ const pendingApprovals = computed(() =>
 		.map((part) => (part as Extract<ToolMessagePart, { state: "approval-requested" }>).approval.id),
 );
 const firstPendingGroup = computed(() =>
-	groups.value.findIndex((group) => group.kind !== "part" && group.parts.some((part) => isStep(part) && part.type !== "reasoning" && asTool(part).state === "approval-requested")),
+	groups.value.findIndex((group) => isStepsGroup(group) && group.parts.some((part) => isStep(part) && part.type !== "reasoning" && asTool(part).state === "approval-requested")),
 );
 const lastTextIndex = computed(() => props.message.parts.map((part) => part.type).lastIndexOf("text"));
 
@@ -81,13 +88,23 @@ function groupParts(parts: Part[]): Group[] {
 		else if (isStep(part) && current) groups.push({ kind: "plan-item", id: current, parts: [part] });
 		else if (isStep(part) && last?.kind === "steps") last.parts.push(part);
 		else if (isStep(part)) groups.push({ kind: "steps", parts: [part] });
-		else if (part.type === "text" || part.type === "file") groups.push({ kind: "part", part });
+		else if (part.type === "file" && last?.kind === "files") last.parts.push(part);
+		else if (part.type === "file") groups.push({ kind: "files", parts: [part] });
+		else if (part.type === "text") groups.push({ kind: "part", part });
 	}
 	return groups;
 }
 
+function isStepsGroup(group: Group): group is Extract<Group, { kind: "steps" | "plan-item" }> {
+	return group.kind === "steps" || group.kind === "plan-item";
+}
+
+function isImage(part: FilePart) {
+	return part.mediaType.startsWith("image/") && Boolean(part.url);
+}
+
 /** Folds a plain steps group; a plan item's steps already sit under its own line. */
-function workItems(group: Exclude<Group, { kind: "part" }>) {
+function workItems(group: Extract<Group, { kind: "steps" | "plan-item" }>) {
 	return group.kind === "steps" ? foldSteps(group.parts, customTools) : group.parts.map((part) => ({ kind: "one" as const, part }));
 }
 
@@ -99,7 +116,7 @@ function answerAll(approved: boolean) {
 }
 
 /** A plan item's steps go under its line (PlanItemSteps); other steps sit in a plain column. */
-function stepsAttrs(group: Exclude<Group, { kind: "part" }>) {
+function stepsAttrs(group: Extract<Group, { kind: "steps" | "plan-item" }>) {
 	if (group.kind === "steps") return { "data-slot": "message-steps", class: "flex min-w-0 flex-col gap-1.5" };
 	const item = buildPlan?.value?.items.find((candidate) => candidate.id === group.id);
 	return {
@@ -132,7 +149,7 @@ function isStreamingText(part: Part) {
 			@approve="answerAll(true)"
 			@deny="answerAll(false)"
 		/>
-		<component :is="group.kind === 'plan-item' ? PlanItemSteps : 'div'" v-if="group.kind !== 'part'" v-bind="stepsAttrs(group)">
+		<component :is="group.kind === 'plan-item' ? PlanItemSteps : 'div'" v-if="isStepsGroup(group)" v-bind="stepsAttrs(group)">
 			<template v-for="(item, itemIndex) in workItems(group)" :key="itemIndex">
 				<ToolGroup v-if="item.kind === 'fold'" v-bind="summarizeSteps(item.parts, streaming)">
 					<template v-for="(part, stepIndex) in item.parts" :key="stepIndex">
@@ -153,16 +170,30 @@ function isStreamingText(part: Part) {
 				/>
 			</template>
 		</component>
-		<template v-else-if="group.part.type === 'text'">
-			<span v-if="role === 'user'" class="whitespace-pre-wrap">{{ group.part.text }}</span>
+		<template v-else-if="group.kind === 'part' && group.part.type === 'text'">
+			<Bubble v-if="role === 'user'" align="end" variant="muted">
+				<BubbleContent class="whitespace-pre-wrap">{{ group.part.text }}</BubbleContent>
+			</Bubble>
 			<Response v-else :content="group.part.text" :parse-incomplete="isStreamingText(group.part)" />
 		</template>
-		<Attachment
-			v-else-if="group.part.type === 'file'"
-			:name="group.part.filename ?? 'File'"
-			:media-type="group.part.mediaType"
-			:url="group.part.url"
-		/>
+		<div
+			v-else-if="group.kind === 'files'"
+			data-slot="message-files"
+			class="flex max-w-[85%] flex-wrap gap-2 group-data-[align=end]/message:justify-end"
+		>
+			<template v-for="(file, fileIndex) in group.parts" :key="fileIndex">
+				<a
+					v-if="isImage(file)"
+					:href="file.url"
+					target="_blank"
+					rel="noreferrer noopener"
+					class="block size-24 overflow-hidden rounded-6 border border-outline-gray-2 transition-transform duration-150 ease-out active:scale-[0.97]"
+				>
+					<img :src="file.url" :alt="file.filename ?? 'Image'" class="size-full object-cover" loading="lazy" />
+				</a>
+				<Attachment v-else :name="file.filename ?? 'File'" :media-type="file.mediaType" :url="file.url" />
+			</template>
+		</div>
 	</template>
 	<Sources v-if="sources.length" :sources="sources" />
 </template>

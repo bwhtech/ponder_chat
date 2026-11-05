@@ -52,9 +52,16 @@ const printed = computed(() => [output.value?.stdout, failed.value ? output.valu
 			<img :src="image.url" :alt="image.name" class="max-h-[420px] max-w-full rounded-6 border border-outline-gray-1" loading="lazy" />
 		</a>
 		<div v-if="others.length" class="flex flex-wrap gap-2">
-			<a v-for="file in others" :key="file.url" :href="file.url" :download="file.name">
-				<Attachment :name="file.name" :size="file.size" :media-type="file.media_type" :url="file.url" state="done" />
-			</a>
+			<Attachment
+				v-for="file in others"
+				:key="file.url"
+				:name="file.name"
+				:size="file.size"
+				:media-type="file.media_type"
+				:url="file.url"
+				:download="file.name"
+				state="done"
+			/>
 		</div>
 	</div>
 </template>

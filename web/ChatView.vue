@@ -433,7 +433,7 @@ function replyModelId(message: UIMessage) {
 					:scroll-anchor="message.role === 'user'"
 				>
 					<Message :from="message.role">
-						<MessageContent>
+						<MessageContent :bare="message.role === 'user'">
 							<MessageParts :message="message" :streaming="isStreaming(message)" />
 							<MessageActions v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)">
 								<MessageCopyAction :value="replyText(message)" />
