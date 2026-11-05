@@ -14,9 +14,10 @@ import { TITLE_FUNCTION_ID } from "./thread-title.ts";
  * The next one is refused. Replies have no length cap of their own: going over by one
  * reply is accepted.
  *
- * CHAT_DAILY_CREDITS sets everyone's limit. A row in `credit_limits` sets one person's.
+ * CHAT_DAILY_CREDITS sets everyone's limit. A row in `credit_limits` sets one person's
+ * (scripts/credits.ts).
  */
-const DEFAULT_DAILY_CREDITS = Number(process.env.CHAT_DAILY_CREDITS ?? 100);
+const DEFAULT_DAILY_CREDITS = Number(process.env.CHAT_DAILY_CREDITS ?? 1000);
 const CREDITS_PER_USD = Number(process.env.CHAT_CREDITS_PER_USD ?? 1000);
 
 export type CreditStatus = {
@@ -51,6 +52,13 @@ export async function creditStatus(user: string, now = new Date()): Promise<Cred
 	const limit = override?.daily_credits ?? DEFAULT_DAILY_CREDITS;
 	const used = Math.round(spent.usd * CREDITS_PER_USD * 10) / 10;
 	return { limit, used, remaining: Math.max(0, Math.round((limit - used) * 10) / 10), resetsAt: resetsAt.toISOString() };
+}
+
+/** Each person with their own limit, by email. */
+export async function listDailyCredits() {
+	return sql<{ email: string; daily_credits: number; updated_at: Date }[]>`
+		select users.email, credit_limits.daily_credits, credit_limits.updated_at
+		from credit_limits join users on users.id = credit_limits.user_id order by users.email`;
 }
 
 /** Sets one person's daily limit, or with null, puts them back on the default. */

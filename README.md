@@ -18,7 +18,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `CHAT_DAILY_CREDITS` | 100 | Credits for each person each day. |
+| `CHAT_DAILY_CREDITS` | 1000 | Credits for each person each day. |
 | `CHAT_CREDITS_PER_USD` | 1000 | Credits per US dollar of OpenRouter cost. With 1000, one credit is $0.001. |
 
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`).
@@ -26,7 +26,8 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - The count starts again at midnight UTC.
 - Before each reply, the server adds up today's cost. When nothing is left, it answers 402 and the page shows when credits refill.
 - Nothing is reserved before a reply. The last reply of the day can go a little past the limit.
-- To give one person a different limit: `insert into credit_limits (user_id, daily_credits) values ('<user id>', 500)`. Delete the row to put them back on the default.
+- To give one person a different limit, run on the server with the app's environment: `npx tsx scripts/credits.ts set someone@example.org 3000`. `reset <email>` puts them back on the default; `list` shows who has their own limit.
+- PDFs: a model that can't read PDFs itself gets them through OpenRouter's free `cloudflare-ai` parser, not its default paid OCR. Each PDF is parsed again on every call.
 
 ## Durable replies
 
