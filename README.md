@@ -1,6 +1,6 @@
 # Ponder Chat
 
-A proof of concept: a general chat app on OpenRouter models, with a daily credit limit for each person. It started as a copy of `../platform` with the Frappe parts removed (sites, MCP, skills, memory, plans, Studio, Python, generated UI).
+A proof of concept: a general chat app on OpenRouter models, with a daily credit limit for each person. It started as a copy of the Seva platform (`~/.t3/projects/seva-studio/platform`) with the Frappe parts removed (sites, MCP, skills, memory, plans, Studio, Python, generated UI).
 
 ## What it does
 
