@@ -5,6 +5,7 @@
  * Run: npx tsx server/search.check.ts [--live]   (--live needs OPENROUTER_API_KEY)
  */
 import assert from "node:assert/strict";
+import { lookup } from "node:dns/promises";
 import { searchBackend } from "./search/backend.ts";
 import { fetchPage, isPrivate } from "./search/fetch-page.ts";
 import { executeWebFetch } from "./search/tool.ts";
@@ -35,10 +36,12 @@ await check("private and special addresses are private; public ones are not", as
 	for (const address of ["1.1.1.1", "93.184.215.14", "2606:4700::1111"]) assert.ok(!isPrivate(address), address);
 });
 
-await check("IP addresses, localhost and the tailnet name are refused", async () => {
-	for (const address of ["http://127.0.0.1/", "http://[::1]/", "http://localhost/", "http://169.254.169.254/latest/meta-data/", "https://hussain-coding.tail5c9b7d.ts.net/"]) {
-		assert.match(await refused(address), /private network/, address);
-	}
+await check("IP addresses, localhost and (on the tailnet) the tailnet name are refused", async () => {
+	const addresses = ["http://127.0.0.1/", "http://[::1]/", "http://localhost/", "http://169.254.169.254/latest/meta-data/"];
+	// Off the tailnet this name resolves to Tailscale's public Funnel address, which is public.
+	const tailnet = await lookup("hussain-coding.tail5c9b7d.ts.net").catch(() => undefined);
+	if (tailnet && isPrivate(tailnet.address)) addresses.push("https://hussain-coding.tail5c9b7d.ts.net/");
+	for (const address of addresses) assert.match(await refused(address), /private network/, address);
 });
 
 await check("other schemes, ports and user names are refused", async () => {
