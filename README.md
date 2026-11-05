@@ -1,6 +1,6 @@
 # Ponder Chat
 
-A proof of concept: a general chat app on OpenRouter models, with a daily credit limit for each person. It started as a copy of the Seva platform (`~/.t3/projects/seva-studio/platform`) with the Frappe parts removed (sites, MCP, skills, memory, plans, Studio, Python, generated UI).
+A proof of concept: a general chat app on OpenRouter models, with a daily credit limit for each person. It started as a copy of the Seva platform (`~/.t3/projects/seva-studio/platform`) with the Frappe parts removed (sites, MCP, skills, plans, Studio, generated UI). Python and memory came back later, adapted.
 
 ## What it does
 
@@ -11,6 +11,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - Attached images, PDFs and text files go to the model.
 - Each reply is a durable workflow run (Workflow SDK, Postgres World). A reload, a dropped connection, a deploy or a crash does not end it: the page reconnects and the reply finishes. Messages sent during a reply wait in a queue.
 - Python: the model can run Python (pandas, matplotlib and more) in a Pyodide sandbox. Attached CSV and Excel files go in as inputs; charts and files come back into the chat.
+- Memory across chats: after each reply, Ponder decides whether the person said something about themselves worth keeping. A note under the reply shows what it kept, with Undo, and the Memory page lists every memory and decision. See `docs/memory.md`.
 - Daily credits (see below).
 
 ## Credits
@@ -59,7 +60,7 @@ npm run build
 ./start.sh        # http://127.0.0.1:3500
 ```
 
-Checks: `npm run typecheck` (web) and `npm run typecheck:server`.
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, and `npx tsx server/memory.check.ts`.
 
 ## Code
 
@@ -70,5 +71,6 @@ Checks: `npm run typecheck` (web) and `npm run typecheck:server`.
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |
 | Models | `server/models.ts`, `web/models.ts` |
 | Credits | `server/credits.ts`, `web/CreditMeter.vue` |
+| Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
 | Components | `web/ai-elements/` (copy of the platform's) |

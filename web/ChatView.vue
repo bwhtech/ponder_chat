@@ -7,6 +7,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me } from "./account";
 import { useAttention } from "./attention";
 import { useDraft } from "./drafts";
+import { canUndo, fetchThreadSaves, undoSave, type MemoryOperation, type MemorySave } from "./memory";
 import { closeOpenCalls, queueFor, waitingOnPerson, type Queued } from "./message-queue";
 import { features, model, modelName, models } from "./models";
 import RunPythonPart from "./RunPythonPart.vue";
@@ -44,6 +45,8 @@ const emit = defineEmits<{
 	saved: [];
 	/** A request failed, perhaps for want of credits: the shell asks how many are left. */
 	refused: [];
+	/** The person wants to see or change what Ponder remembers. */
+	openMemory: [];
 }>();
 
 const { messages, sendMessage, status, error, stop, regenerate, resumeStream } = useChat({
@@ -60,7 +63,10 @@ const { messages, sendMessage, status, error, stop, regenerate, resumeStream } =
 		}),
 		fetch: patientFetch,
 	}),
-	onFinish: () => emit("saved"),
+	onFinish: () => {
+		emit("saved");
+		void loadRemembered({ wait: true });
+	},
 	onError: () => emit("refused"),
 });
 
@@ -83,7 +89,33 @@ async function patientFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 	}
 }
 
+// What each reply added to memory, by message id, one entry per save so each can be undone.
+// Memory saves after the reply, so the page asks again once a reply finishes, and the server waits for the save.
+type Remembered = { save: MemorySave; operations: MemoryOperation[] };
+const remembered = ref(new Map<string, Remembered[]>());
+const MEMORY_LABELS = { add: "Remembered", update: "Updated memory", forget: "Forgot" } as const;
+
+async function loadRemembered({ wait = false } = {}) {
+	const saves = await fetchThreadSaves(props.threadId, { wait });
+	const byMessage = new Map<string, Remembered[]>();
+	for (const save of [...saves].reverse()) {
+		if (!save.messageId) continue;
+		const operations = save.operations.filter((op) => op.status === "applied");
+		if (operations.length) byMessage.set(save.messageId, [...(byMessage.get(save.messageId) ?? []), { save, operations }]);
+	}
+	remembered.value = byMessage;
+}
+
+async function undoRemembered(save: MemorySave) {
+	try {
+		await undoSave(save.id);
+	} finally {
+		await loadRemembered();
+	}
+}
+
 onMounted(() => {
+	void loadRemembered();
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	if (props.running) void resumeStream();
 });
@@ -290,6 +322,33 @@ function replyModel(message: UIMessage) {
 								<MessageCopyAction :value="replyText(message)" />
 								<span v-if="replyModel(message)" class="px-1 text-p-xs text-ink-gray-5" data-slot="reply-model">{{ replyModel(message) }}</span>
 							</MessageActions>
+							<div v-for="{ save, operations } in remembered.get(message.id) ?? []" :key="save.id" class="flex flex-wrap items-start gap-x-1">
+								<div class="min-w-0">
+									<button
+										v-for="op in operations"
+										:key="op.memoryId + op.op"
+										type="button"
+										data-slot="memory-note"
+										class="flex w-fit max-w-full items-start gap-1.5 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+										:class="{ 'line-through': save.undoneAt }"
+										title="Open Memory"
+										@click="emit('openMemory')"
+									>
+										<span class="lucide-brain mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+										<span class="min-w-0"><span class="text-ink-gray-7">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
+									</button>
+								</div>
+								<button
+									v-if="canUndo(save)"
+									type="button"
+									data-slot="memory-undo"
+									class="rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-5 underline hover:bg-surface-gray-2 hover:text-ink-gray-8"
+									@click="undoRemembered(save)"
+								>
+									Undo
+								</button>
+								<span v-else-if="save.undoneAt" class="px-1 py-0.5 text-p-sm text-ink-gray-4">Undone</span>
+							</div>
 						</MessageContent>
 					</Message>
 				</ConversationItem>

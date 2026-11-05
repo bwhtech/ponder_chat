@@ -3,7 +3,7 @@ import { isStepCount, tool } from "ai";
 import { getWorkflowMetadata, getWritable } from "workflow";
 import { RUN_PYTHON, RUN_PYTHON_DESCRIPTION, runPythonInput } from "../python/schema.ts";
 import { ChatModel } from "./model.ts";
-import { loadModelMessages, recordUsageStep, runPythonStep, saveReplyStep } from "./steps.ts";
+import { loadModelMessages, recallMemoryStep, recordUsageStep, runPythonStep, saveReplyStep } from "./steps.ts";
 
 export type ChatTurn = {
 	threadId: string;
@@ -27,9 +27,11 @@ export type ChatTurn = {
 export async function chatTurn(turn: ChatTurn) {
 	"use workflow";
 
+	// What the person told Ponder in earlier chats (server/memory.ts). The turn is saved to memory with the reply (reply.ts).
+	const memory = await recallMemoryStep(turn.threadId, turn.owner);
 	const agent = new WorkflowAgent({
 		model: new ChatModel(turn.model.id),
-		instructions: instructions(turn),
+		instructions: [instructions(turn), memory].filter(Boolean).join("\n\n"),
 		tools: turn.python
 			? {
 					[RUN_PYTHON]: tool({

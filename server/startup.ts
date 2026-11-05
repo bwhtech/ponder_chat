@@ -3,6 +3,7 @@ import { migrateCredits } from "./credits.ts";
 import { migrate, sql } from "./db.ts";
 import { migrateFiles } from "./files.ts";
 import { migrateInvites } from "./invites.ts";
+import { setupMemory } from "./memory.ts";
 import { checkSandbox } from "./python/pyodide.ts";
 import { migratePythonState } from "./python/state.ts";
 import { setupTelemetry } from "./telemetry.ts";
@@ -26,6 +27,7 @@ export async function startup() {
 	await migrateInvites();
 	await migratePythonState();
 	await migrateThreadRuns();
+	await setupMemory();
 	resolvePython(await checkSandbox());
 
 	await becomeTheOnlyWorker();

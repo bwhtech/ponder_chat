@@ -1,0 +1,18 @@
+{
+	"save": {
+		"type": "noul",
+		"instructions": "Should the assistant's long-term memory of this person change because of this turn: save something new, correct something, or forget something?",
+		"criteria": {
+			"true": "The person tells the assistant something about themselves that stays true and matters in later conversations: their work or field, what they are working on over weeks, their tools, skills or level, where they live, or how they want answers; or asks the assistant to remember such a thing; or asks it to forget or correct a saved memory. A turn that has such a fact alongside a phone number still counts.",
+			"false": "The turn is a one-off question or request, small talk, the task in progress, the contents of a file or a pasted text, something already in the saved memories, or only a password, key, token, contact details, an ID or account number, health details, or details about another person, which are never saved."
+		}
+	},
+	"refuse": {
+		"type": "noul",
+		"instructions": "Does the turn hold anything memory must never keep, even if the person asks?",
+		"criteria": {
+			"true": "It holds a password, API key or token; a phone number, email address, home address, ID number or bank or card number, the person's own or anyone's; health details; or personal details about another individual.",
+			"false": "It holds none of these."
+		}
+	}
+}

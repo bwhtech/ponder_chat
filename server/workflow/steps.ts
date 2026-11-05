@@ -17,6 +17,14 @@ export async function loadModelMessages(threadId: string): Promise<ModelMessage[
 	return convertToModelMessages(await resolveFileParts(await loadThread(threadId)));
 }
 
+/** What memory adds to the instructions: how it works, and what it recalls for the person's latest message. */
+export async function recallMemoryStep(threadId: string, owner: string): Promise<string> {
+	"use step";
+	const { loadThread } = await import("../db.ts");
+	const { memoryInstructions } = await import("../memory.ts");
+	return memoryInstructions({ threadId, user: owner }, await loadThread(threadId));
+}
+
 export async function runPythonStep(input: RunPythonInput, threadId: string, owner: string) {
 	"use step";
 	const { executeRunPython } = await import("../python/tool.ts");

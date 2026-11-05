@@ -2,6 +2,7 @@ import { createModelCallToUIChunkTransform, type ModelCallStreamPart } from "@ai
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
 import { loadThread, saveThread } from "../db.ts";
+import { rememberTurn } from "../memory.ts";
 import { finishRun } from "./runs.ts";
 
 /** The reply's message id: the same in the live stream, a reconnect, and the saved thread. */
@@ -51,6 +52,7 @@ function withMessage(messageId: string, model: string) {
  * messages, with no conversion back to UI messages, so this replays the run's own
  * stream into a UI message, as the browser did. Used by the run's last step, and by Stop
  * for a run cut short (`untilTail`: what it wrote up to the moment it was stopped). The reply replaces a message with the same id, so saving twice is safe.
+ * Memory then decides, in the background, what the turn adds (server/memory.ts).
  */
 export async function saveReply(threadId: string, owner: string, runId: string, model: string, { untilTail = false } = {}) {
 	let reply: UIMessage | undefined;
@@ -61,6 +63,7 @@ export async function saveReply(threadId: string, owner: string, runId: string, 
 		if (at === -1) messages.push(reply);
 		else messages[at] = reply;
 		await saveThread(threadId, owner, messages);
+		rememberTurn({ threadId, user: owner }, messages);
 	}
 	await finishRun(threadId, runId, { cancelled: untilTail });
 }

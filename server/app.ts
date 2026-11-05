@@ -9,6 +9,7 @@ import { auth, type SignedIn } from "./auth.ts";
 import { creditStatus } from "./credits.ts";
 import { deleteThread, listThreads, renameThread, saveThread, sql, threadOwner } from "./db.ts";
 import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
+import { memory, memoryEnabled, memoryScope, memoryStore, readExtractPrompt } from "./memory.ts";
 import { DEFAULT_MODEL, MODELS, pickModel } from "./models.ts";
 import { forgetPythonState } from "./python/state.ts";
 import { pythonReady } from "./startup.ts";
@@ -150,6 +151,52 @@ app.post("/api/chat/:id/stop", async (c) => {
 	if (run) await cancelRun(c.req.param("id"), userOf(c), run);
 	return c.json({ stopped: Boolean(run) });
 });
+
+// Memory (server/memory.ts): what Ponder remembers about the person, and the decisions behind it.
+const scopeOf = (c: Context<Env>, threadId = "") => memoryScope({ threadId, user: userOf(c) });
+
+app.get("/api/memory", async (c) =>
+	c.json({
+		enabled: memoryEnabled,
+		adapter: memoryStore.name,
+		memories: await memoryStore.list(scopeOf(c)),
+		saves: await memoryStore.saves(scopeOf(c), { limit: 30 }),
+		prompt: await readExtractPrompt(),
+	}),
+);
+
+app.patch("/api/memory/:id", async (c) => {
+	const text = String((await c.req.json<{ text?: string }>()).text ?? "").trim().slice(0, 1000);
+	if (!text) return c.json({ error: "A memory needs some text." }, 400);
+	return (await memoryStore.update(scopeOf(c), c.req.param("id"), text)) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
+});
+
+app.delete("/api/memory/:id", async (c) =>
+	(await memoryStore.forget(scopeOf(c), c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404),
+);
+
+app.post("/api/memory/saves/:id/undo", async (c) => {
+	const saveId = Number(c.req.param("id"));
+	if (!Number.isSafeInteger(saveId)) return c.json({ error: "Not found" }, 404);
+	const undone = await memoryStore.undo(scopeOf(c), saveId);
+	return undone ? c.json({ ok: true, operations: undone }) : c.json({ error: "Not found, or undone already." }, 404);
+});
+
+// A chat's memory decisions. With ?wait=1, first waits for the reply to be saved and its memory save to end.
+app.get("/api/threads/:id/memory", async (c) => {
+	const threadId = c.req.param("id");
+	if (c.req.query("wait")) {
+		await replyFinished(threadId);
+		await memory.settled(threadId);
+	}
+	return c.json({ saves: await memoryStore.saves(scopeOf(c, threadId), { threadId }) });
+});
+
+/** The page sees the stream end a moment before the run's last step saves the reply and starts the memory save. */
+async function replyFinished(threadId: string, timeoutMs = 10_000) {
+	const deadline = Date.now() + timeoutMs;
+	while ((await activeRun(threadId)) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
+}
 
 // Files attached in the chat. Each person sees only their own.
 const uploadLimit = bodyLimit({
