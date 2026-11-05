@@ -73,18 +73,26 @@ function askDelete(thread: ThreadSummary) {
 			type="search"
 			placeholder="Search chats"
 			aria-label="Search chats"
-			class="w-full"
+			class="mt-2 w-full"
 			@keydown.esc="query = ''"
 		>
 			<template #prefix><span class="lucide-search size-4 text-ink-gray-5" aria-hidden="true" /></template>
 		</TextInput>
 		<div v-if="searching" data-slot="thread-search-results" class="space-y-0.5" :aria-busy="search.searching.value">
+			<!-- The first answer: rows shaped like results. A newer search over results already shown dims them instead. -->
+			<div v-if="search.searching.value && !search.hits.value.length" aria-label="Searching chats" class="space-y-0.5">
+				<div v-for="width in ['w-36', 'w-44', 'w-28']" :key="width" class="flex flex-col gap-1.5 px-4 py-2">
+					<Skeleton :class="['h-3.5 rounded-4', width]" />
+					<Skeleton class="h-2.5 w-full rounded-4" />
+					<Skeleton class="h-2.5 w-3/4 rounded-4" />
+				</div>
+			</div>
 			<button
 				v-for="hit in search.hits.value"
 				:key="hit.id"
 				type="button"
-				class="flex w-full flex-col gap-0.5 rounded-4 px-4 py-1.5 text-left hover:bg-surface-gray-2 active:bg-surface-gray-3"
-				:class="{ 'bg-surface-elevation-3 shadow-sm': props.highlight && hit.id === current }"
+				class="flex w-full flex-col gap-0.5 rounded-4 px-4 py-1.5 text-left transition-opacity duration-150 hover:bg-surface-gray-2 active:bg-surface-gray-3"
+				:class="{ 'bg-surface-elevation-3 shadow-sm': props.highlight && hit.id === current, 'opacity-50': search.searching.value }"
 				@click="emit('select', hit.id)"
 				@pointerenter="prefetch(hit.id)"
 			>
