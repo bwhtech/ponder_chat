@@ -4,7 +4,12 @@
  */
 export type Status = "active" | "invited" | "banned";
 
-export type Settings = { defaultDailyCredits: number; creditsPerUsd: number };
+export type Settings = {
+	defaultDailyCredits: number;
+	creditsPerUsd: number;
+	/** Models that can't read PDFs get the text the server read from them; off, OpenRouter parses each PDF. */
+	pdfTextOnServer: boolean;
+};
 
 /** The OpenRouter key in use, without the key itself (server/openrouter-key.ts). */
 export type KeyStatus = {

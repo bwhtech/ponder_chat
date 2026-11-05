@@ -6,6 +6,7 @@ import Bubble from "../bubble/Bubble.vue";
 import { viewOnClick } from "../file-viewer/viewer";
 import BubbleContent from "../bubble/BubbleContent.vue";
 import ConfirmationBatch from "../confirmation/ConfirmationBatch.vue";
+import { collectCitations } from "../inline-citation/collect";
 import ReasoningPart from "../reasoning/ReasoningPart.vue";
 import { UPDATE_PLAN_TOOL, type ProposePlanOutput, type UpdatePlanInput } from "../plan/build-plan";
 import { useBuildPlan } from "../plan/context";
@@ -55,6 +56,8 @@ const sources = computed(() =>
 		.filter((part, index, all) => all.findIndex((other) => other.url === part.url) === index),
 );
 const groups = computed(() => groupParts(props.message.parts));
+/** Pages the reply's tools returned; links to them show as citation chips. */
+const citations = computed(() => collectCitations(props.message));
 /** Approval ids still waiting on the person; two or more get an "answer all" bar. */
 const pendingApprovals = computed(() =>
 	props.message.parts
@@ -175,7 +178,7 @@ function isStreamingText(part: Part) {
 			<Bubble v-if="role === 'user'" align="end" variant="muted">
 				<BubbleContent class="whitespace-pre-wrap">{{ group.part.text }}</BubbleContent>
 			</Bubble>
-			<Response v-else :content="group.part.text" :parse-incomplete="isStreamingText(group.part)" />
+			<Response v-else :content="group.part.text" :parse-incomplete="isStreamingText(group.part)" :citations="citations" />
 		</template>
 		<div
 			v-else-if="group.kind === 'files'"

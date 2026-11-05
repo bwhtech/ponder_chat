@@ -10,7 +10,7 @@ import { creditAnswerEmail, inviteEmail, sendEmail } from "../email.ts";
 import { decideRequest, grantCredits, pendingCount, type Decision } from "../extra-credits.ts";
 import { allow, disallow, setInviteCredits } from "../invites.ts";
 import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
-import { getSettings, updateSettings } from "../settings.ts";
+import { getSettings, setPdfTextOnServer, updateSettings } from "../settings.ts";
 import { listAdmins, listPeople, personDetail } from "./people.ts";
 import { overview, requestsReport } from "./reports.ts";
 
@@ -144,6 +144,14 @@ adminApi.put("/settings", async (c) => {
 	const input = await readBody(c, z.object({ defaultDailyCredits: credits, creditsPerUsd: z.number().int().min(1).max(1_000_000_000) }));
 	if (!input) return invalid(c);
 	await updateSettings(input, adminOf(c));
+	return c.json(await getSettings());
+});
+
+// How PDFs reach models that can't read them (settings.ts). Saved at once, apart from the credits.
+adminApi.put("/settings/pdf-reading", async (c) => {
+	const input = await readBody(c, z.object({ onServer: z.boolean() }));
+	if (!input) return invalid(c);
+	await setPdfTextOnServer(input.onServer, adminOf(c));
 	return c.json(await getSettings());
 });
 

@@ -16,6 +16,8 @@ import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
 import { memory, memoryEnabled, memoryScope, memoryStore, readExtractPrompt } from "./memory.ts";
 import { availableModels, pickModel } from "./models.ts";
 import { notifyAdmins } from "./notify.ts";
+import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
+import { searchThreads } from "./thread-search.ts";
 import { forgetPythonState } from "./python/state.ts";
 import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
@@ -54,6 +56,8 @@ app.use("/api/*", async (c, next) => {
 	await next();
 });
 const userOf = (c: Context<Env>) => c.get("user").id;
+/** At most so many uses per person (rate-limit.ts). */
+const perPerson = (limit: RateLimit, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
 /** A thread id the person may use: theirs, or not taken yet. */
 const mayUseThread = async (c: Context<Env>, id: string) => ((await threadOwner(id)) ?? userOf(c)) === userOf(c);
 
@@ -76,7 +80,7 @@ app.get("/api/models", async (c) => c.json(await availableModels()));
 app.get("/api/credits", async (c) => c.json(await creditStatus(userOf(c))));
 
 // Out of credits: ask the admins for more (extra-credits.ts). One request waits at a time.
-app.post("/api/credits/request", async (c) => {
+app.post("/api/credits/request", perPerson(creditRequestLimit), async (c) => {
 	const status = await creditStatus(userOf(c));
 	if (status.request?.status === "pending") return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
 	if (status.remaining > 0) return c.json({ error: "You still have credits for today." }, 400);
@@ -92,6 +96,9 @@ app.post("/api/credits/request", async (c) => {
 
 // The list revalidates by its content and goes gzipped; one thread has its own cache (thread-cache.ts).
 app.get("/api/threads", compress(), etag(), async (c) => c.json({ threads: await listThreads(userOf(c)) }));
+
+// Search in the person's chats (thread-search.ts). Before /api/threads/:id, which would take "search" as an id.
+app.get("/api/threads/search", perPerson(searchLimit), async (c) => c.json({ threads: await searchThreads(userOf(c), String(c.req.query("q") ?? "").slice(0, 200)) }));
 
 app.patch("/api/threads/:id", async (c) => {
 	const { title } = await c.req.json<{ title?: string }>();
@@ -110,8 +117,10 @@ app.delete("/api/threads/:id", async (c) => {
 
 app.get("/api/threads/:id", (c) => threadResponse(c, c.req.param("id"), userOf(c)));
 
-app.post("/api/chat", async (c) => {
+app.post("/api/chat", perPerson(chatLimit, { plain: true }), async (c) => {
 	const body = await c.req.json<{ id: string; messages: UIMessage[]; model?: string }>();
+	// A run with no messages fails before it writes, and its stream would never close.
+	if (typeof body.id !== "string" || !Array.isArray(body.messages) || !body.messages.length) return c.text("Nothing to send.", 400);
 	if (!(await mayUseThread(c, body.id))) return c.json({ error: "Not found" }, 404);
 	// The chat transport shows the response text as the error, so this one is plain text.
 	const credits = await creditStatus(userOf(c));
@@ -228,7 +237,7 @@ const uploadLimit = bodyLimit({
 	onError: (c) => c.json({ error: "That file is larger than 10 MB." }, 413),
 });
 
-app.post("/api/files", uploadLimit, async (c) => {
+app.post("/api/files", perPerson(uploadRate), uploadLimit, async (c) => {
 	const form = await c.req.formData();
 	const file = form.get("file");
 	if (!(file instanceof File)) return c.json({ error: "No file in the upload." }, 400);

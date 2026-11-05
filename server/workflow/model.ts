@@ -1,5 +1,6 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
 import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
+import { needsCacheMarks, withCacheMarks } from "./cache.ts";
 
 /**
  * The OpenRouter model, made safe to cross workflow step boundaries, from the platform's
@@ -27,11 +28,16 @@ export class ChatModel implements LanguageModelV4 {
 
 	// Called only inside model steps, which run in plain Node.
 	async doGenerate(options: LanguageModelV4CallOptions) {
-		return (await this.openrouter()).doGenerate(options);
+		return (await this.openrouter()).doGenerate(this.cached(options));
 	}
 
 	async doStream(options: LanguageModelV4CallOptions) {
-		return (await this.openrouter()).doStream(options);
+		return (await this.openrouter()).doStream(this.cached(options));
+	}
+
+	/** Anthropic's models cache only what the request marks (cache.ts). */
+	private cached(options: LanguageModelV4CallOptions): LanguageModelV4CallOptions {
+		return needsCacheMarks(this.modelId) ? { ...options, prompt: withCacheMarks(options.prompt) } : options;
 	}
 
 	private async openrouter(): Promise<LanguageModelV4> {

@@ -5,8 +5,8 @@ import { settings } from "../store";
 import { creditValue } from "./format";
 
 /**
- * The General settings: the credit fields with their checks and Save, the OpenRouter key's
- * status, and the admins. The settings dialog (desktop) and the Settings page (phones)
+ * The General settings: the credit fields with their checks and Save, how PDFs are read
+ * (saved as soon as it is switched), the OpenRouter key's status, and the admins. The settings dialog (desktop) and the Settings page (phones)
  * each make one, which loads the saved values. Reactive, so a template reads
  * `form.defaultCredits` and binds `v-model` to it.
  */
@@ -16,6 +16,8 @@ export function useSettingsForm() {
 	const openRouterKey = ref<KeyStatus | null>(null);
 	const defaultCredits = ref("");
 	const perUsd = ref("");
+	const pdfTextOnServer = ref(true);
+	const savingPdf = ref(false);
 	const saving = ref(false);
 	const loading = ref(true);
 
@@ -33,8 +35,9 @@ export function useSettingsForm() {
 	}
 
 	function show(next: Settings) {
-		saved.value = { defaultDailyCredits: next.defaultDailyCredits, creditsPerUsd: next.creditsPerUsd };
+		saved.value = { defaultDailyCredits: next.defaultDailyCredits, creditsPerUsd: next.creditsPerUsd, pdfTextOnServer: next.pdfTextOnServer };
 		Object.assign(settings, saved.value);
+		pdfTextOnServer.value = next.pdfTextOnServer;
 		defaultCredits.value = String(next.defaultDailyCredits);
 		perUsd.value = String(next.creditsPerUsd);
 	}
@@ -76,8 +79,41 @@ export function useSettingsForm() {
 		});
 	}
 
+	/** The switch saves at once; a failure puts it back. */
+	async function setPdfReading(onServer: boolean) {
+		pdfTextOnServer.value = onServer;
+		savingPdf.value = true;
+		try {
+			const next = await api<Settings>("/settings/pdf-reading", { method: "PUT", body: { onServer } });
+			if (saved.value) saved.value.pdfTextOnServer = next.pdfTextOnServer;
+			settings.pdfTextOnServer = next.pdfTextOnServer;
+			pdfTextOnServer.value = next.pdfTextOnServer;
+			toast.success(onServer ? "PDFs are read on this server" : "PDFs go to the model");
+		} catch (e) {
+			pdfTextOnServer.value = !onServer;
+			toast.error((e as Error).message);
+		} finally {
+			savingPdf.value = false;
+		}
+	}
+
 	void load();
-	return reactive({ saved, admins, openRouterKey, defaultCredits, perUsd, saving, loading, defaultError, perUsdError, canSave, save });
+	return reactive({
+		saved,
+		admins,
+		openRouterKey,
+		defaultCredits,
+		perUsd,
+		pdfTextOnServer,
+		savingPdf,
+		saving,
+		loading,
+		defaultError,
+		perUsdError,
+		canSave,
+		save,
+		setPdfReading,
+	});
 }
 
 export type SettingsForm = ReturnType<typeof useSettingsForm>;

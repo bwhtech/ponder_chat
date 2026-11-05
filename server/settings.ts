@@ -13,7 +13,14 @@ export type Settings = {
 	defaultDailyCredits: number;
 	/** Credits per US dollar of OpenRouter cost. With 1000, one credit is $0.001. */
 	creditsPerUsd: number;
+	/**
+	 * A model that can't read PDFs gets the text this server read from them (file-context.ts).
+	 * Off: every PDF goes to the model, and OpenRouter parses it for those that can't.
+	 */
+	pdfTextOnServer: boolean;
 };
+
+export type CreditSettings = Pick<Settings, "defaultDailyCredits" | "creditsPerUsd">;
 
 const CACHE_MS = 5_000;
 let cached: { settings: Settings; at: number } | undefined;
@@ -31,22 +38,28 @@ export async function migrateSettings() {
 		insert into settings (id, default_daily_credits, credits_per_usd)
 		values (1, ${fromEnv("CHAT_DAILY_CREDITS", 1000)}, ${fromEnv("CHAT_CREDITS_PER_USD", 1000)})
 		on conflict (id) do nothing`;
+	await sql`alter table settings add column if not exists pdf_text_on_server boolean not null default true`;
 }
 
 export async function getSettings(): Promise<Settings> {
 	if (cached && Date.now() - cached.at < CACHE_MS) return cached.settings;
-	const [row] = await sql<{ default_daily_credits: number; credits_per_usd: number }[]>`
-		select default_daily_credits, credits_per_usd from settings where id = 1`;
-	const settings = { defaultDailyCredits: row.default_daily_credits, creditsPerUsd: row.credits_per_usd };
+	const [row] = await sql<{ default_daily_credits: number; credits_per_usd: number; pdf_text_on_server: boolean }[]>`
+		select default_daily_credits, credits_per_usd, pdf_text_on_server from settings where id = 1`;
+	const settings = { defaultDailyCredits: row.default_daily_credits, creditsPerUsd: row.credits_per_usd, pdfTextOnServer: row.pdf_text_on_server };
 	cached = { settings, at: Date.now() };
 	return settings;
 }
 
-export async function updateSettings(settings: Settings, by: string) {
+export async function updateSettings(settings: CreditSettings, by: string) {
 	await sql`
 		update settings set default_daily_credits = ${settings.defaultDailyCredits}, credits_per_usd = ${settings.creditsPerUsd},
 			updated_by = ${by}, updated_at = now()
 		where id = 1`;
+	cached = undefined;
+}
+
+export async function setPdfTextOnServer(on: boolean, by: string) {
+	await sql`update settings set pdf_text_on_server = ${on}, updated_by = ${by}, updated_at = now() where id = 1`;
 	cached = undefined;
 }
 

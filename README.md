@@ -7,11 +7,11 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link; either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes; a code takes 3 wrong tries. Without email settings, the email is printed in the server log.
 - Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
 - Admin pages at `/admin` (see "Admin" below): usage, people, invites, requests for more credits, and the settings (credits and the OpenRouter key).
-- Chats in a sidebar, with names that a cheap model writes.
+- Chats in a sidebar, with names that a cheap model writes. A search box above the list finds chats by the words in their names and messages (Postgres full-text search, `server/thread-search.ts`). Each chat's menu can export it as a Markdown file, made in the browser (`web/export-markdown.ts`).
 - A model selector in the message field. The list is in `server/models.ts`, and it is also the allowlist: a request for any other model gets the default.
 - Each reply shows the model that wrote it.
 - Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter.ts`), so no provider keeps or trains on what people write. The selector shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
-- Attached images, PDFs and text files go to the model. Each file is private to the person who attached it: the download link, the model and Python read only the owner's files.
+- Attached images, PDFs and text files go to the model. Each file is private to the person who attached it: the download link, the model and Python read only the owner's files. See "Files" below.
 - A click on an attached PDF or image opens it over the chat (`web/ai-elements/file-viewer/`). pdf.js loads only the first time a PDF opens, and each page draws when it comes near the screen. Cmd- or Ctrl-click still opens the file in a new tab.
 - Each reply is a durable workflow run (Workflow SDK, Postgres World). A reload, a dropped connection, a deploy or a crash does not end it: the page reconnects and the reply finishes. Messages sent during a reply wait in a queue.
 - Python: the model can run Python (pandas, matplotlib and more) in a Pyodide sandbox. Attached CSV and Excel files go in as inputs; charts and files come back into the chat.
@@ -36,7 +36,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - Nothing is reserved before a reply. The last reply of the day can go a little past the limit.
 - To give one person a different limit, use `/admin`, or run on the server with the app's environment: `npx tsx scripts/credits.ts set someone@example.org 3000`. `reset <email>` puts them back on the default, and `list` shows who has their own limit. An invite can set the limit that the person starts with.
 - A person who has used today's credits can ask the admins for more. The admins get a message on `NOTIFY_URL`, and answer on `/admin`, Requests. An approval adds extra credits to that day's limit only (`credit_grants`). The person gets an email either way. One request can wait at a time, and after an answer they can ask again. An admin can also give extra credits from a person's page, without a request.
-- PDFs: a model that can't read PDFs itself gets them through OpenRouter's free `cloudflare-ai` parser, not its default paid OCR. Each PDF is parsed again on every call.
+- PDFs: see "Files" below.
 
 ## Admin
 
@@ -48,7 +48,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 | Requests | Requests for more credits that wait, with Approve and Decline. Below: the answers of the last 30 days. |
 | People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
 | Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
-| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, the OpenRouter key and the list of admins. On a phone, Settings is a page in the tab bar. |
+| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the OpenRouter key and the list of admins. On a phone, Settings is a page in the tab bar. |
 
 - Admins see usage only. The admin API reads `runs` (cost, model, time), `sessions` (device and time) and the number of threads. It never returns messages or thread titles.
 - A "reply" is a `runs` row with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each model call, so a reply that used tools has several rows, and only the last one counts.
@@ -81,6 +81,29 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 
 - `web_search`: a backend from `SEARCH_BACKEND` (`server/search/backend.ts`). The only one now is `openrouter`: a cheap model (`PONDER_SEARCH_MODEL`) makes one search with OpenRouter's `web_search` server tool on Exa, and its citations are the results. It needs no other API key. The model call goes to a Zero Data Retention endpoint, but Exa keeps queries by its own rules. For more privacy later: a search API with a zero-retention contract (Brave, Exa or Parallel enterprise) or a SearXNG we host, as one more backend.
 - `web_fetch`: reads the page on our own server (`server/search/fetch-page.ts`), so no other company sees it. It refuses every address on this machine, the tailnet and private networks, checked when each connection opens and on each redirect. Only ports 80 and 443; at most 3 MB and 20,000 characters of text.
+- Citations: the model cites with a Markdown link right after each fact. In the page, a link to a page that a search returned or `web_fetch` read shows as a small chip; hovering or focusing it shows the page's title and an excerpt.
+
+## Files
+
+`server/files.ts` stores uploads; `server/file-context.ts` turns them into what the model reads before each call.
+
+- Images: the upload must really be a PNG, JPEG, WebP or GIF. A photo larger than 1,568 pixels on its long side is made smaller, and its metadata (such as where it was taken) is removed (`server/image-resize.ts`). GIFs stay as they are.
+- PDFs: the upload must start like a PDF. While the admin setting "Read PDF text on this server" is on (the default), the server reads each PDF's text once with pdf.js (`server/pdf-text.ts`) and keeps it in `files.text`. A model that can't read PDFs gets that text. A model that can read PDFs always gets the PDF. A scan has no text, so it goes as a PDF. With the setting off, every PDF goes to the model, and for models that can't read PDFs OpenRouter's free `cloudflare-ai` parser reads it on every call.
+- Text files: up to 200,000 characters each.
+- All file text in one model call: at most 300,000 characters, newest files first. A file that does not fit is named, and the model is told to ask for it again in a new chat.
+
+## What the model reads
+
+`server/workflow/context.ts` and `server/workflow/cache.ts` keep each call small, and its start the same from one call to the next, so that providers can cache it.
+
+- Tool output (Python, pages read, search results) is kept whole for the current turn and the one before, so a follow-up such as "what else did that page say?" needs no new call. After that, output longer than 3,000 characters is cut to its first 1,000.
+- What memory recalls goes with the person's latest message, not in the instructions, because it changes with every message.
+- Anthropic's models cache only what a request marks, at most four places. Ponder marks the instructions, the history before the two whole turns, the history before the latest turn, and the last message. A cached read costs a tenth of the price. Each call reads from the cache everything before the latest turn, or before the turn before it when that turn's long tool output was just trimmed. Other providers cache the start of a prompt by themselves.
+
+## Limits
+
+- Per person, in memory (`server/rate-limit.ts`): 12 messages a minute and 200 an hour; 30 uploads in 10 minutes and 150 a day; 3 requests for credits an hour; 60 chat searches a minute. Over a limit, the answer is 429 with `Retry-After`. A restart clears the counts.
+- Sign-in (Better Auth, `server/auth.ts`), per address: 5 sign-in emails in 10 minutes, 10 code tries and 10 link opens in 10 minutes, 100 other requests a minute. The address comes from `cf-connecting-ip` (Cloudflare), else `x-forwarded-for`.
 
 ## Run it
 
@@ -95,7 +118,7 @@ npm run build
 ./start.sh        # http://127.0.0.1:3500
 ```
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/memory.check.ts`, and `npx tsx server/search.check.ts [--live]`.
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, and `npx tsx server/search.check.ts [--live]`.
 
 ## Code
 
@@ -106,6 +129,11 @@ Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/m
 | Admin pages | `server/admin/`, `web/admin.html`, `web/admin/` |
 | Chat workflow | `server/workflow/` |
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |
+| Files and what the model reads of them | `server/files.ts`, `server/file-context.ts`, `server/image-resize.ts`, `server/pdf-text.ts` |
+| Trimming, memory placement and prompt caching | `server/workflow/context.ts`, `server/workflow/cache.ts` |
+| Rate limits | `server/rate-limit.ts` |
+| Search in chats, Markdown export | `server/thread-search.ts`, `web/thread-search.ts`, `web/export-markdown.ts` |
+| Citation chips | `web/ai-elements/inline-citation/collect.ts`, `CitationCard.vue`, `web/ai-elements/response/Response.vue` |
 | Models | `server/models.ts`, `web/models.ts` |
 | OpenRouter key and other secrets | `server/openrouter-key.ts`, `server/secrets.ts` |
 | Credits | `server/credits.ts`, `server/settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |

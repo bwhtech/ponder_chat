@@ -15,6 +15,24 @@ export async function migrate() {
 	await sql`alter table threads add column if not exists owner text not null default 'default'`;
 	await sql`alter table threads add column if not exists title text`;
 	await sql`create index if not exists threads_owner_updated on threads (owner, updated_at desc)`;
+	await migrateThreadSearch();
+}
+
+/**
+ * Words of each thread for search (thread-search.ts): its title, and the text the person
+ * and Ponder wrote, not tool output or files. The "simple" dictionary does not stem, so it
+ * works the same in every language. The text is the JSON of the parts, with its escapes
+ * blanked and cut to 500,000 characters, so a huge thread can't overflow a tsvector.
+ */
+async function migrateThreadSearch() {
+	await sql.unsafe(`
+		alter table threads add column if not exists search tsvector generated always as (
+			setweight(to_tsvector('simple'::regconfig, coalesce(title, '')), 'A') ||
+			setweight(to_tsvector('simple'::regconfig, left(regexp_replace(
+				jsonb_path_query_array(messages, '$[*].parts[*] ? (@.type == "text").text')::text,
+				'\\\\[nrtbf"\\\\/]|\\\\u[0-9a-fA-F]{4}', ' ', 'g'), 500000)), 'B')
+		) stored`);
+	await sql`create index if not exists threads_search on threads using gin (search)`;
 }
 
 export async function loadThread(id: string): Promise<UIMessage[]> {

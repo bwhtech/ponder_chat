@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Avatar, Badge, Button, SettingsRow, Skeleton, TextInput } from "frappe-ui";
+import { Avatar, Badge, Button, SettingsRow, Skeleton, Switch, TextInput } from "frappe-ui";
 import { computed, ref } from "vue";
 import { creditValue, date, resetTime } from "../lib/format";
 import type { SettingsForm } from "../lib/settings-form";
@@ -7,7 +7,7 @@ import ListSkeleton from "./ListSkeleton.vue";
 import OpenRouterKeyDialog from "./OpenRouterKeyDialog.vue";
 
 /**
- * The General settings: credits, the OpenRouter key and the admins. Save is the parent's,
+ * The General settings: credits, how PDFs are read, the OpenRouter key and the admins. Save is the parent's,
  * from `form`. Skeletons stand in for the values until they load.
  */
 const props = defineProps<{ form: SettingsForm }>();
@@ -47,6 +47,23 @@ const keyText = computed(() => {
 					<span class="whitespace-nowrap text-base text-ink-gray-7">Midnight UTC</span>
 				</SettingsRow>
 			</div>
+		</section>
+
+		<section class="space-y-1">
+			<h2 class="text-base-semibold text-ink-gray-8">PDFs</h2>
+			<SettingsRow
+				title="Read PDF text on this server"
+				description="Models that can't read PDFs get the text this server took from them, once. Off: OpenRouter parses each PDF on every reply, which costs more but keeps tables and layout better. Models that read PDFs always get the PDF."
+			>
+				<Skeleton v-if="form.loading" class="h-5 w-8 rounded-full" />
+				<Switch
+					v-else
+					:model-value="form.pdfTextOnServer"
+					:disabled="form.savingPdf"
+					aria-label="Read PDF text on this server"
+					@update:model-value="form.setPdfReading"
+				/>
+			</SettingsRow>
 		</section>
 
 		<section class="space-y-1">

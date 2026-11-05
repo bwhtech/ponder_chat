@@ -9,21 +9,31 @@ import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
  * cannot load Node modules (the database, files, the sandbox).
  */
 
-/** The thread as the model reads it, with the owner's attached files swapped for their content. */
-export async function loadModelMessages(threadId: string, owner: string): Promise<ModelMessage[]> {
+/**
+ * The thread as the model reads it: the owner's attached files swapped for their content
+ * (file-context.ts), tool results of earlier turns trimmed, and what memory recalled added to
+ * the person's latest message (context.ts).
+ */
+export async function loadModelMessages(threadId: string, owner: string, modelId: string, recalled: string): Promise<ModelMessage[]> {
 	"use step";
 	const { convertToModelMessages } = await import("ai");
 	const { loadThread } = await import("../db.ts");
-	const { resolveFileParts } = await import("../files.ts");
-	return convertToModelMessages(await resolveFileParts(await loadThread(threadId), owner));
+	const { resolveFileParts } = await import("../file-context.ts");
+	const { MODELS } = await import("../models.ts");
+	const { getSettings } = await import("../settings.ts");
+	const { addRecalledMemory, trimOldToolResults } = await import("./context.ts");
+	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
+	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
+	const messages = await convertToModelMessages(await resolveFileParts(await loadThread(threadId), owner, { pdfAsText }));
+	return addRecalledMemory(trimOldToolResults(messages), recalled);
 }
 
-/** What memory adds to the instructions: how it works, and what it recalls for the person's latest message. */
-export async function recallMemoryStep(threadId: string, owner: string): Promise<string> {
+/** Memory's guidance for the instructions, and what it recalls for the person's latest message. */
+export async function recallMemoryStep(threadId: string, owner: string): Promise<{ guidance: string; recalled: string }> {
 	"use step";
 	const { loadThread } = await import("../db.ts");
-	const { memoryInstructions } = await import("../memory.ts");
-	return memoryInstructions({ threadId, user: owner }, await loadThread(threadId));
+	const { memoryForRun } = await import("../memory.ts");
+	return memoryForRun({ threadId, user: owner }, await loadThread(threadId));
 }
 
 export async function runPythonStep(input: RunPythonInput, threadId: string, owner: string) {

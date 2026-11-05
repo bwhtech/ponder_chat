@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { dialog, Dropdown, SidebarItem, SidebarLabel, Skeleton } from "frappe-ui";
-import { computed } from "vue";
+import { dialog, Dropdown, SidebarItem, SidebarLabel, Skeleton, TextInput } from "frappe-ui";
+import { computed, ref } from "vue";
+import { downloadThreadMarkdown } from "./export-markdown";
+import { excerptPieces, useThreadSearch } from "./thread-search";
 import { useThreads, type ThreadSummary } from "./threads";
 
-/** The person's threads, grouped by when they were last active. Each row has rename and delete. */
+/**
+ * The person's threads, grouped by when they were last active, with a search box above.
+ * Each row has rename, export and delete. While the box has text, the list shows the
+ * chats that match, each with an excerpt.
+ */
 const props = withDefaults(defineProps<{ /** Highlight the open thread; off while another page fills the main area. */ highlight?: boolean }>(), {
 	highlight: true,
 });
@@ -13,6 +19,9 @@ const emit = defineEmits<{
 }>();
 
 const { threads, listLoaded, current, prefetch, rename, remove } = useThreads();
+const query = ref("");
+const searching = computed(() => Boolean(query.value.trim()));
+const search = useThreadSearch(query);
 
 const groups = computed(() => {
 	const startOfToday = new Date().setHours(0, 0, 0, 0);
@@ -34,6 +43,7 @@ const groups = computed(() => {
 function menu(thread: ThreadSummary) {
 	return [
 		{ label: "Rename", icon: "lucide-pencil", onClick: () => askRename(thread) },
+		{ label: "Export as Markdown", icon: "lucide-download", onClick: () => void downloadThreadMarkdown(thread.id, thread.title) },
 		{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: () => askDelete(thread) },
 	];
 }
@@ -58,7 +68,38 @@ function askDelete(thread: ThreadSummary) {
 
 <template>
 	<nav data-slot="thread-list" aria-label="Threads" class="flex flex-col gap-3">
-		<div v-for="group in groups" :key="group.label" class="space-y-0.5">
+		<TextInput
+			v-model="query"
+			type="search"
+			placeholder="Search chats"
+			aria-label="Search chats"
+			class="w-full"
+			@keydown.esc="query = ''"
+		>
+			<template #prefix><span class="lucide-search size-4 text-ink-gray-5" aria-hidden="true" /></template>
+		</TextInput>
+		<div v-if="searching" data-slot="thread-search-results" class="space-y-0.5" :aria-busy="search.searching.value">
+			<button
+				v-for="hit in search.hits.value"
+				:key="hit.id"
+				type="button"
+				class="flex w-full flex-col gap-0.5 rounded-4 px-4 py-1.5 text-left hover:bg-surface-gray-2 active:bg-surface-gray-3"
+				:class="{ 'bg-surface-elevation-3 shadow-sm': props.highlight && hit.id === current }"
+				@click="emit('select', hit.id)"
+				@pointerenter="prefetch(hit.id)"
+			>
+				<span class="truncate text-sm text-ink-gray-8">{{ hit.title }}</span>
+				<span v-if="hit.excerpt" class="line-clamp-2 text-p-xs text-ink-gray-5">
+					<template v-for="(piece, index) in excerptPieces(hit.excerpt)" :key="index">
+						<mark v-if="piece.match" class="bg-transparent font-semibold text-ink-gray-8">{{ piece.text }}</mark>
+						<template v-else>{{ piece.text }}</template>
+					</template>
+				</span>
+			</button>
+			<p v-if="search.failed.value" class="px-2 text-p-sm text-ink-gray-5">Search did not work. Try again.</p>
+			<p v-else-if="!search.searching.value && !search.hits.value.length" class="px-2 text-p-sm text-ink-gray-5">No chats match.</p>
+		</div>
+		<div v-for="group in searching ? [] : groups" :key="group.label" class="space-y-0.5">
 			<SidebarLabel>{{ group.label }}</SidebarLabel>
 			<SidebarItem
 				v-for="thread in group.threads"
@@ -85,12 +126,12 @@ function askDelete(thread: ThreadSummary) {
 				</template>
 			</SidebarItem>
 		</div>
-		<div v-if="!listLoaded" class="space-y-0.5" aria-busy="true" aria-label="Loading threads">
+		<div v-if="!listLoaded && !searching" class="space-y-0.5" aria-busy="true" aria-label="Loading threads">
 			<Skeleton class="mx-2 mb-2 mt-1.5 h-3 w-14 rounded-4" />
 			<div v-for="width in ['w-40', 'w-32', 'w-44', 'w-28', 'w-36']" :key="width" class="flex h-7 items-center px-2">
 				<Skeleton :class="['h-3.5 rounded-4', width]" />
 			</div>
 		</div>
-		<p v-else-if="!threads.length" class="px-2 text-p-sm text-ink-gray-5">Your threads show up here once you start one.</p>
+		<p v-else-if="!threads.length && !searching" class="px-2 text-p-sm text-ink-gray-5">Your threads show up here once you start one.</p>
 	</nav>
 </template>

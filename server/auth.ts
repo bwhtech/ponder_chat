@@ -38,7 +38,21 @@ export const auth = betterAuth({
 	baseURL: { allowedHosts: hosts },
 	trustedOrigins: hosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
 	// Tailscale Serve, Caddy and the Cloudflare Worker in front pass on the host the person used.
-	advanced: { trustedProxyHeaders: true },
+	// Cloudflare names the visitor in cf-connecting-ip; Caddy's x-forwarded-for holds Cloudflare's address.
+	advanced: { trustedProxyHeaders: true, ipAddress: { ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"] } },
+	// Better Auth limits only in production by default. On always, with tighter limits on
+	// what sends an email or checks a code, per address.
+	rateLimit: {
+		enabled: true,
+		window: 60,
+		max: 100,
+		customRules: {
+			"/sign-in/magic-link": { window: 10 * 60, max: 5 },
+			"/email-otp/send-verification-otp": { window: 10 * 60, max: 5 },
+			"/sign-in/email-otp": { window: 10 * 60, max: 10 },
+			"/magic-link/verify": { window: 10 * 60, max: 10 },
+		},
+	},
 	user: { modelName: "users" },
 	account: { modelName: "accounts" },
 	verification: { modelName: "verifications" },

@@ -30,10 +30,14 @@ export const memory = memoryMiddleware({ adapter: memoryStore, scope: memoryScop
 const MEMORY_GUIDANCE = `You have a memory across conversations. It saves itself after each reply: you do not call a tool for it.
 When the person asks you to remember or forget something, say you will. But memory never keeps passwords, keys or tokens, phone numbers, email addresses, home addresses, ID, bank or card numbers (theirs or anyone's), health details, or personal details about other people. If they ask you to remember one of those, say you cannot keep it in memory.`;
 
-/** The memory part of a run's instructions: the guidance, then what was recalled. Empty when memory is off. */
-export async function memoryInstructions(ctx: MemoryContext, messages: UIMessage[]) {
-	if (!memoryEnabled) return "";
-	return [MEMORY_GUIDANCE, await memory.recall(ctx, messages)].filter(Boolean).join("\n\n");
+/**
+ * What memory adds to a run, both empty when memory is off. The guidance never changes,
+ * so it goes in the instructions. What was recalled for the person's latest message
+ * changes each time, so it goes with that message (workflow/context.ts).
+ */
+export async function memoryForRun(ctx: MemoryContext, messages: UIMessage[]) {
+	if (!memoryEnabled) return { guidance: "", recalled: "" };
+	return { guidance: MEMORY_GUIDANCE, recalled: await memory.recall(ctx, messages) };
 }
 
 /** Saves the turn that ends the thread, in the background. */

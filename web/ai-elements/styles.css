@@ -291,6 +291,31 @@
   min-width: 6rem;
 }
 
+/* Citations: a link to a page that a search or a page read returned (Response) shows as a chip. */
+[data-slot='response'] a[data-citation] {
+  display: inline-block;
+  max-width: 14rem;
+  margin: 0 0.125rem;
+  padding: 0 0.4rem;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--surface-gray-2);
+  color: var(--ink-gray-7);
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: 1px;
+  text-decoration: none;
+  transition: background-color 150ms ease-out;
+}
+[data-slot='response'] a[data-citation]:hover,
+[data-slot='response'] a[data-citation]:focus-visible {
+  background: var(--surface-gray-3);
+  color: var(--ink-gray-9);
+  text-decoration: none;
+}
+
 /* Maths (KaTeX): a wide formula scrolls on its own instead of widening the reply. */
 [data-slot='math-block'] {
   max-width: 100%;
