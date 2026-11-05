@@ -65,10 +65,10 @@ export async function storeFile(owner: string, name: string, mediaType: string, 
 	return { id, url: `${URL_PREFIX}${id}`, name, mediaType, size: data.length };
 }
 
-/** A file by id; with `owner`, only if it is theirs. */
-export async function loadFile(id: string, owner?: string): Promise<{ name: string; media_type: string; data: Buffer } | undefined> {
+/** A file by id, only if `owner` uploaded it (or Python wrote it for them). Files are private to their owner. */
+export async function loadFile(id: string, owner: string): Promise<{ name: string; media_type: string; data: Buffer } | undefined> {
 	const [row] = await sql<{ owner: string; name: string; media_type: string; data: Buffer | null }[]>`
-		select owner, name, media_type, data from files where id = ${id} ${owner === undefined ? sql`` : sql`and owner = ${owner}`}`;
+		select owner, name, media_type, data from files where id = ${id} and owner = ${owner}`;
 	if (!row) return undefined;
 	const data = row.data ?? (objectStoreEnabled ? await getObject(objectKey(row.owner, id)) : undefined);
 	return data && { name: row.name, media_type: row.media_type, data };
@@ -79,21 +79,22 @@ const objectKey = (owner: string, id: string) => `files/${owner}/${id}`;
 /**
  * For the model only: replaces each stored file part with its content. Images and
  * PDFs become data URLs; text files become a text part with the file's text. The
- * saved thread keeps the links.
+ * saved thread keeps the links. Only the thread owner's files are read: a link to
+ * someone else's file reads as "no longer available".
  */
-export async function resolveFileParts(messages: UIMessage[]): Promise<UIMessage[]> {
+export async function resolveFileParts(messages: UIMessage[], owner: string): Promise<UIMessage[]> {
 	return Promise.all(
 		messages.map(async (message) => {
 			if (!message.parts.some(isStoredFile)) return message;
-			const parts = await Promise.all(message.parts.map((part) => (isStoredFile(part) ? resolvePart(part) : [part])));
+			const parts = await Promise.all(message.parts.map((part) => (isStoredFile(part) ? resolvePart(part, owner) : [part])));
 			return { ...message, parts: parts.flat() };
 		}),
 	);
 }
 
-async function resolvePart(part: Extract<UIMessage["parts"][number], { type: "file" }>): Promise<UIMessage["parts"]> {
+async function resolvePart(part: Extract<UIMessage["parts"][number], { type: "file" }>, owner: string): Promise<UIMessage["parts"]> {
 	const id = part.url.slice(URL_PREFIX.length);
-	const file = await loadFile(id);
+	const file = await loadFile(id, owner);
 	if (!file) return [{ type: "text", text: `[The attached file "${part.filename ?? "file"}" is no longer available.]` }];
 	const attached = `The person attached "${file.name}" (${file.media_type}, file id ${id}).`;
 

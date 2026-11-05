@@ -8,13 +8,13 @@ import type { RunPythonInput } from "../python/schema.ts";
  * cannot load Node modules (the database, files, the sandbox).
  */
 
-/** The thread as the model reads it, with attached files swapped for their content. */
-export async function loadModelMessages(threadId: string): Promise<ModelMessage[]> {
+/** The thread as the model reads it, with the owner's attached files swapped for their content. */
+export async function loadModelMessages(threadId: string, owner: string): Promise<ModelMessage[]> {
 	"use step";
 	const { convertToModelMessages } = await import("ai");
 	const { loadThread } = await import("../db.ts");
 	const { resolveFileParts } = await import("../files.ts");
-	return convertToModelMessages(await resolveFileParts(await loadThread(threadId)));
+	return convertToModelMessages(await resolveFileParts(await loadThread(threadId), owner));
 }
 
 /** What memory adds to the instructions: how it works, and what it recalls for the person's latest message. */

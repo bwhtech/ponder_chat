@@ -1,4 +1,5 @@
 import { sql } from "./db.ts";
+import { TITLE_FUNCTION_ID } from "./thread-title.ts";
 
 /**
  * Daily credits. Each person may spend a number of credits a day, and the count starts
@@ -7,7 +8,8 @@ import { sql } from "./db.ts";
  * fraction of a credit per message and Claude Opus several credits.
  *
  * Spending is read from the `runs` table (telemetry), which records OpenRouter's cost
- * for every model call, including thread titles. Nothing is reserved up front: a person
+ * for every model call. Thread titles are recorded there too, but are not charged: the
+ * app names threads, the person did not ask for it. Nothing is reserved up front: a person
  * with credits left can start a reply, and that one reply may take them past the limit.
  * The next one is refused. Replies have no length cap of their own: going over by one
  * reply is accepted.
@@ -42,7 +44,8 @@ export async function creditStatus(user: string, now = new Date()): Promise<Cred
 	const [[spent], [override]] = await Promise.all([
 		sql<{ usd: number }[]>`
 			select coalesce(sum(cost_usd), 0)::float8 as usd from runs
-			where "user" = ${user} and created_at >= ${dayStart}`,
+			where "user" = ${user} and created_at >= ${dayStart}
+				and function_id is distinct from ${TITLE_FUNCTION_ID}`,
 		sql<{ daily_credits: number }[]>`select daily_credits from credit_limits where user_id = ${user}`,
 	]);
 	const limit = override?.daily_credits ?? DEFAULT_DAILY_CREDITS;
