@@ -64,7 +64,7 @@ export async function chatTurn(turn: ChatTurn) {
 	let failure: unknown;
 	try {
 		await agent.stream({
-			messages: await loadModelMessages(turn.threadId),
+			messages: await loadModelMessages(turn.threadId, turn.owner),
 			writable: getWritable<ModelCallStreamPart>(),
 			stopWhen: isStepCount(turn.maxSteps),
 		});
