@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Avatar, Dropdown, useColorScheme } from "frappe-ui";
-import { computed, h } from "vue";
+import { Avatar, Dropdown } from "frappe-ui";
+import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { signOut } from "../../account";
+import { useThemeMenu } from "../../theme-menu";
 import { isMobile } from "../lib/viewport";
 import { settingsOpen, viewer } from "../store";
 
@@ -10,30 +11,13 @@ import { settingsOpen, viewer } from "../store";
 defineProps<{ compact?: boolean }>();
 
 const me = computed(() => viewer.value?.user.name || viewer.value?.user.email.split("@")[0] || "");
-const { colorScheme, setColorScheme } = useColorScheme();
 const router = useRouter();
-const themes = [
-	{ label: "Light", value: "light", icon: "lucide-sun" },
-	{ label: "Dark", value: "dark", icon: "lucide-moon" },
-	{ label: "System", value: "system", icon: "lucide-monitor" },
-] as const;
+const theme = useThemeMenu();
 
 const menu = computed(() => [
 	{ label: "Settings", icon: "lucide-settings", onClick: () => (isMobile.value ? void router.push("/settings") : (settingsOpen.value = true)) },
 	{ label: "Back to chat", icon: "lucide-message-circle", onClick: () => location.assign("/") },
-	{
-		label: "Theme",
-		icon: "lucide-sun-moon",
-		submenu: themes.map((t) => ({
-			label: t.label,
-			icon: t.icon,
-			selected: colorScheme.value === t.value,
-			slots: {
-				suffix: ({ selected }: { selected: boolean }) => (selected ? h("span", { class: "lucide-check size-4 shrink-0 text-ink-gray-7" }) : null),
-			},
-			onClick: () => setColorScheme(t.value),
-		})),
-	},
+	theme(),
 	{ label: "Sign out", icon: "lucide-log-out", onClick: () => void signOut() },
 ]);
 </script>

@@ -1,18 +1,21 @@
 <script setup lang="ts">
-import { BottomSheet, Button, Dialog, Sidebar, SidebarHeader, SidebarItem, Skeleton } from "frappe-ui";
-import { ref } from "vue";
+import { BottomSheet, Button, Dialog, Sidebar, SidebarHeader, Skeleton } from "frappe-ui";
+import { computed, ref } from "vue";
 import { me, refreshCredits, signOut } from "./account";
 import ChatView from "./ChatView.vue";
 import { FileViewer } from "./ai-elements/file-viewer";
-import ColorSchemeSwitcher from "./ColorSchemeSwitcher.vue";
 import CreditMeter from "./CreditMeter.vue";
 import { useCreditRequestWatch } from "./credit-request";
 import MemoryView from "./MemoryView.vue";
 import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
+import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
 
-/** The signed-in shell: chats in a sidebar (a bottom sheet on phones) and the open chat, or the Memory page. */
+/**
+ * The signed-in shell: chats in a sidebar (a bottom sheet on phones) and the open chat, or
+ * the Memory page. The header at the top of the sidebar opens the account menu, as on /admin.
+ */
 const { current, currentThread, messages, running, loading, revision, refresh, open, start } = useThreads();
 const sheetOpen = ref(false);
 const settingsOpen = ref(false);
@@ -54,6 +57,18 @@ function showSettings() {
 	settingsOpen.value = true;
 }
 
+// Memory, Admin (for admins), Settings, Theme and Sign out.
+const theme = useThemeMenu();
+const menu = computed(() => [
+	{ label: "Memory", icon: "lucide-brain", onClick: showMemory },
+	...(me.value?.user.role === "admin" ? [{ label: "Admin", icon: "lucide-shield", onClick: () => location.assign("/admin") }] : []),
+	{ label: "Settings", icon: "lucide-settings", onClick: showSettings },
+	theme(),
+	{ label: "Sign out", icon: "lucide-log-out", onClick: () => void signOut() },
+]);
+/** People have no name until they set one, so the start of the email stands in. */
+const name = computed(() => me.value?.user.name.trim() || me.value?.user.email.split("@")[0] || "");
+
 function newThread() {
 	sheetOpen.value = false;
 	showChat();
@@ -71,7 +86,7 @@ function onSaved() {
 	<div class="contents">
 		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
 			<Sidebar class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
-				<SidebarHeader title="Ponder Chat" logo="/logo.png" />
+				<SidebarHeader title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" />
 				<div class="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
 					<ThreadList @select="pick" />
 				</div>
@@ -79,14 +94,8 @@ function onSaved() {
 				<div class="px-2 pb-3">
 					<Button variant="solid" size="md" icon-left="lucide-square-pen" class="w-full" @click="newThread">New chat</Button>
 				</div>
-				<div class="border-t border-outline-gray-1 px-2 pt-2">
-					<CreditMeter v-if="me" :credits="me.credits" />
-					<SidebarItem label="Memory" icon="lucide-brain" :active="view === 'memory'" @click="showMemory" />
-					<SidebarItem v-if="me?.user.role === 'admin'" label="Admin" icon="lucide-shield" href="/admin" />
-					<SidebarItem label="Settings" icon="lucide-settings" @click="showSettings" />
-				</div>
-				<div class="px-2 pb-3 pt-1">
-					<ColorSchemeSwitcher class="w-full" fluid />
+				<div v-if="me" class="border-t border-outline-gray-1 px-2 pb-2 pt-2">
+					<CreditMeter :credits="me.credits" />
 				</div>
 			</Sidebar>
 
@@ -114,15 +123,12 @@ function onSaved() {
 
 		<BottomSheet v-model:open="sheetOpen" title="Chats">
 			<div class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
+				<SidebarHeader title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" class="-mx-1 -mt-2" />
 				<Button variant="solid" size="md" icon-left="lucide-square-pen" class="w-full" @click="newThread">New chat</Button>
 				<ThreadList @select="pick" />
-				<div class="border-t border-outline-gray-1 pt-2">
-					<CreditMeter v-if="me" :credits="me.credits" />
-					<SidebarItem label="Memory" icon="lucide-brain" :active="view === 'memory'" @click="showMemory" />
-					<SidebarItem v-if="me?.user.role === 'admin'" label="Admin" icon="lucide-shield" href="/admin" />
-					<SidebarItem label="Settings" icon="lucide-settings" @click="showSettings" />
+				<div v-if="me" class="border-t border-outline-gray-1 pt-2">
+					<CreditMeter :credits="me.credits" />
 				</div>
-				<ColorSchemeSwitcher fluid />
 			</div>
 		</BottomSheet>
 
