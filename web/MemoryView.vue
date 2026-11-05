@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Alert, Badge, Button, dialog, Dropdown, LoadingIndicator, TabButtons } from "frappe-ui";
+import { Alert, Badge, Button, dialog, Dropdown, Skeleton, TabButtons } from "frappe-ui";
 import { onMounted, ref } from "vue";
 import { canUndo, fetchMemory, forgetMemory, KIND_LABELS, timeAgo, undoSave, updateMemory, type Memory, type MemoryOverview, type MemorySave } from "./memory";
 import { useThreads } from "./threads";
@@ -104,11 +104,25 @@ async function undo(save: MemorySave) {
 				title="Memory is off"
 				description="The server runs with PONDER_MEMORY=off, so new chats neither use nor add memories."
 			/>
-			<LoadingIndicator v-if="!overview && !loadError" class="size-5 text-ink-gray-5" />
+			<TabButtons v-if="!loadError" v-model="tab" :options="tabs" />
+
+			<!-- Rows shaped like memories while they load: a line of text, then its kind and age. -->
+			<ul
+				v-if="!overview && !loadError"
+				class="divide-y divide-outline-gray-1 rounded-6 border border-outline-gray-2"
+				aria-busy="true"
+				aria-label="Loading memories"
+			>
+				<li v-for="width in ['w-4/5', 'w-3/5', 'w-2/3']" :key="width" class="space-y-2 px-3 py-3">
+					<Skeleton :class="['h-4 rounded-4', width]" />
+					<div class="flex items-center gap-2">
+						<Skeleton class="h-4 w-14 rounded-full" />
+						<Skeleton class="h-3 w-16 rounded-4" />
+					</div>
+				</li>
+			</ul>
 
 			<template v-if="overview">
-				<TabButtons v-model="tab" :options="tabs" />
-
 				<div v-if="tab === 'memories'">
 					<ul v-if="overview.memories.length" class="divide-y divide-outline-gray-1 rounded-6 border border-outline-gray-2">
 						<li v-for="memory in overview.memories" :key="memory.id" class="flex items-start gap-3 px-3 py-2.5">

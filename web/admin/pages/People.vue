@@ -7,6 +7,7 @@ import AccountMenu from "../components/AccountMenu.vue";
 import CreditBar from "../components/CreditBar.vue";
 import CreditsDialog from "../components/CreditsDialog.vue";
 import InviteDialog from "../components/InviteDialog.vue";
+import ListSkeleton from "../components/ListSkeleton.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import { personActions } from "../lib/actions";
 import { credits, lastActive } from "../lib/format";
@@ -30,13 +31,14 @@ async function load() {
 void load();
 
 const filter = ref("all");
-const count = (test: (p: Person) => boolean) => people.value.filter(test).length;
+// A label with its count, such as "Active 12". No count while loading: "0" would read as a fact.
+const counted = (label: string, test: (p: Person) => boolean) => (loading.value ? label : `${label} ${people.value.filter(test).length}`);
 const filters = computed(() => [
-	{ label: `All ${people.value.length}`, value: "all" },
-	{ label: `Active ${count((p) => p.status === "active")}`, value: "active" },
-	{ label: `Invited ${count((p) => p.status === "invited")}`, value: "invited" },
-	{ label: `Admins ${count((p) => p.role === "admin")}`, value: "admins" },
-	{ label: `Banned ${count((p) => p.status === "banned")}`, value: "banned" },
+	{ label: counted("All", () => true), value: "all" },
+	{ label: counted("Active", (p) => p.status === "active"), value: "active" },
+	{ label: counted("Invited", (p) => p.status === "invited"), value: "invited" },
+	{ label: counted("Admins", (p) => p.role === "admin"), value: "admins" },
+	{ label: counted("Banned", (p) => p.status === "banned"), value: "banned" },
 ]);
 
 const search = ref("");
@@ -195,13 +197,7 @@ function invited() {
 			</ListRows>
 		</List>
 
-		<div v-if="loading" class="space-y-4 pt-3">
-			<div v-for="n in 6" :key="n" class="flex items-center gap-3">
-				<div class="size-8 animate-pulse rounded-full bg-surface-gray-2" />
-				<div class="h-4 w-40 animate-pulse rounded-4 bg-surface-gray-2 md:w-56" />
-				<div class="ml-auto h-4 w-16 animate-pulse rounded-4 bg-surface-gray-2 md:w-32" />
-			</div>
-		</div>
+		<ListSkeleton v-if="loading" :rows="6" :avatar="isMobile ? 'lg' : 'md'" two-lines label="Loading people" />
 
 		<div v-else-if="!rows.length" class="flex flex-col items-center gap-3 py-16 text-center">
 			<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">

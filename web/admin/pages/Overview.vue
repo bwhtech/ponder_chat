@@ -7,6 +7,7 @@ import { useRouter } from "vue-router";
 import { api, type Overview } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import CreditBar from "../components/CreditBar.vue";
+import ListSkeleton from "../components/ListSkeleton.vue";
 import { credits, dollars, shortDay } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 import { counts, settings } from "../store";
@@ -72,20 +73,23 @@ function openRequests() {
 			<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
 				<NumberCard
 					title="Active people"
+					:loading="loading"
 					:value="loading ? null : now.active"
 					:delta="loading ? undefined : now.active - yesterday.active"
 					delta-caption="vs yesterday"
 				/>
 				<NumberCard
 					title="Replies"
+					:loading="loading"
 					:value="loading ? null : now.replies"
 					:delta="loading ? undefined : now.replies - yesterday.replies"
 					delta-caption="vs yesterday"
 				/>
-				<NumberCard title="Credits used" :value="loading ? null : Math.round(now.credits)" />
-				<NumberCard title="Cost" :value="loading ? null : dollars(now.credits)" />
+				<NumberCard title="Credits used" :value="loading ? null : Math.round(now.credits)" :loading="loading" />
+				<NumberCard title="Cost" :value="loading ? null : dollars(now.credits)" :loading="loading" />
 				<NumberCard
 					title="Out of credits"
+					:loading="loading"
 					:value="loading ? null : now.outOfCredits"
 					:suffix="now.outOfCredits === 1 ? ' person' : ' people'"
 					class="col-span-2 sm:col-span-1"
@@ -98,7 +102,7 @@ function openRequests() {
 		<div class="h-64 rounded-5 border border-outline-gray-1 p-3 md:h-72 md:p-4">
 			<BarChart
 				title="Credits used per day"
-				:subtitle="`${credits(rangeCredits)} credits, ${dollars(rangeCredits)}`"
+				:subtitle="loading ? undefined : `${credits(rangeCredits)} credits, ${dollars(rangeCredits)}`"
 				:data="daily"
 				x="day"
 				y="Credits"
@@ -162,9 +166,7 @@ function openRequests() {
 				</ListRows>
 			</List>
 
-			<div v-if="loading" class="space-y-3 pt-2">
-				<div v-for="n in 5" :key="n" class="h-8 animate-pulse rounded-4 bg-surface-gray-2" />
-			</div>
+			<ListSkeleton v-if="loading" :avatar="isMobile ? 'lg' : 'sm'" :two-lines="isMobile" label="Loading people" />
 		</section>
 
 		<p class="flex items-center gap-1.5 text-sm text-ink-gray-5">

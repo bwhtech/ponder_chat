@@ -6,6 +6,7 @@ import { api, type DecidedRequest, type PendingRequest } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import CreditBar from "../components/CreditBar.vue";
 import ExtraCreditsDialog from "../components/ExtraCreditsDialog.vue";
+import ListSkeleton from "../components/ListSkeleton.vue";
 import { credits, lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 import { counts, refreshCounts } from "../store";
@@ -130,9 +131,7 @@ const answer = (request: DecidedRequest) =>
 				</ListRows>
 			</List>
 
-			<div v-if="loading" class="space-y-3 pt-2">
-				<div v-for="n in 3" :key="n" class="h-10 animate-pulse rounded-4 bg-surface-gray-2" />
-			</div>
+			<ListSkeleton v-if="loading" :rows="3" :avatar="isMobile ? 'lg' : 'md'" two-lines label="Loading requests" />
 			<div v-else-if="!pending.length" class="flex flex-col items-center gap-3 py-12 text-center">
 				<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
 					<span class="lucide-inbox size-6" aria-hidden="true" />

@@ -9,6 +9,7 @@ import {
 	PageHeader,
 	PageHeaderBackButton,
 	PageHeaderMobile,
+	Skeleton,
 	toast,
 } from "frappe-ui";
 import { BarChart, DonutChart, NumberCard } from "frappe-ui/charts";
@@ -226,4 +227,38 @@ async function emailInvite() {
 		<p class="text-sm text-ink-gray-5">They may have been removed.</p>
 		<Button label="All people" route="/people" class="mt-2" />
 	</div>
+	<!-- Loading: the page's own frame, with skeletons where its numbers go. NumberCard
+	     and the chart draw frappe-ui's own skeletons with `loading`. -->
+	<template v-else>
+		<PageHeaderMobile v-if="isMobile" title="">
+			<template #prefix><PageHeaderBackButton :fallback-route="{ path: '/people' }" /></template>
+		</PageHeaderMobile>
+		<PageHeader v-else>
+			<Breadcrumbs :items="[{ label: 'People', route: '/people' }]" />
+		</PageHeader>
+
+		<div class="flex min-h-0 flex-1 flex-col md:flex-row" aria-busy="true" aria-label="Loading this person">
+			<div class="min-w-0 flex-1 space-y-6 px-3 pb-6 pt-4 sm:px-5 md:pb-16 md:pt-5">
+				<div class="flex items-center gap-3">
+					<Skeleton class="size-10 shrink-0 rounded-full md:size-12" />
+					<div class="min-w-0 flex-1 space-y-2">
+						<Skeleton class="h-5 w-40 max-w-full rounded-4 md:h-6 md:w-56" />
+						<Skeleton class="h-3.5 w-52 max-w-full rounded-4" />
+					</div>
+				</div>
+				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+					<NumberCard v-for="title in ['Credits today', 'Last 7 days', 'Replies, 7 days', 'Chats']" :key="title" :title="title" :value="null" loading />
+				</div>
+				<div class="h-60 rounded-5 border border-outline-gray-1 p-3 md:h-64 md:p-4">
+					<BarChart title="Credits per day, last 30 days" :data="[]" x="day" y="Credits" loading />
+				</div>
+			</div>
+			<aside class="space-y-3 border-outline-gray-1 px-3 pb-16 sm:px-5 md:w-[20rem] md:shrink-0 md:border-l md:pt-5">
+				<div v-for="(width, row) in ['w-20', 'w-24', 'w-16', 'w-28', 'w-20']" :key="row" class="flex justify-between gap-3">
+					<Skeleton class="h-3.5 w-20 rounded-4" />
+					<Skeleton :class="['h-3.5 rounded-4', width]" />
+				</div>
+			</aside>
+		</div>
+	</template>
 </template>
