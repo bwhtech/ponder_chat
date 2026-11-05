@@ -204,7 +204,7 @@ const busy = computed(() => status.value === "submitted" || status.value === "st
 const lastMessage = computed(() => messages.value[messages.value.length - 1]);
 // The copy of the thread on this device follows the chat: written when a reply ends, or when
 // the chat closes mid-reply (it reconnects on the way back).
-const { chatBusy, remember } = useThreads();
+const { chatBusy, remember, added } = useThreads();
 watch(
 	busy,
 	(now, before) => {
@@ -248,6 +248,8 @@ async function sendNow({ text, files }: Pick<Queued, "text" | "files">) {
 	queuePaused.value = false;
 	const closed = closeOpenCalls(messages.value);
 	if (closed) messages.value = closed;
+	// The first message: the thread shows in the list now, not once the reply ends.
+	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text);
 	sendMessage(files.length ? { text, files } : { text });
 }
 
@@ -343,10 +345,13 @@ function replyModel(message: UIMessage) {
 			<ConversationEmptyState
 				v-if="landing"
 				class="sm:justify-end sm:pb-6"
-				icon="lucide-message-circle"
-				title="What's on your mind?"
-				description="Ask anything. Pick a model below; bigger models use more of your daily credits."
-			/>
+			>
+				<img src="/logo.png" alt="" class="size-12" />
+				<div class="space-y-1.5">
+					<p class="text-lg-semibold text-ink-gray-8">What's on your mind?</p>
+					<p class="text-p-base text-ink-gray-5">Ask anything. Pick a model below; bigger models use more of your daily credits.</p>
+				</div>
+			</ConversationEmptyState>
 		</Transition>
 		<Conversation v-if="!landing">
 			<ConversationContent class="mx-auto w-full max-w-[770px] px-3 pb-6 pt-6 sm:px-5">

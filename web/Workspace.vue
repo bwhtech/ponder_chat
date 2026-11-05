@@ -68,11 +68,12 @@ function onSaved() {
 		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
 			<Sidebar class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
 				<SidebarHeader title="Ponder Chat" logo="/logo.png" />
-				<div class="px-2 pb-2">
-					<SidebarItem label="New chat" icon="lucide-square-pen" @click="newThread" />
-				</div>
 				<div class="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
 					<ThreadList @select="pick" />
+				</div>
+				<!-- The main action, under the list: always in the same place, however long the list grows. -->
+				<div class="px-2 pb-3">
+					<Button variant="solid" size="md" icon-left="lucide-square-pen" class="w-full" @click="newThread">New chat</Button>
 				</div>
 				<div class="border-t border-outline-gray-1 px-2 pt-2">
 					<CreditMeter v-if="me" :credits="me.credits" />
@@ -108,7 +109,7 @@ function onSaved() {
 
 		<BottomSheet v-model:open="sheetOpen" title="Chats">
 			<div class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-				<SidebarItem label="New chat" icon="lucide-square-pen" @click="newThread" />
+				<Button variant="solid" size="md" icon-left="lucide-square-pen" class="w-full" @click="newThread">New chat</Button>
 				<ThreadList @select="pick" />
 				<div class="border-t border-outline-gray-1 pt-2">
 					<CreditMeter v-if="me" :credits="me.credits" />

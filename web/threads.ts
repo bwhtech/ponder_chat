@@ -30,6 +30,8 @@ const chatBusy = ref(false);
 // Each open() takes a number; a slower answer for a thread no longer open is dropped.
 let opening = 0;
 const inflight = new Map<string, Promise<CachedThread | "same" | undefined>>();
+/** Threads started on this page that the server's list may not have yet. */
+const pending = new Map<string, ThreadSummary>();
 
 export function useThreads() {
 	const currentThread = computed(() => threads.value.find((thread) => thread.id === current.value));
@@ -48,6 +50,7 @@ export function useThreads() {
 		prefetch,
 		remember,
 		start,
+		added,
 		rename,
 		remove,
 		init,
@@ -72,8 +75,10 @@ async function refresh() {
 	try {
 		const response = await fetch("/api/threads");
 		if (!response.ok) return;
-		threads.value = (await response.json()).threads;
-		localStorage.setItem(LIST_KEY, JSON.stringify(threads.value));
+		const fresh: ThreadSummary[] = (await response.json()).threads;
+		for (const id of pending.keys()) if (fresh.some((thread) => thread.id === id)) pending.delete(id);
+		threads.value = [...pending.values(), ...fresh];
+		localStorage.setItem(LIST_KEY, JSON.stringify(fresh));
 	} catch {
 		// Offline: keep the list this device has.
 	} finally {
@@ -154,7 +159,7 @@ function sameThread(a: CachedThread, b: CachedThread) {
 	return a.running === b.running && JSON.stringify(a.messages) === JSON.stringify(b.messages);
 }
 
-/** A new, empty thread. It joins the list once its first reply is saved. */
+/** A new, empty thread. It joins the list when its first message goes out (added). */
 function start({ push = true } = {}) {
 	opening++;
 	const id = crypto.randomUUID().slice(0, 8);
@@ -163,6 +168,39 @@ function start({ push = true } = {}) {
 	loading.value = false;
 	current.value = id;
 	setUrl(id, push);
+}
+
+/**
+ * A new thread's first message went out: the thread joins the top of the list now, named by
+ * that message, as the server names it until it has a title. The server names it with a cheap
+ * model a moment later (server/thread-title.ts), so the list is asked again until the name changes.
+ */
+function added(id: string, text: string) {
+	if (threads.value.some((thread) => thread.id === id)) return;
+	const thread = { id, title: nameFrom(text), updatedAt: new Date().toISOString(), messages: 1 };
+	pending.set(id, thread);
+	threads.value = [thread, ...threads.value];
+	void waitForTitle(id, thread.title);
+}
+
+async function waitForTitle(id: string, untitled: string) {
+	for (const wait of [1_500, 3_000, 6_000]) {
+		await new Promise((resolve) => setTimeout(resolve, wait));
+		await refresh();
+		const thread = threads.value.find((each) => each.id === id);
+		if (!thread || thread.title !== untitled) return;
+	}
+	// Still not on the server (the message was refused, say): it leaves the list.
+	if (pending.delete(id)) threads.value = threads.value.filter((thread) => thread.id !== id);
+}
+
+/** Names an untitled thread by its first message. The same as nameFrom in server/db.ts. */
+function nameFrom(text: string) {
+	const line = text.split("\n")[0].trim();
+	if (!line) return "New chat";
+	if (line.length <= 60) return line;
+	const cut = line.slice(0, 60);
+	return `${cut.slice(0, cut.lastIndexOf(" ") > 30 ? cut.lastIndexOf(" ") : 60)}…`;
 }
 
 async function rename(id: string, title: string) {
@@ -179,6 +217,7 @@ async function remove(id: string) {
 	const response = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
 	if (!response.ok) throw new Error("The thread could not be deleted.");
 	forgetThread(id);
+	pending.delete(id);
 	await refresh();
 	if (id === current.value) {
 		const next = threads.value[0];
