@@ -65,7 +65,7 @@ function onSaved() {
 
 <template>
 	<div class="contents">
-		<div class="flex h-dvh bg-surface-base text-ink-gray-8">
+		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
 			<Sidebar class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
 				<SidebarHeader title="Ponder Chat" logo="/logo.png" />
 				<div class="px-2 pb-2">
@@ -107,7 +107,7 @@ function onSaved() {
 		</div>
 
 		<BottomSheet v-model:open="sheetOpen" title="Chats">
-			<div class="flex flex-col gap-2 px-2 pb-4">
+			<div class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
 				<SidebarItem label="New chat" icon="lucide-square-pen" @click="newThread" />
 				<ThreadList @select="pick" />
 				<div class="border-t border-outline-gray-1 pt-2">

@@ -75,7 +75,7 @@ function askDelete(thread: ThreadSummary) {
 						<template #trigger>
 							<button
 								type="button"
-								class="flex size-6 items-center justify-center rounded-4 text-ink-gray-5 hover:bg-surface-gray-3 hover:text-ink-gray-8"
+								class="relative flex size-6 items-center justify-center rounded-4 text-ink-gray-5 after:absolute after:-inset-1 after:content-[''] hover:bg-surface-gray-3 hover:text-ink-gray-8 active:bg-surface-gray-4"
 								:aria-label="`Actions for ${thread.title}`"
 							>
 								<span class="lucide-ellipsis size-4" aria-hidden="true" />

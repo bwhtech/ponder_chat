@@ -95,6 +95,10 @@ async function patientFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 type Remembered = { save: MemorySave; operations: MemoryOperation[] };
 const remembered = ref(new Map<string, Remembered[]>());
 const MEMORY_LABELS = { add: "Remembered", update: "Updated memory", forget: "Forgot" } as const;
+// Saves that arrived after the first load (a reply just finished): only these animate in.
+const newSaves = ref(new Set<number>());
+const shownSaves = new Set<number>();
+let loadedSaves = false;
 
 async function loadRemembered({ wait = false } = {}) {
 	const saves = await fetchThreadSaves(props.threadId, { wait });
@@ -104,6 +108,10 @@ async function loadRemembered({ wait = false } = {}) {
 		const operations = save.operations.filter((op) => op.status === "applied");
 		if (operations.length) byMessage.set(save.messageId, [...(byMessage.get(save.messageId) ?? []), { save, operations }]);
 	}
+	const ids = [...byMessage.values()].flat().map(({ save }) => save.id);
+	newSaves.value = new Set(loadedSaves ? ids.filter((id) => !shownSaves.has(id)) : []);
+	for (const id of ids) shownSaves.add(id);
+	loadedSaves = true;
 	remembered.value = byMessage;
 }
 
@@ -323,14 +331,20 @@ function replyModel(message: UIMessage) {
 								<MessageCopyAction :value="replyText(message)" />
 								<span v-if="replyModel(message)" class="px-1 text-p-xs text-ink-gray-5" data-slot="reply-model">{{ replyModel(message) }}</span>
 							</MessageActions>
-							<div v-for="{ save, operations } in remembered.get(message.id) ?? []" :key="save.id" class="flex flex-wrap items-start gap-x-1">
+							<div
+								v-for="{ save, operations } in remembered.get(message.id) ?? []"
+								:key="save.id"
+								data-slot="memory-saved"
+								:data-new="newSaves.has(save.id) || undefined"
+								class="flex flex-wrap items-start gap-x-1"
+							>
 								<div class="min-w-0">
 									<button
 										v-for="op in operations"
 										:key="op.memoryId + op.op"
 										type="button"
 										data-slot="memory-note"
-										class="flex w-fit max-w-full items-start gap-1.5 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-7"
+										class="flex w-fit max-w-full items-start gap-1.5 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
 										:class="{ 'line-through': save.undoneAt }"
 										title="Open Memory"
 										@click="emit('openMemory')"
@@ -343,7 +357,7 @@ function replyModel(message: UIMessage) {
 									v-if="canUndo(save)"
 									type="button"
 									data-slot="memory-undo"
-									class="rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-5 underline hover:bg-surface-gray-2 hover:text-ink-gray-8"
+									class="rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-5 underline hover:bg-surface-gray-2 hover:text-ink-gray-8 active:bg-surface-gray-3"
 									@click="undoRemembered(save)"
 								>
 									Undo
@@ -369,7 +383,7 @@ function replyModel(message: UIMessage) {
 		</Conversation>
 	</div>
 
-	<footer class="mx-auto w-full max-w-[770px] shrink-0 space-y-2 px-3 pb-3 sm:px-5 [@media(display-mode:standalone)]:pb-[env(safe-area-inset-bottom)]">
+	<footer class="mx-auto w-full max-w-[770px] shrink-0 space-y-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
 		<Suggestions v-if="messages.length === 0 && !outOfCredits">
 			<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
 		</Suggestions>

@@ -2,7 +2,11 @@
 <html lang="en">
 	<head>
 		<meta charset="UTF-8" />
-		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<!-- cover: the page draws under the notch and home bar, and env(safe-area-inset-*) has values to pad back with.
+		     resizes-content: on Android the keyboard shrinks the page (100dvh), so the message field stays above it. -->
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+		<!-- The browser bar and status bar match the header (--surface-base). Kept in step with data-theme below. -->
+		<meta name="theme-color" content="#ffffff" />
 		<title>Ponder Chat</title>
 		<!-- The same icon as ICON in attention.ts, which draws a count on it while the tab is hidden. -->
 		<link rel="icon" type="image/png" href="/favicon.png" />
@@ -12,7 +16,13 @@
 			(() => {
 				const saved = localStorage.getItem("theme");
 				const dark = saved === "dark" || (saved !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
-				document.documentElement.setAttribute("data-theme", dark ? "dark" : "light");
+				const root = document.documentElement;
+				root.setAttribute("data-theme", dark ? "dark" : "light");
+				// frappe-ui's color scheme switch sets data-theme; follow it with the status bar colour.
+				const themeColor = document.querySelector('meta[name="theme-color"]');
+				const sync = () => themeColor.setAttribute("content", root.dataset.theme === "dark" ? "#171717" : "#ffffff");
+				sync();
+				new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
 			})();
 		</script>
 	</head>

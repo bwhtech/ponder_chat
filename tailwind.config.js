@@ -6,4 +6,10 @@ const here = new URL(".", import.meta.url).pathname;
 export default {
 	presets: [preset],
 	content: [...content, `${here}web/**/*.{html,vue,ts}`],
+	theme: {
+		extend: {
+			// `ease-out-strong`: the curve for things that enter, leave or open. Defined in style.css.
+			transitionTimingFunction: { "out-strong": "var(--ease-out-strong)" },
+		},
+	},
 };

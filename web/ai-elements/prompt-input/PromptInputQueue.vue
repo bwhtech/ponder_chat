@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button, Tooltip } from "frappe-ui";
 import { nextTick, ref } from "vue";
+import CollapseTransition from "../utils/CollapseTransition.vue";
 
 export interface QueuedMessage {
 	id: string;
@@ -61,68 +62,77 @@ function onDrop(target: string) {
 </script>
 
 <template>
-	<section
-		v-if="items.length"
-		data-slot="prompt-input-queue"
-		class="mx-3 rounded-t-6 border border-b-0 border-outline-gray-2 bg-surface-gray-1 text-ink-gray-7"
-		aria-label="Queued messages"
-	>
-		<button
-			type="button"
-			class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-ink-gray-5 hover:text-ink-gray-7"
-			:aria-expanded="open"
-			@click="open = !open"
-		>
-			<span class="lucide-list-ordered size-4" aria-hidden="true" />
-			<span class="flex-1 text-left">Queued</span>
-			<span class="tabular-nums">{{ items.length }}</span>
-			<span class="lucide-chevron-down size-4 transition-transform" :class="!open && '-rotate-90'" aria-hidden="true" />
-		</button>
-		<ol v-show="open" class="pb-1">
-			<li
-				v-for="item in items"
-				:key="item.id"
-				data-slot="prompt-input-queue-item"
-				class="group flex items-center gap-1.5 py-0.5 pl-1.5 pr-2"
-				:class="over === item.id && dragged !== item.id && 'shadow-[inset_0_2px_0_var(--outline-gray-4)]'"
-				@dragover.prevent="over = item.id"
-				@dragleave="over === item.id && (over = null)"
-				@drop.prevent="onDrop(item.id)"
+	<!-- The panel and its list grow and shrink, so the field below moves instead of jumping.
+	     Each wrapper has no padding or border, so height 0 is fully closed. -->
+	<CollapseTransition>
+		<div v-if="items.length">
+			<section
+				data-slot="prompt-input-queue"
+				class="mx-3 rounded-t-6 border border-b-0 border-outline-gray-2 bg-surface-gray-1 text-ink-gray-7"
+				aria-label="Queued messages"
 			>
-				<span
-					class="lucide-grip-vertical size-4 shrink-0 cursor-grab text-ink-gray-4"
-					:class="items.length < 2 && 'invisible'"
-					draggable="true"
-					aria-hidden="true"
-					@dragstart="dragged = item.id"
-					@dragend="dragged = over = null"
-				/>
-				<textarea
-					v-if="editing === item.id"
-					ref="editor"
-					v-model="draft"
-					rows="1"
-					class="min-w-0 flex-1 resize-none rounded-4 border-outline-gray-2 bg-surface-base px-2 py-1 text-base text-ink-gray-8 focus:border-outline-gray-4 focus:ring-0"
-					aria-label="Edit queued message"
-					@keydown="onEditKeydown"
-					@blur="save"
-				/>
-				<p v-else class="min-w-0 flex-1 truncate text-base text-ink-gray-8" :title="item.text">
-					{{ item.text }}
-					<span v-if="item.files" class="ml-1 inline-flex items-center gap-0.5 text-sm text-ink-gray-5">
-						<span class="lucide-paperclip size-3" aria-hidden="true" />{{ item.files }}
-					</span>
-				</p>
-				<Tooltip text="Edit">
-					<Button variant="ghost" size="sm" icon="lucide-pencil" aria-label="Edit" @click="edit(item)" />
-				</Tooltip>
-				<Tooltip text="Stop the current reply and send this now">
-					<Button variant="ghost" size="sm" icon-left="lucide-corner-up-right" label="Steer" @click="emit('steer', item.id)" />
-				</Tooltip>
-				<Tooltip text="Remove">
-					<Button variant="ghost" size="sm" icon="lucide-x" aria-label="Remove" @click="emit('remove', item.id)" />
-				</Tooltip>
-			</li>
-		</ol>
-	</section>
+				<button
+					type="button"
+					class="flex w-full items-center gap-2 px-3 py-1.5 text-sm text-ink-gray-5 hover:text-ink-gray-7 active:bg-surface-gray-2"
+					:aria-expanded="open"
+					@click="open = !open"
+				>
+					<span class="lucide-list-ordered size-4" aria-hidden="true" />
+					<span class="flex-1 text-left">Queued</span>
+					<span class="tabular-nums">{{ items.length }}</span>
+					<span class="lucide-chevron-down size-4 transition-transform duration-200 ease-out-strong motion-reduce:transition-none" :class="!open && '-rotate-90'" aria-hidden="true" />
+				</button>
+				<CollapseTransition>
+					<div v-show="open">
+						<ol class="pb-1">
+							<li
+								v-for="item in items"
+								:key="item.id"
+								data-slot="prompt-input-queue-item"
+								class="group flex items-center gap-1.5 py-0.5 pl-1.5 pr-2"
+								:class="over === item.id && dragged !== item.id && 'shadow-[inset_0_2px_0_var(--outline-gray-4)]'"
+								@dragover.prevent="over = item.id"
+								@dragleave="over === item.id && (over = null)"
+								@drop.prevent="onDrop(item.id)"
+							>
+								<span
+									class="lucide-grip-vertical size-4 shrink-0 cursor-grab text-ink-gray-4"
+									:class="items.length < 2 && 'invisible'"
+									draggable="true"
+									aria-hidden="true"
+									@dragstart="dragged = item.id"
+									@dragend="dragged = over = null"
+								/>
+								<textarea
+									v-if="editing === item.id"
+									ref="editor"
+									v-model="draft"
+									rows="1"
+									class="min-w-0 flex-1 resize-none rounded-4 border-outline-gray-2 bg-surface-base px-2 py-1 text-base text-ink-gray-8 focus:border-outline-gray-4 focus:ring-0"
+									aria-label="Edit queued message"
+									@keydown="onEditKeydown"
+									@blur="save"
+								/>
+								<p v-else class="min-w-0 flex-1 truncate text-base text-ink-gray-8" :title="item.text">
+									{{ item.text }}
+									<span v-if="item.files" class="ml-1 inline-flex items-center gap-0.5 text-sm text-ink-gray-5">
+										<span class="lucide-paperclip size-3" aria-hidden="true" />{{ item.files }}
+									</span>
+								</p>
+								<Tooltip text="Edit">
+									<Button variant="ghost" size="sm" icon="lucide-pencil" aria-label="Edit" @click="edit(item)" />
+								</Tooltip>
+								<Tooltip text="Stop the current reply and send this now">
+									<Button variant="ghost" size="sm" icon-left="lucide-corner-up-right" label="Steer" @click="emit('steer', item.id)" />
+								</Tooltip>
+								<Tooltip text="Remove">
+									<Button variant="ghost" size="sm" icon="lucide-x" aria-label="Remove" @click="emit('remove', item.id)" />
+								</Tooltip>
+							</li>
+						</ol>
+					</div>
+				</CollapseTransition>
+			</section>
+		</div>
+	</CollapseTransition>
 </template>

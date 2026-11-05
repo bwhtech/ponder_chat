@@ -21,8 +21,8 @@ function clear(el: Element) {
 
 <template>
 	<Transition
-		enter-active-class="overflow-hidden transition-[height] duration-200 ease-out motion-reduce:transition-none"
-		leave-active-class="overflow-hidden transition-[height] duration-150 ease-in motion-reduce:transition-none"
+		enter-active-class="overflow-hidden transition-[height] duration-200 ease-out-strong motion-reduce:transition-none"
+		leave-active-class="overflow-hidden transition-[height] duration-150 ease-out-strong motion-reduce:transition-none"
 		@enter="onEnter"
 		@after-enter="clear"
 		@leave="onLeave"

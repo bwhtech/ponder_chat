@@ -1,2 +1,52 @@
 @import "frappe-ui/style.css";
 @import "./ai-elements/styles.css";
+
+:root {
+  /* A strong ease-out: fast at the start, where the eye is. Tailwind: `ease-out-strong`. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+/* A memory note that arrives after a reply rises in; notes already there on load do not. */
+@keyframes memory-saved-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+[data-slot='memory-saved'][data-new] {
+  animation: memory-saved-in 150ms var(--ease-out-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes memory-saved-in {
+    from {
+      opacity: 0;
+    }
+  }
+}
+
+/* The app shell does not scroll, so stop iOS bouncing it and Android pulling to refresh it.
+   Scroll areas inside (the transcript, the sheet) keep their own bounce. */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+/* iOS zooms into a field under 16px on focus and does not zoom back. On touch screens every field
+   is 16px; :root lifts this over Tailwind's text-* utilities, including the !important ones. */
+@media (pointer: coarse) {
+  :root :is(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, select) {
+    font-size: 16px !important;
+  }
+}
+
+/* Controls are not text: a long press must not select a label or open the link callout. */
+:is(button, [role='button'], [role='menuitem'], [role='tab'], [data-slot='sidebar-item']) {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Touch has no hover, so a sidebar row (a chat in the sheet) shows the press instead. */
+[data-slot='sidebar-item'][data-state='inactive']:active {
+  background-color: var(--surface-gray-3);
+}
