@@ -219,7 +219,50 @@ onBeforeUnmount(() => {
 });
 // While the tab is hidden, a finished reply puts a count on the favicon.
 useAttention(busy, computed(() => waitingOnPerson(messages.value)));
-const waitingForReply = computed(() => status.value === "submitted" && lastMessage.value?.role === "user");
+
+// While a reply is on its way, something on screen always moves. Text and reasoning that are
+// streaming, and a running tool ("Searching …"), show it themselves. Every other moment shows
+// "Thinking…": before the first word (the stream opens at once, but a model can think for
+// 20 seconds before it writes), after a tool returns, and between steps.
+const quiet = computed(() => {
+	if (!busy.value || waitingOnPerson(messages.value)) return false;
+	const last = lastMessage.value;
+	if (last?.role !== "assistant") return true;
+	const part = last.parts[last.parts.length - 1];
+	if (!part) return true;
+	if (part.type === "text" || part.type === "reasoning") return part.state !== "streaming";
+	if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
+		const state = (part as { state?: string }).state;
+		return state !== "input-streaming" && state !== "input-available";
+	}
+	return true;
+});
+// Shown after a short quiet, so it does not blink between the last word and the end of the run.
+const thinking = ref(false);
+const thinkingFor = ref(0);
+let showTimer: ReturnType<typeof setTimeout> | undefined;
+let tickTimer: ReturnType<typeof setInterval> | undefined;
+watch(
+	quiet,
+	(now) => {
+		clearTimeout(showTimer);
+		clearInterval(tickTimer);
+		thinking.value = false;
+		if (!now) return;
+		showTimer = setTimeout(() => {
+			thinking.value = true;
+			thinkingFor.value = 0;
+			tickTimer = setInterval(() => thinkingFor.value++, 1_000);
+		}, 300);
+	},
+	{ immediate: true },
+);
+onBeforeUnmount(() => {
+	clearTimeout(showTimer);
+	clearInterval(tickTimer);
+});
+// A long wait counts the seconds, so it reads as work going on, not as stuck.
+const thinkingText = computed(() => (thinkingFor.value >= 5 ? `Thinking… ${thinkingFor.value}s` : "Thinking…"));
 
 // Messages written while a reply streams wait here; the first goes out when it ends.
 const queue = queueFor(props.threadId);
@@ -409,8 +452,8 @@ function replyModel(message: UIMessage) {
 						</MessageContent>
 					</Message>
 				</ConversationItem>
-				<ConversationItem v-if="waitingForReply">
-					<Loader text="Thinking…" />
+				<ConversationItem v-if="thinking">
+					<Loader :text="thinkingText" />
 				</ConversationItem>
 				<ConversationItem v-if="error && !outOfCredits">
 					<Alert
