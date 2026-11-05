@@ -6,6 +6,7 @@ import { Alert, Button } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me } from "./account";
 import { useAttention } from "./attention";
+import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
 import { useDraft } from "./drafts";
 import { canUndo, fetchThreadSaves, undoSave, type MemoryOperation, type MemorySave } from "./memory";
 import { closeOpenCalls, queueFor, waitingOnPerson, type Queued } from "./message-queue";
@@ -152,6 +153,8 @@ const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
 const refillTime = computed(() =>
 	me.value ? new Date(me.value.credits.resetsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "",
 );
+// While a request for more credits waits, the notice says so and has no button.
+const creditNotice = computed(() => outOfCreditsNotice(me.value?.credits, refillTime.value));
 
 const input = ref("");
 // What the person was writing in this chat comes back after a switch or a reload.
@@ -500,7 +503,8 @@ function replyModelId(message: UIMessage) {
 			v-if="outOfCredits"
 			theme="amber"
 			title="You've used today's credits"
-			:description="`They refill at ${refillTime}. Your chats are saved, and you can keep reading them.`"
+			:description="creditNotice.description"
+			:primary-action="creditNotice.canAsk ? { label: 'Request more credits', onClick: askForMoreCredits } : undefined"
 			data-slot="out-of-credits"
 		/>
 		<Alert v-if="uploadError" theme="red" :title="uploadError" description="Attach the files again to send them." />

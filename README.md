@@ -4,7 +4,9 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 
 ## What it does
 
-- Sign-in with an email link (Better Auth). Without email settings, the link is printed in the server log.
+- Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link; either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes; a code takes 3 wrong tries. Without email settings, the email is printed in the server log.
+- Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
+- Admin pages at `/admin` (see "Admin" below): usage, people, invites, requests for more credits, and the credit settings.
 - Chats in a sidebar, with names that a cheap model writes.
 - A model selector in the message field. The list is in `server/models.ts`, and it is also the allowlist: a request for any other model gets the default.
 - Each reply shows the model that wrote it.
@@ -19,10 +21,12 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 
 ## Credits
 
-| Setting | Default | Meaning |
-| --- | --- | --- |
-| `CHAT_DAILY_CREDITS` | 1000 | Credits for each person each day. |
-| `CHAT_CREDITS_PER_USD` | 1000 | Credits per US dollar of OpenRouter cost. With 1000, one credit is $0.001. |
+| Setting | Meaning |
+| --- | --- |
+| Default daily credits | Credits for each person each day. |
+| Credits per US dollar | Credits per US dollar of OpenRouter cost. With 1000, one credit is $0.001. |
+
+- Both settings are in the `settings` table (one row), and admins change them on `/admin`, Settings. The first start fills the row from `CHAT_DAILY_CREDITS` (default 1000) and `CHAT_CREDITS_PER_USD` (default 1000). After that, the app does not read these two variables.
 
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`).
 - The calls that write chat names are recorded in `runs` but are not charged to credits.
@@ -30,8 +34,25 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - The count starts again at midnight UTC.
 - Before each reply, the server adds up today's cost. When nothing is left, it answers 402 and the page shows when credits refill.
 - Nothing is reserved before a reply. The last reply of the day can go a little past the limit.
-- To give one person a different limit, run on the server with the app's environment: `npx tsx scripts/credits.ts set someone@example.org 3000`. `reset <email>` puts them back on the default; `list` shows who has their own limit.
+- To give one person a different limit, use `/admin`, or run on the server with the app's environment: `npx tsx scripts/credits.ts set someone@example.org 3000`. `reset <email>` puts them back on the default, and `list` shows who has their own limit. An invite can set the limit that the person starts with.
+- A person who has used today's credits can ask the admins for more. The admins get a message on `NOTIFY_URL`, and answer on `/admin`, Requests. An approval adds extra credits to that day's limit only (`credit_grants`). The person gets an email either way. One request can wait at a time, and after an answer they can ask again. An admin can also give extra credits from a person's page, without a request.
 - PDFs: a model that can't read PDFs itself gets them through OpenRouter's free `cloudflare-ai` parser, not its default paid OCR. Each PDF is parsed again on every call.
+
+## Admin
+
+`/admin` is a second Vite page (`web/admin.html`, `web/admin/`) with its own routes under `/admin/`. The server sends `dist/admin.html` for `/admin` and `/admin/*`. Its API is under `/api/admin/*` (`server/admin/routes.ts`), and every route there needs the admin role (`requireAdmin`, which reads the role from the database). A person who is signed out goes to `/` to sign in. A person without the role sees "This page is for admins".
+
+| Page | What it shows |
+| --- | --- |
+| Overview | Today's numbers, credits and active people per day over 7, 14 or 30 days, credits by model, and who uses Ponder. A notice when requests wait. |
+| Requests | Requests for more credits that wait, with Approve and Decline. Below: the answers of the last 30 days. |
+| People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
+| Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
+| Settings | The default daily credits, credits per US dollar, and the list of admins. |
+
+- Admins see usage only. The admin API reads `runs` (cost, model, time), `sessions` (device and time) and the number of threads. It never returns messages or thread titles.
+- A "reply" is a `runs` row with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each model call, so a reply that used tools has several rows, and only the last one counts.
+- Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
 
 ## Durable replies
 
@@ -80,10 +101,12 @@ Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/m
 | Part | Where |
 | --- | --- |
 | HTTP API | `server/app.ts` |
+| Sign-in, invites and admins | `server/auth.ts`, `server/invites.ts`, `server/admins.ts`, `web/SignIn.vue` |
+| Admin pages | `server/admin/`, `web/admin.html`, `web/admin/` |
 | Chat workflow | `server/workflow/` |
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |
 | Models | `server/models.ts`, `web/models.ts` |
-| Credits | `server/credits.ts`, `web/CreditMeter.vue` |
+| Credits | `server/credits.ts`, `server/settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
 | Components | `web/ai-elements/` (copy of the platform's) |

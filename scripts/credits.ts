@@ -1,4 +1,4 @@
-// Gives one person more (or fewer) daily credits than CHAT_DAILY_CREDITS. Run on the server with the app's environment:
+// Gives one person more (or fewer) daily credits than the default (/admin, Settings). Run on the server with the app's environment:
 //   npx tsx scripts/credits.ts set someone@example.org 3000
 //   npx tsx scripts/credits.ts reset someone@example.org
 //   npx tsx scripts/credits.ts list

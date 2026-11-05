@@ -1,0 +1,229 @@
+<script setup lang="ts">
+import {
+	Alert,
+	Avatar,
+	Badge,
+	Breadcrumbs,
+	Button,
+	Dropdown,
+	PageHeader,
+	PageHeaderBackButton,
+	PageHeaderMobile,
+	toast,
+} from "frappe-ui";
+import { BarChart, DonutChart, NumberCard } from "frappe-ui/charts";
+import { computed, ref, watch } from "vue";
+import { useRouter } from "vue-router";
+import { api, type Person, type PersonDetail } from "../api";
+import CreditsDialog from "../components/CreditsDialog.vue";
+import ExtraCreditsDialog from "../components/ExtraCreditsDialog.vue";
+import StatusBadge from "../components/StatusBadge.vue";
+import { personActions } from "../lib/actions";
+import { credits, date, dollars, lastActive, shortDay } from "../lib/format";
+import { isMobile } from "../lib/viewport";
+import { settings } from "../store";
+
+const props = defineProps<{ id: string }>();
+const router = useRouter();
+
+const detail = ref<PersonDetail | null>(null);
+const missing = ref(false);
+const person = computed(() => detail.value?.person);
+
+watch(() => props.id, load, { immediate: true });
+
+async function load() {
+	try {
+		const data = await api<PersonDetail>(`/people/${encodeURIComponent(props.id)}`);
+		Object.assign(settings, data.settings);
+		detail.value = data;
+	} catch {
+		missing.value = true;
+	}
+}
+
+const creditsOpen = ref(false);
+const extraOpen = ref(false);
+const actions = computed(() =>
+	person.value
+		? personActions(person.value, {
+				openCredits: () => (creditsOpen.value = true),
+				giveExtra: () => (extraOpen.value = true),
+				changed: load,
+				removed: () => router.push("/people"),
+				sessions: detail.value?.sessions.length,
+			})
+		: [],
+);
+
+async function giveExtra(amount: number) {
+	const p = person.value as Person;
+	await api(`/people/${encodeURIComponent(p.id)}/grant`, { body: { credits: amount } });
+	toast.success(`Gave ${p.name} ${amount} extra credits for today`);
+	await load();
+}
+
+const days = computed(() => detail.value?.days ?? []);
+const week = computed(() => days.value.slice(-7));
+const weekCredits = computed(() => Math.round(week.value.reduce((sum, day) => sum + day.credits, 0) * 10) / 10);
+const weekReplies = computed(() => week.value.reduce((sum, day) => sum + day.replies, 0));
+const perDay = computed(() => days.value.map((d) => ({ day: shortDay(d.date), Credits: d.credits })));
+
+// Better Auth stores "No reason" when a ban has none.
+const banText = computed(() => {
+	const p = person.value;
+	if (!p) return "";
+	const reason = p.banReason && p.banReason !== "No reason" ? `Reason: ${p.banReason}.` : "No reason given.";
+	return p.banExpires ? `${reason} Until ${date(p.banExpires)}.` : reason;
+});
+
+const limitText = computed(() =>
+	person.value?.dailyCredits === null ? `${settings.defaultDailyCredits} (default)` : `${person.value?.dailyCredits} (own limit)`,
+);
+const details = computed(() => {
+	const p = person.value;
+	if (!p) return [];
+	return [
+		{ label: "Role", value: p.role === "admin" ? "Admin" : "User" },
+		{ label: "Daily credits", value: limitText.value },
+		...(p.status === "invited" ? [] : [{ label: "Extra today", value: p.today.extra ? `+${credits(p.today.extra)}` : "None" }]),
+		{ label: "Note", value: p.note || "—" },
+		{ label: "Invited", value: date(p.invitedAt) },
+		{ label: "Invited by", value: p.invitedBy ?? "—" },
+		{ label: "First sign-in", value: date(p.joinedAt) },
+		{ label: "Last active", value: lastActive(p.lastActive) },
+	];
+});
+
+const invitedText = computed(() => {
+	const p = person.value;
+	if (!p) return "";
+	return `Invited ${lastActive(p.invitedAt)}${p.invitedBy ? ` by ${p.invitedBy}` : ""}. The invite doesn't expire.`;
+});
+
+async function emailInvite() {
+	const p = person.value;
+	if (!p) return;
+	try {
+		await api(`/invites/${encodeURIComponent(p.email)}/send`, { body: {} });
+		toast.success(`Sent to ${p.email}`);
+	} catch (e) {
+		toast.error((e as Error).message);
+	}
+}
+</script>
+
+<template>
+	<template v-if="person && detail">
+		<PageHeaderMobile v-if="isMobile" :title="person.name">
+			<template #prefix><PageHeaderBackButton :fallback-route="{ path: '/people' }" /></template>
+			<template #suffix>
+				<Dropdown :options="actions">
+					<Button variant="ghost" icon="lucide-ellipsis" aria-label="Actions" />
+				</Dropdown>
+			</template>
+		</PageHeaderMobile>
+		<PageHeader v-else>
+			<Breadcrumbs :items="[{ label: 'People', route: '/people' }, { label: person.name }]" />
+			<div class="ml-auto flex items-center gap-2">
+				<Button label="Set daily credits" icon-left="lucide-gauge" @click="creditsOpen = true" />
+				<Dropdown :options="actions">
+					<Button icon="lucide-ellipsis" aria-label="More actions" />
+				</Dropdown>
+			</div>
+		</PageHeader>
+
+		<div class="flex min-h-0 flex-1 flex-col md:flex-row">
+			<div class="min-w-0 flex-1 space-y-6 px-3 pb-6 pt-4 sm:px-5 md:pb-16 md:pt-5">
+				<div class="flex items-center gap-3">
+					<Avatar :label="person.name" :size="isMobile ? 'xl' : '2xl'" />
+					<div class="min-w-0">
+						<div class="flex flex-wrap items-center gap-x-2 gap-y-1">
+							<h1 class="truncate text-xl-semibold text-ink-gray-9 md:text-2xl-semibold">{{ person.name }}</h1>
+							<Badge v-if="person.role === 'admin'" label="Admin" variant="outline" />
+							<StatusBadge :status="person.status" />
+						</div>
+						<p class="truncate text-base text-ink-gray-6">{{ person.email }}</p>
+					</div>
+				</div>
+
+				<Alert
+					v-if="person.status === 'invited'"
+					theme="blue"
+					title="Hasn't signed in yet"
+					:description="invitedText"
+					:primary-action="{ label: 'Email the invite again', onClick: emailInvite }"
+				/>
+				<Alert v-if="person.status === 'banned'" theme="red" title="Banned" :description="banText" />
+
+				<template v-if="person.status !== 'invited'">
+					<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+						<NumberCard title="Credits today" :value="`${credits(person.today.used)} / ${credits(person.today.limit)}`" />
+						<NumberCard title="Last 7 days" :value="credits(weekCredits)" :delta-caption="dollars(weekCredits)" />
+						<NumberCard title="Replies, 7 days" :value="weekReplies" />
+						<NumberCard title="Chats" :value="detail.chats" />
+					</div>
+
+					<div class="h-60 rounded-5 border border-outline-gray-1 p-3 md:h-64 md:p-4">
+						<BarChart title="Credits per day, last 30 days" :data="perDay" x="day" y="Credits" />
+					</div>
+
+					<div class="h-72 rounded-5 border border-outline-gray-1 p-3 md:h-64 md:p-4">
+						<DonutChart title="Models, last 30 days" :data="detail.models" category="model" value="credits" />
+					</div>
+				</template>
+
+				<p v-if="!isMobile" class="flex items-center gap-1.5 text-sm text-ink-gray-5">
+					<span class="lucide-lock size-3.5 shrink-0" aria-hidden="true" />
+					Their chats are private. Admins see usage only.
+				</p>
+			</div>
+
+			<!-- Desktop: a side panel. Phone: a section under the charts. -->
+			<aside class="space-y-5 border-outline-gray-1 px-3 pb-16 sm:px-5 md:w-[20rem] md:shrink-0 md:border-l md:pt-5">
+				<h2 v-if="isMobile" class="text-lg-semibold text-ink-gray-8">Details</h2>
+				<dl class="space-y-3 text-base">
+					<div v-for="row in details" :key="row.label" class="flex justify-between gap-3">
+						<dt class="shrink-0 text-ink-gray-6">{{ row.label }}</dt>
+						<dd class="truncate text-right tabular-nums text-ink-gray-8">{{ row.value }}</dd>
+					</div>
+				</dl>
+
+				<div v-if="person.status !== 'invited'" class="space-y-2 border-t border-outline-gray-1 pt-5">
+					<h2 class="text-sm text-ink-gray-5">Signed in on</h2>
+					<ul v-if="detail.sessions.length" class="space-y-2">
+						<li v-for="(session, index) in detail.sessions" :key="index" class="flex items-center gap-2 text-base">
+							<span class="lucide-monitor-smartphone size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
+							<span class="min-w-0 flex-1 truncate text-ink-gray-8">{{ session.device }}</span>
+							<span class="text-sm text-ink-gray-5">{{ lastActive(session.lastUsed) }}</span>
+						</li>
+					</ul>
+					<p v-else class="text-sm text-ink-gray-5">Not signed in anywhere.</p>
+				</div>
+
+				<p v-if="isMobile" class="flex items-center gap-1.5 text-sm text-ink-gray-5">
+					<span class="lucide-lock size-3.5 shrink-0" aria-hidden="true" />
+					Their chats are private. Admins see usage only.
+				</p>
+			</aside>
+		</div>
+
+		<CreditsDialog v-model:open="creditsOpen" :person="person" @saved="load" />
+		<ExtraCreditsDialog
+			v-model:open="extraOpen"
+			:title="`Extra credits for ${person.name}`"
+			confirm-label="Give credits"
+			:suggested="person.dailyCredits ?? settings.defaultDailyCredits"
+			:submit="giveExtra"
+		/>
+	</template>
+
+	<div v-else-if="missing" class="flex flex-col items-center gap-3 px-3 py-24 text-center">
+		<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
+			<span class="lucide-user-x size-6" aria-hidden="true" />
+		</div>
+		<p class="text-base text-ink-gray-7">No one here</p>
+		<p class="text-sm text-ink-gray-5">They may have been removed.</p>
+		<Button label="All people" route="/people" class="mt-2" />
+	</div>
+</template>

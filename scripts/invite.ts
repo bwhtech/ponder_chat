@@ -8,7 +8,7 @@ import { allow, disallow, listAllowed, migrateInvites } from "../server/invites.
 const [command, email, note] = process.argv.slice(2);
 await migrateInvites();
 if (command === "add" && email) {
-	await allow(email, note ?? "");
+	await allow(email, { note: note ?? "" });
 	console.log(`Invited ${email}.`);
 } else if (command === "remove" && email) {
 	console.log((await disallow(email)) ? `Removed ${email}. Their account stays; they cannot get a new sign-in link.` : `${email} was not invited.`);

@@ -79,7 +79,9 @@ To roll back by hand: `ln -sfn /srv/ponder-chat/releases/<old> /srv/ponder-chat/
 | Queue | A workflow job failed 3 times |
 | Spend | OpenRouter spend today is over `SPEND_ALERT_USD` (default $10) |
 
-Every morning at 09:00 IST it sends a summary: people, replies, failures, spend, the top 3 spenders, people out of credits, invites, disk and backups.
+Every morning at 09:00 IST it sends a summary: people, replies, failures, spend, the top 3 spenders, people out of credits, requests for more credits that wait for an answer, invites, disk and backups.
+
+The app also sends to `NOTIFY_URL` when a person asks for more credits. The message has their name and today's credits, and a link to `/admin/requests`.
 
 The VM cannot report that it is down. Add a free external uptime check on `https://<domain>/health`, such as UptimeRobot or Better Stack.
 

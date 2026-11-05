@@ -5,12 +5,17 @@ import { compress } from "hono/compress";
 import { etag } from "hono/etag";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
 import { getRun, start } from "workflow/api";
-import { auth, type SignedIn } from "./auth.ts";
+import { adminApi } from "./admin/routes.ts";
+import { displayName } from "./admin/people.ts";
+import { roleOf } from "./admins.ts";
+import { appOrigin, auth, type SignedIn } from "./auth.ts";
 import { creditStatus } from "./credits.ts";
+import { askForCredits } from "./extra-credits.ts";
 import { deleteThread, listThreads, renameThread, saveThread, sql, threadOwner } from "./db.ts";
 import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
 import { memory, memoryEnabled, memoryScope, memoryStore, readExtractPrompt } from "./memory.ts";
 import { availableModels, pickModel } from "./models.ts";
+import { notifyAdmins } from "./notify.ts";
 import { forgetPythonState } from "./python/state.ts";
 import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
@@ -52,11 +57,15 @@ const userOf = (c: Context<Env>) => c.get("user").id;
 /** A thread id the person may use: theirs, or not taken yet. */
 const mayUseThread = async (c: Context<Env>, id: string) => ((await threadOwner(id)) ?? userOf(c)) === userOf(c);
 
-// Who is signed in, and their credits for today.
+// Who is signed in, their role (read from the database, not the cookie), and their credits for today.
 app.get("/api/me", async (c) => {
 	const { id, email, name } = c.get("user");
-	return c.json({ user: { id, email, name }, credits: await creditStatus(id) });
+	const [role, credits] = await Promise.all([roleOf(id), creditStatus(id)]);
+	return c.json({ user: { id, email, name, role }, credits });
 });
+
+// The admin pages' API (admin/routes.ts). Every route there needs the admin role.
+app.route("/api/admin", adminApi);
 
 // Whether the chat can run Python, for the attach button.
 app.get("/api/features", async (c) => c.json({ python: await pythonReady }));
@@ -65,6 +74,21 @@ app.get("/api/features", async (c) => c.json({ python: await pythonReady }));
 app.get("/api/models", async (c) => c.json(await availableModels()));
 
 app.get("/api/credits", async (c) => c.json(await creditStatus(userOf(c))));
+
+// Out of credits: ask the admins for more (extra-credits.ts). One request waits at a time.
+app.post("/api/credits/request", async (c) => {
+	const status = await creditStatus(userOf(c));
+	if (status.request?.status === "pending") return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
+	if (status.remaining > 0) return c.json({ error: "You still have credits for today." }, 400);
+	if (!(await askForCredits(userOf(c)))) return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
+	const { name, email } = c.get("user");
+	await notifyAdmins(
+		"Ponder Chat: credit request",
+		`${displayName(name, email)} asked for more credits (${status.used >= 100 ? Math.round(status.used) : status.used} of ${status.limit} used today).`,
+		`${appOrigin(c.req.raw.headers)}/admin/requests`,
+	);
+	return c.json(await creditStatus(userOf(c)));
+});
 
 // The list revalidates by its content and goes gzipped; one thread has its own cache (thread-cache.ts).
 app.get("/api/threads", compress(), etag(), async (c) => c.json({ threads: await listThreads(userOf(c)) }));
@@ -230,6 +254,11 @@ const INLINE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/web
 
 // Tokens and cost of a person's runs, optionally for one thread.
 app.get("/api/usage", async (c) => c.json(await usageReport({ user: userOf(c), thread: c.req.query("thread") })));
+
+// The admin pages are their own app (web/admin.html) with its own routes under /admin/.
+const adminPage = serveStatic({ path: "./dist/admin.html" });
+app.get("/admin", adminPage);
+app.get("/admin/*", adminPage);
 
 app.use("/*", serveStatic({ root: "./dist" }));
 

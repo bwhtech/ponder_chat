@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="theme-color" content="#ffffff" />
+		<title>Ponder Admin</title>
+		<link rel="icon" type="image/png" href="/favicon.png" />
+		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+		<!-- The admin pages, served at /admin and /admin/* (server/app.ts). The light/dark choice is the chat's (index.html). -->
+		<script>
+			(() => {
+				const saved = localStorage.getItem("theme");
+				const dark = saved === "dark" || (saved !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+				const root = document.documentElement;
+				root.setAttribute("data-theme", dark ? "dark" : "light");
+				const themeColor = document.querySelector('meta[name="theme-color"]');
+				const sync = () => themeColor.setAttribute("content", root.dataset.theme === "dark" ? "#171717" : "#ffffff");
+				sync();
+				new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+			})();
+		</script>
+	</head>
+	<body>
+		<div id="app"></div>
+		<script type="module" src="./admin/main.ts"></script>
+	</body>
+</html>

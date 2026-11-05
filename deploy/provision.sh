@@ -118,6 +118,7 @@ OPENROUTER_API_KEY=FILL_IN
 PONDER_EMAIL_FROM=FILL_IN
 CLOUDFLARE_ACCOUNT_ID=FILL_IN
 CLOUDFLARE_EMAIL_TOKEN=FILL_IN
+# Credits: read once, on the app's first start. After that they live in the settings table (/admin, Settings).
 CHAT_DAILY_CREDITS=100
 CHAT_CREDITS_PER_USD=1000
 PYTHON_MAX_RUNS=3

@@ -44,7 +44,14 @@ if [ "${1:-}" = "--daily" ]; then
 	FAILED=$(sql "select count(*) from workflow.workflow_runs where created_at > now() - interval '1 day' and status = 'failed'")
 	COST=$(sql "select to_char(coalesce(sum(cost_usd), 0), 'FM990.00') from runs where created_at > now() - interval '1 day'")
 	TOP=$(sql "select string_agg(format('%s \$%s', coalesce(u.email, r.\"user\"), to_char(r.cost, 'FM990.000')), ', ') from (select \"user\", sum(cost_usd) cost from runs where created_at > now() - interval '1 day' group by 1 order by 2 desc nulls last limit 3) r left join users u on u.id = r.\"user\"")
-	OUT_OF_CREDITS=$(sql "select count(*) from (select \"user\", sum(cost_usd) * ${CHAT_CREDITS_PER_USD:-1000} spent from runs where created_at >= date_trunc('day', now() at time zone 'utc') group by 1) s where spent >= ${CHAT_DAILY_CREDITS:-100}")
+	# The limits are in the app's tables (server/settings.ts, server/credits.ts): the default, each person's own, and today's extra credits.
+	OUT_OF_CREDITS=$(sql "with s as (select default_daily_credits, credits_per_usd from settings where id = 1),
+		spent as (select \"user\", sum(cost_usd) * (select credits_per_usd from s) credits from runs
+			where created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc' and function_id is distinct from 'thread-title' group by 1),
+		extra as (select user_id, sum(credits) credits from credit_grants where day = (now() at time zone 'utc')::date group by 1)
+		select count(*) from spent left join credit_limits l on l.user_id = spent.\"user\" left join extra e on e.user_id = spent.\"user\"
+		where spent.credits >= coalesce(l.daily_credits, (select default_daily_credits from s)) + coalesce(e.credits, 0)")
+	REQUESTS=$(sql "select count(*) from credit_requests where status = 'pending'")
 	INVITED=$(sql "select count(*) from allowed_emails")
 	SIGNED_UP=$(sql "select count(*) from users")
 	DISK=$(df --output=pcent / | tail -1 | tr -d ' ')
@@ -52,7 +59,7 @@ if [ "${1:-}" = "--daily" ]; then
 	RESTORE=$(cat /var/backups/ponder-chat/last-restore-test 2>/dev/null || echo never)
 	notify "Ponder Chat: daily summary" "Last 24 hours: $USERS people, $REPLIES replies ($FAILED failed), $CALLS model calls, \$$COST on OpenRouter.
 Top: ${TOP:-none}
-Out of credits today: $OUT_OF_CREDITS. Invited: $INVITED, signed up: $SIGNED_UP.
+Out of credits today: $OUT_OF_CREDITS. Requests for more credits waiting: ${REQUESTS:-0}. Invited: $INVITED, signed up: $SIGNED_UP.
 Disk $DISK. Last backup $BACKUP, last restore test $RESTORE." low
 	exit 0
 fi

@@ -1,11 +1,13 @@
 import { sql } from "./db.ts";
+import { currentRequest, extraCredits, migrateExtraCredits, type CreditRequest } from "./extra-credits.ts";
+import { getSettings, migrateSettings } from "./settings.ts";
 import { TITLE_FUNCTION_ID } from "./thread-title.ts";
 
 /**
  * Daily credits. Each person may spend a number of credits a day, and the count starts
- * again at midnight UTC. A credit is a fixed slice of what OpenRouter charges: with the
- * default CHAT_CREDITS_PER_USD of 1000, one credit is $0.001. So a cheap model costs a
- * fraction of a credit per message and Claude Opus several credits.
+ * again at midnight UTC. A credit is a fixed slice of what OpenRouter charges: with
+ * 1000 credits per US dollar, one credit is $0.001. So a cheap model costs a fraction
+ * of a credit per message and Claude Opus several credits.
  *
  * Spending is read from the `runs` table (telemetry), which records OpenRouter's cost
  * for every model call. Thread titles are recorded there too, but are not charged: the
@@ -14,44 +16,69 @@ import { TITLE_FUNCTION_ID } from "./thread-title.ts";
  * The next one is refused. Replies have no length cap of their own: going over by one
  * reply is accepted.
  *
- * CHAT_DAILY_CREDITS sets everyone's limit. A row in `credit_limits` sets one person's
- * (scripts/credits.ts).
+ * The default limit and the credits per dollar are in `settings` (settings.ts), which
+ * admins change on /admin. A row in `credit_limits` sets one person's limit (from /admin,
+ * an invite, or scripts/credits.ts). Extra credits for one day (extra-credits.ts) add to
+ * the limit.
  */
-const DEFAULT_DAILY_CREDITS = Number(process.env.CHAT_DAILY_CREDITS ?? 1000);
-const CREDITS_PER_USD = Number(process.env.CHAT_CREDITS_PER_USD ?? 1000);
-
 export type CreditStatus = {
-	/** Credits a day. */
+	/** Credits for today: the person's own limit or the default, plus `extra`. */
 	limit: number;
 	/** Spent since midnight UTC, rounded to one decimal place. */
 	used: number;
 	remaining: number;
 	/** When the count starts again: the next midnight UTC, as an ISO date. */
 	resetsAt: string;
+	/** Extra credits that admins gave for today. */
+	extra: number;
+	/** The request for more credits that is waiting, or the one answered today. */
+	request: CreditRequest | null;
 };
 
 export async function migrateCredits() {
+	await migrateSettings();
 	await sql`
 		create table if not exists credit_limits (
 			user_id text primary key,
 			daily_credits integer not null,
 			updated_at timestamptz not null default now()
 		)`;
+	await migrateExtraCredits();
 }
 
 export async function creditStatus(user: string, now = new Date()): Promise<CreditStatus> {
-	const dayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-	const resetsAt = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
-	const [[spent], [override]] = await Promise.all([
+	const { start, day, resetsAt } = utcDay(now);
+	const [settings, [spent], [own], extra, request] = await Promise.all([
+		getSettings(),
 		sql<{ usd: number }[]>`
 			select coalesce(sum(cost_usd), 0)::float8 as usd from runs
-			where "user" = ${user} and created_at >= ${dayStart}
+			where "user" = ${user} and created_at >= ${start}
 				and function_id is distinct from ${TITLE_FUNCTION_ID}`,
 		sql<{ daily_credits: number }[]>`select daily_credits from credit_limits where user_id = ${user}`,
+		extraCredits(user, day),
+		currentRequest(user, start),
 	]);
-	const limit = override?.daily_credits ?? DEFAULT_DAILY_CREDITS;
-	const used = Math.round(spent.usd * CREDITS_PER_USD * 10) / 10;
-	return { limit, used, remaining: Math.max(0, Math.round((limit - used) * 10) / 10), resetsAt: resetsAt.toISOString() };
+	const limit = (own?.daily_credits ?? settings.defaultDailyCredits) + extra;
+	const used = toCredits(spent.usd, settings.creditsPerUsd);
+	return {
+		limit,
+		used,
+		remaining: Math.max(0, Math.round((limit - used) * 10) / 10),
+		resetsAt: resetsAt.toISOString(),
+		extra,
+		request,
+	};
+}
+
+/** Credits for a cost in US dollars, rounded to one decimal place. */
+export function toCredits(usd: number, creditsPerUsd: number) {
+	return Math.round(usd * creditsPerUsd * 10) / 10;
+}
+
+/** Today in UTC: when it started, its date ("2026-11-05"), and when the next one starts. */
+export function utcDay(now = new Date()) {
+	const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+	return { start, day: start.toISOString().slice(0, 10), resetsAt: new Date(start.getTime() + 24 * 60 * 60 * 1000) };
 }
 
 /** Each person with their own limit, by email. */

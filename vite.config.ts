@@ -21,5 +21,7 @@ export default defineConfig({
 		outDir: "../dist",
 		emptyOutDir: true,
 		target: "es2022",
+		// Two pages: the chat (index.html) and the admin pages (admin.html, served at /admin by server/app.ts).
+		rollupOptions: { input: { main: `${here}web/index.html`, admin: `${here}web/admin.html` } },
 	},
 });

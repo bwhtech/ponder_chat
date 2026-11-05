@@ -6,6 +6,7 @@ import ChatView from "./ChatView.vue";
 import { FileViewer } from "./ai-elements/file-viewer";
 import ColorSchemeSwitcher from "./ColorSchemeSwitcher.vue";
 import CreditMeter from "./CreditMeter.vue";
+import { useCreditRequestWatch } from "./credit-request";
 import MemoryView from "./MemoryView.vue";
 import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
@@ -15,6 +16,8 @@ import { useThreads } from "./threads";
 const { current, currentThread, messages, running, loading, revision, refresh, open, start } = useThreads();
 const sheetOpen = ref(false);
 const settingsOpen = ref(false);
+// A request for more credits that waits for an answer: the page checks on it.
+useCreditRequestWatch();
 // The main area shows the open chat, or the Memory page (?view=memory).
 const view = ref<"chat" | "memory">(viewInUrl());
 addEventListener("popstate", () => (view.value = viewInUrl()));
@@ -79,6 +82,7 @@ function onSaved() {
 				<div class="border-t border-outline-gray-1 px-2 pt-2">
 					<CreditMeter v-if="me" :credits="me.credits" />
 					<SidebarItem label="Memory" icon="lucide-brain" :active="view === 'memory'" @click="showMemory" />
+					<SidebarItem v-if="me?.user.role === 'admin'" label="Admin" icon="lucide-shield" href="/admin" />
 					<SidebarItem label="Settings" icon="lucide-settings" @click="showSettings" />
 				</div>
 				<div class="px-2 pb-3 pt-1">
@@ -115,6 +119,7 @@ function onSaved() {
 				<div class="border-t border-outline-gray-1 pt-2">
 					<CreditMeter v-if="me" :credits="me.credits" />
 					<SidebarItem label="Memory" icon="lucide-brain" :active="view === 'memory'" @click="showMemory" />
+					<SidebarItem v-if="me?.user.role === 'admin'" label="Admin" icon="lucide-shield" href="/admin" />
 					<SidebarItem label="Settings" icon="lucide-settings" @click="showSettings" />
 				</div>
 				<ColorSchemeSwitcher fluid />
@@ -135,9 +140,10 @@ function onSaved() {
 				<section v-if="me" class="flex flex-col gap-1 border-t border-outline-gray-1 pt-5">
 					<h3 class="text-base-semibold text-ink-gray-9">Daily credits</h3>
 					<p class="text-p-sm text-ink-gray-6">
-						You get {{ me.credits.limit }} credits a day. Each reply uses credits by what the model charges for it, so
+						You get {{ me.credits.limit - me.credits.extra }} credits a day. Each reply uses credits by what the model charges for it, so
 						bigger models use more. Credits refill at midnight UTC.
 					</p>
+					<p v-if="me.credits.extra" class="text-p-sm text-ink-gray-6">Today you also have {{ me.credits.extra }} extra credits from an admin.</p>
 				</section>
 			</div>
 		</Dialog>
