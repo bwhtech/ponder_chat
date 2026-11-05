@@ -37,6 +37,7 @@ export class ChatModel implements LanguageModelV4 {
 	private async openrouter(): Promise<LanguageModelV4> {
 		const { createOpenRouter } = await import("@openrouter/ai-sdk-provider");
 		const { MODELS } = await import("../models.ts");
+		const { privateRouting } = await import("../openrouter.ts");
 		// A PDF is parsed again on every call. For a model that can't read PDFs, OpenRouter's
 		// default parser is Mistral OCR at $2 per 1,000 pages, so a chat with a few PDFs cost
 		// more in parsing than in tokens. cloudflare-ai turns the PDF into markdown for free.
@@ -44,6 +45,7 @@ export class ChatModel implements LanguageModelV4 {
 		return createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })(this.modelId, {
 			// usage.include makes OpenRouter report each call's cost, which credits are charged from.
 			usage: { include: true },
+			provider: privateRouting,
 			...(!readsPdf && { plugins: [{ id: "file-parser", pdf: { engine: "cloudflare-ai" } }] }),
 		}) as unknown as LanguageModelV4;
 	}

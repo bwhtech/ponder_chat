@@ -1,4 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { privateRouting } from "../openrouter.ts";
 import { embed, embedMany } from "ai";
 import type { Sql } from "postgres";
 import type { IndexedMemory, MemoryIndex } from "./types.ts";
@@ -17,7 +18,7 @@ const CANDIDATES = 50;
 const K = 60;
 
 export function pgvectorIndex({ sql, model = process.env.PONDER_EMBEDDING_MODEL ?? "google/gemini-embedding-2" }: { sql: Sql; model?: string }): MemoryIndex {
-	const embedder = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).textEmbeddingModel(model);
+	const embedder = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).textEmbeddingModel(model, { provider: privateRouting });
 	let ready: Promise<void> | undefined;
 	const migrate = () =>
 		(ready ??= (async () => {

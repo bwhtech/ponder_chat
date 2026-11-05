@@ -10,7 +10,7 @@ import { creditStatus } from "./credits.ts";
 import { deleteThread, listThreads, renameThread, saveThread, sql, threadOwner } from "./db.ts";
 import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
 import { memory, memoryEnabled, memoryScope, memoryStore, readExtractPrompt } from "./memory.ts";
-import { DEFAULT_MODEL, MODELS, pickModel } from "./models.ts";
+import { availableModels, pickModel } from "./models.ts";
 import { forgetPythonState } from "./python/state.ts";
 import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
@@ -61,8 +61,8 @@ app.get("/api/me", async (c) => {
 // Whether the chat can run Python, for the attach button.
 app.get("/api/features", async (c) => c.json({ python: await pythonReady }));
 
-// The models a person can pick, and the one picked when they have not chosen.
-app.get("/api/models", (c) => c.json({ models: MODELS, defaultModel: DEFAULT_MODEL }));
+// The models a person can pick (only those with Zero Data Retention), and the one picked when they have not chosen.
+app.get("/api/models", async (c) => c.json(await availableModels()));
 
 app.get("/api/credits", async (c) => c.json(await creditStatus(userOf(c))));
 
@@ -97,7 +97,7 @@ app.post("/api/chat", async (c) => {
 	const previous = await activeRun(body.id);
 	if (previous) await cancelRun(body.id, userOf(c), previous);
 
-	const model = pickModel(body.model);
+	const model = await pickModel(body.model);
 	const run = { threadId: body.id, user: userOf(c) };
 	// The run reads the thread from the database, so it is saved first.
 	await saveThread(body.id, userOf(c), body.messages);

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { privateRoutingBody } from "../openrouter.ts";
 import { insertRun } from "../telemetry/store.ts";
 import type { Gate } from "./extract.ts";
 
@@ -32,7 +33,7 @@ export const decisionGate: Gate = async ({ scope, turn, existing }) => {
 	const response = await fetch(ENDPOINT, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" },
-		body: JSON.stringify({ model: GATE_MODEL, state, questions: JSON.parse(await readGateQuestions()) }),
+		body: JSON.stringify({ model: GATE_MODEL, state, questions: JSON.parse(await readGateQuestions()), provider: privateRoutingBody }),
 	});
 	const body = (await response.json().catch(() => ({}))) as DecisionsResponse;
 	const save = body.answers?.save?.noul;

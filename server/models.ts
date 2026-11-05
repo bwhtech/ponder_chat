@@ -1,3 +1,5 @@
+import { modelsWithZdr } from "./openrouter.ts";
+
 /**
  * The models a person can pick in the chat, all through OpenRouter. A short list on
  * purpose: one cheap default, and a few strong models from each lab. The browser
@@ -36,9 +38,23 @@ export const MODELS: ChatModel[] = [
 	{ id: "z-ai/glm-5.3", name: "GLM 5.3", provider: "Z.ai", description: "Open weights, low input cost", readsPdf: false },
 ];
 
-export const DEFAULT_MODEL = process.env.CHAT_DEFAULT_MODEL ?? MODELS[0].id;
+const DEFAULT_MODEL = process.env.CHAT_DEFAULT_MODEL ?? MODELS[0].id;
 
-/** The model to run: the one asked for if it is on the list, else the default. */
-export function pickModel(id: unknown): ChatModel {
-	return MODELS.find((model) => model.id === id) ?? MODELS.find((model) => model.id === DEFAULT_MODEL) ?? MODELS[0];
+/**
+ * The models on the list that have a Zero Data Retention endpoint on OpenRouter: the
+ * only ones a person sees and can run, since every call asks for ZDR (openrouter.ts).
+ * When OpenRouter's list can't be read, the whole list shows; a model without ZDR then
+ * fails with an error, and still never reaches a provider that keeps data.
+ */
+export async function availableModels() {
+	const zdr = await modelsWithZdr();
+	const models = zdr ? MODELS.filter((model) => zdr.has(model.id)) : MODELS;
+	const fallback = models.find((model) => model.id === DEFAULT_MODEL) ?? models[0] ?? MODELS[0];
+	return { models, defaultModel: fallback.id };
+}
+
+/** The model to run: the one asked for if it is available, else the default. */
+export async function pickModel(id: unknown): Promise<ChatModel> {
+	const { models, defaultModel } = await availableModels();
+	return models.find((model) => model.id === id) ?? MODELS.find((model) => model.id === defaultModel)!;
 }

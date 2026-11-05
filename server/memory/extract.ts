@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { privateRouting } from "../openrouter.ts";
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { runTelemetry } from "../telemetry.ts";
@@ -90,7 +91,7 @@ export const llmWriter: Writer = async ({ gate, ...input }) => {
 		.join("\n");
 	const { scope } = input;
 	const { output } = await generateText({
-		model: openrouter(MODEL, { usage: { include: true } }),
+		model: openrouter(MODEL, { usage: { include: true }, provider: privateRouting }),
 		instructions: await readFile(PROMPT_PATH, "utf8"),
 		prompt: `${describe(input)}\n\n${note}`,
 		output: Output.object({ schema: decision }),
