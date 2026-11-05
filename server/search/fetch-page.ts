@@ -1,14 +1,13 @@
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
-import { lookup, type LookupAddress } from "node:dns";
-import { BlockList, isIP, type LookupFunction } from "node:net";
-import { Agent, fetch } from "undici";
+import { isIP } from "node:net";
+import { fetch } from "undici";
+import { isPrivate, publicAgent } from "../net-guard.ts";
 
 /**
  * web_fetch: reads a page on our own server, so no other company sees what is read.
  * The model picks the address, so a page must not reach this machine, the tailnet or
- * any private network: every address a host name resolves to is checked when the
- * connection opens (so DNS cannot change it after the check), and on every redirect.
+ * any private network (net-guard.ts), checked again on every redirect.
  */
 const MAX_BYTES = 3_000_000;
 const MAX_CHARS = 20_000;
@@ -36,7 +35,7 @@ async function fetchFollowing(address: string) {
 	let url = checkedUrl(address);
 	for (let redirects = 0; ; redirects++) {
 		const response = await fetch(url, {
-			dispatcher: agent,
+			dispatcher: publicAgent,
 			redirect: "manual",
 			signal: AbortSignal.timeout(TIMEOUT_MS),
 			headers: { "user-agent": USER_AGENT, accept: "text/html,text/plain;q=0.9,*/*;q=0.5" },
@@ -56,36 +55,9 @@ function checkedUrl(address: string) {
 	if (url.port && url.port !== "80" && url.port !== "443") throw new Error("Only the usual web ports (80 and 443) can be read.");
 	if (url.username || url.password) throw new Error("Addresses with a user name or password cannot be read.");
 	const host = url.hostname.replace(/^\[|\]$/g, "");
-	// A connection to an IP address skips the lookup below, so it is checked here.
+	// A connection to an IP address skips the lookup, so it is checked here.
 	if (isIP(host) && isPrivate(host)) throw new Error("That address is on a private network.");
 	return url;
-}
-
-const agent = new Agent({ connect: { lookup: publicLookup } });
-
-/** dns.lookup, without the private addresses, for every connection the agent opens. */
-function publicLookup(hostname: string, options: Parameters<LookupFunction>[1], callback: Parameters<LookupFunction>[2]) {
-	lookup(hostname, { ...options, all: true }, (error, addresses: LookupAddress[]) => {
-		if (error) return callback(error, "");
-		const allowed = addresses.filter((entry) => !isPrivate(entry.address));
-		if (!allowed.length) return callback(new Error(`${hostname} is on a private network.`), "");
-		if (options.all) return callback(null, allowed);
-		callback(null, allowed[0]!.address, allowed[0]!.family);
-	});
-}
-
-const PRIVATE = new BlockList();
-for (const [net, bits] of [
-	["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
-	["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 4], ["240.0.0.0", 4],
-] as const) PRIVATE.addSubnet(net, bits, "ipv4");
-for (const [net, bits] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) PRIVATE.addSubnet(net, bits, "ipv6");
-
-export function isPrivate(address: string) {
-	// An IPv4 address written as IPv6 (::ffff:10.0.0.1) is checked as IPv4.
-	const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
-	if (mapped) return PRIVATE.check(mapped, "ipv4");
-	return PRIVATE.check(address, isIP(address) === 6 ? "ipv6" : "ipv4");
 }
 
 async function readCapped(body: AsyncIterable<Uint8Array> | null) {

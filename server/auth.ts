@@ -7,6 +7,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { Pool } from "pg";
 import { sql } from "./db.ts";
 import { sendEmail, signInEmail } from "./email.ts";
+import { hosts, isLocalHost } from "./hosts.ts";
 import { applyInvite, isAllowed } from "./invites.ts";
 
 /**
@@ -24,10 +25,6 @@ import { applyInvite, isAllowed } from "./invites.ts";
  * (comma-separated, such as "chat.example.org"); links in emails use the host the
  * person signed in from.
  */
-const hosts = (process.env.PONDER_HOSTS ?? `localhost:${process.env.PORT ?? 3500},127.0.0.1:${process.env.PORT ?? 3500}`)
-	.split(",")
-	.map((host) => host.trim())
-	.filter(Boolean);
 
 const SIGN_IN_EXPIRES_IN = 15 * 60;
 const NOT_INVITED = "This email is not invited to Ponder Chat.";
@@ -141,7 +138,7 @@ export async function migrateAuth() {
 export function appOrigin(headers: Headers) {
 	const asked = (headers.get("x-forwarded-host") ?? headers.get("host") ?? "").split(",")[0].trim();
 	const host = hosts.includes(asked) ? asked : hosts[0];
-	const local = /^(localhost|127\.0\.0\.1)(:|$)/.test(host);
+	const local = isLocalHost(host);
 	const forwarded = headers.get("x-forwarded-proto")?.split(",")[0].trim();
 	const proto = forwarded === "http" || forwarded === "https" ? forwarded : local ? "http" : "https";
 	return `${proto}://${host}`;

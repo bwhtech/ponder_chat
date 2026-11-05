@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useChat } from "@ai-sdk/vue";
 import { WorkflowChatTransport } from "@ai-sdk/workflow/client";
-import type { FileUIPart, UIMessage } from "ai";
-import { Alert, Button } from "frappe-ui";
+import { lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart, type UIMessage } from "ai";
+import { Alert, Button, toast } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me } from "./account";
 import { useAttention } from "./attention";
 import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
+import { changeConnector, connectors, findTool, loadConnectors, toolTitle } from "./connectors/api";
 import { useDraft } from "./drafts";
 import { canUndo, fetchThreadSaves, undoSave, type MemoryOperation, type MemorySave } from "./memory";
 import { closeOpenCalls, queueFor, waitingOnPerson, type Queued } from "./message-queue";
@@ -35,6 +36,7 @@ import {
 	PromptInputSubmit,
 	PromptInputTextarea,
 	PromptInputTools,
+	provideToolLabels,
 	provideToolRenderers,
 	Suggestion,
 	Suggestions,
@@ -70,7 +72,7 @@ function lastReplyModel(messages: UIMessage[]) {
 	return reply && replyModelId(reply);
 }
 
-const { messages, sendMessage, status, error, stop, regenerate, resumeStream } = useChat({
+const { messages, sendMessage, addToolApprovalResponse, status, error, stop, regenerate, resumeStream } = useChat({
 	id: props.threadId,
 	messages: props.initialMessages,
 	// Each reply is a durable workflow run on the server. When the connection drops before
@@ -84,6 +86,8 @@ const { messages, sendMessage, status, error, stop, regenerate, resumeStream } =
 		}),
 		fetch: patientFetch,
 	}),
+	// A connector tool on "Ask first" waits for the person; their answer goes out at once.
+	sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
 	onFinish: () => {
 		emit("saved");
 		void loadRemembered({ wait: true });
@@ -165,6 +169,28 @@ const uploadError = ref("");
 const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
 // A Python run shows its code, what it printed, and the files it made.
 provideToolRenderers({ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart });
+
+// Connector tools (Settings, Connectors) show as "Linear · Create issue". When one waits
+// for approval, "Always allow" saves its rule, then approves.
+if (!connectors.value) void loadConnectors().catch(() => undefined);
+provideToolLabels((name) => {
+	const found = findTool(name);
+	if (!found) return undefined;
+	const { connector, tool } = found;
+	return {
+		title: `${connector.name} · ${toolTitle(tool)}`,
+		question: `Allow Ponder to use ${connector.name}: ${toolTitle(tool)}?`,
+		alwaysAllow: async () => {
+			await changeConnector(connector.id, { rules: { [tool.name]: "allow" } });
+			toast.success(`Ponder now uses ${toolTitle(tool)} in ${connector.name} without asking. You can change this in Settings, Connectors.`);
+		},
+	};
+});
+
+/** The person answered a tool that waited for approval. The answer goes out by itself (sendAutomaticallyWhen). */
+function answerApproval(id: string, approved: boolean) {
+	addToolApprovalResponse({ id, approved, reason: approved ? undefined : "The person denied this." });
+}
 const suggestions = computed(() => [
 	"Explain a concept like I'm new to it",
 	"Help me write a polite follow-up email",
@@ -437,7 +463,12 @@ function replyModelId(message: UIMessage) {
 				>
 					<Message :from="message.role">
 						<MessageContent :bare="message.role === 'user'">
-							<MessageParts :message="message" :streaming="isStreaming(message)" />
+							<MessageParts
+								:message="message"
+								:streaming="isStreaming(message)"
+								@approve="answerApproval($event, true)"
+								@deny="answerApproval($event, false)"
+							/>
 							<MessageActions v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)">
 								<MessageCopyAction :value="replyText(message)" />
 								<span v-if="replyModel(message)" class="px-1 text-p-xs text-ink-gray-5" data-slot="reply-model">{{ replyModel(message) }}</span>

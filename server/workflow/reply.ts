@@ -3,7 +3,7 @@ import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
 import { loadThread, saveThread } from "../db.ts";
 import { rememberTurn } from "../memory.ts";
-import { finishRun } from "./runs.ts";
+import { finishRun, type Continued } from "./runs.ts";
 
 /** The reply's message id: the same in the live stream, a reconnect, and the saved thread. */
 export const messageIdFor = (runId: string) => `msg-${runId}`;
@@ -14,10 +14,12 @@ export const messageIdFor = (runId: string) => `msg-${runId}`;
  * With `untilTail`, the stream ends at what the run has written so far, instead of
  * when the run closes it: a cancelled run never closes its stream.
  */
-export async function replyStream(runId: string, model: string, { uiStartIndex = 0, untilTail = false } = {}) {
+export async function replyStream(runId: string, model: string, { uiStartIndex = 0, untilTail = false, continued = null as Continued | null } = {}) {
 	const readable = getRun(runId).getReadable<ModelCallStreamPart>({ startIndex: 0 });
 	const raw = untilTail ? firstChunks(readable, (await readable.getTailIndex()) + 1) : readable;
-	return raw.pipeThrough(createModelCallToUIChunkTransform({ uiStartIndex })).pipeThrough(withMessage(messageIdFor(runId), model));
+	// A run that carries on a message keeps its id, so the page and the saved thread extend that message.
+	const messageId = continued?.messageId ?? messageIdFor(runId);
+	return raw.pipeThrough(createModelCallToUIChunkTransform({ uiStartIndex })).pipeThrough(withMessage(messageId, model));
 }
 
 /** The first `count` chunks of a stream, then the end. */
@@ -54,10 +56,16 @@ function withMessage(messageId: string, model: string) {
  * for a run cut short (`untilTail`: what it wrote up to the moment it was stopped). The reply replaces a message with the same id, so saving twice is safe.
  * Memory then decides, in the background, what the turn adds (server/memory.ts).
  */
-export async function saveReply(threadId: string, owner: string, runId: string, model: string, { untilTail = false } = {}) {
-	let reply: UIMessage | undefined;
-	for await (const message of readUIMessageStream({ stream: await replyStream(runId, model, { untilTail }) })) reply = message;
+export async function saveReply(threadId: string, owner: string, runId: string, model: string, { untilTail = false, continued = null as Continued | null } = {}) {
 	const messages = await loadThread(threadId);
+	// After the person answers an approval, the run carries on the thread's last assistant
+	// message, as the browser does: its stream starts with the results of the approved
+	// tools, for calls made in that message. The stream replays on that message as it was
+	// before the run (its first `baseParts` parts), so saving twice adds nothing twice.
+	const existing = continued && messages.find((message) => message.id === continued.messageId && message.role === "assistant");
+	const base = existing ? { ...existing, parts: existing.parts.slice(0, continued.baseParts) } : undefined;
+	let reply: UIMessage | undefined;
+	for await (const message of readUIMessageStream({ message: base, stream: await replyStream(runId, model, { untilTail, continued }) })) reply = message;
 	if (reply?.parts.length) {
 		const at = messages.findIndex((message) => message.id === reply.id);
 		if (at === -1) messages.push(reply);

@@ -3,6 +3,8 @@ import { isStepCount, tool } from "ai";
 import { getWorkflowMetadata, getWritable } from "workflow";
 import { RUN_PYTHON, RUN_PYTHON_DESCRIPTION, runPythonInput } from "../python/schema.ts";
 import { WEB_FETCH, WEB_FETCH_DESCRIPTION, WEB_SEARCH, WEB_SEARCH_DESCRIPTION, webFetchInput, webSearchInput } from "../search/schema.ts";
+import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
+import { connectorTools, connectorToolsStep } from "./connectors.ts";
 import { ChatModel } from "./model.ts";
 import { loadModelMessages, recallMemoryStep, recordUsageStep, runPythonStep, saveReplyStep, webFetchStep, webSearchStep } from "./steps.ts";
 
@@ -14,6 +16,8 @@ export type ChatTurn = {
 	/** Set by the route, so the prompt does not read the clock inside the workflow. */
 	today: string;
 	maxSteps: number;
+	/** The assistant message this run carries on, after the person answered an approval (runs.ts). */
+	continued: { messageId: string; baseParts: number } | null;
 };
 
 /**
@@ -30,9 +34,13 @@ export async function chatTurn(turn: ChatTurn) {
 
 	// What the person told Ponder in earlier chats (server/memory.ts). The turn is saved to memory with the reply (reply.ts).
 	const memory = await recallMemoryStep(turn.threadId, turn.owner);
+	// The tools of the apps the person connected (server/mcp/), recorded by the step.
+	const connectors = await connectorToolsStep(turn.owner);
 	const agent = new WorkflowAgent({
 		model: new ChatModel(turn.model.id),
-		instructions: [instructions(turn), memory.guidance].filter(Boolean).join("\n\n"),
+		instructions: [instructions(turn), connectors.guidance, memory.guidance].filter(Boolean).join("\n\n"),
+		// A tool that waits for approval comes back approved in the messages the browser sends; the signature shows the model asked for it.
+		experimental_toolApprovalSecret: { environmentVariable: TOOL_APPROVAL_SECRET_ENV },
 		tools: {
 			[WEB_SEARCH]: tool({
 				description: WEB_SEARCH_DESCRIPTION,
@@ -47,6 +55,8 @@ export async function chatTurn(turn: ChatTurn) {
 					execute: (input) => runPythonStep(input, turn.threadId, turn.owner),
 				}),
 			}),
+			// After our own tools, which never change, so more of the prompt stays cached.
+			...connectorTools(connectors.specs, turn.owner),
 		},
 		// Credits are charged from what each model call cost (steps.ts).
 		onStepEnd: async (step) => {
@@ -80,7 +90,7 @@ export async function chatTurn(turn: ChatTurn) {
 	} catch (error) {
 		failure = error;
 	}
-	await saveReplyStep(turn.threadId, turn.owner, workflowRunId, turn.model.id, Boolean(failure));
+	await saveReplyStep(turn.threadId, turn.owner, workflowRunId, turn.model.id, Boolean(failure), turn.continued);
 	if (failure) throw failure;
 }
 

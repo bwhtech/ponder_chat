@@ -41,11 +41,14 @@ export function foldSteps(parts: Part[], custom: Set<string>): WorkItem[] {
 export function summarizeSteps(parts: Part[], streaming: boolean) {
 	const tools = parts.filter((part) => part.type !== "reasoning") as ToolMessagePart[];
 	const counts = { read: 0, write: 0, other: 0 };
-	for (const tool of tools) counts[actionOf(getToolName(tool))]++;
+	// A call the person denied did nothing, so it is not counted as a change.
+	const denied = tools.filter((tool) => tool.state === "output-denied").length;
+	for (const tool of tools) if (tool.state !== "output-denied") counts[actionOf(getToolName(tool))]++;
 	const labels = [
 		counts.read && `looked up ${plural(counts.read, "thing")}`,
 		counts.write && `made ${plural(counts.write, "change")}`,
 		counts.other && `took ${plural(counts.other, "other step")}`,
+		denied && `skipped ${plural(denied, "denied step")}`,
 	].filter(Boolean) as string[];
 	if (!tools.length) labels.push(parts.length === 1 ? "thought" : `thought (×${parts.length})`);
 

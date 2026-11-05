@@ -51,6 +51,11 @@ export const uploadLimit = new RateLimit([
 /** Each request emails the admins. */
 export const creditRequestLimit = new RateLimit([{ max: 3, ms: HOUR }]);
 export const searchLimit = new RateLimit([{ max: 60, ms: MINUTE }]);
+/** Connectors: each probe, add, sign-in and refresh reaches another server. */
+export const connectorLimit = new RateLimit([
+	{ max: 30, ms: 10 * MINUTE },
+	{ max: 200, ms: 24 * HOUR },
+]);
 
 /**
  * Hono middleware: 429 when the person is over the limit. `plain` answers in plain text,

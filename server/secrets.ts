@@ -62,28 +62,74 @@ async function secretRow(name: string): Promise<Row | undefined> {
 }
 
 function encrypt(name: string, value: string) {
-	const iv = randomBytes(12);
-	const cipher = createCipheriv("aes-256-gcm", key(), iv);
-	cipher.setAAD(Buffer.from(name));
-	const data = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
-	return [VERSION, iv, cipher.getAuthTag(), data].map((part) => (typeof part === "string" ? part : part.toString("base64url"))).join(".");
+	return [VERSION, ...cipherParts(key(), name, value)].join(".");
 }
 
 function decrypt(name: string, stored: string) {
-	const [version, iv, tag, data] = stored.split(".");
-	if (version !== VERSION || !iv || !tag || data === undefined) throw new UnreadableSecret(`The saved ${name} is not in a known format.`);
-	try {
-		const decipher = createDecipheriv("aes-256-gcm", key(), Buffer.from(iv, "base64url"));
-		decipher.setAAD(Buffer.from(name));
-		decipher.setAuthTag(Buffer.from(tag, "base64url"));
-		return Buffer.concat([decipher.update(Buffer.from(data, "base64url")), decipher.final()]).toString("utf8");
-	} catch {
-		throw new UnreadableSecret(`The saved ${name} can't be decrypted. Did BETTER_AUTH_SECRET change? Enter it again in /admin, Settings.`);
-	}
+	const [version, ...parts] = stored.split(".");
+	if (version !== VERSION || parts.length !== 3) throw new UnreadableSecret(`The saved ${name} is not in a known format.`);
+	const value = decipher(key(), name, parts);
+	if (value === undefined) throw new UnreadableSecret(`The saved ${name} can't be decrypted. Did BETTER_AUTH_SECRET change? Enter it again in /admin, Settings.`);
+	return value;
 }
 
 function key() {
 	const secret = process.env.BETTER_AUTH_SECRET;
 	if (!secret) throw new Error("BETTER_AUTH_SECRET is not set, so secrets can't be encrypted or read.");
 	return (encryptionKey ??= Buffer.from(hkdfSync("sha256", secret, "ponder-chat", "secrets v1", 32)));
+}
+
+/**
+ * Secrets kept in other tables, such as the credentials of a person's connectors
+ * (mcp/store.ts). The same AES-256-GCM. The context names the table, the row and the
+ * column, and is bound as AAD, so a value copied to another row or person does not decrypt.
+ *
+ * The key is derived from PONDER_ENCRYPTION_KEY when it is set, or else from
+ * BETTER_AUTH_SECRET. Each sealed value names its key ("e" or "a"), so values sealed
+ * before PONDER_ENCRYPTION_KEY was set stay readable while BETTER_AUTH_SECRET stays the same.
+ */
+const SEALED = "s1";
+const sealKeys = new Map<string, Buffer>();
+
+export function seal(context: string, value: string) {
+	const id = process.env.PONDER_ENCRYPTION_KEY ? "e" : "a";
+	return [SEALED, id, ...cipherParts(sealKey(id), context, value)].join(".");
+}
+
+/** Throws UnreadableSecret when the value can't be decrypted: its key changed, or it belongs to another context. */
+export function unseal(context: string, stored: string) {
+	const [version, id, ...parts] = stored.split(".");
+	if (version !== SEALED || (id !== "e" && id !== "a") || parts.length !== 3) throw new UnreadableSecret("A saved secret is not in a known format.");
+	const value = decipher(sealKey(id), context, parts);
+	if (value === undefined) throw new UnreadableSecret(`A saved secret can't be decrypted. Did ${id === "e" ? "PONDER_ENCRYPTION_KEY" : "BETTER_AUTH_SECRET"} change?`);
+	return value;
+}
+
+function sealKey(id: "e" | "a") {
+	const secret = id === "e" ? process.env.PONDER_ENCRYPTION_KEY : process.env.BETTER_AUTH_SECRET;
+	if (!secret) throw new UnreadableSecret(`${id === "e" ? "PONDER_ENCRYPTION_KEY" : "BETTER_AUTH_SECRET"} is not set, so this secret can't be read.`);
+	const cacheKey = `${id}:${secret}`;
+	let derived = sealKeys.get(cacheKey);
+	if (!derived) sealKeys.set(cacheKey, (derived = Buffer.from(hkdfSync("sha256", secret, "ponder-chat", "sealed values v1", 32))));
+	return derived;
+}
+
+function cipherParts(cipherKey: Buffer, aad: string, value: string) {
+	const iv = randomBytes(12);
+	const cipher = createCipheriv("aes-256-gcm", cipherKey, iv);
+	cipher.setAAD(Buffer.from(aad));
+	const data = Buffer.concat([cipher.update(value, "utf8"), cipher.final()]);
+	return [iv, cipher.getAuthTag(), data].map((part) => part.toString("base64url"));
+}
+
+/** The plain value, or undefined when the key or the AAD is wrong. */
+function decipher(cipherKey: Buffer, aad: string, [iv, tag, data]: string[]) {
+	try {
+		const decipher = createDecipheriv("aes-256-gcm", cipherKey, Buffer.from(iv!, "base64url"));
+		decipher.setAAD(Buffer.from(aad));
+		decipher.setAuthTag(Buffer.from(tag!, "base64url"));
+		return Buffer.concat([decipher.update(Buffer.from(data!, "base64url")), decipher.final()]).toString("utf8");
+	} catch {
+		return undefined;
+	}
 }

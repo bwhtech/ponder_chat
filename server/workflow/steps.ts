@@ -54,10 +54,17 @@ export async function webFetchStep(input: WebFetchInput) {
 	return executeWebFetch(input);
 }
 
-export async function saveReplyStep(threadId: string, owner: string, runId: string, model: string, failed = false) {
+export async function saveReplyStep(
+	threadId: string,
+	owner: string,
+	runId: string,
+	model: string,
+	failed = false,
+	continued: { messageId: string; baseParts: number } | null = null,
+) {
 	"use step";
 	const { saveReply } = await import("./reply.ts");
-	await saveReply(threadId, owner, runId, model, { untilTail: failed });
+	await saveReply(threadId, owner, runId, model, { untilTail: failed, continued });
 }
 
 export type StepUsage = {

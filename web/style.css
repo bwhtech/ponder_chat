@@ -50,3 +50,25 @@ body {
 [data-slot='sidebar-item'][data-state='inactive']:active {
   background-color: var(--surface-gray-3);
 }
+
+/* frappe-ui's SettingsDialog fills a phone's screen (w-screen, 100dvh), but the Dialog
+   around it keeps its padding and margin, so its right side runs off the screen. On a
+   phone, the Settings dialog drops them and fills the screen as meant. */
+@media (max-width: 639px) {
+  .dialog-scroll-container > div:has(> [data-slot='content'] > [data-orientation='vertical']) {
+    padding: 0;
+  }
+  [data-slot='content']:has(> [data-orientation='vertical']) {
+    margin: 0;
+    border-radius: 0;
+    max-width: none;
+  }
+  /* Clear of the notch and the home indicator, in the installed app. */
+  [data-slot='content'] > [data-orientation='vertical'] {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  [data-slot='settings-close'] {
+    top: calc(env(safe-area-inset-top) + 0.5rem);
+  }
+}

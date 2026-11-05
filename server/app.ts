@@ -6,6 +6,7 @@ import { etag } from "hono/etag";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
 import { getRun, start } from "workflow/api";
 import { adminApi } from "./admin/routes.ts";
+import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import { displayName } from "./admin/people.ts";
 import { roleOf } from "./admins.ts";
 import { appOrigin, auth, type SignedIn } from "./auth.ts";
@@ -25,7 +26,7 @@ import { forgetThread, threadResponse } from "./thread-cache.ts";
 import { usageReport } from "./telemetry.ts";
 import { chatTurn } from "./workflow/chat.ts";
 import { replyStream, saveReply } from "./workflow/reply.ts";
-import { activeRun, latestRun, setActiveRun } from "./workflow/runs.ts";
+import { activeRun, latestRun, setActiveRun, type ThreadRun } from "./workflow/runs.ts";
 
 /**
  * The HTTP API, served by Nitro (nitro.config.ts), which also compiles the chat workflow
@@ -46,6 +47,9 @@ app.get("/health", async (c) => {
 		return c.text("database unavailable", 503);
 	}
 });
+
+// The end of a connector's OAuth sign-in (mcp/routes.ts). It reads the session itself.
+app.get("/oauth/mcp/callback", oauthCallback);
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
@@ -70,6 +74,9 @@ app.get("/api/me", async (c) => {
 
 // The admin pages' API (admin/routes.ts). Every route there needs the admin role.
 app.route("/api/admin", adminApi);
+
+// Connectors: the MCP servers each person connected (server/mcp/).
+app.route("/api/connectors", connectorsApi);
 
 // Whether the chat can run Python, for the attach button.
 app.get("/api/features", async (c) => c.json({ python: await pythonReady }));
@@ -132,6 +139,9 @@ app.post("/api/chat", perPerson(chatLimit, { plain: true }), async (c) => {
 
 	const model = await pickModel(body.model);
 	const run = { threadId: body.id, user: userOf(c) };
+	// After an approval the page sends the thread again with no new message: the run carries on its last assistant message.
+	const last = body.messages.at(-1);
+	const continued = last?.role === "assistant" ? { messageId: last.id, baseParts: last.parts.length } : null;
 	// The run reads the thread from the database, so it is saved first.
 	await saveThread(body.id, userOf(c), body.messages);
 	const started = await start(chatTurn, [
@@ -142,22 +152,23 @@ app.post("/api/chat", perPerson(chatLimit, { plain: true }), async (c) => {
 			python: await pythonReady,
 			today: new Date().toDateString(),
 			maxSteps: MAX_STEPS,
+			continued,
 		},
 	]);
-	await setActiveRun(body.id, started.runId, model.id);
+	await setActiveRun(body.id, started.runId, model.id, continued);
 	// A new thread gets a name from a cheap model while the reply is written (thread-title.ts).
 	if (isFirstMessage(body.messages)) void nameThread(run, body.messages);
 
 	// The run goes on if this request closes; the page reconnects with GET /api/chat/:id/stream.
-	return createUIMessageStreamResponse({ stream: await replyStream(started.runId, model.id), headers: { "x-workflow-run-id": started.runId } });
+	return createUIMessageStreamResponse({ stream: await replyStream(started.runId, model.id, { continued }), headers: { "x-workflow-run-id": started.runId } });
 });
 
 /** Cancels a run and saves what it wrote so far. */
-async function cancelRun(threadId: string, owner: string, run: { runId: string; model: string }) {
+async function cancelRun(threadId: string, owner: string, run: ThreadRun) {
 	await getRun(run.runId).cancel({ cancelReason: "Stopped by the person, or replaced by a newer message." }).catch(() => undefined);
 	// The step in flight writes on for a moment after a cancel, and the stream is never
 	// closed, so the saved reply is what the run had written when it was stopped.
-	await saveReply(threadId, owner, run.runId, run.model, { untilTail: true });
+	await saveReply(threadId, owner, run.runId, run.model, { untilTail: true, continued: run.continued });
 }
 
 function outOfCredits(resetsAt: string) {
@@ -173,7 +184,7 @@ app.get("/api/chat/:id/stream", async (c) => {
 	if (!run || !(await mayUseThread(c, run.threadId))) return c.body(null, 204);
 	const startIndex = Number(c.req.query("startIndex") ?? 0);
 	const uiStartIndex = Number.isSafeInteger(startIndex) && startIndex > 0 ? startIndex : 0;
-	const stream = await replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled });
+	const stream = await replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled, continued: run.continued });
 	return createUIMessageStreamResponse({ stream, headers: { "x-workflow-run-id": run.runId } });
 });
 

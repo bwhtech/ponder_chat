@@ -1,3 +1,4 @@
+import { hkdfSync } from "node:crypto";
 import { migrateAuth } from "./auth.ts";
 import { migrateCredits } from "./credits.ts";
 import { migrate, sql } from "./db.ts";
@@ -6,7 +7,9 @@ import { migrateInvites } from "./invites.ts";
 import { setupMemory } from "./memory.ts";
 import { checkSandbox } from "./python/pyodide.ts";
 import { migratePythonState } from "./python/state.ts";
+import { migrateConnectors } from "./mcp/store.ts";
 import { migrateSecrets } from "./secrets.ts";
+import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
 import { setupTelemetry } from "./telemetry.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
 
@@ -27,6 +30,8 @@ export async function startup() {
 	await migrateCredits();
 	await migrateInvites();
 	await migrateSecrets();
+	await migrateConnectors();
+	setToolApprovalSecret();
 	await migratePythonState();
 	await migrateThreadRuns();
 	await setupMemory();
@@ -102,4 +107,12 @@ function stopCleanly(world: { close?: () => Promise<void> }) {
 	};
 	process.once("SIGTERM", () => void stop("SIGTERM"));
 	process.once("SIGINT", () => void stop("SIGINT"));
+}
+
+/** The secret that tool approvals are signed with (workflow/approval-secret.ts), from BETTER_AUTH_SECRET unless it is set. */
+function setToolApprovalSecret() {
+	if (process.env[TOOL_APPROVAL_SECRET_ENV]) return;
+	const secret = process.env.BETTER_AUTH_SECRET;
+	if (!secret) throw new Error("BETTER_AUTH_SECRET is not set.");
+	process.env[TOOL_APPROVAL_SECRET_ENV] = Buffer.from(hkdfSync("sha256", secret, "ponder-chat", "tool approvals v1", 32)).toString("base64url");
 }

@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { BottomSheet, Button, Dialog, Sidebar, SidebarHeader, Skeleton } from "frappe-ui";
+import { BottomSheet, Button, Sidebar, SidebarHeader, Skeleton, toast } from "frappe-ui";
 import { computed, ref } from "vue";
 import { me, refreshCredits, signOut } from "./account";
+import { loadConnectors } from "./connectors/api";
+import SettingsModal from "./settings/SettingsModal.vue";
+import { openSettings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
 import { FileViewer } from "./ai-elements/file-viewer";
 import CreditMeter from "./CreditMeter.vue";
@@ -18,7 +21,6 @@ import { useThreads } from "./threads";
  */
 const { current, currentThread, messages, running, loading, revision, refresh, open, start } = useThreads();
 const sheetOpen = ref(false);
-const settingsOpen = ref(false);
 // A request for more credits that waits for an answer: the page checks on it.
 useCreditRequestWatch();
 // The main area shows the open chat, or the Memory page (?view=memory).
@@ -52,9 +54,22 @@ function pick(id: string) {
 	void open(id);
 }
 
-function showSettings() {
+function showSettings(tab: SettingsTab = "account") {
 	sheetOpen.value = false;
-	settingsOpen.value = true;
+	openSettings(tab);
+}
+
+// Back from a connector's sign-in in this tab (a phone): /?settings=connectors&connector=<id>,
+// or &connector_error=<why> (server/mcp/routes.ts). Opens the connector, then tidies the URL.
+const back = new URL(location.href);
+if (back.searchParams.get("settings") === "connectors") {
+	const id = back.searchParams.get("connector");
+	const problem = back.searchParams.get("connector_error");
+	for (const key of ["settings", "connector", "connector_error"]) back.searchParams.delete(key);
+	history.replaceState(null, "", back);
+	openSettings("connectors", id);
+	if (problem) toast.error(problem);
+	else if (id) void loadConnectors().then(() => toast.success("Connected"));
 }
 
 // Memory, Admin (for admins), Settings, Theme and Sign out.
@@ -62,7 +77,8 @@ const theme = useThemeMenu();
 const menu = computed(() => [
 	{ label: "Memory", icon: "lucide-brain", onClick: showMemory },
 	...(me.value?.user.role === "admin" ? [{ label: "Admin", icon: "lucide-shield", onClick: () => location.assign("/admin") }] : []),
-	{ label: "Settings", icon: "lucide-settings", onClick: showSettings },
+	{ label: "Connectors", icon: "lucide-plug", onClick: () => showSettings("connectors") },
+	{ label: "Settings", icon: "lucide-settings", onClick: () => showSettings() },
 	theme(),
 	{ label: "Sign out", icon: "lucide-log-out", onClick: () => void signOut() },
 ]);
@@ -134,24 +150,6 @@ function onSaved() {
 
 		<FileViewer />
 
-		<Dialog v-model:open="settingsOpen" title="Settings" size="md">
-			<div class="flex flex-col gap-6" data-slot="settings">
-				<section class="flex items-center justify-between gap-3">
-					<div class="min-w-0">
-						<p class="text-p-sm text-ink-gray-5">Signed in as</p>
-						<p class="truncate text-base text-ink-gray-9">{{ me?.user.email }}</p>
-					</div>
-					<Button icon-left="lucide-log-out" @click="signOut">Sign out</Button>
-				</section>
-				<section v-if="me" class="flex flex-col gap-1 border-t border-outline-gray-1 pt-5">
-					<h3 class="text-base-semibold text-ink-gray-9">Daily credits</h3>
-					<p class="text-p-sm text-ink-gray-6">
-						You get {{ me.credits.limit - me.credits.extra }} credits a day. Each reply uses credits by what the model charges for it, so
-						bigger models use more. Credits refill at midnight UTC.
-					</p>
-					<p v-if="me.credits.extra" class="text-p-sm text-ink-gray-6">Today you also have {{ me.credits.extra }} extra credits from an admin.</p>
-				</section>
-			</div>
-		</Dialog>
+		<SettingsModal />
 	</div>
 </template>

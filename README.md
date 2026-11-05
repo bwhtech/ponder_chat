@@ -16,6 +16,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - Each reply is a durable workflow run (Workflow SDK, Postgres World). A reload, a dropped connection, a deploy or a crash does not end it: the page reconnects and the reply finishes. Messages sent during a reply wait in a queue.
 - Python: the model can run Python (pandas, matplotlib and more) in a Pyodide sandbox. Attached CSV and Excel files go in as inputs; charts and files come back into the chat.
 - Web search: the model can search the web (`web_search`) and read a page (`web_fetch`). See "Web search" below.
+- Connectors: each person can connect remote MCP servers (Linear, Notion, a Frappe site, any MCP server), and the model can use their tools. Tools that change something ask first. See "Connectors" below.
 - Memory across chats: after each reply, Ponder decides whether the person said something about themselves worth keeping. A note under the reply shows what it kept, with Undo, and the Memory page lists every memory and decision. See `docs/memory.md`.
 - Daily credits (see below).
 
@@ -83,6 +84,20 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 - `web_fetch`: reads the page on our own server (`server/search/fetch-page.ts`), so no other company sees it. It refuses every address on this machine, the tailnet and private networks, checked when each connection opens and on each redirect. Only ports 80 and 443; at most 3 MB and 20,000 characters of text.
 - Citations: the model cites with a Markdown link right after each fact. In the page, a link to a page that a search returned or `web_fetch` read shows as a small chip; hovering or focusing it shows the page's title and an excerpt.
 
+## Connectors
+
+Settings, Connectors (from the account menu) lists the MCP servers the person connected. The code is in `server/mcp/` and `server/workflow/connectors.ts`; the page is in `web/connectors/` and `web/settings/`. The plan and its reasons are in `docs/connectors-plan.md`.
+
+- Add connector takes the URL of a remote MCP server (Streamable HTTP, or SSE for old servers). While the person types, the server sends it an `initialize` request (`server/mcp/probe.ts`) and says whether it needs no sign-in, an API key, or an OAuth sign-in. No stdio: Ponder never runs a command that a person typed.
+- OAuth: `@ai-sdk/mcp` runs the flow the MCP spec asks for (discovery, dynamic client registration, PKCE, state and issuer checks). The sign-in opens in a popup and ends at `/oauth/mcp/callback`, which tells the page on a `BroadcastChannel` and closes. On a phone, the sign-in uses the same tab and comes back to `/?settings=connectors`. For a server that does not allow dynamic registration (GitHub), the person registers their own OAuth app and enters its client ID and secret under Advanced.
+- Credentials (header values, OAuth client, tokens) are one value per connection in `mcp_connections.credentials`, encrypted with AES-256-GCM and bound to the row (`seal` in `server/secrets.ts`). The key comes from `PONDER_ENCRYPTION_KEY` when it is set, else from `BETTER_AUTH_SECRET`. A sealed value names its key, so setting `PONDER_ENCRYPTION_KEY` later keeps the older values readable while `BETTER_AUTH_SECRET` stays the same. The page never gets a credential: only header names.
+- Every request to an MCP server or its OAuth endpoints goes through the same guard as `web_fetch` (`server/net-guard.ts`): https, public addresses only, checked on each connection. For development and the checks only, `MCP_ALLOW_PRIVATE_NETWORKS=1` turns the guard off for connectors.
+- Tools: the model sees each tool as `<slug>__<tool>`, such as `linear__create_issue`. A tool that says it only reads (`readOnlyHint`) starts on "Always allow"; every other tool starts on "Ask first". The person can set each tool to "Always allow", "Ask first" or "Off", and turn a connector off. The tool lists are kept in the database and listed again in the background when they are more than an hour old.
+- In a reply, one step reads the person's tools as plain data (so a replay uses the same tools), and each call is its own step that connects (`server/mcp/client.ts` keeps a client per connection for 2 minutes). A call is never retried: it could create something twice. A failure is the call's result, so the model can tell the person. Results are cut at 50,000 characters.
+- Approvals: a tool on "Ask first" stops the reply with a confirmation (Deny, Always allow, Allow once). The answer goes out by itself and a new run carries on the same message (`continued` in `server/workflow/runs.ts`). Approval requests are signed (`experimental_toolApprovalSecret`, derived from `BETTER_AUTH_SECRET` at startup), so only a call the model asked for can be approved.
+- A token that expires within a minute is refreshed before a call, one refresh at a time for each connection. When the server refuses the sign-in, the connector shows "Sign in again", and the model is told to ask the person.
+- Limits: 30 probes, adds, sign-ins and refreshes in 10 minutes per person (`connectorLimit`); at most 120 connector tools go to the model.
+
 ## Files
 
 `server/files.ts` stores uploads; `server/file-context.ts` turns them into what the model reads before each call.
@@ -107,7 +122,7 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 
 ## Run it
 
-Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY` (until an admin saves a key in `/admin`, Settings), `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings.
+Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY` (until an admin saves a key in `/admin`, Settings), `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings. Optional: `PONDER_ENCRYPTION_KEY` for connector credentials (see "Connectors").
 
 ```bash
 npm install
@@ -118,7 +133,9 @@ npm run build
 ./start.sh        # http://127.0.0.1:3500
 ```
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, and `npx tsx server/search.check.ts [--live]`.
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+
+To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
 ## Code
 
@@ -138,5 +155,6 @@ Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/c
 | OpenRouter key and other secrets | `server/openrouter-key.ts`, `server/secrets.ts` |
 | Credits | `server/credits.ts`, `server/settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
+| Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net-guard.ts`, `web/connectors/`, `web/settings/` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
 | Components | `web/ai-elements/` (copy of the platform's) |
