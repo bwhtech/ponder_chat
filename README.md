@@ -6,7 +6,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 
 - Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link; either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes; a code takes 3 wrong tries. Without email settings, the email is printed in the server log.
 - Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
-- Admin pages at `/admin` (see "Admin" below): usage, people, invites, requests for more credits, and the credit settings.
+- Admin pages at `/admin` (see "Admin" below): usage, people, invites, requests for more credits, and the settings (credits and the OpenRouter key).
 - Chats in a sidebar, with names that a cheap model writes.
 - A model selector in the message field. The list is in `server/models.ts`, and it is also the allowlist: a request for any other model gets the default.
 - Each reply shows the model that wrote it.
@@ -48,10 +48,11 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 | Requests | Requests for more credits that wait, with Approve and Decline. Below: the answers of the last 30 days. |
 | People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
 | Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
-| Settings | The default daily credits, credits per US dollar, and the list of admins. |
+| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, the OpenRouter key and the list of admins. On a phone, Settings is a page in the tab bar. |
 
 - Admins see usage only. The admin API reads `runs` (cost, model, time), `sessions` (device and time) and the number of threads. It never returns messages or thread titles.
 - A "reply" is a `runs` row with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each model call, so a reply that used tools has several rows, and only the last one counts.
+- The OpenRouter key: an admin pastes it in Settings. The server checks it with OpenRouter, then saves it encrypted in the `secrets` table (AES-256-GCM, with a key derived from `BETTER_AUTH_SECRET`), so a copy of the database alone does not give it away. The key is never sent back to the page; Settings shows its last four characters. Until a key is saved there, `OPENROUTER_API_KEY` from the environment is used. A new `BETTER_AUTH_SECRET` makes the saved key unreadable: the server then uses `OPENROUTER_API_KEY` if it is set, and Settings asks for the key again.
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
 
 ## Durable replies
@@ -83,7 +84,7 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 
 ## Run it
 
-Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY`, `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings.
+Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY` (until an admin saves a key in `/admin`, Settings), `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings.
 
 ```bash
 npm install
@@ -106,6 +107,7 @@ Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/m
 | Chat workflow | `server/workflow/` |
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |
 | Models | `server/models.ts`, `web/models.ts` |
+| OpenRouter key and other secrets | `server/openrouter-key.ts`, `server/secrets.ts` |
 | Credits | `server/credits.ts`, `server/settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |

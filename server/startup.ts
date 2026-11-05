@@ -6,6 +6,7 @@ import { migrateInvites } from "./invites.ts";
 import { setupMemory } from "./memory.ts";
 import { checkSandbox } from "./python/pyodide.ts";
 import { migratePythonState } from "./python/state.ts";
+import { migrateSecrets } from "./secrets.ts";
 import { setupTelemetry } from "./telemetry.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
 
@@ -25,6 +26,7 @@ export async function startup() {
 	await migrateFiles();
 	await migrateCredits();
 	await migrateInvites();
+	await migrateSecrets();
 	await migratePythonState();
 	await migrateThreadRuns();
 	await setupMemory();

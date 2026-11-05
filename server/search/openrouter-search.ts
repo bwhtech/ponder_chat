@@ -1,4 +1,5 @@
 import { privateRoutingBody } from "../openrouter.ts";
+import { openRouterKey } from "../openrouter-key.ts";
 import type { SearchBackend, SearchReply, SearchResult } from "./backend.ts";
 
 /**
@@ -40,7 +41,7 @@ export class OpenRouterSearch implements SearchBackend {
 	private async complete(query: string): Promise<Completion> {
 		const response = await fetch(URL, {
 			method: "POST",
-			headers: { authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "content-type": "application/json" },
+			headers: { authorization: `Bearer ${await openRouterKey()}`, "content-type": "application/json" },
 			signal: AbortSignal.timeout(TIMEOUT_MS),
 			body: JSON.stringify({
 				model: MODEL,

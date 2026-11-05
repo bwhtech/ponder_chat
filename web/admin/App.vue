@@ -16,12 +16,14 @@ import { RouterView, useRoute } from "vue-router";
 import { loadViewer } from "./api";
 import AccountMenu from "./components/AccountMenu.vue";
 import NoAccess from "./components/NoAccess.vue";
+import SettingsModal from "./components/SettingsModal.vue";
 import { isMobile } from "./lib/viewport";
-import { counts, refreshCounts, viewer } from "./store";
+import { counts, refreshCounts, settingsOpen, viewer } from "./store";
 
 /**
  * The admin shell. Signed out goes to the chat's sign-in page. Signed in without the
  * admin role sees NoAccess. The server checks the role again on every /api/admin call.
+ * Settings is a dialog on wider screens (account menu) and a tab on phones.
  */
 const route = useRoute();
 const isAdmin = computed(() => viewer.value?.user.role === "admin");
@@ -96,7 +98,6 @@ onBeforeUnmount(() => clearInterval(timer));
 											<span v-if="counts.invited" class="text-xs tabular-nums text-ink-gray-5">{{ counts.invited }} invited</span>
 										</template>
 									</SidebarItem>
-									<SidebarItem label="Settings" icon="lucide-settings" route="/settings" />
 								</div>
 							</SidebarSection>
 						</ScrollArea>
@@ -106,6 +107,7 @@ onBeforeUnmount(() => clearInterval(timer));
 					</Sidebar>
 				</template>
 				<RouterView />
+				<SettingsModal v-model:open="settingsOpen" />
 			</DesktopShell>
 		</div>
 	</FrappeUIProvider>

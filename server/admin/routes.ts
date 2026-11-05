@@ -9,6 +9,7 @@ import { sql } from "../db.ts";
 import { creditAnswerEmail, inviteEmail, sendEmail } from "../email.ts";
 import { decideRequest, grantCredits, pendingCount, type Decision } from "../extra-credits.ts";
 import { allow, disallow, setInviteCredits } from "../invites.ts";
+import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
 import { getSettings, updateSettings } from "../settings.ts";
 import { listAdmins, listPeople, personDetail } from "./people.ts";
 import { overview, requestsReport } from "./reports.ts";
@@ -135,13 +136,25 @@ adminApi.delete("/invites/:email", async (c) => {
 
 // Settings
 
-adminApi.get("/settings", async (c) => c.json({ ...(await getSettings()), admins: await listAdmins() }));
+adminApi.get("/settings", async (c) =>
+	c.json({ ...(await getSettings()), admins: await listAdmins(), openRouterKey: await openRouterKeyStatus() }),
+);
 
 adminApi.put("/settings", async (c) => {
 	const input = await readBody(c, z.object({ defaultDailyCredits: credits, creditsPerUsd: z.number().int().min(1).max(1_000_000_000) }));
 	if (!input) return invalid(c);
 	await updateSettings(input, adminOf(c));
 	return c.json(await getSettings());
+});
+
+// Saved encrypted (secrets.ts), and only after OpenRouter accepts it: a wrong key would stop every reply.
+adminApi.put("/settings/openrouter-key", async (c) => {
+	const input = await readBody(c, z.object({ key: z.string().trim().min(20).max(500) }));
+	if (!input) return c.json({ error: "Paste the whole key." }, 400);
+	const problem = await checkOpenRouterKey(input.key);
+	if (problem) return c.json({ error: problem }, 400);
+	await saveOpenRouterKey(input.key, adminOf(c));
+	return c.json(await openRouterKeyStatus());
 });
 
 // Requests for more credits (extra-credits.ts)

@@ -6,6 +6,21 @@ export type Status = "active" | "invited" | "banned";
 
 export type Settings = { defaultDailyCredits: number; creditsPerUsd: number };
 
+/** The OpenRouter key in use, without the key itself (server/openrouter-key.ts). */
+export type KeyStatus = {
+	source: "settings" | "environment" | "none";
+	/** The key's last characters, such as "…3f9a". */
+	hint: string | null;
+	/** The saved key can't be decrypted, because BETTER_AUTH_SECRET changed. */
+	unreadable: boolean;
+	updatedAt: string | null;
+	updatedBy: string | null;
+};
+
+export type Admin = { id: string; name: string; email: string };
+
+export type SettingsData = Settings & { admins: Admin[]; openRouterKey: KeyStatus };
+
 export type Person = {
 	/** The user id, or the email for an invite without an account. */
 	id: string;

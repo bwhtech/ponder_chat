@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { privateRouting } from "../openrouter.ts";
+import { openRouter } from "../openrouter-key.ts";
 import { generateText, Output } from "ai";
 import { z } from "zod";
 import { runTelemetry } from "../telemetry.ts";
@@ -17,8 +17,6 @@ import type { MemoryScope, MemoryTurn } from "./types.ts";
  */
 const PROMPT_PATH = new URL("./extract.md", import.meta.url);
 const MODEL = process.env.PONDER_MEMORY_MODEL ?? "z-ai/glm-5.3-flash";
-
-const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
 
 export const KINDS = ["fact", "project", "preference"] as const;
 export type MemoryKind = (typeof KINDS)[number];
@@ -91,7 +89,7 @@ export const llmWriter: Writer = async ({ gate, ...input }) => {
 		.join("\n");
 	const { scope } = input;
 	const { output } = await generateText({
-		model: openrouter(MODEL, { usage: { include: true }, provider: privateRouting }),
+		model: (await openRouter())(MODEL, { usage: { include: true }, provider: privateRouting }),
 		instructions: await readFile(PROMPT_PATH, "utf8"),
 		prompt: `${describe(input)}\n\n${note}`,
 		output: Output.object({ schema: decision }),

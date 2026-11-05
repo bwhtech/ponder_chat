@@ -113,6 +113,7 @@ PONDER_HOSTS=$DOMAIN
 PONDER_DENO=/usr/local/bin/deno
 PONDER_DENO_DIR=/var/cache/$APP/deno
 BETTER_AUTH_SECRET=$(openssl rand -base64 32)
+# Or leave it empty and paste the key in /admin, Settings, which saves it encrypted and wins over this one.
 OPENROUTER_API_KEY=FILL_IN
 # Sign-in emails (Cloudflare Email Service). Without them, links only go to the log.
 PONDER_EMAIL_FROM=FILL_IN

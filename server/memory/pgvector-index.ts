@@ -1,5 +1,5 @@
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { privateRouting } from "../openrouter.ts";
+import { openRouter } from "../openrouter-key.ts";
 import { embed, embedMany } from "ai";
 import type { Sql } from "postgres";
 import type { IndexedMemory, MemoryIndex } from "./types.ts";
@@ -18,7 +18,8 @@ const CANDIDATES = 50;
 const K = 60;
 
 export function pgvectorIndex({ sql, model = process.env.PONDER_EMBEDDING_MODEL ?? "google/gemini-embedding-2" }: { sql: Sql; model?: string }): MemoryIndex {
-	const embedder = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY }).textEmbeddingModel(model, { provider: privateRouting });
+	// Made for each call, because the key can change (openrouter-key.ts).
+	const embedder = async () => (await openRouter()).textEmbeddingModel(model, { provider: privateRouting });
 	let ready: Promise<void> | undefined;
 	const migrate = () =>
 		(ready ??= (async () => {
@@ -37,7 +38,7 @@ export function pgvectorIndex({ sql, model = process.env.PONDER_EMBEDDING_MODEL 
 		}));
 
 	async function write(memories: IndexedMemory[]) {
-		const { embeddings } = await embedMany({ model: embedder, values: memories.map((m) => m.text) });
+		const { embeddings } = await embedMany({ model: await embedder(), values: memories.map((m) => m.text) });
 		await sql`
 			insert into memory_vectors ${sql(memories.map((m, i) => ({ ...m, embedding: vectorLiteral(embeddings[i]) })))}
 			on conflict (id) do update set owner = excluded.owner, text = excluded.text, embedding = excluded.embedding`;
@@ -55,7 +56,7 @@ export function pgvectorIndex({ sql, model = process.env.PONDER_EMBEDDING_MODEL 
 		},
 		async search(owner, query, limit) {
 			await migrate();
-			const { embedding } = await embed({ model: embedder, value: query });
+			const { embedding } = await embed({ model: await embedder(), value: query });
 			const rows = await sql<{ id: string }[]>`
 				with scoped as (select id, text, embedding from memory_vectors where owner = ${owner}),
 				by_meaning as (

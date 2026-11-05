@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { Avatar, Dropdown, useColorScheme } from "frappe-ui";
 import { computed, h } from "vue";
+import { useRouter } from "vue-router";
 import { signOut } from "../../account";
-import { viewer } from "../store";
+import { isMobile } from "../lib/viewport";
+import { settingsOpen, viewer } from "../store";
 
-/** Back to chat, theme and sign out. `compact` is the avatar for a mobile header. */
+/** Settings, back to chat, theme and sign out. `compact` is the avatar for a mobile header. */
 defineProps<{ compact?: boolean }>();
 
 const me = computed(() => viewer.value?.user.name || viewer.value?.user.email.split("@")[0] || "");
 const { colorScheme, setColorScheme } = useColorScheme();
+const router = useRouter();
 const themes = [
 	{ label: "Light", value: "light", icon: "lucide-sun" },
 	{ label: "Dark", value: "dark", icon: "lucide-moon" },
@@ -16,6 +19,7 @@ const themes = [
 ] as const;
 
 const menu = computed(() => [
+	{ label: "Settings", icon: "lucide-settings", onClick: () => (isMobile.value ? void router.push("/settings") : (settingsOpen.value = true)) },
 	{ label: "Back to chat", icon: "lucide-message-circle", onClick: () => location.assign("/") },
 	{
 		label: "Theme",

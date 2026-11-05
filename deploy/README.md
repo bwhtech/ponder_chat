@@ -30,7 +30,7 @@ Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ ponder-chat (Nod
    ```
 
    After this, root cannot log in over SSH. Use `deploy@<ip>`.
-4. Fill in the `FILL_IN` values in `/etc/ponder-chat/env`: the OpenRouter key and the email settings. Add `NOTIFY_URL` for alerts.
+4. Fill in the `FILL_IN` values in `/etc/ponder-chat/env`: the OpenRouter key and the email settings. Add `NOTIFY_URL` for alerts. For the OpenRouter key, you can instead leave `OPENROUTER_API_KEY` empty and paste the key in `/admin`, Settings, after you sign in as an admin. There it is saved encrypted.
 5. Deploy: `deploy/deploy.sh deploy@<ip>`.
 6. Invite people:
 
