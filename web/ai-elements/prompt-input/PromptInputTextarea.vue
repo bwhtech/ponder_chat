@@ -31,10 +31,14 @@ function onKeydown(event: KeyboardEvent) {
 	submit();
 }
 
+// On a touch screen, focus opens the on-screen keyboard, which hides half the chat. There
+// the person taps the field when they want to type.
+const touch = matchMedia("(pointer: coarse)").matches;
+
 watch(text, () => nextTick(resize));
 onMounted(() => {
 	resize();
-	if (props.autofocus) textarea()?.focus();
+	if (props.autofocus && !touch) textarea()?.focus();
 });
 defineExpose({ focus: () => textarea()?.focus() });
 </script>
