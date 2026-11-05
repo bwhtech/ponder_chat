@@ -291,6 +291,16 @@
   min-width: 6rem;
 }
 
+/* Maths (KaTeX): a wide formula scrolls on its own instead of widening the reply. */
+[data-slot='math-block'] {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+[data-slot='math-block'] > .katex-display {
+  margin: 0.75rem 0;
+}
+
 /* DeskCard: when the card itself is narrow (a phone, a side panel), the button
    gets its own row under the text instead of squeezing it. */
 [data-slot="desk-card"] {
