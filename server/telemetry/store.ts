@@ -47,6 +47,8 @@ export async function migrateRuns() {
 		)`;
 	await sql`create index if not exists runs_thread_idx on runs (thread_id, created_at)`;
 	await sql`create index if not exists runs_user_idx on runs ("user", created_at)`;
+	// Everyone's runs over a range of days: the /admin overview, people and requests, and deploy/sentinel.sh.
+	await sql`create index if not exists runs_created_idx on runs (created_at)`;
 }
 
 export async function insertRun(run: RunRow) {

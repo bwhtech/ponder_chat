@@ -116,6 +116,8 @@ export async function migrateAuth() {
 	// Better Auth adds "role" with no default, so people who signed up before the admin plugin would have none.
 	await sql`alter table users alter column role set default 'user'`;
 	await sql`update users set role = 'user' where role is null`;
+	// Ponder matches emails without case (invites, /admin, scripts/admin.ts); the unique index on email can't serve lower(email).
+	await sql`create index if not exists users_email_lower on users (lower(email))`;
 }
 
 /**

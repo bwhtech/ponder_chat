@@ -27,6 +27,8 @@ export async function migrateExtraCredits() {
 		)`;
 	await sql`create unique index if not exists credit_requests_one_pending on credit_requests (user_id) where status = 'pending'`;
 	await sql`create index if not exists credit_requests_user on credit_requests (user_id, created_at desc)`;
+	// The answered requests on /admin, Requests, newest first.
+	await sql`create index if not exists credit_requests_decided on credit_requests (decided_at desc) where status <> 'pending'`;
 	await sql`
 		create table if not exists credit_grants (
 			id integer primary key generated always as identity,
@@ -38,6 +40,8 @@ export async function migrateExtraCredits() {
 			created_at timestamptz not null default now()
 		)`;
 	await sql`create index if not exists credit_grants_user_day on credit_grants (user_id, day)`;
+	// Everyone's grants for one day: the limits on /admin and in deploy/sentinel.sh.
+	await sql`create index if not exists credit_grants_day on credit_grants (day)`;
 }
 
 /** Extra credits a person got for one UTC day ("2026-11-05"). */
