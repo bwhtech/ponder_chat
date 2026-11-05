@@ -166,6 +166,40 @@ function turnStart(list: UIMessage[], index: number) {
 	return start;
 }
 
+// A new chat opens with the field in the middle of the page, under the greeting (on phones it
+// stays at the bottom, by the thumb and the keyboard). The first message sends it down.
+const landing = computed(() => messages.value.length === 0);
+const area = ref<HTMLElement | null>(null);
+const footer = ref<HTMLElement | null>(null);
+let footerTop = 0;
+// Before the page re-renders: where the field is now.
+watch(landing, () => (footerTop = footer.value?.getBoundingClientRect().top ?? 0), { flush: "pre" });
+watch(landing, (now) => !now && settleFooter(), { flush: "post" });
+
+/** The field moves from where it was to its place at the bottom; the conversation fades in. */
+function settleFooter() {
+	const field = footer.value;
+	if (!field) return;
+	const shift = footerTop - field.getBoundingClientRect().top;
+	const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
+	if (Math.abs(shift) > 1 && !still) {
+		field.animate([{ transform: `translateY(${shift}px)` }, { transform: "none" }], {
+			duration: 400,
+			easing: "cubic-bezier(0.32, 0.72, 0, 1)",
+		});
+	}
+	area.value
+		?.querySelector("[data-slot=conversation]")
+		?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 250, delay: still ? 0 : 150, easing: "ease-out", fill: "backwards" });
+}
+
+/** The greeting fades out where it stood, out of the layout, so it does not hold the field up. */
+function pinInPlace(element: Element) {
+	const el = element as HTMLElement;
+	const { top, left, width, height } = el.getBoundingClientRect();
+	Object.assign(el.style, { position: "fixed", top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` });
+}
+
 const busy = computed(() => status.value === "submitted" || status.value === "streaming");
 const lastMessage = computed(() => messages.value[messages.value.length - 1]);
 // The copy of the thread on this device follows the chat: written when a reply ends, or when
@@ -304,14 +338,17 @@ function replyModel(message: UIMessage) {
 </script>
 
 <template>
-	<div class="relative min-h-0 flex-1">
-		<ConversationEmptyState
-			v-if="messages.length === 0"
-			icon="lucide-message-circle"
-			title="What's on your mind?"
-			description="Ask anything. Pick a model below; bigger models use more of your daily credits."
-		/>
-		<Conversation v-else>
+	<div ref="area" class="relative min-h-0 flex-1">
+		<Transition leave-active-class="transition-opacity duration-150 ease-out" leave-to-class="opacity-0" @before-leave="pinInPlace">
+			<ConversationEmptyState
+				v-if="landing"
+				class="sm:justify-end sm:pb-6"
+				icon="lucide-message-circle"
+				title="What's on your mind?"
+				description="Ask anything. Pick a model below; bigger models use more of your daily credits."
+			/>
+		</Transition>
+		<Conversation v-if="!landing">
 			<ConversationContent class="mx-auto w-full max-w-[770px] px-3 pb-6 pt-6 sm:px-5">
 				<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">
 					<Button variant="ghost" size="sm" icon-left="lucide-chevrons-up" @click="showEarlier">
@@ -383,8 +420,9 @@ function replyModel(message: UIMessage) {
 		</Conversation>
 	</div>
 
-	<footer class="mx-auto w-full max-w-[770px] shrink-0 space-y-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
-		<Suggestions v-if="messages.length === 0 && !outOfCredits">
+	<footer ref="footer" class="mx-auto flex w-full max-w-[770px] shrink-0 flex-col gap-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+		<!-- Above the field on phones; under it in the middle of the page. -->
+		<Suggestions v-if="landing && !outOfCredits" class="sm:order-last">
 			<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
 		</Suggestions>
 		<Alert
@@ -419,4 +457,6 @@ function replyModel(message: UIMessage) {
 			</PromptInput>
 		</div>
 	</footer>
+	<!-- As tall as the space above, so the greeting and the field sit in the middle. -->
+	<div v-if="landing" class="hidden flex-1 sm:block" aria-hidden="true" />
 </template>
