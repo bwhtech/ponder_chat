@@ -1,5 +1,6 @@
 import type { ModelMessage } from "ai";
 import type { RunPythonInput } from "../python/schema.ts";
+import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 
 /**
  * The chat workflow's steps. Each is recorded in Postgres when it finishes; after a
@@ -29,6 +30,18 @@ export async function runPythonStep(input: RunPythonInput, threadId: string, own
 	"use step";
 	const { executeRunPython } = await import("../python/tool.ts");
 	return executeRunPython(input, { threadId, owner });
+}
+
+export async function webSearchStep(input: WebSearchInput, threadId: string, owner: string) {
+	"use step";
+	const { executeWebSearch } = await import("../search/tool.ts");
+	return executeWebSearch(input, { threadId, owner });
+}
+
+export async function webFetchStep(input: WebFetchInput) {
+	"use step";
+	const { executeWebFetch } = await import("../search/tool.ts");
+	return executeWebFetch(input);
 }
 
 export async function saveReplyStep(threadId: string, owner: string, runId: string, model: string, failed = false) {

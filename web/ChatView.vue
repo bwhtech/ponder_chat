@@ -11,6 +11,7 @@ import { canUndo, fetchThreadSaves, undoSave, type MemoryOperation, type MemoryS
 import { closeOpenCalls, queueFor, waitingOnPerson, type Queued } from "./message-queue";
 import { features, model, modelName, models } from "./models";
 import RunPythonPart from "./RunPythonPart.vue";
+import WebToolPart from "./WebToolPart.vue";
 import { useThreads } from "./threads";
 import {
 	Conversation,
@@ -133,7 +134,7 @@ const uploadError = ref("");
 // What the server can pass to the model; spreadsheets only when Python can read them.
 const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
 // A Python run shows its code, what it printed, and the files it made.
-provideToolRenderers({ run_python: RunPythonPart });
+provideToolRenderers({ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart });
 const suggestions = computed(() => [
 	"Explain a concept like I'm new to it",
 	"Help me write a polite follow-up email",

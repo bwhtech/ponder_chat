@@ -12,6 +12,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - Attached images, PDFs and text files go to the model. Each file is private to the person who attached it: the download link, the model and Python read only the owner's files.
 - Each reply is a durable workflow run (Workflow SDK, Postgres World). A reload, a dropped connection, a deploy or a crash does not end it: the page reconnects and the reply finishes. Messages sent during a reply wait in a queue.
 - Python: the model can run Python (pandas, matplotlib and more) in a Pyodide sandbox. Attached CSV and Excel files go in as inputs; charts and files come back into the chat.
+- Web search: the model can search the web (`web_search`) and read a page (`web_fetch`). See "Web search" below.
 - Memory across chats: after each reply, Ponder decides whether the person said something about themselves worth keeping. A note under the reply shows what it kept, with Undo, and the Memory page lists every memory and decision. See `docs/memory.md`.
 - Daily credits (see below).
 
@@ -24,6 +25,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`).
 - The calls that write chat names are recorded in `runs` but are not charged to credits.
+- Each web search is a `runs` row (`function_id` `web-search`) and is charged: about $0.007, so 7 credits.
 - The count starts again at midnight UTC.
 - Before each reply, the server adds up today's cost. When nothing is left, it answers 402 and the page shows when credits refill.
 - Nothing is reserved before a reply. The last reply of the day can go a little past the limit.
@@ -50,6 +52,13 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 
 `sandbox/pyodide/` is adapted from LangChain's pyodide-sandbox (MIT): each run is a new Deno process with no permissions except reading Pyodide and the vendored packages. No network, no environment, no writes, no subprocesses. Variables, imports and files in `/work` are kept per chat in Postgres (`python_state`). Set up once with `npm run sandbox:setup` (needs Deno and uv). Limits: `PYTHON_MAX_RUNS` (3 at once), `PYTHON_MEMORY_MB` (1536), 60 seconds a run.
 
+## Web search
+
+The model sees two tools of our own (`server/search/schema.ts`), whatever runs them behind:
+
+- `web_search`: a backend from `SEARCH_BACKEND` (`server/search/backend.ts`). The only one now is `openrouter`: a cheap model (`PONDER_SEARCH_MODEL`) makes one search with OpenRouter's `web_search` server tool on Exa, and its citations are the results. It needs no other API key. The model call goes to a Zero Data Retention endpoint, but Exa keeps queries by its own rules. For more privacy later: a search API with a zero-retention contract (Brave, Exa or Parallel enterprise) or a SearXNG we host, as one more backend.
+- `web_fetch`: reads the page on our own server (`server/search/fetch-page.ts`), so no other company sees it. It refuses every address on this machine, the tailnet and private networks, checked when each connection opens and on each redirect. Only ports 80 and 443; at most 3 MB and 20,000 characters of text.
+
 ## Run it
 
 Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY`, `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings.
@@ -63,7 +72,7 @@ npm run build
 ./start.sh        # http://127.0.0.1:3500
 ```
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, and `npx tsx server/memory.check.ts`.
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/memory.check.ts`, and `npx tsx server/search.check.ts [--live]`.
 
 ## Code
 
