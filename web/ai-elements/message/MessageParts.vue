@@ -3,6 +3,7 @@ import type { ReasoningUIPart, SourceUrlUIPart, UIMessage } from "ai";
 import { computed } from "vue";
 import Attachment from "../attachment/Attachment.vue";
 import Bubble from "../bubble/Bubble.vue";
+import { viewOnClick } from "../file-viewer/viewer";
 import BubbleContent from "../bubble/BubbleContent.vue";
 import ConfirmationBatch from "../confirmation/ConfirmationBatch.vue";
 import ReasoningPart from "../reasoning/ReasoningPart.vue";
@@ -187,6 +188,7 @@ function isStreamingText(part: Part) {
 					:href="file.url"
 					target="_blank"
 					rel="noreferrer noopener"
+					@click="viewOnClick($event, { name: file.filename ?? 'Image', url: file.url, mediaType: file.mediaType })"
 					class="block size-24 overflow-hidden rounded-6 border border-outline-gray-2 transition-transform duration-150 ease-out active:scale-[0.97]"
 				>
 					<img :src="file.url" :alt="file.filename ?? 'Image'" class="size-full object-cover" loading="lazy" />

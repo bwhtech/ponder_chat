@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
 import { computed } from "vue";
+import { viewOnClick } from "../file-viewer/viewer";
 
 /** A file chip: an icon or image preview, the name and size, and an optional remove button. */
 const props = withDefaults(
@@ -60,6 +61,7 @@ function formatSize(bytes?: number) {
 		:target="isLink ? '_blank' : undefined"
 		:rel="isLink ? 'noreferrer noopener' : undefined"
 		:title="name"
+		@click="isLink && url && viewOnClick($event, { name, url, mediaType: mediaType ?? '' })"
 		:aria-busy="state === 'uploading' || undefined"
 		class="group/attachment relative flex w-fit min-w-44 max-w-64 items-center gap-2.5 rounded-6 border border-outline-gray-2 bg-surface-base p-1.5 pr-3 data-[state=error]:border-outline-red-3 [&:is(a)]:transition-[background-color,transform] [&:is(a)]:duration-150 [&:is(a)]:ease-out [&:is(a):hover]:bg-surface-gray-1 [&:is(a):active]:scale-[0.98]"
 	>

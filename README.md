@@ -10,6 +10,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - Each reply shows the model that wrote it.
 - Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter.ts`), so no provider keeps or trains on what people write. The selector shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
 - Attached images, PDFs and text files go to the model. Each file is private to the person who attached it: the download link, the model and Python read only the owner's files.
+- A click on an attached PDF or image opens it over the chat (`web/ai-elements/file-viewer/`). pdf.js loads only the first time a PDF opens, and each page draws when it comes near the screen. Cmd- or Ctrl-click still opens the file in a new tab.
 - Each reply is a durable workflow run (Workflow SDK, Postgres World). A reload, a dropped connection, a deploy or a crash does not end it: the page reconnects and the reply finishes. Messages sent during a reply wait in a queue.
 - Python: the model can run Python (pandas, matplotlib and more) in a Pyodide sandbox. Attached CSV and Excel files go in as inputs; charts and files come back into the chat.
 - Web search: the model can search the web (`web_search`) and read a page (`web_fetch`). See "Web search" below.

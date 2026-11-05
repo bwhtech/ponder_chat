@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Attachment } from "./ai-elements/attachment";
+import { viewOnClick } from "./ai-elements/file-viewer";
 import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockTitle } from "./ai-elements/code-block";
 import { Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "./ai-elements/tool";
 
@@ -48,7 +49,15 @@ const printed = computed(() => [output.value?.stdout, failed.value ? output.valu
 				<ToolOutput v-if="part.state === 'output-error'" :output="undefined" :error-text="part.errorText" />
 			</ToolContent>
 		</Tool>
-		<a v-for="image in images" :key="image.url" :href="image.url" target="_blank" rel="noopener" class="block w-fit max-w-full">
+		<a
+			v-for="image in images"
+			:key="image.url"
+			:href="image.url"
+			target="_blank"
+			rel="noopener"
+			class="block w-fit max-w-full"
+			@click="viewOnClick($event, { name: image.name, url: image.url, mediaType: image.media_type })"
+		>
 			<img :src="image.url" :alt="image.name" class="max-h-[420px] max-w-full rounded-6 border border-outline-gray-1" loading="lazy" />
 		</a>
 		<div v-if="others.length" class="flex flex-wrap gap-2">

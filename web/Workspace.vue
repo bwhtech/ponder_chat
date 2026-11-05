@@ -3,6 +3,7 @@ import { BottomSheet, Button, Dialog, Sidebar, SidebarHeader, SidebarItem, Skele
 import { ref } from "vue";
 import { me, refreshCredits, signOut } from "./account";
 import ChatView from "./ChatView.vue";
+import { FileViewer } from "./ai-elements/file-viewer";
 import ColorSchemeSwitcher from "./ColorSchemeSwitcher.vue";
 import CreditMeter from "./CreditMeter.vue";
 import MemoryView from "./MemoryView.vue";
@@ -119,6 +120,8 @@ function onSaved() {
 				<ColorSchemeSwitcher fluid />
 			</div>
 		</BottomSheet>
+
+		<FileViewer />
 
 		<Dialog v-model:open="settingsOpen" title="Settings" size="md">
 			<div class="flex flex-col gap-6" data-slot="settings">
