@@ -50,6 +50,25 @@ const emit = defineEmits<{
 	openMemory: [];
 }>();
 
+// The model for this chat: the one that wrote its last reply, so going back to a chat
+// brings back its model. A new chat starts on the model picked last (models.ts), and a
+// pick here becomes the one new chats start on.
+const threadModel = ref(lastReplyModel(props.initialMessages) ?? model.value);
+watch(threadModel, (id) => id && (model.value = id));
+// A model that left the list falls back to the one picked last.
+watch(
+	models,
+	(options) => {
+		if (options.length && !options.some((option) => option.id === threadModel.value)) threadModel.value = model.value;
+	},
+	{ immediate: true },
+);
+
+function lastReplyModel(messages: UIMessage[]) {
+	const reply = messages.findLast((message) => message.role === "assistant" && replyModelId(message));
+	return reply && replyModelId(reply);
+}
+
 const { messages, sendMessage, status, error, stop, regenerate, resumeStream } = useChat({
 	id: props.threadId,
 	messages: props.initialMessages,
@@ -60,7 +79,7 @@ const { messages, sendMessage, status, error, stop, regenerate, resumeStream } =
 		api: "/api/chat",
 		prepareSendMessagesRequest: ({ id, messages }) => ({
 			headers: { "Content-Type": "application/json" },
-			body: { id, messages, model: model.value },
+			body: { id, messages, model: threadModel.value },
 		}),
 		fetch: patientFetch,
 	}),
@@ -377,8 +396,12 @@ function replyText(message: UIMessage) {
 
 /** The model that wrote a reply, from the metadata the server attaches. */
 function replyModel(message: UIMessage) {
-	const id = (message.metadata as { model?: string } | undefined)?.model;
+	const id = replyModelId(message);
 	return id ? (modelName(id) ?? id) : undefined;
+}
+
+function replyModelId(message: UIMessage) {
+	return (message.metadata as { model?: string } | undefined)?.model;
 }
 </script>
 
@@ -497,7 +520,7 @@ function replyModel(message: UIMessage) {
 				<PromptInputFooter>
 					<PromptInputTools>
 						<PromptInputAttachButton />
-						<ModelSelector v-if="models.length" v-model="model" :models="models" label="Model" />
+						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
 						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-4">Uploading…</span>
 					</PromptInputTools>
 					<PromptInputSubmit />

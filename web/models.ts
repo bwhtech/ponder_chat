@@ -2,9 +2,9 @@ import { ref, watch } from "vue";
 import type { ModelOption } from "./ai-elements";
 
 /**
- * The models a person can pick (server/models.ts), and the one they picked. The choice
- * is kept in this browser and goes with every chat request, so a switch applies from
- * the next message, in any thread.
+ * The models a person can pick (server/models.ts), and the one they picked last. The
+ * choice is kept in this browser. A new chat starts on it; an old chat starts on the
+ * model of its last reply (ChatView.vue).
  */
 const KEY = "ponder-chat:model";
 
