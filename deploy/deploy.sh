@@ -4,7 +4,7 @@
 # builds, migrates, switches and checks health, and rolls back if the check fails.
 set -euo pipefail
 HOST=${1:?Usage: deploy/deploy.sh deploy@<server>}
-KEY=${SSH_KEY:-$HOME/.ssh/seva_chat_deploy}
+KEY=${SSH_KEY:-$HOME/.ssh/ponder_chat_deploy}
 cd "$(dirname "$0")/.."
 RELEASE=$(date -u +%Y%m%d-%H%M%S)-$(git rev-parse --short HEAD 2>/dev/null || echo nogit)
 DIRTY=$(git status --porcelain 2>/dev/null | wc -l)
@@ -18,5 +18,5 @@ rsync -az --delete -e "$SSH" \
 	--exclude .git --exclude node_modules --exclude .output --exclude .nitro --exclude dist \
 	--exclude 'sandbox/pyodide/node_modules' --exclude 'sandbox/pyodide/vendor' --exclude 'sandbox/pyodide/.deno' \
 	--exclude .devtools --exclude data \
-	./ "$RSYNC_HOST:/srv/seva-chat/releases/$RELEASE/"
-$SSH "$HOST" "bash /srv/seva-chat/releases/$RELEASE/deploy/release.sh $RELEASE"
+	./ "$RSYNC_HOST:/srv/ponder-chat/releases/$RELEASE/"
+$SSH "$HOST" "bash /srv/ponder-chat/releases/$RELEASE/deploy/release.sh $RELEASE"

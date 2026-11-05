@@ -13,7 +13,7 @@ import { forgetThread, peekThread, readThread, writeThread, type CachedThread } 
  */
 export type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number };
 
-const LIST_KEY = "seva-chat:threads";
+const LIST_KEY = "ponder-chat:threads";
 const threads = ref<ThreadSummary[]>([]);
 /** The list came from the server, or from this device: until then the sidebar shows skeleton rows. */
 const listLoaded = ref(false);

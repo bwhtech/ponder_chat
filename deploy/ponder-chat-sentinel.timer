@@ -1,5 +1,5 @@
 [Unit]
-Description=Seva Chat checks every 5 minutes
+Description=Ponder Chat checks every 5 minutes
 
 [Timer]
 OnBootSec=2min

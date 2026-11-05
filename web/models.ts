@@ -6,7 +6,7 @@ import type { ModelOption } from "./ai-elements";
  * is kept in this browser and goes with every chat request, so a switch applies from
  * the next message, in any thread.
  */
-const KEY = "seva-chat:model";
+const KEY = "ponder-chat:model";
 
 export const models = ref<ModelOption[]>([]);
 export const model = ref(localStorage.getItem(KEY) ?? "");

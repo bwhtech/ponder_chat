@@ -33,10 +33,8 @@ async function send() {
 	<main class="flex min-h-dvh items-center justify-center bg-surface-base px-4 text-ink-gray-8" data-slot="sign-in">
 		<div class="flex w-full max-w-sm flex-col gap-6">
 			<div class="flex flex-col items-center gap-3 text-center">
-				<span class="flex size-10 items-center justify-center rounded-full bg-surface-green-2">
-					<span class="lucide-sprout size-5 text-ink-green-6" aria-hidden="true" />
-				</span>
-				<h1 class="text-2xl-semibold text-ink-gray-9">Sign in to Seva Chat</h1>
+				<img src="/logo.png" alt="" class="size-12" />
+				<h1 class="text-2xl-semibold text-ink-gray-9">Sign in to Ponder Chat</h1>
 				<p class="text-p-base text-ink-gray-6">We'll email you a link. No password needed.</p>
 			</div>
 

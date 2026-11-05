@@ -1,5 +1,5 @@
-# Seva Chat behind Caddy, which gets and renews the HTTPS certificate.
-# Installed by deploy/release.sh, with DOMAIN from /srv/seva-chat/domain.
+# Ponder Chat behind Caddy, which gets and renews the HTTPS certificate.
+# Installed by deploy/release.sh, with DOMAIN from /srv/ponder-chat/domain.
 {$DOMAIN} {
 	# The workflow's internal route has no authentication. The worker reaches it on
 	# 127.0.0.1; nobody outside may.
@@ -28,7 +28,7 @@
 	}
 
 	log {
-		output file /var/log/caddy/seva-chat.log {
+		output file /var/log/caddy/ponder-chat.log {
 			roll_size 50MiB
 			roll_keep 5
 		}

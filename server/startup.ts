@@ -34,11 +34,11 @@ export async function startup() {
 	const world = await getWorld();
 	await world.start?.();
 	stopCleanly(world);
-	console.log(`Seva Chat is ready. Python is ${(await pythonReady) ? "on" : "off"}.`);
+	console.log(`Ponder Chat is ready. Python is ${(await pythonReady) ? "on" : "off"}.`);
 }
 
 /**
- * Waits until no other Seva Chat server runs workflow workers on this database, and then
+ * Waits until no other Ponder Chat server runs workflow workers on this database, and then
  * holds a lock that says so for as long as this process lives. Postgres frees the lock
  * when the process's connection closes, even after a crash. A new server started while
  * the old one is still stopping waits here, so the two never run the same step at once,

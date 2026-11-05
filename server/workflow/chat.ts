@@ -78,7 +78,7 @@ export async function chatTurn(turn: ChatTurn) {
 }
 
 function instructions({ model, today, python }: ChatTurn) {
-	return `You are Seva, a helpful assistant. You run on ${model.name}. Today is ${today}.
+	return `You are Ponder, a helpful assistant. You run on ${model.name}. Today is ${today}.
 
 Answer clearly and directly. Use Markdown when it helps: lists, tables, and code blocks with a language. Keep answers as short as the question allows. If you are not sure, say so.${
 		python

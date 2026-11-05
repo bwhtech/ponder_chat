@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Sets up a fresh Ubuntu server (24.04 or later) for Seva Chat. Run once as root:
+# Sets up a fresh Ubuntu server (24.04 or later) for Ponder Chat. Run once as root:
 #   DOMAIN=chat.example.org DEPLOY_KEY="ssh-ed25519 ..." bash provision.sh
 # Safe to run again: each step checks what is there first.
 set -euo pipefail
 
 DOMAIN=${DOMAIN:?Set DOMAIN, such as chat.example.org (or <ip>.sslip.io until DNS is ready)}
 DEPLOY_KEY=${DEPLOY_KEY:?Set DEPLOY_KEY to the public SSH key that deploys}
-APP=seva-chat
-DB=seva_chat
+APP=ponder-chat
+DB=ponder_chat
 export DEBIAN_FRONTEND=noninteractive
 
 step() { printf '\n== %s\n' "$*"; }
@@ -45,7 +45,7 @@ ufw allow OpenSSH && ufw allow 80/tcp && ufw allow 443/tcp && ufw --force enable
 systemctl enable --now fail2ban
 
 step "Security updates, with a reboot at 04:30 when one needs it (replies survive restarts)"
-cat > /etc/apt/apt.conf.d/52seva-unattended <<'CONF'
+cat > /etc/apt/apt.conf.d/52ponder-unattended <<'CONF'
 Unattended-Upgrade::Automatic-Reboot "true";
 Unattended-Upgrade::Automatic-Reboot-Time "04:30";
 CONF
@@ -53,7 +53,7 @@ systemctl enable --now unattended-upgrades
 
 step "Logs: kept across reboots, at most 1 GB"
 mkdir -p /etc/systemd/journald.conf.d
-printf '[Journal]\nStorage=persistent\nSystemMaxUse=1G\n' > /etc/systemd/journald.conf.d/90-seva.conf
+printf '[Journal]\nStorage=persistent\nSystemMaxUse=1G\n' > /etc/systemd/journald.conf.d/90-ponder.conf
 systemctl restart systemd-journald
 
 step "Node.js 24"
@@ -83,7 +83,7 @@ fi
 apt-get install -yq postgresql-18 postgresql-18-pgvector
 # Memory settings from the server's RAM: a quarter for shared buffers.
 MEM_MB=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
-cat > /etc/postgresql/18/main/conf.d/90-seva.conf <<CONF
+cat > /etc/postgresql/18/main/conf.d/90-ponder.conf <<CONF
 listen_addresses = 'localhost'
 shared_buffers = $((MEM_MB / 4))MB
 effective_cache_size = $((MEM_MB * 3 / 4))MB
@@ -109,13 +109,13 @@ DATABASE_URL=postgres://$DB:$DB_PASSWORD@127.0.0.1:5432/$DB
 WORKFLOW_TARGET_WORLD=@workflow/world-postgres
 WORKFLOW_POSTGRES_URL=postgres://$DB:$DB_PASSWORD@127.0.0.1:5432/$DB
 WORKFLOW_POSTGRES_APPLICATION_MANAGED_SHUTDOWN=1
-SEVA_HOSTS=$DOMAIN
-SEVA_DENO=/usr/local/bin/deno
-SEVA_DENO_DIR=/var/cache/$APP/deno
+PONDER_HOSTS=$DOMAIN
+PONDER_DENO=/usr/local/bin/deno
+PONDER_DENO_DIR=/var/cache/$APP/deno
 BETTER_AUTH_SECRET=$(openssl rand -base64 32)
 OPENROUTER_API_KEY=FILL_IN
 # Sign-in emails (Cloudflare Email Service). Without them, links only go to the log.
-SEVA_EMAIL_FROM=FILL_IN
+PONDER_EMAIL_FROM=FILL_IN
 CLOUDFLARE_ACCOUNT_ID=FILL_IN
 CLOUDFLARE_EMAIL_TOKEN=FILL_IN
 CHAT_DAILY_CREDITS=100

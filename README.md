@@ -1,4 +1,4 @@
-# Seva Chat
+# Ponder Chat
 
 A proof of concept: a general chat app on OpenRouter models, with a daily credit limit for each person. It started as a copy of `../platform` with the Frappe parts removed (sites, MCP, skills, memory, plans, Studio, Python, generated UI).
 
@@ -49,12 +49,12 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 
 ## Run it
 
-Secrets are in `~/.config/seva-chat/.env` (mode 600): `DATABASE_URL` (database `seva_chat`), `OPENROUTER_API_KEY`, `BETTER_AUTH_SECRET`, `SEVA_HOSTS`, and the credit settings.
+Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY`, `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings.
 
 ```bash
 npm install
 npm run sandbox:setup                                  # once: Pyodide and its packages
-set -a; . ~/.config/seva-chat/.env; set +a
+set -a; . ~/.config/ponder-chat/.env; set +a
 WORKFLOW_POSTGRES_URL=$DATABASE_URL npx --no-install bootstrap   # once, and after upgrades
 npm run build
 ./start.sh        # http://127.0.0.1:3500

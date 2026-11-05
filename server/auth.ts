@@ -7,20 +7,20 @@ import { isAllowed } from "./invites.ts";
 
 /**
  * Sign-in: Better Auth with magic links only (no passwords). People, sessions and links
- * live in Seva's Postgres. A session is a cookie on Seva's own domain, cached in the
+ * live in Ponder's Postgres. A session is a cookie on Ponder's own domain, cached in the
  * cookie for five minutes so most requests skip the session lookup.
  *
- * BETTER_AUTH_SECRET signs the cookies. SEVA_HOSTS lists the hosts Seva answers on
- * (comma-separated, such as "seva.example.org"); links in emails use the host the
+ * BETTER_AUTH_SECRET signs the cookies. PONDER_HOSTS lists the hosts Ponder answers on
+ * (comma-separated, such as "chat.example.org"); links in emails use the host the
  * person signed in from.
  */
-const hosts = (process.env.SEVA_HOSTS ?? `localhost:${process.env.PORT ?? 3500},127.0.0.1:${process.env.PORT ?? 3500}`)
+const hosts = (process.env.PONDER_HOSTS ?? `localhost:${process.env.PORT ?? 3500},127.0.0.1:${process.env.PORT ?? 3500}`)
 	.split(",")
 	.map((host) => host.trim())
 	.filter(Boolean);
 
 export const auth = betterAuth({
-	appName: "Seva Chat",
+	appName: "Ponder Chat",
 	database: new Pool({ connectionString: process.env.DATABASE_URL, max: 5 }),
 	baseURL: { allowedHosts: hosts },
 	trustedOrigins: hosts.flatMap((host) => [`https://${host}`, `http://${host}`]),

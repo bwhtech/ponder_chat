@@ -1,7 +1,7 @@
 {
-  "name": "seva-chat",
+  "name": "ponder-chat",
   "version": "1.0.0",
-  "description": "Seva Chat: a chat app on OpenRouter models, with a daily credit limit per person.",
+  "description": "Ponder Chat: a chat app on OpenRouter models, with a daily credit limit per person.",
   "main": "index.js",
   "scripts": {
     "build": "vite build && nitro build",

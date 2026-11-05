@@ -6,7 +6,7 @@ import { onBeforeUnmount, watch, type Ref } from "vue";
  * at once when the chat closes or the page unloads. Sending clears the field, and so the
  * draft. Only the text: attached files are not kept. Adapted from T3 Code's composer drafts.
  */
-const KEY = "seva-chat:drafts:v1";
+const KEY = "ponder-chat:drafts:v1";
 const SAVE_AFTER_MS = 300;
 /** The most drafts kept; the oldest go first. */
 const MAX_DRAFTS = 50;

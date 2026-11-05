@@ -1,5 +1,5 @@
 [Unit]
-Description=Seva Chat daily summary
+Description=Ponder Chat daily summary
 
 [Service]
 Type=oneshot

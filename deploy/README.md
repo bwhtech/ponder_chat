@@ -1,9 +1,9 @@
 # Deploy: one Ubuntu VM
 
-Seva Chat runs on one VM: Caddy, the Node server (with the workflow worker in the same process), and PostgreSQL. Python runs in Deno processes that the server starts.
+Ponder Chat runs on one VM: Caddy, the Node server (with the workflow worker in the same process), and PostgreSQL. Python runs in Deno processes that the server starts.
 
 ```
-Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ seva-chat (Node, systemd) ──▶ PostgreSQL 18 (localhost)
+Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ ponder-chat (Node, systemd) ──▶ PostgreSQL 18 (localhost)
                    │                          ├─ workflow worker (graphile-worker, same DB)
                    └─ blocks /.well-known/workflow/*   └─ deno: Python sandbox, one process per run
 ```
@@ -13,7 +13,7 @@ Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ seva-chat (Node,
 | `provision.sh` | Sets up a fresh server once, as root. Can run again. |
 | `deploy.sh` | Runs on the build machine. Copies the code and runs `release.sh` on the server. |
 | `release.sh` | Builds a release, migrates, switches, checks health, rolls back if the check fails. |
-| `seva-chat.service` | The systemd unit. |
+| `ponder-chat.service` | The systemd unit. |
 | `Caddyfile` | HTTPS, the blocked workflow route, and requests held during a restart. |
 | `backup.sh` + timer | A nightly dump, encrypted off-site copy, restore test on Sundays. |
 | `sentinel.sh` + timers | Checks every 5 minutes and a daily summary, sent to a phone through ntfy. |
@@ -30,13 +30,13 @@ Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ seva-chat (Node,
    ```
 
    After this, root cannot log in over SSH. Use `deploy@<ip>`.
-4. Fill in the `FILL_IN` values in `/etc/seva-chat/env`: the OpenRouter key and the email settings. Add `NOTIFY_URL` for alerts.
+4. Fill in the `FILL_IN` values in `/etc/ponder-chat/env`: the OpenRouter key and the email settings. Add `NOTIFY_URL` for alerts.
 5. Deploy: `deploy/deploy.sh deploy@<ip>`.
 6. Invite people:
 
    ```bash
    ssh deploy@<ip>
-   cd /srv/seva-chat/current && set -a && . /etc/seva-chat/env && set +a
+   cd /srv/ponder-chat/current && set -a && . /etc/ponder-chat/env && set +a
    npx tsx scripts/invite.ts add someone@example.org "Pilot group 1"
    ```
 
@@ -44,14 +44,14 @@ Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ seva-chat (Node,
 
 `deploy/deploy.sh deploy@<ip>` deploys the working tree, including files that are not committed (the script says how many). A deploy:
 
-1. Copies the code to `/srv/seva-chat/releases/<time>-<commit>/`.
+1. Copies the code to `/srv/ponder-chat/releases/<time>-<commit>/`.
 2. Runs `npm ci`. Sets up the Python sandbox, or reuses the previous release's when its package lists did not change. Builds.
 3. Runs the workflow migrations. The app runs its own migrations when it starts.
 4. Installs the units, the scripts and the Caddyfile from the release.
-5. Points `/srv/seva-chat/current` at the release and restarts the service.
+5. Points `/srv/ponder-chat/current` at the release and restarts the service.
 6. Waits up to 60 seconds for `/health`. If it fails, points `current` back at the previous release and restarts that one.
 
-To roll back by hand: `ln -sfn /srv/seva-chat/releases/<old> /srv/seva-chat/current && sudo systemctl restart seva-chat`. A release whose database migration changed tables may not run against the newer tables.
+To roll back by hand: `ln -sfn /srv/ponder-chat/releases/<old> /srv/ponder-chat/current && sudo systemctl restart ponder-chat`. A release whose database migration changed tables may not run against the newer tables.
 
 ## What survives what
 
@@ -71,7 +71,7 @@ To roll back by hand: `ln -sfn /srv/seva-chat/releases/<old> /srv/seva-chat/curr
 
 | Check | Alerts when |
 | --- | --- |
-| Services | `seva-chat`, `caddy` or `postgresql` is not running |
+| Services | `ponder-chat`, `caddy` or `postgresql` is not running |
 | Health | `/health` fails on 127.0.0.1, or on `https://<domain>` (Caddy, DNS, certificate) |
 | Disk, memory | The disk is 85% full; less than 10% of memory is free |
 | Backup | No backup in 26 hours |
@@ -85,11 +85,11 @@ The VM cannot report that it is down. Add a free external uptime check on `https
 
 To set up alerts, install the ntfy app on a phone and subscribe to a long random topic name. Set `NOTIFY_URL=https://ntfy.sh/<that name>`. Anyone who knows the name can read the alerts, and they have no chat content.
 
-Logs: `journalctl -u seva-chat -f`; Caddy's are in `/var/log/caddy/`. Workflow runs: `npx workflow inspect runs --backend @workflow/world-postgres` in `/srv/seva-chat/current` with the env loaded.
+Logs: `journalctl -u ponder-chat -f`; Caddy's are in `/var/log/caddy/`. Workflow runs: `npx workflow inspect runs --backend @workflow/world-postgres` in `/srv/ponder-chat/current` with the env loaded.
 
 ## Backups and restore
 
-Every night at 02:15 UTC, `backup.sh` makes a `pg_dump` in `/var/backups/seva-chat` and keeps 14. The database holds everything: accounts, chats, attached files, Python state and workflow runs.
+Every night at 02:15 UTC, `backup.sh` makes a `pg_dump` in `/var/backups/ponder-chat` and keeps 14. The database holds everything: accounts, chats, attached files, Python state and workflow runs.
 
 Off-site copies need `BACKUP_RCLONE_REMOTE` (an rclone remote, such as a Hetzner Storage Box or a bucket, set up with `sudo rclone config`) and `BACKUP_AGE_RECIPIENT` (an `age` public key). The script refuses to send a copy that is not encrypted. Keep the age private key off this server.
 
@@ -98,18 +98,18 @@ On Sundays, it restores the dump into a scratch database and counts the threads.
 To restore on a new server, provision it, then:
 
 ```bash
-age -d -i key.txt seva_chat-<time>.dump.age > seva_chat.dump
-sudo systemctl stop seva-chat
-sudo -u postgres dropdb seva_chat && sudo -u postgres createdb -O seva_chat seva_chat
-sudo -u postgres pg_restore --no-owner --role=seva_chat -d seva_chat seva_chat.dump
-sudo systemctl start seva-chat
+age -d -i key.txt ponder_chat-<time>.dump.age > ponder_chat.dump
+sudo systemctl stop ponder-chat
+sudo -u postgres dropdb ponder_chat && sudo -u postgres createdb -O ponder_chat ponder_chat
+sudo -u postgres pg_restore --no-owner --role=ponder_chat -d ponder_chat ponder_chat.dump
+sudo systemctl start ponder-chat
 ```
 
 ## Security
 
 - SSH: keys only, no root login, fail2ban. The firewall allows only 22, 80 and 443.
 - PostgreSQL and the app listen only on localhost. Caddy refuses `/.well-known/workflow/*`, which has no authentication.
-- The service runs as `seva-chat`, with a read-only system and no home folder. It can write only `/var/cache/seva-chat`.
-- Secrets are in `/etc/seva-chat/env` (root:seva-chat, mode 640).
+- The service runs as `ponder-chat`, with a read-only system and no home folder. It can write only `/var/cache/ponder-chat`.
+- Secrets are in `/etc/ponder-chat/env` (root:ponder-chat, mode 640).
 - The `deploy` user has passwordless sudo, so that deploys run unattended. Protect its key.
 - The pilot is invite-only (`scripts/invite.ts`).

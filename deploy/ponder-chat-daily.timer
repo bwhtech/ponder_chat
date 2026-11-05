@@ -1,5 +1,5 @@
 [Unit]
-Description=Seva Chat summary every morning at 03:30 UTC (09:00 IST)
+Description=Ponder Chat summary every morning at 03:30 UTC (09:00 IST)
 
 [Timer]
 OnCalendar=*-*-* 03:30:00 UTC

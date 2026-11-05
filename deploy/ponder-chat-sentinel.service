@@ -1,5 +1,5 @@
 [Unit]
-Description=Seva Chat checks and alerts
+Description=Ponder Chat checks and alerts
 
 [Service]
 Type=oneshot

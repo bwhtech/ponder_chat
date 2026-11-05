@@ -41,7 +41,7 @@ export async function signOut() {
 
 // Threads are kept on the device (thread-cache.ts, threads.ts) for whoever is signed in.
 // Another person signing in on the same browser starts with none of them.
-const CACHE_OWNER = "seva-chat:user";
+const CACHE_OWNER = "ponder-chat:user";
 
 function keepCachesFor(userId: string) {
 	if (localStorage.getItem(CACHE_OWNER) === userId) return;
@@ -50,7 +50,7 @@ function keepCachesFor(userId: string) {
 }
 
 function clearCaches() {
-	localStorage.removeItem("seva-chat:threads");
+	localStorage.removeItem("ponder-chat:threads");
 	localStorage.removeItem(CACHE_OWNER);
-	indexedDB?.deleteDatabase("seva-chat");
+	indexedDB?.deleteDatabase("ponder-chat");
 }

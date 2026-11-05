@@ -1,16 +1,16 @@
-# Seva Chat. Installed by deploy/release.sh.
+# Ponder Chat. Installed by deploy/release.sh.
 [Unit]
-Description=Seva Chat
+Description=Ponder Chat
 After=network-online.target postgresql.service
 Wants=network-online.target
 Requires=postgresql.service
 
 [Service]
 Type=simple
-User=seva-chat
-Group=seva-chat
-WorkingDirectory=/srv/seva-chat/current
-EnvironmentFile=/etc/seva-chat/env
+User=ponder-chat
+Group=ponder-chat
+WorkingDirectory=/srv/ponder-chat/current
+EnvironmentFile=/etc/ponder-chat/env
 ExecStart=/usr/bin/node .output/server/index.mjs
 # A crash restarts it in 2 seconds; replies in progress go on (durable workflow runs).
 Restart=always
@@ -18,8 +18,8 @@ RestartSec=2
 # On stop, the server finishes the step in progress for up to 10 seconds (server/startup.ts).
 KillSignal=SIGTERM
 TimeoutStopSec=20
-# Deno's cache for the Python sandbox: /var/cache/seva-chat.
-CacheDirectory=seva-chat
+# Deno's cache for the Python sandbox: /var/cache/ponder-chat.
+CacheDirectory=ponder-chat
 # Limits, so a runaway cannot take the database down with it.
 MemoryMax=75%
 TasksMax=512

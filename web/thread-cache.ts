@@ -11,7 +11,7 @@ export type CachedThread = { messages: UIMessage[]; running: boolean; etag: stri
 const memory = new Map<string, CachedThread>();
 /** Threads kept in IndexedDB, most recently opened first. */
 const KEEP = 30;
-const DB = "seva-chat";
+const DB = "ponder-chat";
 const STORE = "threads";
 
 let db: Promise<IDBDatabase | null> | undefined;

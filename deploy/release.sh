@@ -2,7 +2,7 @@
 # Runs on the server as `deploy`, from deploy/deploy.sh. Builds one release and makes it live.
 set -euo pipefail
 RELEASE=${1:?release name}
-ROOT=/srv/seva-chat
+ROOT=/srv/ponder-chat
 DIR=$ROOT/releases/$RELEASE
 PREVIOUS=$(readlink -f $ROOT/current 2>/dev/null || true)
 step() { printf '\n== %s\n' "$*"; }
@@ -26,25 +26,25 @@ step "Build"
 npm run build --silent
 
 step "Database migrations (the workflow tables; the app's own run at start-up)"
-set -a; . /etc/seva-chat/env; set +a
+set -a; . /etc/ponder-chat/env; set +a
 npx --no-install bootstrap
 
 step "Server config: systemd units, Caddy"
-sudo install -m 644 deploy/seva-chat.service deploy/seva-chat-backup.service deploy/seva-chat-backup.timer \
-	deploy/seva-chat-sentinel.service deploy/seva-chat-sentinel.timer deploy/seva-chat-daily.service deploy/seva-chat-daily.timer /etc/systemd/system/
+sudo install -m 644 deploy/ponder-chat.service deploy/ponder-chat-backup.service deploy/ponder-chat-backup.timer \
+	deploy/ponder-chat-sentinel.service deploy/ponder-chat-sentinel.timer deploy/ponder-chat-daily.service deploy/ponder-chat-daily.timer /etc/systemd/system/
 sudo install -m 755 deploy/backup.sh deploy/sentinel.sh /usr/local/bin/
 sed "s/{\$DOMAIN}/$(cat $ROOT/domain)/" deploy/Caddyfile | sudo tee /etc/caddy/Caddyfile >/dev/null
 # As the caddy user: validating opens the log file, and a file that root opens first is closed to Caddy.
 sudo install -d -o caddy -g caddy /var/log/caddy
 sudo -u caddy caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
 sudo systemctl daemon-reload
-sudo systemctl enable --now seva-chat-backup.timer seva-chat-sentinel.timer seva-chat-daily.timer >/dev/null
+sudo systemctl enable --now ponder-chat-backup.timer ponder-chat-sentinel.timer ponder-chat-daily.timer >/dev/null
 sudo systemctl reload caddy || sudo systemctl restart caddy
 
 step "Switch to $RELEASE and restart"
 ln -sfn "$DIR" $ROOT/current
-sudo systemctl enable seva-chat >/dev/null
-sudo systemctl restart seva-chat
+sudo systemctl enable ponder-chat >/dev/null
+sudo systemctl restart ponder-chat
 
 healthy() {
 	for _ in $(seq 1 60); do
@@ -57,11 +57,11 @@ if healthy; then
 	echo "Healthy. $RELEASE is live."
 else
 	echo "Not healthy after 60 seconds. The last log lines:"
-	sudo journalctl -u seva-chat -n 30 --no-pager
+	sudo journalctl -u ponder-chat -n 30 --no-pager
 	if [ -n "$PREVIOUS" ]; then
 		echo "Rolling back to $(basename "$PREVIOUS")"
 		ln -sfn "$PREVIOUS" $ROOT/current
-		sudo systemctl restart seva-chat
+		sudo systemctl restart ponder-chat
 		healthy && echo "Rolled back; the old release is healthy." || echo "The old release is not healthy either."
 	fi
 	exit 1

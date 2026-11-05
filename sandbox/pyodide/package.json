@@ -1,5 +1,5 @@
 {
-  "name": "seva-chat-pyodide-sandbox",
+  "name": "ponder-chat-pyodide-sandbox",
   "private": true,
   "type": "module",
   "dependencies": {

@@ -15,8 +15,8 @@ import { RUN_TIMEOUT_MS } from "./schema.ts";
  * and no subprocesses. setup.sh must have run once (`npm run sandbox:setup`).
  */
 // From the project folder, not this file: the server runs bundled from .output/.
-const DIR = `${resolve(process.env.SEVA_SANDBOX_DIR ?? "sandbox/pyodide")}/`;
-const DENO = process.env.SEVA_DENO ?? "deno";
+const DIR = `${resolve(process.env.PONDER_SANDBOX_DIR ?? "sandbox/pyodide")}/`;
+const DENO = process.env.PONDER_DENO ?? "deno";
 const MAX_RUNS = Number(process.env.PYTHON_MAX_RUNS ?? 3);
 const MEMORY_MB = Number(process.env.PYTHON_MEMORY_MB ?? 1536);
 
@@ -37,8 +37,8 @@ export type RunReply = {
 	packages: string[];
 };
 
-/** Python is on when the sandbox is set up and SEVA_PYTHON is not "off". */
-export const pythonEnabled = process.env.SEVA_PYTHON !== "off";
+/** Python is on when the sandbox is set up and PONDER_PYTHON is not "off". */
+export const pythonEnabled = process.env.PONDER_PYTHON !== "off";
 
 /** Checks at start-up that Deno and the cached packages are there. Turns Python off with a log line if not. */
 export async function checkSandbox(): Promise<boolean> {
@@ -57,7 +57,7 @@ export async function checkSandbox(): Promise<boolean> {
 		child.on("error", () => resolve(undefined));
 		child.on("close", (code) => resolve(code === 0 ? out.split("\n")[0] : undefined));
 	});
-	if (!version) console.warn(`python: Deno was not found (${DENO}). Set SEVA_DENO. Python is off.`);
+	if (!version) console.warn(`python: Deno was not found (${DENO}). Set PONDER_DENO. Python is off.`);
 	return Boolean(version);
 }
 
@@ -89,7 +89,7 @@ function runNow({ code, files, state, abortSignal }: RunRequest): Promise<RunRep
 			`${DIR}runner.ts`,
 		],
 		// No environment from the server: only what Deno needs to start.
-		{ cwd: DIR, env: { PATH: process.env.PATH ?? "", DENO_DIR: process.env.SEVA_DENO_DIR ?? `${DIR}.deno`, NO_COLOR: "1" }, stdio: ["pipe", "pipe", "pipe"], detached: true },
+		{ cwd: DIR, env: { PATH: process.env.PATH ?? "", DENO_DIR: process.env.PONDER_DENO_DIR ?? `${DIR}.deno`, NO_COLOR: "1" }, stdio: ["pipe", "pipe", "pipe"], detached: true },
 	);
 
 	return new Promise((resolve) => {

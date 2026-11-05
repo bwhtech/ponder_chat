@@ -1,5 +1,5 @@
 [Unit]
-Description=Seva Chat database backup
+Description=Ponder Chat database backup
 After=postgresql.service
 
 [Service]

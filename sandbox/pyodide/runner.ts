@@ -52,8 +52,8 @@ const VENDOR = new URL("./vendor", import.meta.url).pathname;
 const HELPERS = `
 import base64, importlib, sys, types
 
-def _seva_load_globals(data: str) -> None:
-    """Restores what _seva_dump_globals saved: the values, then the modules under the names the code gave them."""
+def _ponder_load_globals(data: str) -> None:
+    """Restores what _ponder_dump_globals saved: the values, then the modules under the names the code gave them."""
     import dill
     saved = dill.loads(base64.b64decode(data))
     main = vars(sys.modules["__main__"])
@@ -61,7 +61,7 @@ def _seva_load_globals(data: str) -> None:
         main[alias] = importlib.import_module(module)
     main.update(saved["values"])
 
-def _seva_dump_globals(max_bytes: int):
+def _ponder_dump_globals(max_bytes: int):
     """The code's variables as a dill snapshot. Values that cannot be saved (a generator, an open file) are left out by name."""
     import dill
     values, modules, skipped = {}, {}, []
@@ -131,7 +131,7 @@ async function run(request: Request): Promise<Reply> {
 			errorCallback: (text) => stderr.push(text),
 		});
 		pyodide.runPython(HELPERS);
-		if (request.state?.globals) helpers.get("_seva_load_globals")(request.state.globals);
+		if (request.state?.globals) helpers.get("_ponder_load_globals")(request.state.globals);
 		await pyodide.runPythonAsync(request.code);
 		reply.ok = true;
 	} catch (error) {
@@ -144,7 +144,7 @@ async function run(request: Request): Promise<Reply> {
 
 	// The state: what the next run in this thread starts with.
 	try {
-		const [globals, kept, skipped, imports] = helpers.get("_seva_dump_globals")(limits.maxStateBytes).toJs() as [string | undefined, string[], string[], string[]];
+		const [globals, kept, skipped, imports] = helpers.get("_ponder_dump_globals")(limits.maxStateBytes).toJs() as [string | undefined, string[], string[], string[]];
 		const files = collect(pyodide, "/work", 200, limits.maxStateBytes, ["/work/inputs", "/work/outputs"]);
 		reply.state = { globals: globals ?? undefined, imports, files: files.files };
 		const notes = [];

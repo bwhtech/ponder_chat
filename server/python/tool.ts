@@ -4,7 +4,7 @@ import type { RunPythonInput } from "./schema.ts";
 import { loadPythonState, savePythonState } from "./state.ts";
 
 /**
- * run_python: the model writes Python and Seva Chat runs it in the sandbox (pyodide.ts).
+ * run_python: the model writes Python and Ponder Chat runs it in the sandbox (pyodide.ts).
  * The chat workflow (server/workflow/chat.ts) gives the model this description and input
  * schema, and runs `executeRunPython` as a durable step.
  * Attached files go in /work/inputs; files the code writes to /work/outputs come back

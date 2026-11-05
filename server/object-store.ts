@@ -2,23 +2,23 @@ import { AwsClient } from "aws4fetch";
 
 /**
  * Where the bytes of attached files go: an S3-compatible bucket (Cloudflare R2 when
- * deployed) when SEVA_S3_BUCKET is set, with SEVA_S3_ENDPOINT, SEVA_S3_ACCESS_KEY_ID
- * and SEVA_S3_SECRET_ACCESS_KEY. Without it, files.ts keeps the bytes in Postgres.
+ * deployed) when PONDER_S3_BUCKET is set, with PONDER_S3_ENDPOINT, PONDER_S3_ACCESS_KEY_ID
+ * and PONDER_S3_SECRET_ACCESS_KEY. Without it, files.ts keeps the bytes in Postgres.
  *
  * For R2 the endpoint is https://<account id>.r2.cloudflarestorage.com and the keys
  * come from an R2 API token.
  */
-const bucket = process.env.SEVA_S3_BUCKET;
-const endpoint = process.env.SEVA_S3_ENDPOINT?.replace(/\/$/, "");
+const bucket = process.env.PONDER_S3_BUCKET;
+const endpoint = process.env.PONDER_S3_ENDPOINT?.replace(/\/$/, "");
 
 const client =
 	bucket && endpoint
 		? new AwsClient({
-				accessKeyId: process.env.SEVA_S3_ACCESS_KEY_ID ?? "",
-				secretAccessKey: process.env.SEVA_S3_SECRET_ACCESS_KEY ?? "",
+				accessKeyId: process.env.PONDER_S3_ACCESS_KEY_ID ?? "",
+				secretAccessKey: process.env.PONDER_S3_SECRET_ACCESS_KEY ?? "",
 				service: "s3",
 				// R2 takes "auto"; MinIO and others take any region.
-				region: process.env.SEVA_S3_REGION ?? "auto",
+				region: process.env.PONDER_S3_REGION ?? "auto",
 			})
 		: undefined;
 

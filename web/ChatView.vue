@@ -333,7 +333,7 @@ function replyModel(message: UIMessage) {
 				@stop="stopReply"
 			>
 				<PromptInputHeader />
-				<PromptInputTextarea placeholder="Message Seva Chat" autofocus />
+				<PromptInputTextarea placeholder="Message Ponder Chat" autofocus />
 				<PromptInputFooter>
 					<PromptInputTools>
 						<PromptInputAttachButton />

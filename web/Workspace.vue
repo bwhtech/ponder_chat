@@ -40,7 +40,7 @@ function onSaved() {
 	<div class="contents">
 		<div class="flex h-dvh bg-surface-base text-ink-gray-8">
 			<Sidebar class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
-				<SidebarHeader title="Seva Chat" />
+				<SidebarHeader title="Ponder Chat" logo="/logo.png" />
 				<div class="px-2 pb-2">
 					<SidebarItem label="New chat" icon="lucide-square-pen" @click="newThread" />
 				</div>

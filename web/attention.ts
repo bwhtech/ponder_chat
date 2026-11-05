@@ -1,18 +1,16 @@
 import { onBeforeUnmount, watch, type Ref } from "vue";
 
 /**
- * Tells a person who switched tabs that Seva Chat needs them: a count on the favicon and in
+ * Tells a person who switched tabs that Ponder Chat needs them: a count on the favicon and in
  * the page title. A reply that waits on them (an approval, questions, a plan) counts at
  * once. A finished reply counts only if no new one starts within 2 seconds, so a run that
  * ends and goes on (an approval answered by the server, a queued message) counts once.
  * The count clears when the tab is seen again. Adapted from T3 Code's thread notifications.
  */
 const FINISH_GRACE_MS = 2_000;
-const BASE_TITLE = "Seva Chat";
+const BASE_TITLE = "Ponder Chat";
 /** The favicon without a badge; index.html links the same one. */
-const ICON = `data:image/svg+xml,${encodeURIComponent(
-	'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#16794c"/><text x="32" y="45" font-family="system-ui,sans-serif" font-size="38" font-weight="700" fill="#fff" text-anchor="middle">S</text></svg>',
-)}`;
+const ICON = "/favicon.png";
 
 class Attention {
 	private count = 0;

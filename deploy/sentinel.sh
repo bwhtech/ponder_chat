@@ -1,35 +1,35 @@
 #!/usr/bin/env bash
-# Seva Chat's watchman. Every 5 minutes (seva-chat-sentinel.timer) it checks the server
+# Ponder Chat's watchman. Every 5 minutes (ponder-chat-sentinel.timer) it checks the server
 # and the app, and sends an alert to NOTIFY_URL (an ntfy topic) when something is wrong:
 # again every 6 hours while it stays wrong, and once when it is fixed.
-# With --daily (seva-chat-daily.timer) it sends a summary of the last day instead.
-# Without NOTIFY_URL, it writes to the journal only: journalctl -u seva-chat-sentinel
+# With --daily (ponder-chat-daily.timer) it sends a summary of the last day instead.
+# Without NOTIFY_URL, it writes to the journal only: journalctl -u ponder-chat-sentinel
 set -uo pipefail
-set -a; . "${SEVA_ENV:-/etc/seva-chat/env}"; set +a
-STATE=${SENTINEL_STATE:-/var/lib/seva-chat-sentinel}
+set -a; . "${PONDER_ENV:-/etc/ponder-chat/env}"; set +a
+STATE=${SENTINEL_STATE:-/var/lib/ponder-chat-sentinel}
 mkdir -p $STATE
-DOMAIN=$(cat /srv/seva-chat/domain 2>/dev/null || echo "")
+DOMAIN=$(cat /srv/ponder-chat/domain 2>/dev/null || echo "")
 HOSTNAME_SHORT=$(hostname -s)
 REPEAT_SECONDS=$((6 * 3600))
 
 notify() { # title, message, priority
 	echo "[$1] $2"
 	[ -n "${NOTIFY_URL:-}" ] || return 0
-	curl -fsS --max-time 10 -H "Title: $1" -H "Priority: ${3:-default}" -H "Tags: seva-chat" -d "$2" "$NOTIFY_URL" >/dev/null || echo "notify failed"
+	curl -fsS --max-time 10 -H "Title: $1" -H "Priority: ${3:-default}" -H "Tags: ponder-chat" -d "$2" "$NOTIFY_URL" >/dev/null || echo "notify failed"
 }
-sql() { sudo -u postgres psql -Atd seva_chat -c "$1" 2>/dev/null; }
+sql() { sudo -u postgres psql -Atd ponder_chat -c "$1" 2>/dev/null; }
 
 # alert KEY "message": a problem. ok KEY: no problem.
 alert() {
 	local file=$STATE/$1
 	if [ ! -f "$file" ] || [ $(( $(date +%s) - $(stat -c %Y "$file") )) -ge $REPEAT_SECONDS ]; then
-		notify "Seva Chat: $1 ($HOSTNAME_SHORT)" "$2" high
+		notify "Ponder Chat: $1 ($HOSTNAME_SHORT)" "$2" high
 		touch "$file"
 	fi
 }
 ok() {
 	if [ -f "$STATE/$1" ]; then
-		notify "Seva Chat: $1 resolved ($HOSTNAME_SHORT)" "Back to normal." low
+		notify "Ponder Chat: $1 resolved ($HOSTNAME_SHORT)" "Back to normal." low
 		rm -f "$STATE/$1"
 	fi
 }
@@ -48,9 +48,9 @@ if [ "${1:-}" = "--daily" ]; then
 	INVITED=$(sql "select count(*) from allowed_emails")
 	SIGNED_UP=$(sql "select count(*) from users")
 	DISK=$(df --output=pcent / | tail -1 | tr -d ' ')
-	BACKUP=$(cat /var/backups/seva-chat/last-backup 2>/dev/null || echo never)
-	RESTORE=$(cat /var/backups/seva-chat/last-restore-test 2>/dev/null || echo never)
-	notify "Seva Chat: daily summary" "Last 24 hours: $USERS people, $REPLIES replies ($FAILED failed), $CALLS model calls, \$$COST on OpenRouter.
+	BACKUP=$(cat /var/backups/ponder-chat/last-backup 2>/dev/null || echo never)
+	RESTORE=$(cat /var/backups/ponder-chat/last-restore-test 2>/dev/null || echo never)
+	notify "Ponder Chat: daily summary" "Last 24 hours: $USERS people, $REPLIES replies ($FAILED failed), $CALLS model calls, \$$COST on OpenRouter.
 Top: ${TOP:-none}
 Out of credits today: $OUT_OF_CREDITS. Invited: $INVITED, signed up: $SIGNED_UP.
 Disk $DISK. Last backup $BACKUP, last restore test $RESTORE." low
@@ -58,14 +58,14 @@ Disk $DISK. Last backup $BACKUP, last restore test $RESTORE." low
 fi
 
 # The server
-for unit in seva-chat caddy postgresql; do
+for unit in ponder-chat caddy postgresql; do
 	check "service-$unit" "systemctl is-active --quiet $unit" "$unit is not running. sudo journalctl -u $unit -n 50"
 done
 check health "curl -fsS --max-time 5 http://127.0.0.1:3500/health >/dev/null" "The app does not answer /health on 127.0.0.1:3500."
 [ -n "$DOMAIN" ] && check public "curl -fsS --max-time 10 https://$DOMAIN/health >/dev/null" "https://$DOMAIN/health does not answer: Caddy, DNS or the certificate."
 check disk "[ \$(df --output=pcent / | tail -1 | tr -dc 0-9) -lt 85 ]" "The disk is $(df --output=pcent / | tail -1 | tr -d ' ') full."
 check memory "[ \$(awk '/MemAvailable/ {a=\$2} /MemTotal/ {t=\$2} END {print int(a*100/t)}' /proc/meminfo) -ge 10 ]" "Less than 10% of memory is free."
-check backup "[ -f /var/backups/seva-chat/last-backup ] && [ \$(( \$(date +%s) - \$(date -d \"\$(cat /var/backups/seva-chat/last-backup)\" +%s) )) -lt 93600 ]" "No backup in the last 26 hours. sudo journalctl -u seva-chat-backup"
+check backup "[ -f /var/backups/ponder-chat/last-backup ] && [ \$(( \$(date +%s) - \$(date -d \"\$(cat /var/backups/ponder-chat/last-backup)\" +%s) )) -lt 93600 ]" "No backup in the last 26 hours. sudo journalctl -u ponder-chat-backup"
 
 # The app
 FAILED=$(sql "select count(*) from workflow.workflow_runs where status = 'failed' and updated_at > now() - interval '15 minutes'")

@@ -10,7 +10,7 @@ import { runTelemetry, type RunContext } from "./telemetry.ts";
  * the reply. A failure keeps the fallback name (the first line, db.ts), and a name the
  * person gave meanwhile is never replaced. Adapted from T3 Code's title prompt.
  */
-const MODEL = process.env.SEVA_TITLE_MODEL ?? "z-ai/glm-5.3-flash";
+const MODEL = process.env.PONDER_TITLE_MODEL ?? "z-ai/glm-5.3-flash";
 const MAX_LENGTH = 60;
 const MAX_MESSAGE = 4_000;
 
@@ -23,7 +23,7 @@ Before you answer, reduce the message to its subject (what the person wants to k
 Rules:
 - 2 to 6 words, under 40 characters, in the language of the message.
 - A short noun phrase or action phrase, such as "Trip plan for Goa" or "Fix Python import error".
-- Name the thing, not the tool: no "Seva", "AI", "chat" or "help with".
+- Name the thing, not the tool: no "Ponder", "AI", "chat" or "help with".
 - Do not copy the start of the message. Do not say the work is done.
 - No quotes, no trailing full stop.`;
 
