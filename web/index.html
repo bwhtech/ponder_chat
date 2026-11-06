@@ -11,6 +11,11 @@
 		<!-- The same icon as ICON in attention.ts, which draws a count on it while the tab is hidden. -->
 		<link rel="icon" type="image/png" href="/favicon.png" />
 		<link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+		<!-- Installed to the home screen, the app opens on its own, without the browser bars. -->
+		<link rel="manifest" href="/manifest.webmanifest" />
+		<meta name="mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-title" content="Ponder" />
 		<!-- Paint the saved light/dark choice before the app loads (frappe-ui's useColorScheme keeps it under "theme"). -->
 		<script>
 			(() => {
@@ -22,6 +27,13 @@
 				const themeColor = document.querySelector('meta[name="theme-color"]');
 				const sync = () => themeColor.setAttribute("content", root.dataset.theme === "dark" ? "#171717" : "#ffffff");
 				sync();
+				// iOS reads the status bar style once, at launch. Dark: the status bar is see-through with white
+				// text, and the header (padded by env(safe-area-inset-top)) shows under it. Light: the default
+				// opaque white bar with black text, which matches the white header.
+				const statusBar = document.createElement("meta");
+				statusBar.name = "apple-mobile-web-app-status-bar-style";
+				statusBar.content = dark ? "black-translucent" : "default";
+				document.head.append(statusBar);
 				new MutationObserver(sync).observe(root, { attributes: true, attributeFilter: ["data-theme"] });
 			})();
 		</script>

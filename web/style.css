@@ -31,6 +31,12 @@ body {
   overscroll-behavior: none;
 }
 
+/* The page behind the app shell is the shell's colour. iOS shows it in a strip under the status bar
+   of the installed app (and fades it into the header), and Safari tints its bars from it. */
+html {
+  background-color: var(--surface-base);
+}
+
 /* iOS zooms into a field under 16px on focus and does not zoom back. On touch screens every field
    is 16px; :root lifts this over Tailwind's text-* utilities, including the !important ones. */
 @media (pointer: coarse) {
