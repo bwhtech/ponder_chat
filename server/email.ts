@@ -33,7 +33,8 @@ export function signInEmail(to: string, code: string, url?: string): Email {
 	const linkHtml = url ? `<p>Or open this link to sign in:</p><p><a href="${url}">Sign in to Ponder Chat</a></p>` : "";
 	return {
 		to,
-		subject: "Sign in to Ponder Chat",
+		// The code in the subject, so it shows in the notification without opening the email.
+		subject: `${code} is your OTP for PonderChat.`,
 		text: `Your code to sign in to Ponder Chat:\n\n${code}\n\nType it on the sign-in page.${linkText}\n\n${expiry} ${ignore}`,
 		html:
 			`<p>Your code to sign in to Ponder Chat:</p>` +
