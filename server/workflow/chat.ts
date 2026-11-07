@@ -6,6 +6,7 @@ import { WEB_FETCH, WEB_FETCH_DESCRIPTION, WEB_SEARCH, WEB_SEARCH_DESCRIPTION, w
 import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
 import { connectorTools, connectorToolsStep } from "./connectors.ts";
 import { ChatModel } from "./model.ts";
+import { skillsGuidance, skillsStep, skillTools } from "./skills.ts";
 import { finishRunStep, loadModelMessages, recallMemoryStep, recordUsageStep, runPythonStep, saveReplyStep, webFetchStep, webSearchStep } from "./steps.ts";
 
 export type ChatTurn = {
@@ -44,9 +45,11 @@ export async function chatTurn(turn: ChatTurn) {
 		const memory = await recallMemoryStep(turn.threadId, turn.owner).catch(() => ({ guidance: "", recalled: "" }));
 		// The tools of the apps the person connected (server/mcp/), recorded by the step.
 		const connectors = await connectorToolsStep(turn.owner).catch(() => ({ specs: [], guidance: "" }));
+		// The skills admins turned on (server/skills.ts), recorded by the step. Without them the reply is still written.
+		const skills = await skillsStep().catch(() => []);
 		const agent = new WorkflowAgent({
 			model: new ChatModel(turn.model.id),
-			instructions: [instructions(turn), connectors.guidance, memory.guidance].filter(Boolean).join("\n\n"),
+			instructions: [instructions(turn), skillsGuidance(skills), connectors.guidance, memory.guidance].filter(Boolean).join("\n\n"),
 			// A tool that waits for approval comes back approved in the messages the browser sends; the signature shows the model asked for it.
 			experimental_toolApprovalSecret: { environmentVariable: TOOL_APPROVAL_SECRET_ENV },
 			tools: {
@@ -63,6 +66,8 @@ export async function chatTurn(turn: ChatTurn) {
 						execute: (input) => runPythonStep(input, turn.threadId, turn.owner),
 					}),
 				}),
+				// Changes only when an admin changes the skills.
+				...skillTools(skills),
 				// After our own tools, which never change, so more of the prompt stays cached.
 				...connectorTools(connectors.specs, turn.owner),
 			},
@@ -84,7 +89,7 @@ export async function chatTurn(turn: ChatTurn) {
 			},
 		});
 		await agent.stream({
-			messages: await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled),
+			messages: await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled, skills),
 			writable: getWritable<ModelCallStreamPart>(),
 			stopWhen: isStepCount(turn.maxSteps),
 		});

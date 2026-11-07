@@ -4,6 +4,8 @@ import People from "./pages/People.vue";
 import Person from "./pages/Person.vue";
 import Requests from "./pages/Requests.vue";
 import Settings from "./pages/Settings.vue";
+import SkillEdit from "./pages/SkillEdit.vue";
+import Skills from "./pages/Skills.vue";
 import { isMobile } from "./lib/viewport";
 import { settingsOpen } from "./store";
 
@@ -12,6 +14,9 @@ export const routes: RouteRecordRaw[] = [
 	{ path: "/requests", component: Requests },
 	{ path: "/people", component: People },
 	{ path: "/people/:id", component: Person, props: true },
+	{ path: "/skills", component: Skills },
+	{ path: "/skills/new", component: SkillEdit },
+	{ path: "/skills/:id(\\d+)", component: SkillEdit, props: true },
 	// A page on phones. Wider screens open the settings dialog instead: over the page they
 	// are on, or over the overview when /admin/settings is the first page opened.
 	{

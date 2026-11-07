@@ -18,6 +18,7 @@ import { memory, memoryEnabled, memoryScope, memoryStore, readExtractPrompt } fr
 import { availableModels, pickModel } from "./models.ts";
 import { notifyAdmins } from "./notify.ts";
 import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
+import { activeSkills } from "./skills.ts";
 import { searchThreads } from "./thread-search.ts";
 import { forgetPythonState } from "./python/state.ts";
 import { pythonReady } from "./startup.ts";
@@ -83,6 +84,11 @@ app.get("/api/features", async (c) => c.json({ python: await pythonReady }));
 
 // The models a person can pick (only those with Zero Data Retention), and the one picked when they have not chosen.
 app.get("/api/models", async (c) => c.json(await availableModels()));
+
+// The skills that are on, for the $ menu: names and descriptions, not the instructions.
+app.get("/api/skills", async (c) =>
+	c.json({ skills: (await activeSkills()).map(({ name, description }) => ({ name, description })) }),
+);
 
 app.get("/api/credits", async (c) => c.json(await creditStatus(userOf(c))));
 

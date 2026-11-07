@@ -13,6 +13,11 @@ import { canUndo, fetchThreadSaves, undoSave, type MemoryOperation, type MemoryS
 import { closeOpenCalls, queueFor, waitingOnPerson, type Queued } from "./message-queue";
 import { features, model, modelName, models } from "./models";
 import RunPythonPart from "./RunPythonPart.vue";
+import { useSkillPicker } from "./skills/picker";
+import SkillChip from "./skills/SkillChip.vue";
+import SkillMenu from "./skills/SkillMenu.vue";
+import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skills/skills";
+import UseSkillPart from "./skills/UseSkillPart.vue";
 import WebToolPart from "./WebToolPart.vue";
 import { useThreads } from "./threads";
 import {
@@ -169,7 +174,33 @@ const uploadError = ref("");
 const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
 // A Python run shows its code, what it printed, and the files it made.
 // Searches and page reads are one line each, so they fold with the steps around them.
-provideToolRenderers({ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart }, { foldable: ["web_search", "web_fetch"] });
+// A skill Ponder chose (use_skill) stays a line of its own, so the person sees which skill shaped the reply.
+provideToolRenderers(
+	{ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart, use_skill: UseSkillPart },
+	{ foldable: ["web_search", "web_fetch"] },
+);
+
+// Skills: $name in the message box opens the menu (skills/picker.ts); a chosen skill is a chip until the message goes out.
+const composer = ref<HTMLElement | null>(null);
+const {
+	chosen: skillChips,
+	typed: skillQuery,
+	matches: skillMatches,
+	open: skillMenuOpen,
+	active: skillActive,
+	choose: chooseSkill,
+	remove: removeSkill,
+	take: takeSkills,
+	listeners: skillListeners,
+} = useSkillPicker(input, composer);
+void loadSkills();
+const placeholder = computed(() => (skills.value.length ? "Message Ponder Chat. Type $ for skills" : "Message Ponder Chat"));
+
+/** The skills the person asked for in the message this reply answers, for the line above the reply. */
+function askedSkills(message: UIMessage) {
+	if (message.role !== "assistant") return [];
+	return chosenSkills(messages.value[messages.value.indexOf(message) - 1]);
+}
 
 // Connector tools (Settings, Connectors) show as "Linear · Create issue". When one waits
 // for approval, "Always allow" saves its rule, then approves.
@@ -319,32 +350,39 @@ const queue = queueFor(props.threadId);
 const queuePaused = ref(false);
 // The queued message the person is editing does not go out until they finish.
 const queueEditing = ref<string | null>(null);
-const queueItems = computed(() => queue.map((item) => ({ id: item.id, text: item.text, files: item.files.length })));
+const queueItems = computed(() =>
+	queue.map((item) => ({ id: item.id, text: item.text || item.skills.map((name) => `$${name}`).join(" "), files: item.files.length })),
+);
 
 /** While a reply streams, the message is queued; otherwise it goes out now. */
 async function send(text: string, files: File[] = []) {
-	if ((!text.trim() && !files.length) || uploading.value || outOfCredits.value) {
-		if (outOfCredits.value && !input.value) input.value = text;
+	const chosen = takeSkills();
+	// What did not go out comes back to the field: the text, and the chosen skills.
+	const giveBack = () => {
+		if (!input.value) input.value = text;
+		if (!skillChips.value.length) skillChips.value = chosen;
+	};
+	if ((!text.trim() && !files.length && !chosen.length) || uploading.value || outOfCredits.value) {
+		if (outOfCredits.value) giveBack();
 		return;
 	}
 	const attached = await upload(files);
 	// The field cleared on submit; give the text back so only the files need attaching again.
-	if (!attached) {
-		if (!input.value) input.value = text;
-		return;
-	}
-	const item = { id: crypto.randomUUID(), text, files: attached };
+	if (!attached) return giveBack();
+	const item = { id: crypto.randomUUID(), text, files: attached, skills: chosen };
 	if (busy.value) queue.push(item);
 	else await sendNow(item);
 }
 
-async function sendNow({ text, files }: Pick<Queued, "text" | "files">) {
+async function sendNow({ text, files, skills: chosen }: Pick<Queued, "text" | "files" | "skills">) {
 	queuePaused.value = false;
 	const closed = closeOpenCalls(messages.value);
 	if (closed) messages.value = closed;
 	// The first message: the thread shows in the list now, not once the reply ends.
-	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text);
-	sendMessage(files.length ? { text, files } : { text });
+	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", "));
+	if (!chosen.length) return sendMessage(files.length ? { text, files } : { text });
+	// The skills go first in the message, so their instructions come before the person's text (server/workflow/skills.ts).
+	sendMessage({ parts: [...files, ...chosen.map(skillPart), ...(text ? [{ type: "text" as const, text }] : [])] });
 }
 
 function takeFromQueue(id: string) {
@@ -468,6 +506,18 @@ function replyModelId(message: UIMessage) {
 				>
 					<Message :from="message.role">
 						<MessageContent :bare="message.role === 'user'">
+							<div v-if="chosenSkills(message).length" data-slot="message-skills" class="flex flex-wrap justify-end gap-1.5 self-end">
+								<SkillChip v-for="name in chosenSkills(message)" :key="name" :name="name" />
+							</div>
+							<p
+								v-for="name in askedSkills(message)"
+								:key="name"
+								data-slot="asked-skill"
+								class="flex items-center gap-1.5 text-p-sm text-ink-gray-5"
+							>
+								<span class="lucide-sparkles size-3.5 shrink-0" aria-hidden="true" />
+								<span>Used skill <span class="text-ink-gray-7">{{ skillTitle(name) }}</span> · You asked for it</span>
+							</p>
 							<MessageParts
 								:message="message"
 								:streaming="isStreaming(message)"
@@ -544,7 +594,15 @@ function replyModelId(message: UIMessage) {
 			data-slot="out-of-credits"
 		/>
 		<Alert v-if="uploadError" theme="red" :title="uploadError" description="Attach the files again to send them." />
-		<div>
+		<div ref="composer" class="relative" v-bind="skillListeners">
+			<SkillMenu
+				v-if="skillMenuOpen && skillQuery"
+				:items="skillMatches"
+				:query="skillQuery.query"
+				:active="skillActive"
+				@choose="chooseSkill"
+				@hover="(index) => (skillActive = index)"
+			/>
 			<PromptInputQueue v-model:editing="queueEditing" :items="queueItems" @steer="steer" @remove="takeFromQueue" @update="updateQueued" @reorder="reorderQueue" />
 			<PromptInput
 				v-model="input"
@@ -552,11 +610,15 @@ function replyModelId(message: UIMessage) {
 				:status="status"
 				:disabled="uploading || outOfCredits"
 				:accept="ACCEPT"
+				:ready="skillChips.length > 0"
 				@submit="send($event.text, $event.files)"
 				@stop="stopReply"
 			>
 				<PromptInputHeader />
-				<PromptInputTextarea placeholder="Message Ponder Chat" autofocus />
+				<div v-if="skillChips.length" data-slot="prompt-input-skills" class="flex flex-wrap gap-1.5 px-3 pt-3">
+					<SkillChip v-for="name in skillChips" :key="name" :name="name" removable @remove="removeSkill(name)" />
+				</div>
+				<PromptInputTextarea :placeholder="placeholder" autofocus />
 				<PromptInputFooter>
 					<PromptInputTools>
 						<PromptInputAttachButton />

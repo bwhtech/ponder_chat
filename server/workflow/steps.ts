@@ -1,6 +1,7 @@
 import type { ModelMessage } from "ai";
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
+import type { ActiveSkill } from "../skills.ts";
 
 /**
  * The chat workflow's steps. Each is recorded in Postgres when it finishes; after a
@@ -11,10 +12,11 @@ import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 
 /**
  * The thread as the model reads it: the owner's attached files swapped for their content
- * (file-context.ts), tool results of earlier turns trimmed, and what memory recalled added to
- * the person's latest message (context.ts).
+ * (file-context.ts), the skills they chose with $name swapped for their instructions (skills.ts),
+ * tool results of earlier turns trimmed, and what memory recalled added to the person's
+ * latest message (context.ts).
  */
-export async function loadModelMessages(threadId: string, owner: string, modelId: string, recalled: string): Promise<ModelMessage[]> {
+export async function loadModelMessages(threadId: string, owner: string, modelId: string, recalled: string, skills: ActiveSkill[] = []): Promise<ModelMessage[]> {
 	"use step";
 	const { convertToModelMessages } = await import("ai");
 	const { loadThread } = await import("../db.ts");
@@ -22,9 +24,12 @@ export async function loadModelMessages(threadId: string, owner: string, modelId
 	const { MODELS } = await import("../models.ts");
 	const { getSettings } = await import("../settings.ts");
 	const { addRecalledMemory, trimOldToolResults } = await import("./context.ts");
+	const { skillPartText } = await import("./skills.ts");
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
-	const messages = await convertToModelMessages(await resolveFileParts(await loadThread(threadId), owner, { pdfAsText }));
+	const messages = await convertToModelMessages(await resolveFileParts(await loadThread(threadId), owner, { pdfAsText }), {
+		convertDataPart: (part) => skillPartText(part, skills),
+	});
 	return addRecalledMemory(trimOldToolResults(messages), recalled);
 }
 

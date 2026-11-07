@@ -6,6 +6,8 @@ export interface Queued {
 	id: string;
 	text: string;
 	files: FileUIPart[];
+	/** The skills the person chose with $name. */
+	skills: string[];
 }
 
 /**

@@ -77,6 +77,20 @@ export type DecidedRequest = {
 	decidedBy: string;
 };
 
+/** A skill in the list (server/skills.ts). The file holds the name, the description and `automatic`. */
+export type SkillSummary = {
+	id: number;
+	name: string;
+	description: string;
+	/** Ponder can load it on its own. False: only when someone types $name. */
+	automatic: boolean;
+	enabled: boolean;
+	updatedAt: string;
+	updatedBy: string | null;
+};
+
+export type SkillDetail = SkillSummary & { source: string };
+
 export type Viewer = { user: { id: string; email: string; name: string; role: "admin" | "user" } };
 
 /** Calls /api/admin/<path>. Throws the server's message, which the pages show in a toast or a dialog. */
@@ -87,16 +101,19 @@ export async function api<T>(path: string, options: { method?: string; body?: un
 		body: options.body === undefined ? undefined : JSON.stringify(options.body),
 	});
 	const data = await response.json().catch(() => ({}));
-	if (!response.ok) throw new ApiError(data.error ?? `Something went wrong (${response.status}).`, response.status);
+	if (!response.ok) throw new ApiError(data.error ?? `Something went wrong (${response.status}).`, response.status, data.errors);
 	return data as T;
 }
 
 /** The server's message, with its HTTP status, so a page can tell "not found" from a failure. */
 export class ApiError extends Error {
 	readonly status: number;
-	constructor(message: string, status: number) {
+	/** The problems behind a refusal, one per line, when the server lists them (a skill file). */
+	readonly errors: string[];
+	constructor(message: string, status: number, errors: unknown = []) {
 		super(message);
 		this.status = status;
+		this.errors = Array.isArray(errors) ? errors.map(String) : [];
 	}
 }
 

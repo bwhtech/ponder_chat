@@ -9,9 +9,10 @@ import { providePromptInput } from "./context";
  * clears both. While the chat is busy, the submit button emits `stop`; with `queue`,
  * Enter still submits, so the page can queue the message. Files can
  * also be dropped on it or pasted into it; `accept` filters all three ways.
+ * `ready` says the page holds something else worth sending with no text, such as a chosen skill.
  */
 const props = withDefaults(
-	defineProps<{ status?: ChatStatus; disabled?: boolean; accept?: string; multiple?: boolean; queue?: boolean }>(),
+	defineProps<{ status?: ChatStatus; disabled?: boolean; accept?: string; multiple?: boolean; queue?: boolean; ready?: boolean }>(),
 	{ status: "ready", multiple: true },
 );
 const emit = defineEmits<{ submit: [message: { text: string; files: File[] }]; stop: [] }>();
@@ -22,7 +23,7 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const dragging = ref(false);
 
 const busy = computed(() => props.status === "submitted" || props.status === "streaming");
-const canSubmit = computed(() => !props.disabled && (props.queue || !busy.value) && (text.value.trim() !== "" || files.value.length > 0));
+const canSubmit = computed(() => !props.disabled && (props.queue || !busy.value) && (text.value.trim() !== "" || files.value.length > 0 || props.ready));
 
 function submit() {
 	if (!canSubmit.value) return;

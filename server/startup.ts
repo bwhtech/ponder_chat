@@ -9,6 +9,7 @@ import { checkSandbox } from "./python/pyodide.ts";
 import { migratePythonState } from "./python/state.ts";
 import { migrateConnectors } from "./mcp/store.ts";
 import { migrateSecrets } from "./secrets.ts";
+import { migrateSkills } from "./skills.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
 import { setupTelemetry } from "./telemetry.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
@@ -49,6 +50,7 @@ async function migrateAll() {
 	await migrateInvites();
 	await migrateSecrets();
 	await migrateConnectors();
+	await migrateSkills();
 	setToolApprovalSecret();
 	await migratePythonState();
 	await migrateThreadRuns();

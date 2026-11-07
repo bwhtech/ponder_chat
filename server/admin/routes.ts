@@ -11,6 +11,8 @@ import { decideRequest, grantCredits, pendingCount, type Decision } from "../ext
 import { allow, disallow, setInviteCredits } from "../invites.ts";
 import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
 import { getSettings, setPdfTextOnServer, updateSettings } from "../settings.ts";
+import { MAX_FILE } from "../../shared/skill-file.ts";
+import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult } from "../skills.ts";
 import { listAdmins, listPeople, personDetail } from "./people.ts";
 import { overview, requestsReport } from "./reports.ts";
 
@@ -164,6 +166,62 @@ adminApi.put("/settings/openrouter-key", async (c) => {
 	await saveOpenRouterKey(input.key, adminOf(c));
 	return c.json(await openRouterKeyStatus());
 });
+
+// Skills (skills.ts): Markdown files of instructions, on for everyone or off.
+
+const skillBody = z.object({
+	source: z.string().max(MAX_FILE * 2),
+	enabled: z.boolean(),
+	/** When the admin's copy was loaded; absent for a new skill. */
+	expectedUpdatedAt: z.string().datetime().optional(),
+});
+
+adminApi.get("/skills", async (c) => c.json({ skills: await listSkills() }));
+
+adminApi.get("/skills/:id", async (c) => {
+	const id = skillId(c);
+	const skill = id && (await getSkill(id));
+	return skill ? c.json(skill) : noSkill(c);
+});
+
+adminApi.post("/skills", async (c) => {
+	const input = await readBody(c, skillBody);
+	if (!input) return invalid(c);
+	return savedSkill(c, await saveSkill({ source: input.source, enabled: input.enabled }, adminOf(c)));
+});
+
+adminApi.put("/skills/:id", async (c) => {
+	const id = skillId(c);
+	const input = await readBody(c, skillBody);
+	if (!id) return noSkill(c);
+	if (!input) return invalid(c);
+	return savedSkill(c, await saveSkill({ id, ...input }, adminOf(c)));
+});
+
+adminApi.put("/skills/:id/enabled", async (c) => {
+	const id = skillId(c);
+	const input = await readBody(c, z.object({ enabled: z.boolean() }));
+	if (!input) return invalid(c);
+	return id && (await setSkillEnabled(id, input.enabled, adminOf(c))) ? c.json({ ok: true }) : noSkill(c);
+});
+
+adminApi.delete("/skills/:id", async (c) => {
+	const id = skillId(c);
+	return id && (await deleteSkill(id, adminOf(c))) ? c.json({ ok: true }) : noSkill(c);
+});
+
+function skillId(c: Context<Env>) {
+	const id = Number(c.req.param("id"));
+	return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
+function savedSkill(c: Context<Env>, result: SaveResult) {
+	return result.ok ? c.json(result.skill) : c.json({ error: result.error, errors: result.errors }, result.status);
+}
+
+function noSkill(c: Context<Env>) {
+	return c.json({ error: "This skill was deleted." }, 404);
+}
 
 // Requests for more credits (extra-credits.ts)
 
