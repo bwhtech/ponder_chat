@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Source } from "./ai-elements/sources";
-import { getToolName, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "./ai-elements/tool";
+import { getToolName, getToolPhase, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "./ai-elements/tool";
 
 /**
  * A web_search or web_fetch call (server/search/tool.ts) as one Tool line: what was
@@ -13,12 +13,17 @@ const props = defineProps<{ part: ToolMessagePart; streaming?: boolean }>();
 const search = computed(() => getToolName(props.part) === "web_search");
 const input = computed(() => (props.part.input ?? {}) as { query?: string; url?: string });
 const output = computed(() => (props.part.state === "output-available" ? (props.part.output as Output) : undefined));
-const running = computed(() => props.part.state === "input-streaming" || props.part.state === "input-available");
+// The output can report a failure itself; the header's badge and the title both read it.
+const outputFailed = computed(() => !!output.value?.error);
+const phase = computed(() =>
+	getToolPhase(props.part.state, { streaming: props.streaming, approved: props.part.approval?.approved, failed: outputFailed.value }),
+);
 
 const subject = computed(() => (search.value ? `“${input.value.query ?? ""}”` : hostname(output.value?.url ?? input.value.url ?? "")));
 const title = computed(() => {
-	if (running.value) return props.streaming ? `${search.value ? "Searching" : "Reading"} ${subject.value}` : `Did not finish ${subject.value}`;
-	if (output.value?.error || props.part.state === "output-error") return `Could not ${search.value ? "search" : "read"} ${subject.value}`;
+	if (phase.value === "preparing" || phase.value === "running") return `${search.value ? "Searching" : "Reading"} ${subject.value}`;
+	if (phase.value === "stopped") return `Did not finish ${subject.value}`;
+	if (phase.value === "failed") return `Could not ${search.value ? "search" : "read"} ${subject.value}`;
 	return `${search.value ? "Searched" : "Read"} ${subject.value}`;
 });
 const pages = computed(() => {
@@ -38,7 +43,15 @@ function hostname(url: string) {
 
 <template>
 	<Tool>
-		<ToolHeader :state="part.state" :tool-name="getToolName(part)" :title="title" :icon="search ? 'lucide-search' : 'lucide-globe'" :streaming="streaming" />
+		<ToolHeader
+			:state="part.state"
+			:tool-name="getToolName(part)"
+			:title="title"
+			:icon="search ? 'lucide-search' : 'lucide-globe'"
+			:streaming="streaming"
+			:approved="part.approval?.approved"
+			:failed="outputFailed"
+		/>
 		<ToolContent>
 			<Source v-for="page in pages" :key="page.url" :href="page.url" :title="page.title" />
 			<p v-if="output?.error" class="text-p-sm text-ink-gray-6">{{ output.error }}</p>

@@ -1,7 +1,7 @@
 import { createModelCallToUIChunkTransform, type ModelCallStreamPart } from "@ai-sdk/workflow";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
-import { loadThread, saveThread } from "../db.ts";
+import { loadThread, updateThread } from "../db.ts";
 import { rememberTurn } from "../memory.ts";
 import { finishRun, type Continued } from "./runs.ts";
 
@@ -70,8 +70,8 @@ export async function saveReply(threadId: string, owner: string, runId: string, 
 		const at = messages.findIndex((message) => message.id === reply.id);
 		if (at === -1) messages.push(reply);
 		else messages[at] = reply;
-		await saveThread(threadId, owner, messages);
-		rememberTurn({ threadId, user: owner }, messages);
+		// Only into the thread as it is: a thread deleted while the reply was written stays deleted.
+		if (await updateThread(threadId, owner, messages)) rememberTurn({ threadId, user: owner }, messages);
 	}
-	await finishRun(threadId, runId, { cancelled: untilTail });
+	await finishRun(threadId, runId, model, { cancelled: untilTail, continued });
 }

@@ -15,12 +15,15 @@ const props = withDefaults(
 		streaming?: boolean;
 		approved?: boolean;
 		preliminary?: boolean;
+		/** The output reports a failure itself, such as `{ ok: false }`: shown as an error, not "Done". */
+		failed?: boolean;
 		showBadge?: boolean;
 	}>(),
-	{ streaming: true, showBadge: true },
+	// approved stays undefined when not passed: Vue would cast a missing boolean to false, which reads as "denied".
+	{ streaming: true, showBadge: true, approved: undefined },
 );
 
-const context = computed(() => ({ streaming: props.streaming, approved: props.approved, preliminary: props.preliminary }));
+const context = computed(() => ({ streaming: props.streaming, approved: props.approved, preliminary: props.preliminary, failed: props.failed }));
 const status = computed(() => getToolStatus(props.state, context.value));
 const label = computed(() => props.title ?? getToolTitle(props.state, humanizeToolName(props.toolName ?? "tool"), context.value));
 const badge = computed(() => getStatusBadge(props.state, context.value));

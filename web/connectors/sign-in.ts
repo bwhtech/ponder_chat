@@ -31,28 +31,94 @@ export function goToSignIn(popup: Window | null, authorizeUrl: string) {
 	else location.assign(authorizeUrl);
 }
 
-/** Waits for the callback page. `cancel` stops waiting (the person pressed Cancel) and closes the popup. */
-export function waitForSignIn(popup: Window | null): { result: Promise<SignInMessage | null>; cancel: () => void } {
+/** How a wait for the callback page ends. */
+export type SignInEnd =
+	// The callback page answered for this sign-in.
+	| { kind: "answered"; message: SignInMessage }
+	// The signal aborted: the person pressed Cancel, closed the dialog or started again.
+	| { kind: "cancelled" }
+	// The popup closed before the callback page answered.
+	| { kind: "closed" };
+
+type WaitOptions = {
+	/** Where the popup went. Its OAuth state is how the callback page names this sign-in. */
+	authorizeUrl: string;
+	/** The connector, when it already exists (a new sign-in for it). */
+	id?: string;
+	/** Aborting it stops the wait and closes the popup. */
+	signal?: AbortSignal;
+	/** An answer that comes after the popup seemed to close. See below. */
+	onLate?: (message: SignInMessage) => void;
+};
+
+/** How long the sign-in waits on the server (server/mcp/store.ts): after that no answer can come. */
+const SIGN_IN_LIFETIME = 10 * 60_000;
+
+/**
+ * Waits for the callback page of this sign-in, and only this one: another tab or an
+ * older sign-in may answer on the same channel. Ponder looks at the popup twice a second,
+ * so closing it ends the wait.
+ *
+ * A sign-in page that cuts the popup off from its opener also makes the popup look closed
+ * from here, while the person is still signing in. So after "closed" the channel listens
+ * on, until the sign-in expires or the signal aborts, and gives a late answer to `onLate`.
+ */
+export function waitForSignIn(popup: Window, options: WaitOptions): Promise<SignInEnd> {
+	const state = new URL(options.authorizeUrl, location.href).searchParams.get("state");
 	const channel = new BroadcastChannel(CHANNEL);
-	let finish: (message: SignInMessage | null) => void = () => undefined;
-	const result = new Promise<SignInMessage | null>((resolve) => (finish = resolve));
+	let settle: (end: SignInEnd) => void = () => undefined;
+	const result = new Promise<SignInEnd>((resolve) => (settle = resolve));
+	let settled = false;
+	let closedOnce = false;
+
+	// The OAuth state names the sign-in. A connector's id is the fallback, for an answer with no state.
+	const mine = (message: SignInMessage) => {
+		if (state && message.state) return message.state === state;
+		if (options.id && message.id) return message.id === options.id;
+		return true;
+	};
 	const onMessage = (event: MessageEvent) => {
 		if (event instanceof MessageEvent && event.origin && event.origin !== location.origin) return;
 		const data = event.data as SignInMessage | undefined;
-		if (data?.type === "ponder:connector-sign-in") done(data);
+		if (data?.type !== "ponder:connector-sign-in" || !mine(data)) return;
+		if (settled) options.onLate?.(data);
+		else end({ kind: "answered", message: data });
+		stop();
 	};
-	function done(message: SignInMessage | null) {
+	// The callback page posts, then closes: one more look gives its answer time to arrive.
+	const poll = setInterval(() => {
+		if (!popup.closed) return void (closedOnce = false);
+		if (!closedOnce) return void (closedOnce = true);
+		clearInterval(poll);
+		end({ kind: "closed" });
+		if (!options.onLate) stop();
+	}, 500);
+	const expire = setTimeout(() => {
+		end({ kind: "closed" });
+		stop();
+	}, SIGN_IN_LIFETIME);
+	const onAbort = () => {
+		popup.close();
+		end({ kind: "cancelled" });
+		stop();
+	};
+
+	function end(value: SignInEnd) {
+		if (settled) return;
+		settled = true;
+		settle(value);
+	}
+	function stop() {
+		clearInterval(poll);
+		clearTimeout(expire);
 		channel.close();
 		removeEventListener("message", onMessage);
-		finish(message);
+		options.signal?.removeEventListener("abort", onAbort);
 	}
+
 	channel.addEventListener("message", onMessage);
 	addEventListener("message", onMessage);
-	return {
-		result,
-		cancel: () => {
-			popup?.close();
-			done(null);
-		},
-	};
+	if (options.signal?.aborted) onAbort();
+	else options.signal?.addEventListener("abort", onAbort);
+	return result;
 }

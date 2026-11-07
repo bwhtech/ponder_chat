@@ -60,6 +60,12 @@ export async function saveThread(id: string, owner: string, messages: UIMessage[
 		where threads.owner = excluded.owner`;
 }
 
+/** Saves a reply into the person's thread. False, and nothing saved, when the thread was deleted. */
+export async function updateThread(id: string, owner: string, messages: UIMessage[]) {
+	const rows = await sql`update threads set messages = ${sql.json(messages as never)}, updated_at = now() where id = ${id} and owner = ${owner} returning id`;
+	return rows.length > 0;
+}
+
 export type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number };
 
 /** A person's threads, newest first. Untitled threads are named by their first message. */

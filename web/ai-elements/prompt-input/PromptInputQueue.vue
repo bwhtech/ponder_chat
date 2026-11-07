@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Button, Tooltip } from "frappe-ui";
-import { nextTick, ref } from "vue";
+import { nextTick, ref, watch } from "vue";
 import CollapseTransition from "../utils/CollapseTransition.vue";
 
 export interface QueuedMessage {
@@ -25,11 +25,23 @@ const emit = defineEmits<{
 }>();
 const open = defineModel<boolean>("open", { default: true });
 
-const editing = ref<string | null>(null);
+/** The row being edited. The page holds it back from sending until the edit is saved or dropped. */
+const editing = defineModel<string | null>("editing", { default: null });
 const draft = ref("");
 const editor = ref<HTMLTextAreaElement[]>([]);
 const dragged = ref<string | null>(null);
 const over = ref<string | null>(null);
+
+// The page sent or removed the row being edited: drop the edit, there is nothing left to save it to.
+watch(
+	() => props.items.map((item) => item.id),
+	(ids) => {
+		if (editing.value && !ids.includes(editing.value)) {
+			editing.value = null;
+			draft.value = "";
+		}
+	},
+);
 
 async function edit(item: QueuedMessage) {
 	editing.value = item.id;
@@ -56,7 +68,10 @@ function onDrop(target: string) {
 	dragged.value = over.value = null;
 	if (!from || from === target) return;
 	const ids = props.items.map((item) => item.id).filter((id) => id !== from);
-	ids.splice(ids.indexOf(target), 0, from);
+	const at = ids.indexOf(target);
+	// Either row may have been sent while it was dragged.
+	if (at === -1 || ids.length === props.items.length) return;
+	ids.splice(at, 0, from);
 	emit("reorder", ids);
 }
 </script>

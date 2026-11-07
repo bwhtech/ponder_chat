@@ -87,12 +87,23 @@ export async function api<T>(path: string, options: { method?: string; body?: un
 		body: options.body === undefined ? undefined : JSON.stringify(options.body),
 	});
 	const data = await response.json().catch(() => ({}));
-	if (!response.ok) throw new Error(data.error ?? `Something went wrong (${response.status}).`);
+	if (!response.ok) throw new ApiError(data.error ?? `Something went wrong (${response.status}).`, response.status);
 	return data as T;
 }
 
-/** Who opened /admin. null when signed out. */
+/** The server's message, with its HTTP status, so a page can tell "not found" from a failure. */
+export class ApiError extends Error {
+	readonly status: number;
+	constructor(message: string, status: number) {
+		super(message);
+		this.status = status;
+	}
+}
+
+/** Who opened /admin. null when signed out (401 or 403). Throws when the server can't be reached or fails. */
 export async function loadViewer(): Promise<Viewer | null> {
 	const response = await fetch("/api/me");
-	return response.ok ? response.json() : null;
+	if (response.status === 401 || response.status === 403) return null;
+	if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+	return response.json();
 }

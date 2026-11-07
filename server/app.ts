@@ -26,7 +26,7 @@ import { forgetThread, threadResponse } from "./thread-cache.ts";
 import { usageReport } from "./telemetry.ts";
 import { chatTurn } from "./workflow/chat.ts";
 import { replyStream, saveReply } from "./workflow/reply.ts";
-import { activeRun, latestRun, setActiveRun, type ThreadRun } from "./workflow/runs.ts";
+import { activeRun, finishRun, forgetRuns, latestRun, setActiveRun, withThreadLock, type ThreadRun } from "./workflow/runs.ts";
 
 /**
  * The HTTP API, served by Nitro (nitro.config.ts), which also compiles the chat workflow
@@ -113,11 +113,20 @@ app.patch("/api/threads/:id", async (c) => {
 	return renamed ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
 });
 
+// A reply still running stops first. What it writes after this is not saved (reply.ts).
 app.delete("/api/threads/:id", async (c) => {
-	const deleted = await deleteThread(c.req.param("id"), userOf(c));
+	const id = c.req.param("id");
+	const deleted = await withThreadLock(id, async () => {
+		if ((await threadOwner(id)) !== userOf(c)) return false;
+		const run = await activeRun(id);
+		if (run) await cancelRun(id, userOf(c), run);
+		if (!(await deleteThread(id, userOf(c)))) return false;
+		await forgetRuns(id);
+		return true;
+	});
 	if (deleted) {
-		forgetThread(c.req.param("id"));
-		await forgetPythonState(c.req.param("id"), userOf(c));
+		forgetThread(id);
+		await forgetPythonState(id, userOf(c));
 	}
 	return deleted ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
 });
@@ -133,34 +142,41 @@ app.post("/api/chat", perPerson(chatLimit, { plain: true }), async (c) => {
 	const credits = await creditStatus(userOf(c));
 	if (credits.remaining <= 0) return c.text(outOfCredits(credits.resetsAt), 402);
 
-	// A reply still running in this thread (Steer, another tab) stops, and keeps what it wrote.
-	const previous = await activeRun(body.id);
-	if (previous) await cancelRun(body.id, userOf(c), previous);
-
+	// One request at a time for a thread starts and stops its runs, so a double submit or a
+	// second tab never leaves a run running that nobody tracks and Stop can't reach.
 	const model = await pickModel(body.model);
-	const run = { threadId: body.id, user: userOf(c) };
+	const python = await pythonReady;
 	// After an approval the page sends the thread again with no new message: the run carries on its last assistant message.
 	const last = body.messages.at(-1);
 	const continued = last?.role === "assistant" ? { messageId: last.id, baseParts: last.parts.length } : null;
-	// The run reads the thread from the database, so it is saved first.
-	await saveThread(body.id, userOf(c), body.messages);
-	const started = await start(chatTurn, [
-		{
-			threadId: body.id,
-			owner: userOf(c),
-			model: { id: model.id, name: model.name },
-			python: await pythonReady,
-			today: new Date().toDateString(),
-			maxSteps: MAX_STEPS,
-			continued,
-		},
-	]);
-	await setActiveRun(body.id, started.runId, model.id, continued);
+	const started = await withThreadLock(body.id, async () => {
+		const previous = await activeRun(body.id);
+		// The same approval sent twice: follow the run that carries it out, instead of running the approved calls again.
+		const sameApproval = continued && previous?.continued?.messageId === continued.messageId && previous.continued.baseParts === continued.baseParts;
+		if (previous && sameApproval) return { runId: previous.runId, model: previous.model, again: true };
+		// A reply still running in this thread (Steer, another tab) stops, and keeps what it wrote.
+		if (previous) await cancelRun(body.id, userOf(c), previous);
+		// The run reads the thread from the database, so it is saved first.
+		await saveThread(body.id, userOf(c), body.messages);
+		const run = await start(chatTurn, [
+			{
+				threadId: body.id,
+				owner: userOf(c),
+				model: { id: model.id, name: model.name },
+				python,
+				today: new Date().toDateString(),
+				maxSteps: MAX_STEPS,
+				continued,
+			},
+		]);
+		await setActiveRun(body.id, run.runId, model.id, continued);
+		return { runId: run.runId, model: model.id, again: false };
+	});
 	// A new thread gets a name from a cheap model while the reply is written (thread-title.ts).
-	if (isFirstMessage(body.messages)) void nameThread(run, body.messages);
+	if (!started.again && isFirstMessage(body.messages)) void nameThread({ threadId: body.id, user: userOf(c) }, body.messages);
 
 	// The run goes on if this request closes; the page reconnects with GET /api/chat/:id/stream.
-	return createUIMessageStreamResponse({ stream: await replyStream(started.runId, model.id, { continued }), headers: { "x-workflow-run-id": started.runId } });
+	return createUIMessageStreamResponse({ stream: await replyStream(started.runId, started.model, { continued }), headers: { "x-workflow-run-id": started.runId } });
 });
 
 /** Cancels a run and saves what it wrote so far. */
@@ -168,7 +184,12 @@ async function cancelRun(threadId: string, owner: string, run: ThreadRun) {
 	await getRun(run.runId).cancel({ cancelReason: "Stopped by the person, or replaced by a newer message." }).catch(() => undefined);
 	// The step in flight writes on for a moment after a cancel, and the stream is never
 	// closed, so the saved reply is what the run had written when it was stopped.
-	await saveReply(threadId, owner, run.runId, run.model, { untilTail: true, continued: run.continued });
+	// Finished even when the save fails, so the thread does not look busy forever.
+	try {
+		await saveReply(threadId, owner, run.runId, run.model, { untilTail: true, continued: run.continued });
+	} finally {
+		await finishRun(threadId, run.runId, run.model, { cancelled: true, continued: run.continued });
+	}
 }
 
 function outOfCredits(resetsAt: string) {
@@ -191,8 +212,11 @@ app.get("/api/chat/:id/stream", async (c) => {
 // Stop: closing the request does not end a run; this does.
 app.post("/api/chat/:id/stop", async (c) => {
 	if (!(await mayUseThread(c, c.req.param("id")))) return c.json({ stopped: false });
-	const run = await activeRun(c.req.param("id"));
-	if (run) await cancelRun(c.req.param("id"), userOf(c), run);
+	const run = await withThreadLock(c.req.param("id"), async () => {
+		const active = await activeRun(c.req.param("id"));
+		if (active) await cancelRun(c.req.param("id"), userOf(c), active);
+		return active;
+	});
 	return c.json({ stopped: Boolean(run) });
 });
 

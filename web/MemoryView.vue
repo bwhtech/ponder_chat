@@ -12,6 +12,7 @@ const emit = defineEmits<{
 
 const { threads } = useThreads();
 const overview = ref<MemoryOverview>();
+/** The last load failed. What loaded before stays on screen under it, with Retry. */
 const loadError = ref("");
 const tab = ref<"memories" | "decisions" | "prompt">("memories");
 const tabs = [
@@ -22,12 +23,17 @@ const tabs = [
 
 onMounted(load);
 
+// Each load takes a number: after two undos, the older answer arriving last is dropped.
+let asked = 0;
+
 async function load() {
+	const mine = ++asked;
 	loadError.value = "";
 	try {
-		overview.value = await fetchMemory();
+		const next = await fetchMemory();
+		if (mine === asked) overview.value = next;
 	} catch (error) {
-		loadError.value = (error as Error).message;
+		if (mine === asked) loadError.value = (error as Error).message;
 	}
 }
 
@@ -72,11 +78,12 @@ function applied(save: MemorySave) {
 	return save.operations.filter((op) => op.status === "applied");
 }
 
-const undoing = ref<number>();
+/** The decisions being undone now: each shows its own spinner. */
+const undoing = ref(new Set<number>());
 const undoError = ref("");
 
 async function undo(save: MemorySave) {
-	undoing.value = save.id;
+	undoing.value.add(save.id);
 	undoError.value = "";
 	try {
 		await undoSave(save.id);
@@ -84,7 +91,7 @@ async function undo(save: MemorySave) {
 	} catch (error) {
 		undoError.value = (error as Error).message;
 	} finally {
-		undoing.value = undefined;
+		undoing.value.delete(save.id);
 	}
 }
 </script>
@@ -104,7 +111,7 @@ async function undo(save: MemorySave) {
 				title="Memory is off"
 				description="The server runs with PONDER_MEMORY=off, so new chats neither use nor add memories."
 			/>
-			<TabButtons v-if="!loadError" v-model="tab" :options="tabs" />
+			<TabButtons v-if="overview || !loadError" v-model="tab" :options="tabs" />
 
 			<!-- Rows shaped like memories while they load: a line of text, then its kind and age. -->
 			<ul
@@ -168,7 +175,7 @@ async function undo(save: MemorySave) {
 								/>
 								<p class="min-w-0 flex-1 text-p-base" :class="applied(save).length ? 'text-ink-gray-8' : 'text-ink-gray-6'">{{ save.summary }}</p>
 								<Badge v-if="save.undoneAt" label="Undone" size="sm" />
-								<Button v-else-if="canUndo(save)" variant="ghost" size="sm" label="Undo" :loading="undoing === save.id" @click="undo(save)" />
+								<Button v-else-if="canUndo(save)" variant="ghost" size="sm" label="Undo" :loading="undoing.has(save.id)" @click="undo(save)" />
 							</div>
 							<ul v-if="applied(save).length" class="space-y-0.5 pl-6">
 								<li v-for="op in applied(save)" :key="op.memoryId + op.op" class="text-p-sm text-ink-gray-6" :class="{ 'line-through': save.undoneAt }">

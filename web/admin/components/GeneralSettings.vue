@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Avatar, Badge, Button, SettingsRow, Skeleton, Switch, TextInput } from "frappe-ui";
+import { Alert, Avatar, Badge, Button, SettingsRow, Skeleton, Switch, TextInput } from "frappe-ui";
 import { computed, ref } from "vue";
 import { creditValue, date, resetTime } from "../lib/format";
 import type { SettingsForm } from "../lib/settings-form";
@@ -8,7 +8,7 @@ import OpenRouterKeyDialog from "./OpenRouterKeyDialog.vue";
 
 /**
  * The General settings: credits, how PDFs are read, the OpenRouter key and the admins. Save is the parent's,
- * from `form`. Skeletons stand in for the values until they load.
+ * from `form`. Skeletons stand in for the values until they load; if they can't, an alert offers Retry.
  */
 const props = defineProps<{ form: SettingsForm }>();
 
@@ -26,6 +26,13 @@ const keyText = computed(() => {
 
 <template>
 	<div class="space-y-10 pt-4">
+		<Alert
+			v-if="form.loadError"
+			theme="red"
+			title="The settings could not load"
+			:description="form.loadError"
+			:primary-action="{ label: 'Retry', onClick: form.load }"
+		/>
 		<section class="space-y-1">
 			<h2 class="text-base-semibold text-ink-gray-8">Credits</h2>
 			<div class="divide-y divide-outline-gray-1">

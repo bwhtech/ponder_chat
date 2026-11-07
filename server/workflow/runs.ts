@@ -28,13 +28,18 @@ export async function migrateThreadRuns() {
 	await sql`alter table thread_runs add column if not exists base_parts integer`;
 }
 
+/**
+ * Run ids are ULIDs, so they sort in the order the runs started. A row only moves to a
+ * newer run, so a run that finished before this was written is not opened again.
+ */
 export async function setActiveRun(threadId: string, runId: string, model: string, continued: Continued | null = null) {
 	await sql`
 		insert into thread_runs (thread_id, run_id, model, message_id, base_parts)
 		values (${threadId}, ${runId}, ${model}, ${continued?.messageId ?? null}, ${continued?.baseParts ?? null})
 		on conflict (thread_id) do update set run_id = excluded.run_id, model = excluded.model,
 			message_id = excluded.message_id, base_parts = excluded.base_parts,
-			started_at = now(), finished_at = null, cancelled = false`;
+			started_at = now(), finished_at = null, cancelled = false
+		where excluded.run_id collate "C" > thread_runs.run_id collate "C"`;
 }
 
 /** The run writing the thread's reply now, if any. */
@@ -60,8 +65,44 @@ export async function latestRun(id: string): Promise<ThreadRun | undefined> {
 	);
 }
 
-export async function finishRun(threadId: string, runId: string, { cancelled = false } = {}) {
+/**
+ * Marks the run finished. A run quick enough to finish before the route wrote its row
+ * writes the row itself, finished. An older run never replaces a newer one, and a
+ * deleted thread gets no row.
+ */
+export async function finishRun(threadId: string, runId: string, model: string, { cancelled = false, continued = null as Continued | null } = {}) {
 	await sql`
-		update thread_runs set finished_at = now(), cancelled = ${cancelled}
-		where thread_id = ${threadId} and run_id = ${runId} and finished_at is null`;
+		insert into thread_runs (thread_id, run_id, model, message_id, base_parts, finished_at, cancelled)
+		select ${threadId}, ${runId}, ${model}, ${continued?.messageId ?? null}, ${continued?.baseParts ?? null}, now(), ${cancelled}
+		where exists (select 1 from threads where id = ${threadId})
+		on conflict (thread_id) do update set run_id = excluded.run_id, model = excluded.model,
+			message_id = excluded.message_id, base_parts = excluded.base_parts,
+			finished_at = now(), cancelled = excluded.cancelled
+		where (thread_runs.run_id = excluded.run_id and thread_runs.finished_at is null)
+			or excluded.run_id collate "C" > thread_runs.run_id collate "C"`;
+}
+
+/** For a deleted thread. */
+export async function forgetRuns(threadId: string) {
+	await sql`delete from thread_runs where thread_id = ${threadId}`;
+}
+
+const locks = new Map<string, Promise<unknown>>();
+
+/**
+ * Runs `work` after the thread's earlier work ends, so two requests (a double submit, two
+ * tabs) never stop and start its runs at once. In this process only: one server runs at a
+ * time (becomeTheOnlyWorker in startup.ts). A Postgres lock would hold a connection from
+ * the pool while `work` needs others, and enough waiting requests would empty the pool.
+ */
+export async function withThreadLock<T>(threadId: string, work: () => Promise<T>): Promise<T> {
+	const before = locks.get(threadId) ?? Promise.resolve();
+	const done = before.catch(() => undefined).then(work);
+	const tail = done.catch(() => undefined);
+	locks.set(threadId, tail);
+	try {
+		return await done;
+	} finally {
+		if (locks.get(threadId) === tail) locks.delete(threadId);
+	}
 }

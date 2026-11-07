@@ -67,6 +67,13 @@ export async function saveReplyStep(
 	await saveReply(threadId, owner, runId, model, { untilTail: failed, continued });
 }
 
+/** Marks the run finished when saving its reply failed, so the thread does not look busy forever. */
+export async function finishRunStep(threadId: string, runId: string, model: string, continued: { messageId: string; baseParts: number } | null = null) {
+	"use step";
+	const { finishRun } = await import("./runs.ts");
+	await finishRun(threadId, runId, model, { cancelled: true, continued });
+}
+
 export type StepUsage = {
 	threadId: string;
 	user: string;

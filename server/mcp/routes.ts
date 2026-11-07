@@ -78,7 +78,9 @@ connectorsApi.delete("/:id", (c) =>
 );
 
 /** What the callback page tells the page that opened the sign-in. */
-export type SignInMessage = { type: "ponder:connector-sign-in"; ok: boolean; id?: string; error?: string };
+// `state` is the sign-in's OAuth state, so the page that waits can tell its sign-in from
+// another. It is spent by now (takeSignIn deletes it), and the message stays on Ponder's origin.
+export type SignInMessage = { type: "ponder:connector-sign-in"; ok: boolean; id?: string; error?: string; state?: string };
 
 /**
  * GET /oauth/mcp/callback: the end of an OAuth sign-in. The person's session must be the
@@ -104,6 +106,7 @@ export async function oauthCallback(c: Context) {
 			message = failed(describeError(error));
 		}
 	}
+	if (query.state) message.state = query.state;
 	return c.html(callbackPage(message), 200, { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
 }
 

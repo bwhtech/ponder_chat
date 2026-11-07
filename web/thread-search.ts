@@ -18,6 +18,8 @@ export function useThreadSearch(query: Ref<string>) {
 
 	watch(query, (text) => {
 		clearTimeout(timer);
+		// A new question: the last one's failure no longer applies.
+		failed.value = false;
 		if (!text.trim()) {
 			asked++;
 			hits.value = [];

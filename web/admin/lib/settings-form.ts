@@ -19,18 +19,21 @@ export function useSettingsForm() {
 	const pdfTextOnServer = ref(true);
 	const savingPdf = ref(false);
 	const saving = ref(false);
-	const loading = ref(true);
+	/** Until the saved values load, no control shows: a default there would read as the setting. */
+	const status = ref<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string }>({ kind: "loading" });
+	const loading = computed(() => status.value.kind !== "loaded");
+	const loadError = computed(() => (status.value.kind === "error" ? status.value.message : ""));
 
 	async function load() {
+		status.value = { kind: "loading" };
 		try {
 			const data = await api<SettingsData>("/settings");
 			show(data);
 			admins.value = data.admins;
 			openRouterKey.value = data.openRouterKey;
+			status.value = { kind: "loaded" };
 		} catch (e) {
-			toast.error((e as Error).message);
-		} finally {
-			loading.value = false;
+			status.value = { kind: "error", message: (e as Error).message };
 		}
 	}
 
@@ -81,6 +84,7 @@ export function useSettingsForm() {
 
 	/** The switch saves at once; a failure puts it back. */
 	async function setPdfReading(onServer: boolean) {
+		if (!saved.value) return;
 		pdfTextOnServer.value = onServer;
 		savingPdf.value = true;
 		try {
@@ -108,6 +112,8 @@ export function useSettingsForm() {
 		savingPdf,
 		saving,
 		loading,
+		loadError,
+		load,
 		defaultError,
 		perUsdError,
 		canSave,

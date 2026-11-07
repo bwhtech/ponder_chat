@@ -316,6 +316,8 @@ const thinkingText = computed(() => (thinkingFor.value >= 5 ? `Thinking… ${thi
 const queue = queueFor(props.threadId);
 // After Stop the queue waits, so it does not send what the person may no longer want; sending or Steer resumes it.
 const queuePaused = ref(false);
+// The queued message the person is editing does not go out until they finish.
+const queueEditing = ref<string | null>(null);
 const queueItems = computed(() => queue.map((item) => ({ id: item.id, text: item.text, files: item.files.length })));
 
 /** While a reply streams, the message is queued; otherwise it goes out now. */
@@ -378,13 +380,15 @@ function reorderQueue(ids: string[]) {
 	queue.splice(0, queue.length, ...ids.map((id) => byId.get(id)!).filter(Boolean));
 }
 
-// Send the next queued message once the reply ends. Not after an error or Stop, and not without credits.
+// Send the next queued message once the reply ends. Not after an error or Stop, and not without
+// credits: a queue that waits for credits goes out when they come back.
 watch(
-	() => [status.value, queue.length] as const,
-	([current, queued]) => {
-		if (current !== "ready" || !queued) return;
+	() => [status.value, queue.length, outOfCredits.value, queueEditing.value] as const,
+	([current, queued, noCredits]) => {
+		if (current !== "ready" || !queued || noCredits) return;
 		setTimeout(() => {
 			if (status.value !== "ready" || !queue.length || queuePaused.value || outOfCredits.value) return;
+			if (queue[0].id === queueEditing.value) return;
 			void sendNow(queue.shift()!);
 		});
 	},
@@ -540,7 +544,7 @@ function replyModelId(message: UIMessage) {
 		/>
 		<Alert v-if="uploadError" theme="red" :title="uploadError" description="Attach the files again to send them." />
 		<div>
-			<PromptInputQueue :items="queueItems" @steer="steer" @remove="takeFromQueue" @update="updateQueued" @reorder="reorderQueue" />
+			<PromptInputQueue v-model:editing="queueEditing" :items="queueItems" @steer="steer" @remove="takeFromQueue" @update="updateQueued" @reorder="reorderQueue" />
 			<PromptInput
 				v-model="input"
 				queue

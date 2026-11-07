@@ -15,7 +15,7 @@ import {
 import { BarChart, DonutChart, NumberCard } from "frappe-ui/charts";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { api, type Person, type PersonDetail } from "../api";
+import { api, ApiError, type Person, type PersonDetail } from "../api";
 import CreditsDialog from "../components/CreditsDialog.vue";
 import ExtraCreditsDialog from "../components/ExtraCreditsDialog.vue";
 import StatusBadge from "../components/StatusBadge.vue";
@@ -27,20 +27,49 @@ import { settings } from "../store";
 const props = defineProps<{ id: string }>();
 const router = useRouter();
 
-const detail = ref<PersonDetail | null>(null);
-const missing = ref(false);
+/** The page for one id: its answer, no one with that id (a 404), or a failure to retry. */
+type PageState =
+	| { kind: "loading" }
+	| { kind: "loaded"; detail: PersonDetail }
+	| { kind: "missing" }
+	| { kind: "error"; message: string };
+const state = ref<PageState>({ kind: "loading" });
+const detail = computed(() => (state.value.kind === "loaded" ? state.value.detail : null));
 const person = computed(() => detail.value?.person);
 
-watch(() => props.id, load, { immediate: true });
+// Another person's page starts from the skeleton, never with the last one's numbers.
+watch(
+	() => props.id,
+	() => {
+		state.value = { kind: "loading" };
+		void load();
+	},
+	{ immediate: true },
+);
 
+// Each load takes a number; an answer for an id no longer shown, or overtaken by a newer load, is dropped.
+let asked = 0;
+
+/** Loads the page again. After a change it keeps the page on screen until the new numbers arrive. */
 async function load() {
+	const mine = ++asked;
 	try {
 		const data = await api<PersonDetail>(`/people/${encodeURIComponent(props.id)}`);
+		if (mine !== asked) return;
 		Object.assign(settings, data.settings);
-		detail.value = data;
-	} catch {
-		missing.value = true;
+		state.value = { kind: "loaded", detail: data };
+	} catch (e) {
+		if (mine !== asked) return;
+		if (e instanceof ApiError && e.status === 404) state.value = { kind: "missing" };
+		// A reload after a change that fails keeps the page, with a toast.
+		else if (state.value.kind === "loaded") toast.error((e as Error).message);
+		else state.value = { kind: "error", message: (e as Error).message };
 	}
+}
+
+function retry() {
+	state.value = { kind: "loading" };
+	void load();
 }
 
 const creditsOpen = ref(false);
@@ -219,13 +248,21 @@ async function emailInvite() {
 		/>
 	</template>
 
-	<div v-else-if="missing" class="flex flex-col items-center gap-3 px-3 py-24 text-center">
+	<div v-else-if="state.kind === 'missing'" class="flex flex-col items-center gap-3 px-3 py-24 text-center">
 		<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
 			<span class="lucide-user-x size-6" aria-hidden="true" />
 		</div>
 		<p class="text-base text-ink-gray-7">No one here</p>
 		<p class="text-sm text-ink-gray-5">They may have been removed.</p>
 		<Button label="All people" route="/people" class="mt-2" />
+	</div>
+	<div v-else-if="state.kind === 'error'" class="flex flex-col items-center gap-3 px-3 py-24 text-center" role="alert">
+		<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
+			<span class="lucide-circle-alert size-6" aria-hidden="true" />
+		</div>
+		<p class="text-base text-ink-gray-7">This page could not load</p>
+		<p class="text-sm text-ink-gray-5">{{ state.message }}</p>
+		<Button label="Try again" class="mt-2" @click="retry" />
 	</div>
 	<!-- Loading: the page's own frame, with skeletons where its numbers go. NumberCard
 	     and the chart draw frappe-ui's own skeletons with `loading`. -->

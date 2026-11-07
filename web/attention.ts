@@ -15,6 +15,8 @@ const ICON = "/favicon.png";
 class Attention {
 	private count = 0;
 	private base?: Promise<HTMLImageElement>;
+	/** Each render takes a number: a badge drawn after a newer render (the tab seen again, say) is dropped. */
+	private rendering = 0;
 
 	constructor() {
 		document.addEventListener("visibilitychange", () => {
@@ -36,9 +38,11 @@ class Attention {
 	}
 
 	private async render() {
+		const mine = ++this.rendering;
 		const label = this.count > 9 ? "9+" : String(this.count);
 		document.title = this.count ? `(${label}) ${BASE_TITLE}` : BASE_TITLE;
-		setFavicon(this.count ? await this.badged(label) : ICON);
+		const icon = this.count ? await this.badged(label) : ICON;
+		if (mine === this.rendering) setFavicon(icon);
 	}
 
 	/** The favicon with a red badge and the count at its top right. */

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { toast } from "frappe-ui";
+import { computed, ref } from "vue";
 import { CodeBlock, CodeBlockContent } from "../code-block";
 import { formatToolInput, humanizeToolName, summarizeToolInput } from "../tool/state";
 import Confirmation from "./Confirmation.vue";
@@ -10,24 +11,37 @@ import ConfirmationTitle from "./ConfirmationTitle.vue";
 /**
  * A ready-made Confirmation for a tool call waiting on `approval-requested`. With
  * `alwaysAllow` (tool/labels.ts) it also offers "Always allow", which runs it and then approves.
+ * `approvalId` names the call; "Always allow" approves only if the card still shows that call.
  */
-const props = defineProps<{ toolName: string; input?: unknown; reason?: string; question?: string; alwaysAllow?: () => Promise<void> }>();
+const props = defineProps<{
+	toolName: string;
+	input?: unknown;
+	reason?: string;
+	question?: string;
+	approvalId?: string;
+	alwaysAllow?: () => Promise<void>;
+}>();
 const emit = defineEmits<{ approve: []; deny: [] }>();
 const saving = ref(false);
 
 async function always() {
+	if (saving.value) return;
+	const approvalId = props.approvalId;
 	saving.value = true;
 	try {
 		await props.alwaysAllow?.();
-		emit("approve");
+	} catch {
+		toast.error("The rule could not be saved. Try again, or allow this call once.");
+		return;
 	} finally {
 		saving.value = false;
 	}
+	if (props.approvalId === approvalId) emit("approve");
 }
 
 const showDetails = ref(false);
-const details = formatToolInput(props.input);
-const summary = summarizeToolInput(props.input);
+const details = computed(() => formatToolInput(props.input));
+const summary = computed(() => summarizeToolInput(props.input));
 </script>
 
 <template>
@@ -49,9 +63,9 @@ const summary = summarizeToolInput(props.input);
 				</template>
 			</ConfirmationTitle>
 			<ConfirmationActions>
-				<ConfirmationAction label="Deny" @click="emit('deny')" />
+				<ConfirmationAction label="Deny" :disabled="saving" @click="emit('deny')" />
 				<ConfirmationAction v-if="alwaysAllow" label="Always allow" :loading="saving" @click="always" />
-				<ConfirmationAction :label="alwaysAllow ? 'Allow once' : 'Approve'" variant="solid" @click="emit('approve')" />
+				<ConfirmationAction :label="alwaysAllow ? 'Allow once' : 'Approve'" variant="solid" :disabled="saving" @click="emit('approve')" />
 			</ConfirmationActions>
 		</Confirmation>
 		<CodeBlock v-if="showDetails" size="sm">

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
 	Badge,
+	Button,
 	DesktopShell,
 	FrappeUIProvider,
 	MobileNav,
@@ -11,7 +12,7 @@ import {
 	SidebarItem,
 	SidebarSection,
 } from "frappe-ui";
-import { computed, onBeforeUnmount, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
 import { loadViewer } from "./api";
 import AccountMenu from "./components/AccountMenu.vue";
@@ -28,10 +29,22 @@ import { counts, refreshCounts, settingsOpen, viewer } from "./store";
 const route = useRoute();
 const isAdmin = computed(() => viewer.value?.user.role === "admin");
 
-void loadViewer().then((loaded) => {
-	if (!loaded) return location.assign("/");
-	viewer.value = loaded;
-});
+// Offline or a failing server is not "signed out": say so, with Retry, and ask again when back online.
+const viewerError = ref(false);
+async function askViewer() {
+	try {
+		const loaded = await loadViewer();
+		if (!loaded) return location.assign("/");
+		viewer.value = loaded;
+		viewerError.value = false;
+	} catch {
+		viewerError.value = true;
+	}
+}
+void askViewer();
+const retryViewer = () => viewer.value === undefined && void askViewer();
+addEventListener("online", retryViewer);
+onBeforeUnmount(() => removeEventListener("online", retryViewer));
 
 // The sidebar's counts: on each page change, and every minute for requests that come in.
 watch([isAdmin, () => route.path], ([admin]) => admin && void refreshCounts(), { immediate: true });
@@ -42,7 +55,12 @@ onBeforeUnmount(() => clearInterval(timer));
 <template>
 	<FrappeUIProvider>
 		<div class="h-dvh w-full bg-surface-base text-ink-gray-8">
-			<div v-if="!viewer" class="h-full" aria-busy="true" />
+			<div v-if="!viewer && viewerError" class="flex h-full flex-col items-center justify-center gap-3 px-4 text-center" role="alert">
+				<span class="lucide-wifi-off size-6 text-ink-gray-5" aria-hidden="true" />
+				<p class="max-w-sm text-p-base text-ink-gray-7">Could not reach the server. Check your connection, then try again.</p>
+				<Button label="Retry" @click="retryViewer" />
+			</div>
+			<div v-else-if="!viewer" class="h-full" aria-busy="true" />
 			<NoAccess v-else-if="!isAdmin" :email="viewer.user.email" />
 
 			<MobileShell v-else-if="isMobile">

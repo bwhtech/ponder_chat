@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { Button, Skeleton } from "frappe-ui";
+import { Alert, Button, Skeleton } from "frappe-ui";
 import { ref } from "vue";
 import PanelBody from "../settings/PanelBody.vue";
 import PanelHeader from "../settings/PanelHeader.vue";
 import AddConnectorDialog from "./AddConnectorDialog.vue";
-import { connectors } from "./api";
+import { connectors, connectorsError, loadConnectors } from "./api";
 import ConnectorRow from "./ConnectorRow.vue";
 
 /** Settings, Connectors: the MCP servers the person connected, and Add connector. */
 const adding = ref(false);
+const retry = () => void loadConnectors().catch(() => undefined);
 </script>
 
 <template>
@@ -18,7 +19,15 @@ const adding = ref(false);
 		</template>
 	</PanelHeader>
 	<PanelBody>
-		<div v-if="!connectors" class="divide-y divide-outline-gray-1" aria-busy="true" aria-label="Loading connectors">
+		<Alert
+			v-if="!connectors && connectorsError"
+			theme="red"
+			title="The connectors did not load"
+			:description="connectorsError"
+			:primary-action="{ label: 'Retry', onClick: retry }"
+		/>
+
+		<div v-else-if="!connectors" class="divide-y divide-outline-gray-1" aria-busy="true" aria-label="Loading connectors">
 			<div v-for="n in 3" :key="n" class="flex items-center gap-3 py-3">
 				<Skeleton class="size-8 rounded-4" />
 				<div class="flex-1 space-y-1.5">

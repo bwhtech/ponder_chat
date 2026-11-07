@@ -82,24 +82,30 @@ const signIn = computed(() => {
 	return `OAuth. Ponder registered itself with ${c.value.name}.`;
 });
 
-// A new key: the server checks it before it is saved.
+// A new key: the server checks it before it is saved. Each opening of the dialog is a new
+// session, so a save from an earlier one does not close or unlock this one.
 const keyOpen = ref(false);
 const keyRows = ref<Header[]>([]);
 const savingKey = ref(false);
+let keySession = 0;
 function changeKey() {
+	keySession++;
+	savingKey.value = false;
 	keyRows.value = (c.value.headerNames.length ? c.value.headerNames : ["Authorization"]).map((name) => ({ name, value: "" }));
 	keyOpen.value = true;
 }
 async function saveKey() {
+	const session = keySession;
 	savingKey.value = true;
 	try {
 		await changeConnector(c.value.id, { headers: keyRows.value });
-		keyOpen.value = false;
+		// The key was saved either way, so the toast shows; only its own dialog closes.
 		toast.success(`Saved. ${c.value.name} accepted the key.`);
+		if (session === keySession) keyOpen.value = false;
 	} catch (error) {
 		toast.error(error instanceof Error ? error.message : "The key was not saved.");
 	} finally {
-		savingKey.value = false;
+		if (session === keySession) savingKey.value = false;
 	}
 }
 

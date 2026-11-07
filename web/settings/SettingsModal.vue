@@ -21,7 +21,8 @@ const tab = computed({
 const connector = computed(() => connectors.value?.find((each) => each.id === settings.connector));
 const attention = computed(() => connectors.value?.filter((each) => each.status !== "connected").length ?? 0);
 
-// The list loads when Settings opens, so a sign-in that ended elsewhere shows.
+// The list loads when Settings opens, so a sign-in that ended elsewhere shows. When it
+// fails, Connectors shows why, with Retry (connectorsError in connectors/api.ts).
 watch(
 	() => settings.open,
 	(open) => open && void loadConnectors().catch(() => undefined),

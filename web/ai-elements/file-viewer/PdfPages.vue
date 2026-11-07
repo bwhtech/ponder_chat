@@ -13,7 +13,8 @@ const props = defineProps<{ url: string; name: string }>();
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
-type Page = { number: number; ratio: number; drawn: boolean };
+/** `tries` counts failed draws: a page gets one more try, then shows that it failed. */
+type Page = { number: number; ratio: number; drawn: boolean; tries: number; failed: boolean };
 
 const pages = ref<Page[]>([]);
 const failed = ref(false);
@@ -21,22 +22,33 @@ const pdf = shallowRef<PDFDocumentProxy>();
 const task = getDocument({ url: props.url });
 const drawing = new Set<number>();
 let observer: IntersectionObserver | undefined;
+let unmounted = false;
 
 onMounted(async () => {
 	try {
 		const document = await task.promise;
-		pdf.value = document;
 		const first = (await document.getPage(1)).getViewport({ scale: 1 });
+		// The viewer closed while the PDF loaded: watch nothing.
+		if (unmounted) return;
+		pdf.value = document;
 		// Until a page draws, it has the shape of the first page.
-		pages.value = Array.from({ length: document.numPages }, (_, index) => ({ number: index + 1, ratio: first.width / first.height, drawn: false }));
+		pages.value = Array.from({ length: document.numPages }, (_, index) => ({
+			number: index + 1,
+			ratio: first.width / first.height,
+			drawn: false,
+			tries: 0,
+			failed: false,
+		}));
 		observer = new IntersectionObserver(onVisible, { rootMargin: "100% 0px" });
 	} catch {
-		failed.value = true;
+		if (!unmounted) failed.value = true;
 	}
 });
 
 onBeforeUnmount(() => {
+	unmounted = true;
 	observer?.disconnect();
+	observer = undefined;
 	void task.destroy();
 });
 
@@ -51,7 +63,8 @@ function onVisible(entries: IntersectionObserverEntry[]) {
 		const target = entry.target as HTMLElement;
 		observer?.unobserve(target);
 		const number = Number(target.dataset.page);
-		if (!pages.value[number - 1]?.drawn) void draw(number, target);
+		const page = pages.value[number - 1];
+		if (page && !page.drawn && !page.failed) void draw(number, target);
 	}
 }
 
@@ -72,7 +85,10 @@ async function draw(number: number, element: HTMLElement) {
 		const entry = pages.value[number - 1];
 		if (entry) Object.assign(entry, { ratio: base.width / base.height, drawn: true });
 	} catch {
-		// A page that fails to draw stays blank; the others still show.
+		// The others still show. Watch the page again for one more try, then show it failed.
+		const entry = pages.value[number - 1];
+		if (entry && ++entry.tries < 2) observer?.observe(element);
+		else if (entry) entry.failed = true;
 	} finally {
 		drawing.delete(number);
 	}
@@ -97,7 +113,10 @@ async function draw(number: number, element: HTMLElement) {
 				role="img"
 			>
 				<canvas class="block size-full" />
-				<Skeleton v-if="!page.drawn" class="absolute inset-0 !bg-gray-100" />
+				<div v-if="page.failed" class="absolute inset-0 flex items-center justify-center bg-gray-100 p-4 text-center text-base text-gray-600">
+					Page {{ page.number }} could not be shown.
+				</div>
+				<Skeleton v-else-if="!page.drawn" class="absolute inset-0 !bg-gray-100" />
 			</div>
 		</template>
 		<!-- Loading: a page-shaped placeholder. -->

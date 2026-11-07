@@ -180,6 +180,14 @@ export async function usableConnections(userId: string): Promise<Connection[]> {
 	return rows.map(fromRow);
 }
 
+/** The person's connections that are on but failed, last changed over `waitMs` ago: tried again in the background. */
+export async function connectionsToRetry(userId: string, waitMs: number): Promise<Connection[]> {
+	const rows = await sql<Row[]>`
+		select * from mcp_connections where user_id = ${userId} and enabled and status = 'error'
+			and updated_at < now() - make_interval(secs => ${waitMs / 1000})`;
+	return rows.map(fromRow);
+}
+
 /** The person's connection, or undefined when it is not theirs. */
 export async function getConnection(id: string, userId: string): Promise<Connection | undefined> {
 	const [row] = await sql<Row[]>`select * from mcp_connections where id = ${id} and user_id = ${userId}`;
@@ -238,6 +246,11 @@ export async function saveCredentials(id: string, credentials: Credentials, stat
 
 export async function setStatus(id: string, status: Status, lastError: string | null = null) {
 	await sql`update mcp_connections set status = ${status}, last_error = ${lastError}, updated_at = now() where id = ${id}`;
+}
+
+/** Records a failure and keeps the status: a connected server that did not answer once stays connected. */
+export async function setLastError(id: string, lastError: string) {
+	await sql`update mcp_connections set last_error = ${lastError} where id = ${id}`;
 }
 
 export async function saveTools(id: string, tools: ToolInfo[], serverInfo: ServerInfo | null) {

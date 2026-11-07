@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/vue";
 import { adminClient, emailOTPClient, magicLinkClient } from "better-auth/client/plugins";
 import { ref } from "vue";
+import { model } from "./models";
 
 /**
  * Who is signed in, and their credits for today. Sign-in is by email (server/auth.ts):
@@ -16,11 +17,25 @@ export const authClient = createAuthClient({ plugins: [magicLinkClient(), emailO
 
 /** Undefined while loading, null when signed out. */
 export const me = ref<Me | null | undefined>(undefined);
+/** Why the last loadMe could not tell who is signed in (offline, or the server failed); empty when it could. */
+export const meError = ref("");
 
+/**
+ * Asks who is signed in, and returns it. Only a 401 or 403 means signed out. When the server
+ * cannot be reached or fails, `me` stays as it was and `meError` says why, so App.vue can offer Retry.
+ */
 export async function loadMe() {
-	const response = await fetch("/api/me");
-	me.value = response.ok ? await response.json() : null;
+	try {
+		const response = await fetch("/api/me");
+		if (response.status === 401 || response.status === 403) me.value = null;
+		else if (!response.ok) throw new Error(`The server answered ${response.status}.`);
+		else me.value = await response.json();
+		meError.value = "";
+	} catch {
+		meError.value = "Ponder Chat could not reach the server. Check your connection, then try again.";
+	}
 	if (me.value) keepCachesFor(me.value.user.id);
+	return me.value;
 }
 
 /** Asks again how many credits are left: after each reply, and when a reply is refused. */
@@ -35,11 +50,20 @@ export async function sendSignInLink(email: string) {
 	if (error) throw new Error(error.message ?? "The email could not be sent.");
 }
 
-/** Signs in with the code from the email, then loads who is signed in. */
-export async function signInWithCode(email: string, code: string) {
+/**
+ * Signs in with the code from the email, then loads who is signed in. `stillWanted` says
+ * whether the person still waits for this code: when they chose another email meanwhile, a
+ * code that worked is signed out again, and nothing is reported.
+ */
+export async function signInWithCode(email: string, code: string, stillWanted = () => true) {
 	const { error } = await authClient.signIn.emailOtp({ email, otp: code });
+	if (!stillWanted()) {
+		if (!error) await authClient.signOut().catch(() => undefined);
+		return;
+	}
 	if (error) throw new Error(codeErrors[error.code ?? ""] ?? (error.status === 429 ? TOO_FAST : (error.message ?? "Could not sign in.")));
-	await loadMe();
+	// The code worked, but who is signed in could not be read: say so, rather than stay on this page with no word.
+	if (!(await loadMe())) throw new Error(meError.value ? `${meError.value} Then reload the page.` : "Could not sign in. Reload the page and try again.");
 }
 
 // Better Auth's codes for a code that did not work (plugins/email-otp/error-codes).
@@ -66,8 +90,13 @@ function keepCachesFor(userId: string) {
 	localStorage.setItem(CACHE_OWNER, userId);
 }
 
+// The drafts (drafts.ts) and the model picked (models.ts) are the person's too.
 function clearCaches() {
 	localStorage.removeItem("ponder-chat:threads");
+	localStorage.removeItem("ponder-chat:drafts:v1");
+	localStorage.removeItem("ponder-chat:model");
+	// models.ts read the last person's pick when the page loaded.
+	model.value = "";
 	localStorage.removeItem(CACHE_OWNER);
 	indexedDB?.deleteDatabase("ponder-chat");
 }

@@ -81,29 +81,29 @@ export async function targetFor(connection: Connection): Promise<Target> {
 	};
 }
 
-type Pooled = { client: Promise<MCPClient>; timer?: ReturnType<typeof setTimeout> };
+/** A pooled client, the calls using it now, and the timer that closes it when it has been idle. */
+type Pooled = { client: Promise<MCPClient>; users: number; timer?: ReturnType<typeof setTimeout> };
 const pool = new Map<string, Pooled>();
 
 /**
  * Runs `use` with an open client for the connection. One client for each connection is
  * kept for 2 minutes after its last use, so a reply with several calls connects once.
- * After any error the client is closed, and the next call connects again. A refused
- * sign-in marks the connection "needs_sign_in" and throws NeedsSignIn.
+ * A client is never closed while a call uses it. After any error the client leaves the
+ * pool, and the next call connects again. A refused sign-in marks the connection
+ * "needs_sign_in" and throws NeedsSignIn.
  */
 export async function withConnection<T>(connection: Connection, use: (client: MCPClient) => Promise<T>): Promise<T> {
 	let entry = pool.get(connection.id);
 	if (!entry) {
-		entry = { client: targetFor(connection).then(openClient) };
+		entry = { client: targetFor(connection).then(openClient), users: 0 };
 		pool.set(connection.id, entry);
 	}
+	entry.users++;
 	clearTimeout(entry.timer);
 	try {
-		const result = await use(await entry.client);
-		entry.timer = setTimeout(() => forgetClient(connection.id), IDLE_MS);
-		entry.timer.unref?.();
-		return result;
+		return await use(await entry.client);
 	} catch (error) {
-		forgetClient(connection.id);
+		forgetClient(connection.id, entry);
 		if (!(error instanceof UnauthorizedError || isUnauthorized(error))) throw error;
 		if (connection.auth === "oauth") {
 			await setStatus(connection.id, "needs_sign_in", "The server refused the sign-in. Sign in again.");
@@ -112,7 +112,24 @@ export async function withConnection<T>(connection: Connection, use: (client: MC
 		const message = connection.auth === "headers" ? "The server refused the API key. Enter a new key." : "The server now asks for a sign-in or a key.";
 		await setStatus(connection.id, "error", message);
 		throw new ConnectorProblem(message);
+	} finally {
+		entry.users--;
+		if (pool.get(connection.id) !== entry) closeWhenIdle(entry);
+		else if (!entry.users) idleTimer(connection.id, entry);
 	}
+}
+
+function idleTimer(id: string, entry: Pooled) {
+	clearTimeout(entry.timer);
+	entry.timer = setTimeout(() => forgetClient(id, entry), IDLE_MS);
+	entry.timer.unref?.();
+}
+
+/** Closes a client that left the pool, once no call uses it. */
+function closeWhenIdle(entry: Pooled) {
+	clearTimeout(entry.timer);
+	if (entry.users) return;
+	void entry.client.then((client) => client.close()).catch(() => undefined);
 }
 
 /** A header-key server answers 401 with no OAuth to fall back on. */
@@ -120,11 +137,14 @@ function isUnauthorized(error: unknown) {
 	return error instanceof Error && /\b401\b|Unauthorized/i.test(`${error.message} ${error.cause instanceof Error ? error.cause.message : ""}`);
 }
 
-/** Closes the connection's pooled client: after an error, a new sign-in, new headers, or removal. */
-export function forgetClient(id: string) {
+/**
+ * Takes the connection's client out of the pool: after an error, a new sign-in, new headers,
+ * or removal. It closes now, or when the calls using it end. With `only`, just that client:
+ * an error on an old client leaves a newer one alone.
+ */
+export function forgetClient(id: string, only?: Pooled) {
 	const entry = pool.get(id);
-	if (!entry) return;
+	if (!entry || (only && entry !== only)) return;
 	pool.delete(id);
-	clearTimeout(entry.timer);
-	void entry.client.then((client) => client.close()).catch(() => undefined);
+	closeWhenIdle(entry);
 }

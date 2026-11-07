@@ -6,7 +6,7 @@ import { WEB_FETCH, WEB_FETCH_DESCRIPTION, WEB_SEARCH, WEB_SEARCH_DESCRIPTION, w
 import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
 import { connectorTools, connectorToolsStep } from "./connectors.ts";
 import { ChatModel } from "./model.ts";
-import { loadModelMessages, recallMemoryStep, recordUsageStep, runPythonStep, saveReplyStep, webFetchStep, webSearchStep } from "./steps.ts";
+import { finishRunStep, loadModelMessages, recallMemoryStep, recordUsageStep, runPythonStep, saveReplyStep, webFetchStep, webSearchStep } from "./steps.ts";
 
 export type ChatTurn = {
 	threadId: string;
@@ -32,56 +32,57 @@ export type ChatTurn = {
 export async function chatTurn(turn: ChatTurn) {
 	"use workflow";
 
-	// What the person told Ponder in earlier chats (server/memory.ts). The turn is saved to memory with the reply (reply.ts).
-	const memory = await recallMemoryStep(turn.threadId, turn.owner);
-	// The tools of the apps the person connected (server/mcp/), recorded by the step.
-	const connectors = await connectorToolsStep(turn.owner);
-	const agent = new WorkflowAgent({
-		model: new ChatModel(turn.model.id),
-		instructions: [instructions(turn), connectors.guidance, memory.guidance].filter(Boolean).join("\n\n"),
-		// A tool that waits for approval comes back approved in the messages the browser sends; the signature shows the model asked for it.
-		experimental_toolApprovalSecret: { environmentVariable: TOOL_APPROVAL_SECRET_ENV },
-		tools: {
-			[WEB_SEARCH]: tool({
-				description: WEB_SEARCH_DESCRIPTION,
-				inputSchema: webSearchInput,
-				execute: (input) => webSearchStep(input, turn.threadId, turn.owner),
-			}),
-			[WEB_FETCH]: tool({ description: WEB_FETCH_DESCRIPTION, inputSchema: webFetchInput, execute: (input) => webFetchStep(input) }),
-			...(turn.python && {
-				[RUN_PYTHON]: tool({
-					description: RUN_PYTHON_DESCRIPTION,
-					inputSchema: runPythonInput,
-					execute: (input) => runPythonStep(input, turn.threadId, turn.owner),
-				}),
-			}),
-			// After our own tools, which never change, so more of the prompt stays cached.
-			...connectorTools(connectors.specs, turn.owner),
-		},
-		// Credits are charged from what each model call cost (steps.ts).
-		onStepEnd: async (step) => {
-			const metadata = step.providerMetadata?.openrouter as { usage?: { cost?: number } } | undefined;
-			const raw = step.usage.raw as { cost?: number } | undefined;
-			await recordUsageStep({
-				threadId: turn.threadId,
-				user: turn.owner,
-				model: step.response?.modelId ?? turn.model.id,
-				inputTokens: step.usage.inputTokens ?? 0,
-				outputTokens: step.usage.outputTokens ?? 0,
-				cachedTokens: step.usage.inputTokenDetails?.cacheReadTokens ?? 0,
-				costUsd: metadata?.usage?.cost ?? raw?.cost ?? null,
-				finishReason: step.finishReason,
-				toolCalls: step.toolCalls.map((call) => call.toolName),
-			});
-		},
-	});
-
-	// The reply is saved and the run marked finished even when the run fails (a model
-	// that keeps erroring), so the thread never looks busy forever. A failed run does not
-	// close its stream, so then only what it wrote is saved.
+	// The reply is saved and the run marked finished on every way out: a model that keeps
+	// erroring, memory or connectors that fail, or a save that fails. So the thread never
+	// looks busy forever. A failed run does not close its stream, so then only what it
+	// wrote is saved.
 	const { workflowRunId } = getWorkflowMetadata();
 	let failure: unknown;
 	try {
+		// What the person told Ponder in earlier chats (server/memory.ts). The turn is saved to memory with the reply (reply.ts).
+		// Without it, or without connectors, the reply is still written.
+		const memory = await recallMemoryStep(turn.threadId, turn.owner).catch(() => ({ guidance: "", recalled: "" }));
+		// The tools of the apps the person connected (server/mcp/), recorded by the step.
+		const connectors = await connectorToolsStep(turn.owner).catch(() => ({ specs: [], guidance: "" }));
+		const agent = new WorkflowAgent({
+			model: new ChatModel(turn.model.id),
+			instructions: [instructions(turn), connectors.guidance, memory.guidance].filter(Boolean).join("\n\n"),
+			// A tool that waits for approval comes back approved in the messages the browser sends; the signature shows the model asked for it.
+			experimental_toolApprovalSecret: { environmentVariable: TOOL_APPROVAL_SECRET_ENV },
+			tools: {
+				[WEB_SEARCH]: tool({
+					description: WEB_SEARCH_DESCRIPTION,
+					inputSchema: webSearchInput,
+					execute: (input) => webSearchStep(input, turn.threadId, turn.owner),
+				}),
+				[WEB_FETCH]: tool({ description: WEB_FETCH_DESCRIPTION, inputSchema: webFetchInput, execute: (input) => webFetchStep(input) }),
+				...(turn.python && {
+					[RUN_PYTHON]: tool({
+						description: RUN_PYTHON_DESCRIPTION,
+						inputSchema: runPythonInput,
+						execute: (input) => runPythonStep(input, turn.threadId, turn.owner),
+					}),
+				}),
+				// After our own tools, which never change, so more of the prompt stays cached.
+				...connectorTools(connectors.specs, turn.owner),
+			},
+			// Credits are charged from what each model call cost (steps.ts).
+			onStepEnd: async (step) => {
+				const metadata = step.providerMetadata?.openrouter as { usage?: { cost?: number } } | undefined;
+				const raw = step.usage.raw as { cost?: number } | undefined;
+				await recordUsageStep({
+					threadId: turn.threadId,
+					user: turn.owner,
+					model: step.response?.modelId ?? turn.model.id,
+					inputTokens: step.usage.inputTokens ?? 0,
+					outputTokens: step.usage.outputTokens ?? 0,
+					cachedTokens: step.usage.inputTokenDetails?.cacheReadTokens ?? 0,
+					costUsd: metadata?.usage?.cost ?? raw?.cost ?? null,
+					finishReason: step.finishReason,
+					toolCalls: step.toolCalls.map((call) => call.toolName),
+				});
+			},
+		});
 		await agent.stream({
 			messages: await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled),
 			writable: getWritable<ModelCallStreamPart>(),
@@ -90,7 +91,12 @@ export async function chatTurn(turn: ChatTurn) {
 	} catch (error) {
 		failure = error;
 	}
-	await saveReplyStep(turn.threadId, turn.owner, workflowRunId, turn.model.id, Boolean(failure), turn.continued);
+	try {
+		await saveReplyStep(turn.threadId, turn.owner, workflowRunId, turn.model.id, Boolean(failure), turn.continued);
+	} catch (error) {
+		await finishRunStep(turn.threadId, workflowRunId, turn.model.id, turn.continued);
+		throw failure ?? error;
+	}
 	if (failure) throw failure;
 }
 

@@ -23,10 +23,12 @@ export async function loadPythonState(threadId: string, owner: string): Promise<
 	return row ? (JSON.parse(gunzipSync(row.data).toString("utf8")) as PythonState) : undefined;
 }
 
+/** Not for a thread that was deleted while its run went on. */
 export async function savePythonState(threadId: string, owner: string, state: PythonState) {
 	const data = gzipSync(JSON.stringify(state));
 	await sql`
-		insert into python_state (thread_id, owner, data) values (${threadId}, ${owner}, ${data})
+		insert into python_state (thread_id, owner, data)
+		select ${threadId}, ${owner}, ${data} where exists (select 1 from threads where id = ${threadId} and owner = ${owner})
 		on conflict (thread_id) do update set data = excluded.data, updated_at = now()
 		where python_state.owner = excluded.owner`;
 }

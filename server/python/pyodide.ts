@@ -64,14 +64,16 @@ export async function checkSandbox(): Promise<boolean> {
 let running = 0;
 const waiting: (() => void)[] = [];
 
+/** At most MAX_RUNS at once. A run that ends hands its slot to the next one waiting, so a new caller can't take it first. */
 export async function runPython(request: RunRequest): Promise<RunReply> {
 	if (running >= MAX_RUNS) await new Promise<void>((resolve) => waiting.push(resolve));
-	running++;
+	else running++;
 	try {
 		return await runNow(request);
 	} finally {
-		running--;
-		waiting.shift()?.();
+		const next = waiting.shift();
+		if (next) next();
+		else running--;
 	}
 }
 

@@ -18,18 +18,32 @@ import { counts, refreshCounts } from "../store";
  */
 const pending = ref<PendingRequest[]>([]);
 const decided = ref<DecidedRequest[]>([]);
-const loading = ref(true);
+/** Until the first answer, a failure shows in place of the lists: an empty list would read as "no requests". */
+const status = ref<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string }>({ kind: "loading" });
+const loading = computed(() => status.value.kind === "loading");
+
+// Each load takes a number: an older answer that arrives late is dropped.
+let asked = 0;
 
 async function load() {
+	const mine = ++asked;
 	try {
 		const data = await api<{ pending: PendingRequest[]; decided: DecidedRequest[] }>("/requests");
+		if (mine !== asked) return;
 		pending.value = data.pending;
 		decided.value = data.decided;
+		status.value = { kind: "loaded" };
 	} catch (e) {
-		toast.error((e as Error).message);
-	} finally {
-		loading.value = false;
+		if (mine !== asked) return;
+		// A reload that fails keeps the lists on screen, with a toast.
+		if (status.value.kind === "loaded") toast.error((e as Error).message);
+		else status.value = { kind: "error", message: (e as Error).message };
 	}
+}
+
+function retry() {
+	status.value = { kind: "loading" };
+	void load();
 }
 void load();
 // The sidebar count is checked every minute: a new request shows here too.
@@ -132,6 +146,14 @@ const answer = (request: DecidedRequest) =>
 			</List>
 
 			<ListSkeleton v-if="loading" :rows="3" :avatar="isMobile ? 'lg' : 'md'" two-lines label="Loading requests" />
+			<div v-else-if="status.kind === 'error'" class="flex flex-col items-center gap-3 py-12 text-center" role="alert">
+				<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
+					<span class="lucide-circle-alert size-6" aria-hidden="true" />
+				</div>
+				<p class="text-base text-ink-gray-7">The requests could not load</p>
+				<p class="text-sm text-ink-gray-5">{{ status.message }}</p>
+				<Button label="Try again" class="mt-2" @click="retry" />
+			</div>
 			<div v-else-if="!pending.length" class="flex flex-col items-center gap-3 py-12 text-center">
 				<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
 					<span class="lucide-inbox size-6" aria-hidden="true" />

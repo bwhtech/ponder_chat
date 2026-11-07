@@ -1,3 +1,14 @@
+<script lang="ts">
+import type { Rule as SavedRule } from "./api";
+
+// By "connector id/tool name", shared by the rows, as a search can remove a row and bring
+// it back while its change is on its way: the newest change, and the rule the server has
+// while changes are on their way (the rule before them, or the newest one saved).
+const newestRule = new Map<string, number>();
+const savedRule = new Map<string, { change: number; rule: SavedRule }>();
+let ruleChanges = 0;
+</script>
+
 <script setup lang="ts">
 import { Badge, Select, toast } from "frappe-ui";
 import { computed } from "vue";
@@ -11,14 +22,22 @@ const rule = computed({
 });
 
 async function save(value: Rule) {
-	const before = props.tool.rule;
-	// Shown at once; the server's answer replaces the connector.
+	const key = `${props.connector.id}/${props.tool.name}`;
+	const mine = ++ruleChanges;
+	newestRule.set(key, mine);
+	if (!savedRule.has(key)) savedRule.set(key, { change: 0, rule: props.tool.rule });
+	// Shown at once; the server's answer replaces the connector (api.ts keeps only the newest answer).
 	props.tool.rule = value;
 	try {
 		await changeConnector(props.connector.id, { rules: { [props.tool.name]: value } });
+		const saved = savedRule.get(key);
+		if (saved && mine > saved.change) savedRule.set(key, { change: mine, rule: value });
 	} catch (error) {
-		props.tool.rule = before;
+		// Only the newest change goes back, to what the server has: a later change shows what the person chose last.
+		if (newestRule.get(key) === mine) props.tool.rule = savedRule.get(key)?.rule ?? props.tool.rule;
 		toast.error(error instanceof Error ? error.message : "The rule was not saved.");
+	} finally {
+		if (newestRule.get(key) === mine) savedRule.delete(key);
 	}
 }
 </script>

@@ -97,7 +97,9 @@ function answer(output: AskUserOutput) {
 <template>
 	<ToolConfirmation
 		v-if="needsAnswer && part.state === 'approval-requested'"
+		:key="part.toolCallId"
 		:tool-name="name"
+		:approval-id="part.approval.id"
 		:input="part.input"
 		:reason="part.approval.requestReason"
 		:question="label?.question"

@@ -15,18 +15,32 @@ import { isMobile } from "../lib/viewport";
 import { refreshCounts, settings } from "../store";
 
 const people = ref<Person[]>([]);
-const loading = ref(true);
+/** Until the first answer, a failure shows in place of the list: an empty list would read as "no people yet". */
+const status = ref<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string }>({ kind: "loading" });
+const loading = computed(() => status.value.kind !== "loaded");
+
+// Each load takes a number: an older answer that arrives late is dropped.
+let asked = 0;
 
 async function load() {
+	const mine = ++asked;
 	try {
 		const data = await api<{ people: Person[]; settings: Settings }>("/people");
+		if (mine !== asked) return;
 		Object.assign(settings, data.settings);
 		people.value = data.people;
+		status.value = { kind: "loaded" };
 	} catch (e) {
-		toast.error((e as Error).message);
-	} finally {
-		loading.value = false;
+		if (mine !== asked) return;
+		// A reload that fails keeps the list on screen, with a toast.
+		if (status.value.kind === "loaded") toast.error((e as Error).message);
+		else status.value = { kind: "error", message: (e as Error).message };
 	}
+}
+
+function retry() {
+	status.value = { kind: "loading" };
+	void load();
 }
 void load();
 
@@ -197,7 +211,16 @@ function invited() {
 			</ListRows>
 		</List>
 
-		<ListSkeleton v-if="loading" :rows="6" :avatar="isMobile ? 'lg' : 'md'" two-lines label="Loading people" />
+		<div v-if="status.kind === 'error'" class="flex flex-col items-center gap-3 py-16 text-center" role="alert">
+			<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
+				<span class="lucide-circle-alert size-6" aria-hidden="true" />
+			</div>
+			<p class="text-base text-ink-gray-7">The people could not load</p>
+			<p class="text-sm text-ink-gray-5">{{ status.message }}</p>
+			<Button label="Try again" class="mt-2" @click="retry" />
+		</div>
+
+		<ListSkeleton v-else-if="loading" :rows="6" :avatar="isMobile ? 'lg' : 'md'" two-lines label="Loading people" />
 
 		<div v-else-if="!rows.length" class="flex flex-col items-center gap-3 py-16 text-center">
 			<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">

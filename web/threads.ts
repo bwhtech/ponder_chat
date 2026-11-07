@@ -9,7 +9,7 @@ import { forgetThread, peekThread, readThread, writeThread, type CachedThread } 
  *
  * A thread kept on this device (thread-cache.ts) shows at once, and the server is
  * asked afterwards: a 304 when nothing changed, or the newer thread, which replaces
- * the chat unless the person is mid-reply. The list is kept in localStorage the same way.
+ * the chat unless a reply is on its way. The list is kept in localStorage the same way.
  */
 export type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number };
 
@@ -25,7 +25,11 @@ const loading = ref(false);
 const running = ref(false);
 /** Goes up when a newer copy of the open thread replaces the one shown, so the chat remounts with it. */
 const revision = ref(0);
-/** The open chat is sending or receiving; a newer copy waits rather than cut it off. */
+/**
+ * The open chat is sending or receiving. A newer copy from the server is then dropped rather
+ * than cut the reply off: when the reply ends, the chat's own messages are the newest, and it
+ * saves them (remember) without an etag, so the next open fetches the thread whole.
+ */
 const chatBusy = ref(false);
 // Each open() takes a number; a slower answer for a thread no longer open is dropped.
 let opening = 0;
@@ -105,7 +109,9 @@ async function open(id: string, { push = true } = {}) {
 	loading.value = false;
 	if (!cached) return show(fresh && fresh !== "same" ? fresh : { messages: [], running: false, etag: null });
 	// Nothing new, or the same messages under a new version (the page saved them itself).
-	if (!fresh || fresh === "same" || sameThread(cached, fresh) || chatBusy.value) return;
+	if (!fresh || fresh === "same" || sameThread(cached, fresh)) return;
+	// A reply is on its way: the chat's own messages will be newer than this copy (chatBusy).
+	if (chatBusy.value) return;
 	show(fresh);
 	revision.value++;
 }

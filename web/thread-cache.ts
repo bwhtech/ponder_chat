@@ -9,6 +9,12 @@ import type { UIMessage } from "ai";
 export type CachedThread = { messages: UIMessage[]; running: boolean; etag: string | null };
 
 const memory = new Map<string, CachedThread>();
+/**
+ * Goes up for a thread each time it is written or forgotten. A read from IndexedDB that
+ * was on its way meanwhile holds the older copy, so it must not land in memory.
+ */
+const generation = new Map<string, number>();
+const bump = (id: string) => generation.set(id, (generation.get(id) ?? 0) + 1);
 /** Threads kept in IndexedDB, most recently opened first. */
 const KEEP = 30;
 const DB = "ponder-chat";
@@ -42,7 +48,10 @@ async function run<T>(mode: IDBTransactionMode, work: (store: IDBObjectStore) =>
 export async function readThread(id: string): Promise<CachedThread | undefined> {
 	const inMemory = memory.get(id);
 	if (inMemory) return inMemory;
+	const before = generation.get(id);
 	const stored = await run<{ thread: CachedThread } | undefined>("readonly", (store) => store.get(id));
+	// Written or forgotten while IndexedDB answered: what memory holds now is newer.
+	if (generation.get(id) !== before) return memory.get(id);
 	if (stored) memory.set(id, stored.thread);
 	return stored?.thread;
 }
@@ -51,6 +60,7 @@ export async function readThread(id: string): Promise<CachedThread | undefined> 
 export const peekThread = (id: string) => memory.get(id);
 
 export function writeThread(id: string, thread: CachedThread) {
+	bump(id);
 	memory.set(id, thread);
 	// Messages from the chat are reactive proxies; IndexedDB needs plain data.
 	const plain = { thread: { ...thread, messages: JSON.parse(JSON.stringify(thread.messages)) }, openedAt: Date.now() };
@@ -58,18 +68,36 @@ export function writeThread(id: string, thread: CachedThread) {
 }
 
 export function forgetThread(id: string) {
+	bump(id);
 	memory.delete(id);
 	void run("readwrite", (store) => store.delete(id));
 }
 
 /** Keeps the KEEP threads opened last. */
 async function prune() {
-	const keys = (await run("readonly", (store) => store.getAllKeys())) ?? [];
-	if (keys.length <= KEEP) return;
-	const all = (await run<{ openedAt: number }[]>("readonly", (store) => store.getAll())) ?? [];
-	const byAge = keys.map((key, index) => ({ key, openedAt: all[index]?.openedAt ?? 0 })).sort((a, b) => b.openedAt - a.openedAt);
+	const entries = await ages();
+	if (entries.length <= KEEP) return;
+	const byAge = entries.sort((a, b) => b.openedAt - a.openedAt);
 	for (const { key } of byAge.slice(KEEP)) {
+		bump(String(key));
 		memory.delete(String(key));
 		void run("readwrite", (store) => store.delete(key));
 	}
+}
+
+/** Each kept thread's key with when it was opened, read in one pass so each key meets its own entry. */
+async function ages(): Promise<{ key: IDBValidKey; openedAt: number }[]> {
+	const database = await openDb();
+	if (!database) return [];
+	return new Promise((resolve) => {
+		const found: { key: IDBValidKey; openedAt: number }[] = [];
+		const request = database.transaction(STORE, "readonly").objectStore(STORE).openCursor();
+		request.onsuccess = () => {
+			const cursor = request.result;
+			if (!cursor) return resolve(found);
+			found.push({ key: cursor.primaryKey, openedAt: (cursor.value as { openedAt?: number })?.openedAt ?? 0 });
+			cursor.continue();
+		};
+		request.onerror = () => resolve(found);
+	});
 }

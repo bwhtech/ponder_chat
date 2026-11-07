@@ -18,7 +18,7 @@ import ToolGroup from "../tool/ToolGroup.vue";
 import ToolPart from "../tool/ToolPart.vue";
 import { useToolRenderers } from "../tool/renderers";
 import type { ToolMessagePart } from "../tool/state";
-import { foldSteps, summarizeSteps } from "../tool/work-group";
+import { foldSteps, summarizeSteps, type WorkItem } from "../tool/work-group";
 import { useMessageRole } from "./context";
 
 /**
@@ -131,6 +131,27 @@ function stepsAttrs(group: Extract<Group, { kind: "steps" | "plan-item" }>) {
 	};
 }
 
+/**
+ * Keys from part identity, not position: answering an approval folds it into the steps
+ * before it, so rows shift, and a positional key would hand one call's card to another.
+ * A tool part is its call id; other parts are their place in message.parts, which only grows.
+ */
+const partIndex = computed(() => new Map(props.message.parts.map((part, index) => [part, index])));
+
+function partKey(part: Part) {
+	if (part.type === "dynamic-tool" || part.type.startsWith("tool-")) return `tool:${asTool(part).toolCallId}`;
+	return `${part.type}:${partIndex.value.get(part) ?? props.message.parts.indexOf(part)}`;
+}
+
+function groupKey(group: Group) {
+	const first = group.kind === "part" ? group.part : group.parts[0];
+	return `${group.kind}:${group.kind === "plan-item" ? `${group.id}:` : ""}${first ? partKey(first) : ""}`;
+}
+
+function itemKey(item: WorkItem) {
+	return item.kind === "fold" ? `fold:${partKey(item.parts[0]!)}` : partKey(item.part);
+}
+
 function asTool(part: Part) {
 	return part as ToolMessagePart;
 }
@@ -145,7 +166,7 @@ function isStreamingText(part: Part) {
 </script>
 
 <template>
-	<template v-for="(group, index) in groups" :key="index">
+	<template v-for="(group, index) in groups" :key="groupKey(group)">
 		<ConfirmationBatch
 			v-if="index === firstPendingGroup && pendingApprovals.length > 1"
 			:count="pendingApprovals.length"
@@ -154,9 +175,9 @@ function isStreamingText(part: Part) {
 			@deny="answerAll(false)"
 		/>
 		<component :is="group.kind === 'plan-item' ? PlanItemSteps : 'div'" v-if="isStepsGroup(group)" v-bind="stepsAttrs(group)">
-			<template v-for="(item, itemIndex) in workItems(group)" :key="itemIndex">
+			<template v-for="item in workItems(group)" :key="itemKey(item)">
 				<ToolGroup v-if="item.kind === 'fold'" v-bind="summarizeSteps(item.parts, streaming)">
-					<template v-for="(part, stepIndex) in item.parts" :key="stepIndex">
+					<template v-for="part in item.parts" :key="partKey(part)">
 						<ReasoningPart v-if="part.type === 'reasoning'" :text="part.text" :streaming="isReasoningStreaming(part)" />
 						<ToolPart v-else :part="asTool(part)" :streaming="streaming" />
 					</template>
@@ -185,7 +206,7 @@ function isStreamingText(part: Part) {
 			data-slot="message-files"
 			class="flex max-w-[85%] flex-wrap gap-2 group-data-[align=end]/message:justify-end"
 		>
-			<template v-for="(file, fileIndex) in group.parts" :key="fileIndex">
+			<template v-for="file in group.parts" :key="partKey(file)">
 				<a
 					v-if="isImage(file)"
 					:href="file.url"

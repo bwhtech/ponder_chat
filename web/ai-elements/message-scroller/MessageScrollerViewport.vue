@@ -35,6 +35,7 @@ onBeforeUnmount(() => {
 		@wheel.passive="controller.onWheel($event)"
 		@touchmove.passive="controller.onTouchMove()"
 		@keydown="controller.onKeydown($event)"
+		@pointerdown="controller.onPointerDown($event)"
 	>
 		<slot />
 	</div>

@@ -23,6 +23,24 @@ let resolvePython: (ready: boolean) => void;
 export const pythonReady = new Promise<boolean>((resolve) => (resolvePython = resolve));
 
 export async function startup() {
+	// A failed migration still settles pythonReady, so the routes that wait on it don't hang.
+	try {
+		await migrateAll();
+	} catch (error) {
+		resolvePython(false);
+		throw error;
+	}
+
+	await becomeTheOnlyWorker();
+	await releaseDeadWorkers();
+	const { getWorld } = await import("workflow/runtime");
+	const world = await getWorld();
+	await world.start?.();
+	stopCleanly(world);
+	console.log(`Ponder Chat is ready. Python is ${(await pythonReady) ? "on" : "off"}.`);
+}
+
+async function migrateAll() {
 	await setupTelemetry();
 	await migrate();
 	await migrateAuth();
@@ -36,14 +54,6 @@ export async function startup() {
 	await migrateThreadRuns();
 	await setupMemory();
 	resolvePython(await checkSandbox());
-
-	await becomeTheOnlyWorker();
-	await releaseDeadWorkers();
-	const { getWorld } = await import("workflow/runtime");
-	const world = await getWorld();
-	await world.start?.();
-	stopCleanly(world);
-	console.log(`Ponder Chat is ready. Python is ${(await pythonReady) ? "on" : "off"}.`);
 }
 
 /**

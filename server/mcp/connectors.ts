@@ -8,11 +8,13 @@ import {
 	getConnection,
 	hasConnectionTo,
 	insertConnection,
+	connectionsToRetry,
 	listConnections,
 	markUsed,
 	readCredentials,
 	saveCredentials,
 	saveTools,
+	setLastError,
 	setStatus,
 	takenSlugs,
 	updateConnection,
@@ -206,16 +208,28 @@ export async function completeSignIn(userId: string, params: { state: string; co
 	return { id: connection.id };
 }
 
-/** Lists the tools again and saves them. A failure is saved on the connection and thrown. */
-async function refreshTools(connection: Connection) {
+/**
+ * Lists the tools again and saves them. A failure is saved on the connection and thrown.
+ * In the background, a connected server that is slow or down for a moment (a timeout, a
+ * 5xx, the network) only records the error: the next refresh tries again.
+ */
+async function refreshTools(connection: Connection, { background = false } = {}) {
 	forgetClient(connection.id);
 	try {
 		const { tools, serverInfo } = await inspect(await targetFor(connection));
 		await saveTools(connection.id, tools, serverInfo);
 	} catch (error) {
-		if (!(error instanceof NeedsSignIn)) await setStatus(connection.id, "error", describeError(error));
+		if (error instanceof NeedsSignIn) throw error;
+		if (background && connection.status === "connected" && isTransient(error)) await setLastError(connection.id, describeError(error));
+		else await setStatus(connection.id, "error", describeError(error));
 		throw error;
 	}
+}
+
+/** A failure that may pass by itself: a timeout, a 5xx, or the network. */
+function isTransient(error: unknown) {
+	const text = `${error instanceof Error ? error.message : String(error)} ${error instanceof Error && error.cause instanceof Error ? error.cause.message : ""}`;
+	return /abort|timed? ?out|ECONNREFUSED|ECONNRESET|EAI_AGAIN|ETIMEDOUT|socket|fetch failed|HTTP 5\d\d|\b50[0-4]\b/i.test(text);
 }
 
 export async function refreshConnector(userId: string, id: string) {
@@ -286,18 +300,22 @@ export type ConnectorToolSpec = {
 const MAX_CONNECTOR_TOOLS = 120;
 const MAX_INSTRUCTIONS_CHARS = 2_000;
 const STALE_TOOLS_MS = 60 * 60_000;
+const RETRY_ERROR_MS = 5 * 60_000;
 
 /**
  * The tools of the person's connections that are on and signed in, as plain data the
  * workflow records, and a short section for the instructions. Sorted by name, so the
  * tool definitions stay the same from one call to the next and providers can cache them.
- * A tool list more than an hour old is listed again in the background, for the next reply.
+ * A tool list more than an hour old is listed again in the background, for the next reply,
+ * and so is a connector in "error", so it can recover.
  */
 export async function connectorToolsFor(userId: string): Promise<{ specs: ConnectorToolSpec[]; guidance: string }> {
 	const connections = await usableConnections(userId);
 	for (const connection of connections) {
-		if (!connection.toolsCheckedAt || Date.now() - connection.toolsCheckedAt.getTime() > STALE_TOOLS_MS) void refreshTools(connection).catch(() => undefined);
+		if (!connection.toolsCheckedAt || Date.now() - connection.toolsCheckedAt.getTime() > STALE_TOOLS_MS) void refreshTools(connection, { background: true }).catch(() => undefined);
 	}
+	// A connector in "error" is tried again every few minutes, so it comes back by itself when its server does.
+	for (const connection of await connectionsToRetry(userId, RETRY_ERROR_MS)) void refreshTools(connection, { background: true }).catch(() => undefined);
 	const specs = connections
 		.flatMap((connection) =>
 			connection.tools

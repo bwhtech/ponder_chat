@@ -18,6 +18,8 @@ const email = ref("");
 const sending = ref(false);
 const sentTo = ref("");
 const error = ref(linkError());
+// Shown once: a reload or a shared link should not say it again.
+if (error.value) forgetLinkError();
 
 const code = ref("");
 const checking = ref(false);
@@ -37,6 +39,13 @@ function linkError() {
 	return linkErrors[params.get("error") ?? ""] ?? "That link has expired or was already used. Ask for a new one.";
 }
 
+function forgetLinkError() {
+	const url = new URL(location.href);
+	url.searchParams.delete("sign-in");
+	url.searchParams.delete("error");
+	history.replaceState(history.state, "", url);
+}
+
 async function send() {
 	if (!email.value.trim() || sending.value) return;
 	sending.value = true;
@@ -54,16 +63,27 @@ async function send() {
 	}
 }
 
+// Each code check takes a number; "Use another email" moves it on, so a check still on its way is ignored.
+let attempt = 0;
+
 async function checkCode() {
 	if (code.value.length !== 6 || checking.value) return;
+	const mine = ++attempt;
 	checking.value = true;
 	try {
-		await signInWithCode(sentTo.value, code.value);
+		await signInWithCode(sentTo.value, code.value, () => mine === attempt);
 	} catch (cause) {
-		codeError.value = cause instanceof Error ? cause.message : String(cause);
+		if (mine === attempt) codeError.value = cause instanceof Error ? cause.message : String(cause);
 	} finally {
-		checking.value = false;
+		if (mine === attempt) checking.value = false;
 	}
+}
+
+function useAnotherEmail() {
+	attempt++;
+	checking.value = false;
+	codeError.value = "";
+	sentTo.value = "";
 }
 </script>
 
@@ -97,7 +117,7 @@ async function checkCode() {
 					<Button type="submit" variant="solid" size="md" :loading="checking" :disabled="code.length !== 6">Sign in</Button>
 				</form>
 				<p class="text-p-sm text-ink-gray-5">Or open the link in the email. The code and the link expire in 15 minutes.</p>
-				<Button variant="ghost" class="mx-auto" @click="sentTo = ''">Use another email</Button>
+				<Button variant="ghost" class="mx-auto" @click="useAnotherEmail">Use another email</Button>
 			</div>
 
 			<form v-else class="flex flex-col gap-3" @submit.prevent="send">
