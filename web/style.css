@@ -1,5 +1,7 @@
 @import "frappe-ui/style.css";
 @import "./ai-elements/styles.css";
+/* The chart colour ramp, for Mermaid diagrams. frappe-ui does not export this file, so it is imported by path. */
+@import "../node_modules/frappe-ui/src/charts/style.css";
 
 :root {
   /* A strong ease-out: fast at the start, where the eye is. Tailwind: `ease-out-strong`. */

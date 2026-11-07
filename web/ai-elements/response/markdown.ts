@@ -3,7 +3,7 @@ import katex from "katex";
 import "katex/dist/katex.min.css";
 import { marked, type TokenizerAndRendererExtension, type Token, type Tokens, type TokensList } from "marked";
 
-export type MarkdownBlock = { key: string; kind: "html"; html: string } | { key: string; kind: "code"; code: string; language: string };
+export type MarkdownBlock = { key: string; kind: "html"; html: string } | { key: string; kind: "code"; code: string; language: string; complete: boolean };
 
 /** Turns markdown into blocks; fenced code becomes its own block so it can render as a CodeBlock. */
 export class MarkdownRenderer {
@@ -14,13 +14,17 @@ export class MarkdownRenderer {
 		const source = repairIncomplete ? repairMarkdown(markdown) : markdown;
 		// Options given here replace marked's defaults, where marked.use put the maths extensions.
 		const tokens = marked.lexer(source, { ...marked.defaults, gfm: true });
-		return tokens.filter((token) => token.type !== "space").map((token, index) => this.toBlock(token, index, tokens.links));
+		const blocks = tokens.filter((token) => token.type !== "space").map((token, index) => this.toBlock(token, index, tokens.links));
+		// A fence still streaming was closed by repairMarkdown: its code is not whole yet.
+		const last = blocks.at(-1);
+		if (last?.kind === "code" && repairIncomplete && hasOpenFence(markdown)) last.complete = false;
+		return blocks;
 	}
 
 	private toBlock(token: Token, index: number, links: TokensList["links"]): MarkdownBlock {
 		if (token.type === "code") {
 			const code = token as Tokens.Code;
-			return { key: `${index}-code`, kind: "code", code: code.text, language: (code.lang ?? "").split(/\s/)[0] };
+			return { key: `${index}-code`, kind: "code", code: code.text, language: (code.lang ?? "").split(/\s/)[0], complete: true };
 		}
 		return { key: `${index}-${token.type}`, kind: "html", html: this.html(token, links) };
 	}
@@ -89,8 +93,7 @@ function tex(source: string, displayMode: boolean) {
  * has not arrived yet.
  */
 export function repairMarkdown(text: string) {
-	const fences = text.match(/^\s*(```|~~~)/gm)?.length ?? 0;
-	if (fences % 2 === 1) return `${text}\n\`\`\``;
+	if (hasOpenFence(text)) return `${text}\n\`\`\``;
 
 	// Display maths still being written waits until it is whole, rather than show its source.
 	const lastBlock = text.slice(text.lastIndexOf("\n\n") + 1);
@@ -105,6 +108,10 @@ export function repairMarkdown(text: string) {
 	if ((withoutCode.match(/\*\*/g)?.length ?? 0) % 2 === 1) tail += "**";
 	if ((withoutCode.match(/~~/g)?.length ?? 0) % 2 === 1) tail += "~~";
 	return (text + tail).replace(/\[([^\]\n]*)\]\([^)\s]*$/, "$1");
+}
+
+function hasOpenFence(text: string) {
+	return (text.match(/^\s*(```|~~~)/gm)?.length ?? 0) % 2 === 1;
 }
 
 DOMPurify.addHook("afterSanitizeAttributes", (node) => {
