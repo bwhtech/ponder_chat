@@ -16,7 +16,7 @@ import Response from "../response/Response.vue";
 import Sources from "../sources/Sources.vue";
 import ToolGroup from "../tool/ToolGroup.vue";
 import ToolPart from "../tool/ToolPart.vue";
-import { useToolRenderers } from "../tool/renderers";
+import { useUnfoldableTools } from "../tool/renderers";
 import type { ToolMessagePart } from "../tool/state";
 import { foldSteps, summarizeSteps, type WorkItem } from "../tool/work-group";
 import { useMessageRole } from "./context";
@@ -48,7 +48,7 @@ type Group =
 	| { kind: "plan-item"; id: string; parts: Part[] };
 
 const role = useMessageRole();
-const customTools = new Set(Object.keys(useToolRenderers()));
+const customTools = useUnfoldableTools();
 const buildPlan = useBuildPlan();
 const sources = computed(() =>
 	props.message.parts

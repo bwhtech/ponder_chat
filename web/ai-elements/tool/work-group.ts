@@ -46,6 +46,7 @@ export function summarizeSteps(parts: Part[], streaming: boolean) {
 			streaming,
 			approved: tool.approval?.approved,
 			preliminary: tool.state === "output-available" && !!tool.preliminary,
+			failed: outputFailed(tool),
 		}),
 	);
 	// A call the person denied did nothing, so it is not counted as a change.
@@ -64,6 +65,13 @@ export function summarizeSteps(parts: Part[], streaming: boolean) {
 	const failed = phases.filter((phase) => phase === "failed" || phase === "stopped").length;
 	const running = phases.some((phase) => phase === "preparing" || phase === "running") || (streaming && parts.some((part) => part.type === "reasoning" && part.state === "streaming"));
 	return { summary: capitalize(joinLabels(labels)), failed, running };
+}
+
+/** A call that ran but reports a failure in its output, as web_fetch and run_python do. */
+function outputFailed(tool: ToolMessagePart) {
+	if (tool.state !== "output-available") return false;
+	const output = tool.output as { error?: unknown; ok?: unknown } | null;
+	return typeof output === "object" && !!output && (!!output.error || output.ok === false);
 }
 
 function isFoldable(part: Part, custom: Set<string>) {

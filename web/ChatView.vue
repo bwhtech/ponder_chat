@@ -168,7 +168,8 @@ const uploadError = ref("");
 // What the server can pass to the model; spreadsheets only when Python can read them.
 const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
 // A Python run shows its code, what it printed, and the files it made.
-provideToolRenderers({ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart });
+// Searches and page reads are one line each, so they fold with the steps around them.
+provideToolRenderers({ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart }, { foldable: ["web_search", "web_fetch"] });
 
 // Connector tools (Settings, Connectors) show as "Linear · Create issue". When one waits
 // for approval, "Always allow" saves its rule, then approves.
