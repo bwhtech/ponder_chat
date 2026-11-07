@@ -1,19 +1,23 @@
 <script setup lang="ts">
 import { markdown } from "@codemirror/lang-markdown";
-import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { EditorView } from "@codemirror/view";
 import { CodeEditor, CodeEditorContent, CodeKit } from "frappe-ui/code-editor";
 
 /**
- * A skill file in frappe-ui's code editor: the frontmatter highlighted as YAML and the rest
- * as Markdown, with line numbers. Lines wrap, as skill files are mostly prose.
+ * A skill's instructions in frappe-ui's code editor, highlighted as Markdown, with line
+ * numbers. Lines wrap, as instructions are mostly prose.
  */
-const source = defineModel<string>({ required: true });
+const body = defineModel<string>({ required: true });
 
 const extensions = [
-	CodeKit.configure({ lineNumbers: {}, foldGutter: false, autocompletion: false, placeholder: "---\nname: \ndescription: \n---" }),
+	CodeKit.configure({
+		lineNumbers: {},
+		foldGutter: false,
+		autocompletion: false,
+		placeholder: "Write the steps Ponder follows, as you would brief a new colleague.",
+	}),
 	EditorView.lineWrapping,
-	yamlFrontmatter({ content: markdown() }),
+	markdown(),
 	// CodeMirror's own selection colour is a light lavender, which in dark mode sits under light
 	// text and hides it. A theme token follows light and dark.
 	EditorView.theme({
@@ -25,8 +29,8 @@ const extensions = [
 </script>
 
 <template>
-	<CodeEditor v-model="source" :extensions="extensions">
-		<CodeEditorContent class="skill-file-editor" aria-label="Skill file" />
+	<CodeEditor v-model="body" :extensions="extensions">
+		<CodeEditorContent class="skill-file-editor" aria-label="Instructions" />
 	</CodeEditor>
 </template>
 

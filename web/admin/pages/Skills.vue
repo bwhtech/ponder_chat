@@ -4,9 +4,10 @@ import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "f
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { skillTitle } from "../../../shared/skill-file";
-import { api, type SkillSummary } from "../api";
+import { api, type SkillDetail, type SkillSummary } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import ListSkeleton from "../components/ListSkeleton.vue";
+import NewSkillDialog from "../components/NewSkillDialog.vue";
 import { lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 
@@ -96,9 +97,25 @@ function remove(skill: SkillSummary) {
 	});
 }
 
+// New skill and Duplicate ask for a name and a description first (NewSkillDialog).
+const creating = ref(false);
+const copyOf = ref<SkillDetail | null>(null);
+function newSkill() {
+	copyOf.value = null;
+	creating.value = true;
+}
+async function duplicate(skill: SkillSummary) {
+	try {
+		copyOf.value = await api<SkillDetail>(`/skills/${skill.id}`);
+		creating.value = true;
+	} catch (e) {
+		toast.error((e as Error).message);
+	}
+}
+
 const actionsFor = (skill: SkillSummary) => [
 	{ label: "Edit", icon: "lucide-pencil", onClick: () => router.push(`/skills/${skill.id}`) },
-	{ label: "Duplicate", icon: "lucide-copy", onClick: () => router.push({ path: "/skills/new", query: { from: String(skill.id) } }) },
+	{ label: "Duplicate", icon: "lucide-copy", onClick: () => void duplicate(skill) },
 	{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: () => remove(skill) },
 ];
 
@@ -109,11 +126,11 @@ const startedBy = (skill: SkillSummary) =>
 <template>
 	<PageHeaderMobile v-if="isMobile" title="Skills">
 		<template #prefix><AccountMenu compact /></template>
-		<template #suffix><Button variant="ghost" icon="lucide-plus" aria-label="New skill" route="/skills/new" /></template>
+		<template #suffix><Button variant="ghost" icon="lucide-plus" aria-label="New skill" @click="newSkill" /></template>
 	</PageHeaderMobile>
 	<PageHeader v-else>
 		<h1 class="text-2xl text-ink-gray-9">Skills</h1>
-		<Button variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="ml-auto" route="/skills/new" />
+		<Button variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="ml-auto" @click="newSkill" />
 	</PageHeader>
 
 	<div class="mx-auto max-w-5xl px-3 pb-16 pt-4 sm:px-5 md:pt-5">
@@ -210,7 +227,9 @@ const startedBy = (skill: SkillSummary) =>
 			</div>
 			<p class="text-base text-ink-gray-7">{{ emptyText.title }}</p>
 			<p class="max-w-sm text-sm text-ink-gray-5">{{ emptyText.body }}</p>
-			<Button v-if="!skills.length" variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="mt-2" route="/skills/new" />
+			<Button v-if="!skills.length" variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="mt-2" @click="newSkill" />
 		</div>
 	</div>
+
+	<NewSkillDialog v-model:open="creating" :from="copyOf" />
 </template>

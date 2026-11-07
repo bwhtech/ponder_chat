@@ -15,7 +15,6 @@ export const routes: RouteRecordRaw[] = [
 	{ path: "/people", component: People },
 	{ path: "/people/:id", component: Person, props: true },
 	{ path: "/skills", component: Skills },
-	{ path: "/skills/new", component: SkillEdit },
 	{ path: "/skills/:id(\\d+)", component: SkillEdit, props: true },
 	// A page on phones. Wider screens open the settings dialog instead: over the page they
 	// are on, or over the overview when /admin/settings is the first page opened.

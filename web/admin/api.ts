@@ -77,7 +77,7 @@ export type DecidedRequest = {
 	decidedBy: string;
 };
 
-/** A skill in the list (server/skills.ts). The file holds the name, the description and `automatic`. */
+/** A skill in the list (server/skills.ts). */
 export type SkillSummary = {
 	id: number;
 	name: string;
@@ -89,7 +89,8 @@ export type SkillSummary = {
 	updatedBy: string | null;
 };
 
-export type SkillDetail = SkillSummary & { source: string };
+/** `body` is the instructions; `source` the whole SKILL.md the server keeps, for a download. */
+export type SkillDetail = SkillSummary & { body: string; source: string };
 
 export type Viewer = { user: { id: string; email: string; name: string; role: "admin" | "user" } };
 

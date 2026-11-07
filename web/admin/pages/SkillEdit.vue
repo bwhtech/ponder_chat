@@ -1,49 +1,37 @@
 <script setup lang="ts">
-import { Alert, Breadcrumbs, Button, Dropdown, PageHeader, PageHeaderMobile, Switch, TabButtons, dialog, toast } from "frappe-ui";
+import { Alert, Breadcrumbs, Button, Dropdown, FormControl, PageHeader, PageHeaderMobile, Switch, TabButtons, dialog, toast } from "frappe-ui";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { onBeforeRouteLeave, useRoute, useRouter } from "vue-router";
-import { MAX_DESCRIPTION, NEW_SKILL_FILE, parseSkillFile, setAutomatic, skillTitle } from "../../../shared/skill-file";
+import { onBeforeRouteLeave, useRouter } from "vue-router";
+import { checkSkill, MAX_DESCRIPTION, parseSkillFile, skillTitle, toSkillName, type SkillFields } from "../../../shared/skill-file";
 import Response from "../../ai-elements/response/Response.vue";
 import { api, ApiError, type SkillDetail } from "../api";
-import SkillFileEditor from "../components/SkillFileEditor.vue";
+import NewSkillDialog from "../components/NewSkillDialog.vue";
+import SkillInstructionsEditor from "../components/SkillInstructionsEditor.vue";
 import { lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 
 /**
- * One skill's file, in the code editor. The side panel reads the file as it is typed: what
- * stops a save, the two switches, and the line Ponder sees. The "automatic" switch writes
- * `disable-model-invocation` into the frontmatter, so the file stays the one source of truth.
- *
- * /skills/new makes a skill; /skills/new?from=<id> starts from a copy of another.
+ * One skill: its instructions in the code editor, and its name, description and switches
+ * beside them. The server keeps the skill as one SKILL.md file (server/skills.ts), which
+ * "Download SKILL.md" gives. A whole SKILL.md pasted into the instructions fills in the fields.
  */
-const props = defineProps<{ id?: string }>();
-const route = useRoute();
+const props = defineProps<{ id: string }>();
 const router = useRouter();
 
+type Form = SkillFields & { enabled: boolean };
 const skill = ref<SkillDetail | null>(null);
-const source = ref("");
-const enabled = ref(true);
+const form = ref<Form>({ name: "", description: "", automatic: true, body: "", enabled: false });
 /** What was last loaded or saved, to tell whether there are changes to save. */
-const saved = ref({ source: "", enabled: true });
+const saved = ref<Form>({ ...form.value });
 const status = ref<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string; missing: boolean }>({ kind: "loading" });
 const saving = ref(false);
 const serverErrors = ref<string[]>([]);
-
-const isNew = computed(() => !props.id);
+const duplicating = ref(false);
 
 async function load() {
 	status.value = { kind: "loading" };
 	try {
-		if (props.id) {
-			show(await api<SkillDetail>(`/skills/${props.id}`));
-		} else {
-			const from = typeof route.query.from === "string" ? await api<SkillDetail>(`/skills/${route.query.from}`) : null;
-			skill.value = null;
-			source.value = from ? copyOf(from.source, from.name) : NEW_SKILL_FILE;
-			// A copy starts off, so it never runs twice before it is edited.
-			enabled.value = !from;
-			saved.value = { source: source.value, enabled: enabled.value };
-		}
+		show(await api<SkillDetail>(`/skills/${props.id}`));
 		status.value = { kind: "loaded" };
 	} catch (e) {
 		status.value = { kind: "error", message: (e as Error).message, missing: e instanceof ApiError && e.status === 404 };
@@ -52,52 +40,64 @@ async function load() {
 
 function show(loaded: SkillDetail) {
 	skill.value = loaded;
-	source.value = loaded.source;
-	enabled.value = loaded.enabled;
-	saved.value = { source: loaded.source, enabled: loaded.enabled };
+	const { name, description, automatic, body, enabled } = loaded;
+	form.value = { name, description, automatic, body, enabled };
+	saved.value = { ...form.value };
 	serverErrors.value = [];
 }
 
-/** A copy gets "-copy" on its name, so it does not clash with the skill it came from. */
-function copyOf(text: string, name: string) {
-	return text.replace(/^name:.*$/m, `name: ${name}-copy`);
-}
+watch(() => props.id, load, { immediate: true });
 
-watch(() => [props.id, route.query.from], load, { immediate: true });
+// Typed as words, kept as a name: "Meeting Notes" becomes "meeting-notes".
+watch(
+	() => form.value.name,
+	(typed) => {
+		const cleaned = toSkillName(typed);
+		if (cleaned !== typed) form.value.name = cleaned;
+	},
+);
 
-const file = computed(() => parseSkillFile(source.value));
-const errors = computed(() => [...new Set([...file.value.errors, ...serverErrors.value])]);
-watch(source, () => (serverErrors.value = []));
-const dirty = computed(() => source.value !== saved.value.source || enabled.value !== saved.value.enabled);
+// A whole SKILL.md pasted into the instructions: its frontmatter fills in the fields.
+watch(
+	() => form.value.body,
+	(body) => {
+		const pasted = body.trimStart().startsWith("---") ? parseSkillFile(body.trimStart()) : null;
+		if (!pasted) return;
+		form.value = {
+			...form.value,
+			...pasted,
+			name: pasted.name ? toSkillName(pasted.name) : form.value.name,
+			description: pasted.description || form.value.description,
+		};
+		toast.info("Took the name, description and kind from the pasted file");
+	},
+);
 
-const automatic = computed({
-	get: () => file.value.automatic,
-	set: (on: boolean) => (source.value = setAutomatic(source.value, on)),
-});
+const errors = computed(() => [...new Set([...checkSkill(form.value, form.value.enabled), ...serverErrors.value])]);
+watch(form, () => (serverErrors.value = []), { deep: true });
+const dirty = computed(() => (Object.keys(form.value) as (keyof Form)[]).some((key) => form.value[key] !== saved.value[key]));
 
 const tab = ref("edit");
 const tabs = [
 	{ label: "Edit", value: "edit" },
 	{ label: "Preview", value: "preview" },
 ];
-const words = computed(() => file.value.body.split(/\s+/).filter(Boolean).length);
-const heading = computed(() => (skill.value ? skillTitle(skill.value.name) : "New skill"));
+const words = computed(() => form.value.body.split(/\s+/).filter(Boolean).length);
+const heading = computed(() => (skill.value ? skillTitle(skill.value.name) : "Skill"));
 
 async function save() {
-	if (errors.value.length) return toast.error("Fix the problems in the file first");
+	if (errors.value.length) return toast.error(errors.value[0]!);
 	saving.value = true;
 	try {
-		const body = { source: source.value, enabled: enabled.value, expectedUpdatedAt: skill.value?.updatedAt };
-		const result = skill.value
-			? await api<SkillDetail>(`/skills/${skill.value.id}`, { method: "PUT", body })
-			: await api<SkillDetail>("/skills", { body });
+		const result = await api<SkillDetail>(`/skills/${props.id}`, {
+			method: "PUT",
+			body: { ...form.value, expectedUpdatedAt: skill.value?.updatedAt },
+		});
 		show(result);
-		toast.success(isNew.value ? `Created ${skillTitle(result.name)}` : "Saved. New replies use it now.");
-		if (isNew.value) await router.replace(`/skills/${result.id}`);
+		toast.success(result.enabled ? "Saved. New replies use it now." : "Saved");
 	} catch (e) {
-		const message = (e as Error).message;
 		if (e instanceof ApiError && e.errors.length) serverErrors.value = e.errors;
-		toast.error(message);
+		toast.error((e as Error).message);
 	} finally {
 		saving.value = false;
 	}
@@ -112,23 +112,27 @@ function remove() {
 		confirmLabel: "Delete",
 		onConfirm: async () => {
 			await api(`/skills/${current.id}`, { method: "DELETE" });
-			saved.value = { source: source.value, enabled: enabled.value };
+			saved.value = { ...form.value };
 			toast.success(`Deleted ${skillTitle(current.name)}`);
 			await router.push("/skills");
 		},
 	});
 }
 
+/** The saved file. Unsaved changes are not in it. */
 function download() {
-	const url = URL.createObjectURL(new Blob([source.value], { type: "text/markdown" }));
-	const link = Object.assign(document.createElement("a"), { href: url, download: `${file.value.name || "skill"}.md` });
+	const current = skill.value;
+	if (!current) return;
+	const url = URL.createObjectURL(new Blob([current.source], { type: "text/markdown" }));
+	const link = Object.assign(document.createElement("a"), { href: url, download: `${current.name}.md` });
 	link.click();
 	URL.revokeObjectURL(url);
 }
 
 const more = computed(() => [
-	{ label: "Download .md", icon: "lucide-download", onClick: download },
-	...(skill.value ? [{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: remove }] : []),
+	{ label: "Download SKILL.md", icon: "lucide-download", onClick: download },
+	{ label: "Duplicate", icon: "lucide-copy", onClick: () => (duplicating.value = true) },
+	{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: remove },
 ]);
 
 // Unsaved changes: ask before leaving the page, and before closing the tab.
@@ -153,24 +157,17 @@ function onKeydown(event: KeyboardEvent) {
 		<PageHeaderMobile v-if="isMobile" :title="heading">
 			<template #prefix><Button variant="ghost" icon="lucide-chevron-left" aria-label="Back to skills" route="/skills" /></template>
 			<template #suffix>
-				<Button variant="solid" theme="gray" :label="isNew ? 'Create' : 'Save'" :loading="saving" :disabled="!dirty && !isNew" @click="save" />
+				<Button variant="solid" theme="gray" label="Save" :loading="saving" :disabled="!dirty" @click="save" />
 			</template>
 		</PageHeaderMobile>
 		<PageHeader v-else>
 			<Breadcrumbs :items="[{ label: 'Skills', route: '/skills' }, { label: heading }]" />
 			<div class="ml-auto flex items-center gap-2">
-				<span v-if="dirty && status.kind === 'loaded'" class="text-sm text-ink-gray-5">Not saved</span>
+				<span v-if="dirty" class="text-sm text-ink-gray-5">Not saved</span>
 				<Dropdown v-if="status.kind === 'loaded'" :options="more">
 					<Button variant="ghost" icon="lucide-ellipsis" aria-label="More" />
 				</Dropdown>
-				<Button
-					variant="solid"
-					theme="gray"
-					:label="isNew ? 'Create' : 'Save'"
-					:loading="saving"
-					:disabled="status.kind !== 'loaded' || (!dirty && !isNew)"
-					@click="save"
-				/>
+				<Button variant="solid" theme="gray" label="Save" :loading="saving" :disabled="status.kind !== 'loaded' || !dirty" @click="save" />
 			</div>
 		</PageHeader>
 
@@ -189,20 +186,16 @@ function onKeydown(event: KeyboardEvent) {
 			<div class="flex min-h-[28rem] min-w-0 flex-1 flex-col px-3 pb-5 pt-4 sm:px-5">
 				<div class="flex items-center gap-3">
 					<TabButtons v-model="tab" :options="tabs" class="w-max" />
-					<span class="ml-auto truncate font-mono text-xs text-ink-gray-5">{{ file.name || "skill" }}.md · {{ words }} words</span>
+					<span class="ml-auto truncate text-sm text-ink-gray-5">Instructions · {{ words }} words</span>
 				</div>
-				<SkillFileEditor v-if="tab === 'edit'" v-model="source" class="mt-3 min-h-0 flex-1" />
+				<SkillInstructionsEditor v-if="tab === 'edit'" v-model="form.body" class="mt-3 min-h-0 flex-1" />
 				<div v-else class="mt-3 min-h-0 flex-1 overflow-y-auto rounded-4 border border-outline-gray-2 p-5">
-					<div class="mb-4 flex items-baseline gap-2 border-b border-outline-gray-1 pb-3">
-						<span class="lucide-sparkles size-4 shrink-0 self-center text-ink-violet-6" aria-hidden="true" />
-						<span class="shrink-0 font-mono text-sm text-ink-gray-9">${{ file.name || "name" }}</span>
-						<span class="min-w-0 text-sm text-ink-gray-5">{{ file.description }}</span>
-					</div>
-					<Response :content="file.body" class="max-w-[770px]" />
+					<Response v-if="form.body.trim()" :content="form.body" class="max-w-[770px]" />
+					<p v-else class="text-p-sm text-ink-gray-5">No instructions yet.</p>
 				</div>
 			</div>
 
-			<aside class="w-full shrink-0 space-y-6 overflow-y-auto border-t border-outline-gray-1 px-5 pb-10 pt-5 md:w-[20rem] md:border-l md:border-t-0">
+			<aside class="w-full shrink-0 space-y-6 overflow-y-auto border-t border-outline-gray-1 px-5 pb-10 pt-5 md:w-[22rem] md:border-l md:border-t-0">
 				<Alert v-if="errors.length" theme="red" title="Fix before you save">
 					<template #description>
 						<ul class="list-disc space-y-1 pl-4 text-p-sm">
@@ -212,30 +205,34 @@ function onKeydown(event: KeyboardEvent) {
 				</Alert>
 
 				<div class="space-y-4">
-					<Switch v-model="enabled" label="On for everyone" description="Off: no one can use it, and Ponder does not see it." />
-					<Switch
-						v-model="automatic"
-						label="Ponder can use it on its own"
-						description="Off: it runs only when someone types its name. Sets disable-model-invocation."
+					<FormControl
+						v-model="form.name"
+						label="Name"
+						required
+						autocomplete="off"
+						:description="`People type $${form.name || 'name'} anywhere in a message to use it.`"
+					/>
+					<FormControl
+						v-model="form.description"
+						type="textarea"
+						label="Description"
+						required
+						:rows="4"
+						:description="`Ponder reads it to decide when to use the skill. ${form.description.length} of ${MAX_DESCRIPTION} characters.`"
 					/>
 				</div>
 
-				<div class="space-y-3 border-t border-outline-gray-1 pt-5">
-					<p class="text-sm text-ink-gray-5">How people start it</p>
-					<p class="text-p-sm text-ink-gray-7">
-						Type <span class="rounded-1 bg-surface-gray-2 px-1 font-mono text-ink-gray-9">${{ file.name || "name" }}</span> anywhere in a message.
-					</p>
+				<div class="space-y-4 border-t border-outline-gray-1 pt-5">
+					<Switch v-model="form.enabled" label="On for everyone" description="Off: no one can use it, and Ponder does not see it." />
+					<Switch v-model="form.automatic" label="Ponder can use it on its own" description="Off: it runs only when someone types its name." />
 				</div>
 
 				<div class="space-y-3 border-t border-outline-gray-1 pt-5">
 					<p class="text-sm text-ink-gray-5">What Ponder sees first</p>
-					<p v-if="automatic" class="break-words rounded-4 bg-surface-gray-1 p-3 font-mono text-xs leading-5 text-ink-gray-7">
-						- {{ file.name || "name" }}: {{ file.description || "…" }}
+					<p v-if="form.automatic" class="break-words rounded-4 bg-surface-gray-1 p-3 font-mono text-xs leading-5 text-ink-gray-7">
+						- {{ form.name || "name" }}: {{ form.description || "…" }}
 					</p>
 					<p v-else class="text-p-sm text-ink-gray-6">Nothing. The skill is not in the instructions until someone asks for it.</p>
-					<p class="text-xs tabular-nums" :class="file.description.length > MAX_DESCRIPTION ? 'text-ink-red-5' : 'text-ink-gray-5'">
-						Description: {{ file.description.length }} of {{ MAX_DESCRIPTION }} characters
-					</p>
 				</div>
 
 				<div v-if="skill" class="space-y-1 border-t border-outline-gray-1 pt-5 text-sm">
@@ -244,5 +241,7 @@ function onKeydown(event: KeyboardEvent) {
 				</div>
 			</aside>
 		</div>
+
+		<NewSkillDialog v-model:open="duplicating" :from="skill" />
 	</div>
 </template>

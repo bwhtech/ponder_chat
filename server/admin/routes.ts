@@ -11,7 +11,7 @@ import { decideRequest, grantCredits, pendingCount, type Decision } from "../ext
 import { allow, disallow, setInviteCredits } from "../invites.ts";
 import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
 import { getSettings, setPdfTextOnServer, updateSettings } from "../settings.ts";
-import { MAX_FILE } from "../../shared/skill-file.ts";
+import { MAX_BODY } from "../../shared/skill-file.ts";
 import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult } from "../skills.ts";
 import { listAdmins, listPeople, personDetail } from "./people.ts";
 import { overview, requestsReport } from "./reports.ts";
@@ -169,9 +169,14 @@ adminApi.put("/settings/openrouter-key", async (c) => {
 
 // Skills (skills.ts): Markdown files of instructions, on for everyone or off.
 
+// The server checks the values with the skill rules (shared/skill-file.ts); this only bounds them.
 const skillBody = z.object({
-	source: z.string().max(MAX_FILE * 2),
-	enabled: z.boolean(),
+	name: z.string().trim().max(200),
+	description: z.string().max(2_000),
+	automatic: z.boolean().default(true),
+	body: z.string().max(MAX_BODY * 2).default(""),
+	/** A new skill starts off until it has instructions. */
+	enabled: z.boolean().default(false),
 	/** When the admin's copy was loaded; absent for a new skill. */
 	expectedUpdatedAt: z.string().datetime().optional(),
 });
@@ -187,7 +192,8 @@ adminApi.get("/skills/:id", async (c) => {
 adminApi.post("/skills", async (c) => {
 	const input = await readBody(c, skillBody);
 	if (!input) return invalid(c);
-	return savedSkill(c, await saveSkill({ source: input.source, enabled: input.enabled }, adminOf(c)));
+	const { expectedUpdatedAt: _, ...fields } = input;
+	return savedSkill(c, await saveSkill(fields, adminOf(c)));
 });
 
 adminApi.put("/skills/:id", async (c) => {
@@ -202,7 +208,9 @@ adminApi.put("/skills/:id/enabled", async (c) => {
 	const id = skillId(c);
 	const input = await readBody(c, z.object({ enabled: z.boolean() }));
 	if (!input) return invalid(c);
-	return id && (await setSkillEnabled(id, input.enabled, adminOf(c))) ? c.json({ ok: true }) : noSkill(c);
+	const result = id ? await setSkillEnabled(id, input.enabled, adminOf(c)) : "missing";
+	if (result === "empty") return c.json({ error: "Write the instructions before you turn the skill on." }, 400);
+	return result === "ok" ? c.json({ ok: true }) : noSkill(c);
 });
 
 adminApi.delete("/skills/:id", async (c) => {
