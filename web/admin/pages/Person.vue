@@ -37,6 +37,10 @@ const state = ref<PageState>({ kind: "loading" });
 const detail = computed(() => (state.value.kind === "loaded" ? state.value.detail : null));
 const person = computed(() => detail.value?.person);
 
+// Each load takes a number; an answer for an id no longer shown, or overtaken by a newer load, is dropped.
+// Declared before the watch below, which calls load() at once.
+let asked = 0;
+
 // Another person's page starts from the skeleton, never with the last one's numbers.
 watch(
 	() => props.id,
@@ -47,8 +51,6 @@ watch(
 	{ immediate: true },
 );
 
-// Each load takes a number; an answer for an id no longer shown, or overtaken by a newer load, is dropped.
-let asked = 0;
 
 /** Loads the page again. After a change it keeps the page on screen until the new numbers arrive. */
 async function load() {

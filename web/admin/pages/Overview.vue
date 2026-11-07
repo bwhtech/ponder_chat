@@ -25,11 +25,12 @@ const data = ref<Overview | null>(null);
 const loadError = ref("");
 const loading = computed(() => !data.value);
 
+// Each load takes a number: a slow answer for a range no longer picked is dropped.
+// Declared before the watch below, which calls load() at once.
+let asked = 0;
+
 // A new range keeps the old numbers on screen until the new ones arrive.
 watch(range, load, { immediate: true });
-
-// Each load takes a number: a slow answer for a range no longer picked is dropped.
-let asked = 0;
 
 async function load() {
 	const mine = ++asked;
