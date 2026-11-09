@@ -214,7 +214,8 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 					composer={field}
 					onIdea={(prompt) => {
 						composer.setInput(prompt);
-						requestAnimationFrame(() => area.current?.querySelector<HTMLElement>('[contenteditable="true"], textarea')?.focus());
+						// The field gets focus with the caret after the prompt, so typing finishes it.
+						requestAnimationFrame(() => focusAtEnd(area.current?.querySelector<HTMLElement>('[contenteditable="true"], textarea')));
 					}}
 				/>
 			</div>
@@ -302,6 +303,18 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 			</ChatLayout>
 		</div>
 	);
+}
+
+function focusAtEnd(field: HTMLElement | null | undefined) {
+	if (!field) return;
+	field.focus();
+	if (field instanceof HTMLTextAreaElement) return field.setSelectionRange(field.value.length, field.value.length);
+	const range = document.createRange();
+	range.selectNodeContents(field);
+	range.collapse(false);
+	const selection = getSelection();
+	selection?.removeAllRanges();
+	selection?.addRange(range);
 }
 
 /**
