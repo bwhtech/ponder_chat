@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 import { toast } from "frappe-ui";
 import { modelName } from "./models";
+import { CITATION_PART, type CitationPart } from "./cite/citations";
 
 /**
  * A chat as a Markdown file, made in the browser from the saved thread: what the person
@@ -27,12 +28,19 @@ export function threadMarkdown(title: string, messages: UIMessage[]) {
 	return `# ${title}\n\n${sections.join("\n\n---\n\n")}\n`;
 }
 
+/** A quote from an earlier reply, as a blockquote, with the person's comment under it. */
+function citationMarkdown(citation: CitationPart["data"]): string {
+	const quote = citation.text.trim().split("\n").map((line) => `> ${line}`).join("\n");
+	return citation.comment ? `${quote}\n\n${citation.comment}` : quote;
+}
+
 type Part = UIMessage["parts"][number];
 type ToolPart = { type: string; state?: string; input?: Record<string, unknown>; output?: Record<string, unknown> };
 
 function partMarkdown(part: Part): string {
 	if (part.type === "text") return part.text.trim();
 	if (part.type === "file") return `📎 ${part.filename ?? "Attached file"}`;
+	if (part.type === CITATION_PART) return citationMarkdown((part as CitationPart).data);
 	if (!part.type.startsWith("tool-")) return "";
 	const tool = part as unknown as ToolPart;
 	const name = part.type.slice("tool-".length);

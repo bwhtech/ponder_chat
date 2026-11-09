@@ -125,3 +125,14 @@ html {
   animation-duration: 180ms;
   animation-timing-function: var(--ease-out-strong);
 }
+
+/* Citations (web/cite/highlight.ts): the quote whose comment is being written, and the
+   quote that "Go to source" scrolled to. The page's own selection is left alone. */
+::highlight(ponder-cite-comment) {
+	background-color: color-mix(in srgb, var(--surface-blue-3, #b3d4ff) 70%, transparent);
+	color: inherit;
+}
+::highlight(ponder-cite-flash) {
+	background-color: color-mix(in srgb, var(--surface-amber-3, #fde68a) 80%, transparent);
+	color: inherit;
+}

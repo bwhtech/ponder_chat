@@ -14,6 +14,7 @@ import type { Continued } from "./runs.ts";
 /**
  * The thread as the model reads it: the owner's attached files swapped for their content
  * (file-context.ts), the skills they chose with $name swapped for their instructions (skills.ts),
+ * the reply text they cited marked as a quote (citations.ts),
  * tool results of earlier turns trimmed, and what memory recalled added to the person's
  * latest message (context.ts).
  */
@@ -26,10 +27,11 @@ export async function loadModelMessages(threadId: string, owner: string, modelId
 	const { getSettings } = await import("../settings.ts");
 	const { addRecalledMemory, trimOldToolResults } = await import("./context.ts");
 	const { skillPartText } = await import("./skills.ts");
+	const { citationPartText } = await import("./citations.ts");
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
 	const messages = await convertToModelMessages(await resolveFileParts(await loadThread(threadId), owner, { pdfAsText }), {
-		convertDataPart: (part) => skillPartText(part, skills),
+		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 	});
 	return addRecalledMemory(trimOldToolResults(messages), recalled);
 }

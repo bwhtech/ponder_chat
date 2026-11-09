@@ -32,6 +32,9 @@ function submit() {
 	files.value = [];
 }
 
+/** Sends what the field holds, as the send button does; used by Cmd+Enter in a quote's comment. */
+defineExpose({ submit });
+
 function addFiles(event: Event) {
 	const input = event.target as HTMLInputElement;
 	attach(Array.from(input.files ?? []));
