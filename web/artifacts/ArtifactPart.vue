@@ -97,7 +97,7 @@ watch(
 			class="grid grid-cols-[40px_minmax(0,1fr)] items-center gap-3 py-0.5 pl-[9px] text-p-sm"
 		>
 			<span
-				:class="[step.done ? 'lucide-check text-ink-gray-5' : 'lucide-loader-circle animate-spin text-ink-gray-5 motion-reduce:animate-none', 'size-3.5 justify-self-center']"
+				:class="[step.done ? 'lucide-check text-ink-gray-5' : 'lucide-pen-line text-ink-gray-5', 'size-3.5 justify-self-center']"
 				aria-hidden="true"
 			/>
 			<span class="truncate" :class="step.done ? 'text-ink-gray-6' : 'text-ink-gray-7'">
