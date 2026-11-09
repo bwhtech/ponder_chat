@@ -52,6 +52,18 @@ const daily = computed(() =>
 	(data.value?.days ?? []).map((day) => ({ day: shortDay(day.date), Credits: day.credits, "Active people": day.active })),
 );
 const rangeCredits = computed(() => daily.value.reduce((total, day) => total + day.Credits, 0));
+/** Charts draw in quickly, and not at all with reduced motion: frappe-ui's own default ignores the setting. */
+const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { animation: false } : { animationDuration: 250, animationDurationUpdate: 200 };
+/**
+ * Which day labels the time charts print: every day for a week, then every second or fourth
+ * day, counted back from today so today always has a label and the steps stay even.
+ */
+const dateTicks = (index: number) => {
+	const step = daily.value.length <= 7 ? 1 : daily.value.length <= 14 ? 2 : 4;
+	return (daily.value.length - 1 - index) % step === 0;
+};
+/** The busiest day in the range, for the people chart's subtitle. */
+const peakPeople = computed(() => Math.max(0, ...daily.value.map((day) => day["Active people"])));
 const now = computed(() => data.value?.today ?? { active: 0, replies: 0, credits: 0, outOfCredits: 0 });
 const yesterday = computed(() => data.value?.yesterday ?? { active: 0, replies: 0 });
 const top = computed(() => data.value?.people ?? []);
@@ -67,11 +79,12 @@ function openRequests() {
 		<template #prefix><AccountMenu compact /></template>
 	</PageHeaderMobile>
 	<PageHeader v-else>
-		<h1 class="text-2xl text-ink-gray-9">Overview</h1>
-		<TabButtons v-model="range" :options="ranges" class="ml-auto" />
+		<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
+			<h1 class="text-lg-semibold text-ink-gray-9">Overview</h1>
+		</div>
 	</PageHeader>
 
-	<div class="mx-auto max-w-4xl space-y-6 px-3 pb-16 pt-4 sm:px-5 md:pt-5">
+	<div data-slot="dashboard" class="mx-auto w-full max-w-5xl space-y-6 px-3 pb-16 pt-4 sm:px-5 md:pt-6">
 		<Alert
 			v-if="pending"
 			theme="amber"
@@ -91,9 +104,9 @@ function openRequests() {
 		</div>
 
 		<template v-else>
-			<section aria-label="Today" class="space-y-2">
-				<h2 class="text-sm text-ink-gray-5">Today, since midnight UTC</h2>
-				<div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+			<section aria-label="Today" class="space-y-3">
+				<h2 class="flex min-h-7 items-center text-base-semibold text-ink-gray-9">Today<span class="ml-1 font-normal text-ink-gray-6">· since midnight UTC</span></h2>
+				<div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
 					<NumberCard
 						title="Active people"
 						:loading="loading"
@@ -111,41 +124,62 @@ function openRequests() {
 					<NumberCard title="Credits used" :value="loading ? null : Math.round(now.credits)" :loading="loading" />
 					<NumberCard title="Cost" :value="loading ? null : dollars(now.credits)" :loading="loading" />
 					<NumberCard
-						title="Out of credits"
+						title="People out of credits"
 						:loading="loading"
 						:value="loading ? null : now.outOfCredits"
-						:suffix="now.outOfCredits === 1 ? ' person' : ' people'"
 						class="col-span-2 sm:col-span-1"
 					/>
 				</div>
 			</section>
 
-			<TabButtons v-if="isMobile" v-model="range" :options="ranges" fluid />
-
-			<div class="h-64 rounded-5 border border-outline-gray-1 p-3 md:h-72 md:p-4">
-				<BarChart
-					title="Credits used per day"
-					:subtitle="loading ? undefined : `${credits(rangeCredits)} credits, ${dollars(rangeCredits)}`"
-					:data="daily"
-					x="day"
-					y="Credits"
-					:loading="loading"
-				/>
-			</div>
-
-			<div class="grid gap-6 md:grid-cols-2">
-				<div class="h-64 rounded-5 border border-outline-gray-1 p-3 md:h-72 md:p-4">
-					<LineChart title="Active people per day" :data="daily" x="day" y="Active people" :loading="loading" />
+			<section aria-label="Over time" class="space-y-4">
+				<TabButtons v-if="isMobile" v-model="range" :options="ranges" fluid />
+				<div v-else class="flex min-h-7 items-center">
+					<h2 class="text-base-semibold text-ink-gray-9">Over time</h2>
+					<TabButtons v-model="range" :options="ranges" class="ml-auto" aria-label="Range for the charts" />
 				</div>
-				<div class="h-72 rounded-5 border border-outline-gray-1 p-3 md:p-4">
-					<DonutChart title="Credits by model" :data="data?.byModel ?? []" category="model" value="credits" :loading="loading" />
-				</div>
-			</div>
 
-			<section class="space-y-2">
+				<div class="h-64 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+					<BarChart
+						title="Credits used per day"
+						:subtitle="loading ? undefined : `${credits(rangeCredits)} credits, ${dollars(rangeCredits)}`"
+						:data="daily"
+						x="day"
+						y="Credits"
+						palette="categorical"
+						:echart-options="chartMotion"
+						:x-axis="{ type: 'category', echartOptions: { axisLabel: { rotate: 0, interval: dateTicks, showMinLabel: false, showMaxLabel: true, fontSize: 12 } } }"
+						:y-axis="{ echartOptions: { minInterval: 1, axisLabel: { fontSize: 12 } } }"
+						:loading="loading"
+					/>
+				</div>
+
+				<div class="grid gap-4 md:grid-cols-2">
+					<div class="h-64 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+						<LineChart
+							title="Active people per day"
+							:subtitle="loading ? undefined : `Busiest day: ${peakPeople}`"
+							:data="daily"
+							x="day"
+							y="Active people"
+							palette="categorical"
+							:echart-options="chartMotion"
+							:series-config="{ 'Active people': { echartOptions: { lineStyle: { width: 2 }, areaStyle: { opacity: 0.08 }, symbol: 'none' } } }"
+							:x-axis="{ echartOptions: { axisLabel: { rotate: 0, interval: dateTicks, showMinLabel: false, showMaxLabel: true, fontSize: 12 } } }"
+							:y-axis="{ echartOptions: { minInterval: 1, axisLabel: { fontSize: 12 } } }"
+							:loading="loading"
+						/>
+					</div>
+					<div class="h-64 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:p-4">
+						<DonutChart :echart-options="chartMotion" :format="credits" title="Credits by model" :subtitle="loading ? undefined : `Last ${range} days`" :data="data?.byModel ?? []" category="model" value="credits" :loading="loading" />
+					</div>
+				</div>
+			</section>
+
+			<section class="space-y-3">
 				<div class="flex items-baseline justify-between">
-					<h2 class="text-lg-semibold text-ink-gray-8">Who uses Ponder</h2>
-					<RouterLink to="/people" class="text-sm text-ink-blue-link">All people</RouterLink>
+					<h2 class="text-base-semibold text-ink-gray-9">Who uses Ponder</h2>
+					<RouterLink to="/people" class="flex items-center gap-1 rounded-4 text-sm text-ink-gray-6 hover:text-ink-gray-8">All people<span class="lucide-arrow-right size-3.5" aria-hidden="true" /></RouterLink>
 				</div>
 
 				<!-- Phone: a feed, one person a row, today's credits under the name. -->

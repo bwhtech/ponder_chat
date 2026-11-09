@@ -98,7 +98,7 @@ async function undo(save: MemorySave) {
 
 <template>
 	<div data-slot="memory-view" class="min-h-0 flex-1 overflow-y-auto">
-		<div class="mx-auto w-full max-w-[770px] space-y-5 px-3 py-6 sm:px-5">
+		<div class="mx-auto w-full max-w-[720px] space-y-5 px-3 py-6 sm:px-5">
 			<p class="text-p-base text-ink-gray-6">
 				Ponder remembers what you tell it about yourself, your work and how you like answers, and uses it in new chats so you don't have to repeat
 				yourself. It never keeps passwords, contact details, ID numbers, health details, or what you say about other people.

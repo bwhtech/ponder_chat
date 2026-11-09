@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Avatar, Dropdown } from "frappe-ui";
+import { Avatar, Dropdown, SidebarHeader } from "frappe-ui";
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { signOut } from "../../account";
@@ -23,19 +23,11 @@ const menu = computed(() => [
 </script>
 
 <template>
-	<Dropdown :options="menu">
-		<button v-if="compact" class="rounded-full p-1" :aria-label="`Account menu, ${me}`">
+	<Dropdown v-if="compact" :options="menu">
+		<button class="rounded-full p-1" :aria-label="`Account menu, ${me}`">
 			<Avatar :label="me" size="md" />
 		</button>
-		<button v-else class="flex w-full items-center gap-2 rounded-4 px-2 py-1.5 text-left hover:bg-surface-gray-2">
-			<span class="flex size-7 items-center justify-center rounded-3 bg-surface-gray-9 text-ink-base">
-				<span class="lucide-message-circle size-4" aria-hidden="true" />
-			</span>
-			<span class="min-w-0 flex-1">
-				<span class="block truncate text-base-semibold text-ink-gray-9">Ponder Admin</span>
-				<span class="block truncate text-xs text-ink-gray-5">{{ me }}</span>
-			</span>
-			<span class="lucide-chevrons-up-down size-4 text-ink-gray-5" aria-hidden="true" />
-		</button>
 	</Dropdown>
+	<!-- The same header as the chat's sidebar, so both look like one app. -->
+	<SidebarHeader v-else title="Ponder Admin" :subtitle="me" logo="/logo.png" :menu-items="menu" />
 </template>

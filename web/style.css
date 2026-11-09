@@ -26,6 +26,42 @@
   }
 }
 
+/* A reply that arrives in this visit rises in; the ones already there on load do not, and your own
+   message shows at once.
+   A reply's copy and model row fades in when the reply ends. */
+@keyframes message-in {
+	from {
+		opacity: 0;
+		transform: translateY(6px);
+	}
+}
+@keyframes fade-in {
+	from {
+		opacity: 0;
+	}
+}
+[data-slot='message-scroller-item'][data-new='assistant'] {
+	animation: message-in 220ms var(--ease-out-strong);
+}
+[data-slot='message-scroller-item'][data-new] [data-reply-actions] {
+	animation: fade-in 200ms var(--ease-out-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+	[data-slot='message-scroller-item'][data-new='assistant'] {
+		animation-name: fade-in;
+	}
+	/* frappe-ui's dialogs scale in and out; with reduced motion they only appear. */
+	.dialog-overlay[data-state],
+	.dialog-content[data-state],
+	.bottom-sheet-overlay[data-state],
+	.bottom-sheet-content[data-state] {
+		animation-duration: 1ms !important;
+	}
+	[data-slot='message-scroller-item'][data-new] [data-reply-actions] {
+		animation: none;
+	}
+}
+
 /* The app shell does not scroll, so stop iOS bouncing it and Android pulling to refresh it.
    Scroll areas inside (the transcript, the sheet) keep their own bounce. */
 html,
@@ -79,4 +115,55 @@ html {
   [data-slot='settings-close'] {
     top: calc(env(safe-area-inset-top) + 0.5rem);
   }
+}
+
+/* On a desktop, Settings is as tall as it needs, up to 640px, not most of the screen. */
+@media (min-width: 640px) {
+  [data-slot='content'] > [data-orientation='vertical'] {
+    height: min(640px, calc(100dvh - 8rem));
+    min-height: 0;
+  }
+}
+
+/* In dark mode the sidebar's chat titles and quiet text are one step brighter, so they do not read as disabled. */
+[data-theme='dark'] [data-slot='thread-list'] {
+  --ink-gray-5: var(--ink-gray-6);
+}
+[data-theme='dark'] [data-slot='thread-list'] [data-slot='sidebar-item'][data-state='inactive'] {
+  color: var(--ink-gray-7);
+}
+
+/* Settings, Connectors with none yet: the empty state fills the panel under the heading, so it
+   sits in the middle of the panel and not near the top. The panel body's own bottom padding is
+   taken back, so the space above and below is the same. */
+[data-slot='connectors-empty'] {
+  min-height: calc(min(640px, 100dvh - 8rem) - 7.5rem);
+  margin-bottom: -4rem;
+}
+@media (max-width: 639px) {
+  [data-slot='connectors-empty'] {
+    min-height: calc(100dvh - 12rem);
+  }
+}
+
+/* Placeholders read as quiet text, not as missing text. */
+:root :is(input, textarea)::placeholder {
+  color: var(--ink-gray-5);
+  opacity: 1;
+}
+[data-theme='dark'] :is(input, textarea)::placeholder {
+  color: var(--ink-gray-6);
+}
+
+/* frappe-ui's dialogs and the phone's sheet leave on ease-in, which starts slowly. They leave
+   quickly on the app's ease-out instead. */
+.dialog-overlay[data-state='closed'],
+.dialog-content[data-state='closed'] {
+  animation-duration: 120ms;
+  animation-timing-function: var(--ease-out-strong);
+}
+.bottom-sheet-overlay[data-state='closed'],
+.bottom-sheet-content[data-state='closed'] {
+  animation-duration: 180ms;
+  animation-timing-function: var(--ease-out-strong);
 }

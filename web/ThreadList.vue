@@ -67,7 +67,7 @@ function askDelete(thread: ThreadSummary) {
 </script>
 
 <template>
-	<nav data-slot="thread-list" aria-label="Threads" class="flex flex-col gap-3">
+	<nav data-slot="thread-list" aria-label="Threads" class="flex flex-col gap-4">
 		<TextInput
 			v-model="query"
 			type="search"
@@ -91,7 +91,7 @@ function askDelete(thread: ThreadSummary) {
 				v-for="hit in search.hits.value"
 				:key="hit.id"
 				type="button"
-				class="flex w-full flex-col gap-0.5 rounded-4 px-4 py-1.5 text-left transition-opacity duration-150 hover:bg-surface-gray-2 active:bg-surface-gray-3"
+				class="flex w-full flex-col gap-0.5 rounded-4 px-4 py-1.5 text-left transition-opacity duration-150 ease-out-strong motion-reduce:transition-none hover:bg-surface-gray-2 active:bg-surface-gray-3"
 				:class="{ 'bg-surface-elevation-3 shadow-sm': props.highlight && hit.id === current, 'opacity-50': search.searching.value }"
 				@click="emit('select', hit.id)"
 				@pointerenter="prefetch(hit.id)"
@@ -107,33 +107,49 @@ function askDelete(thread: ThreadSummary) {
 			<p v-if="search.failed.value" class="px-2 text-p-sm text-ink-gray-5">Search did not work. Try again.</p>
 			<p v-else-if="!search.searching.value && !search.hits.value.length" class="px-2 text-p-sm text-ink-gray-5">No chats match.</p>
 		</div>
-		<div v-for="group in searching ? [] : groups" :key="group.label" class="space-y-0.5">
-			<SidebarLabel>{{ group.label }}</SidebarLabel>
-			<SidebarItem
-				v-for="thread in group.threads"
-				:key="thread.id"
-				:label="thread.title"
-				:active="props.highlight && thread.id === current"
-				@click="emit('select', thread.id)"
-				@pointerenter="prefetch(thread.id)"
-				@focusin="prefetch(thread.id)"
-				@touchstart.passive="prefetch(thread.id)"
-			>
-				<template #suffix>
-					<Dropdown :options="menu(thread)" align="end">
-						<template #trigger>
-							<button
-								type="button"
-								class="relative flex size-6 items-center justify-center rounded-4 text-ink-gray-5 after:absolute after:-inset-1 after:content-[''] hover:bg-surface-gray-3 hover:text-ink-gray-8 active:bg-surface-gray-4"
-								:aria-label="`Actions for ${thread.title}`"
-							>
-								<span class="lucide-ellipsis size-4" aria-hidden="true" />
-							</button>
+		<!-- A group that starts while the page is open (the first chat today) fades in. -->
+		<TransitionGroup tag="div" class="flex flex-col gap-4 empty:hidden" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none" enter-from-class="opacity-0">
+			<div v-for="group in searching ? [] : groups" :key="group.label" class="space-y-0.5" data-slot="thread-group">
+				<SidebarLabel class="!pl-4 [&_h3]:text-xs-medium [&_h3]:text-ink-gray-5">{{ group.label }}</SidebarLabel>
+				<!-- A new or newly active chat slides in at the top; the others move down. -->
+				<TransitionGroup
+					tag="div"
+					class="relative space-y-0.5"
+					leave-active-class="absolute inset-x-0 transition-opacity duration-150 ease-out-strong motion-reduce:transition-none"
+					leave-to-class="opacity-0"
+					enter-active-class="transition-[opacity,transform] duration-200 ease-out-strong motion-reduce:transition-none"
+					enter-from-class="-translate-y-1 opacity-0"
+					move-class="transition-transform duration-200 ease-out-strong motion-reduce:transition-none"
+				>
+					<SidebarItem
+						v-for="thread in group.threads"
+						:key="thread.id"
+						class="!h-8"
+						:label="thread.title"
+						:active="props.highlight && thread.id === current"
+						@click="emit('select', thread.id)"
+						@pointerenter="prefetch(thread.id)"
+						@focusin="prefetch(thread.id)"
+						@touchstart.passive="prefetch(thread.id)"
+					>
+						<template #suffix>
+							<Dropdown :options="menu(thread)" align="end">
+								<template #trigger>
+									<button
+										type="button"
+										class="relative flex size-6 items-center justify-center rounded-4 text-ink-gray-5 opacity-0 transition-opacity duration-150 ease-out after:absolute after:-inset-1 after:content-[''] hover:bg-surface-gray-3 hover:text-ink-gray-8 focus-visible:opacity-100 active:bg-surface-gray-4 aria-expanded:opacity-100 data-[state=open]:opacity-100 group-hover/sidebar-item:opacity-100 group-focus-within/sidebar-item:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100"
+										:class="{ 'opacity-100': props.highlight && thread.id === current }"
+										:aria-label="`Actions for ${thread.title}`"
+									>
+										<span class="lucide-ellipsis size-4" aria-hidden="true" />
+									</button>
+								</template>
+							</Dropdown>
 						</template>
-					</Dropdown>
-				</template>
-			</SidebarItem>
-		</div>
+					</SidebarItem>
+				</TransitionGroup>
+			</div>
+		</TransitionGroup>
 		<div v-if="!listLoaded && !searching" class="space-y-0.5" aria-busy="true" aria-label="Loading threads">
 			<Skeleton class="mx-2 mb-2 mt-1.5 h-3 w-14 rounded-4" />
 			<div v-for="width in ['w-40', 'w-32', 'w-44', 'w-28', 'w-36']" :key="width" class="flex h-7 items-center px-2">

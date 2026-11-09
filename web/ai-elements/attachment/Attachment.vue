@@ -55,7 +55,7 @@ function formatSize(bytes?: number) {
 		@click="isLink && url && viewOnClick($event, { name, url, mediaType: mediaType ?? '' })"
 		:aria-busy="state === 'uploading' || undefined"
 		:class="[
-			'group/attachment relative flex h-8 w-fit max-w-full items-center gap-2 rounded-4 border border-outline-gray-2 bg-surface-base pl-2.5 data-[state=error]:border-outline-red-3 [&:is(a)]:transition-[background-color,transform] [&:is(a)]:duration-150 [&:is(a)]:ease-out [&:is(a):hover]:bg-surface-gray-1 [&:is(a):active]:scale-[0.98]',
+			'group/attachment relative flex h-8 w-fit max-w-full items-center gap-2 rounded-4 border border-outline-gray-2 bg-surface-base pl-2.5 data-[state=error]:border-outline-red-3 [&:is(a)]:transition-[background-color,transform] [&:is(a)]:duration-150 [&:is(a)]:ease-out-strong [&:is(a):hover]:bg-surface-gray-1 [&:is(a):active]:scale-[0.98] motion-reduce:[&:is(a):active]:scale-100',
 			removable ? 'pr-1' : 'pr-2.5',
 		]"
 	>

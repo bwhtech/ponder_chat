@@ -35,7 +35,7 @@ const iconName = computed(() => (status.value === "error" ? "lucide-circle-x" : 
 		<TraceLine :status="status">
 			<TraceIcon :icon="iconName" />
 			<TraceTitle :title="label">{{ label }}</TraceTitle>
-			<Badge v-if="showBadge" size="sm" :theme="badge.theme" :label="badge.label" class="shrink-0" />
+			<Badge v-if="showBadge && badge.label !== 'Done'" size="sm" :theme="badge.theme" :label="badge.label" class="shrink-0" />
 		</TraceLine>
 	</TraceCollapsibleTrigger>
 </template>

@@ -16,7 +16,7 @@ const { open, toggle, contentId } = useTraceCollapsible("TraceCollapsibleTrigger
 		<slot />
 		<span
 			aria-hidden="true"
-			class="lucide-chevron-right size-3.5 shrink-0 opacity-70 transition-transform duration-150 group-aria-expanded/trace-trigger:rotate-90"
+			class="lucide-chevron-right size-3.5 shrink-0 opacity-70 transition-transform duration-200 ease-out-strong motion-reduce:transition-none group-aria-expanded/trace-trigger:rotate-90"
 		/>
 	</button>
 </template>

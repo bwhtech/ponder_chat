@@ -127,7 +127,7 @@ function copyUrl() {
 				<ConnectorAvatar :name="c.name" size="2xl" />
 				<div class="min-w-0 flex-1 basis-48 space-y-1">
 					<h2 class="truncate text-xl-semibold text-ink-gray-9">{{ c.name }}</h2>
-					<p class="text-p-sm text-ink-gray-5">{{ c.host }} · {{ status }} · Tools checked {{ ago(c.toolsCheckedAt) }}</p>
+					<p class="text-p-sm text-ink-gray-6">{{ c.host }} · {{ status }} · Tools checked {{ ago(c.toolsCheckedAt) }}</p>
 				</div>
 				<Switch v-model="enabled" label="Use in chats" :disabled="c.status !== 'connected'" />
 			</div>
@@ -158,7 +158,7 @@ function copyUrl() {
 				<div class="flex flex-wrap items-end justify-between gap-3">
 					<div>
 						<h3 class="text-base-semibold text-ink-gray-8">Tools</h3>
-						<p class="text-p-sm text-ink-gray-5">{{ counts.allow }} always allowed · {{ counts.ask }} ask first · {{ counts.off }} off</p>
+						<p class="text-p-sm text-ink-gray-6">{{ counts.allow }} always allowed · {{ counts.ask }} ask first · {{ counts.off }} off</p>
 					</div>
 					<div v-if="c.tools.length" class="flex items-center gap-2">
 						<span class="text-sm text-ink-gray-5" aria-hidden="true">All tools</span>
@@ -182,26 +182,26 @@ function copyUrl() {
 				<h3 class="text-base-semibold text-ink-gray-8">Details</h3>
 				<dl class="divide-y divide-outline-gray-1 text-sm">
 					<div class="grid grid-cols-[7rem_minmax(0,1fr)] items-center gap-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
-						<dt class="text-ink-gray-5">Server URL</dt>
+						<dt class="text-ink-gray-6">Server URL</dt>
 						<dd class="flex min-w-0 items-center gap-1">
 							<span class="truncate font-mono text-xs text-ink-gray-7" :title="c.url">{{ c.url }}</span>
 							<Button variant="ghost" size="sm" icon="lucide-copy" aria-label="Copy the server URL" @click="copyUrl" />
 						</dd>
 					</div>
 					<div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
-						<dt class="text-ink-gray-5">Sign-in</dt>
+						<dt class="text-ink-gray-6">Sign-in</dt>
 						<dd class="text-p-sm text-ink-gray-7">{{ signIn }}</dd>
 					</div>
 					<div v-if="c.serverName" class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
-						<dt class="text-ink-gray-5">Server</dt>
+						<dt class="text-ink-gray-6">Server</dt>
 						<dd class="text-p-sm text-ink-gray-7">{{ c.serverName }}</dd>
 					</div>
 					<div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
-						<dt class="text-ink-gray-5">Added</dt>
+						<dt class="text-ink-gray-6">Added</dt>
 						<dd class="text-p-sm text-ink-gray-7">{{ new Date(c.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) }}</dd>
 					</div>
 					<div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
-						<dt class="text-ink-gray-5">Last used</dt>
+						<dt class="text-ink-gray-6">Last used</dt>
 						<dd class="text-p-sm text-ink-gray-7">{{ c.lastUsedAt ? ago(c.lastUsedAt) : "Not yet" }}</dd>
 					</div>
 				</dl>

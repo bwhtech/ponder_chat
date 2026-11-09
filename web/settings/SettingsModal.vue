@@ -32,10 +32,8 @@ watch(
 
 <template>
 	<SettingsDialog v-model:open="settings.open" v-model:tab="tab">
-		<!-- On a phone the dialog fills the screen (style.css), so there is no backdrop to tap: it needs a close button. -->
-		<Button data-slot="settings-close" class="absolute right-2 top-2 z-10 sm:hidden" variant="ghost" icon="lucide-x" aria-label="Close settings" @click="settings.open = false" />
 		<SettingsSidebar>
-			<SettingsNavGroup label="Settings">
+			<SettingsNavGroup label="Settings" class="[&>div:first-child]:text-xs-medium">
 				<SettingsNavItem value="account">
 					<template #prefix><span class="lucide-circle-user size-4 text-ink-gray-6" aria-hidden="true" /></template>
 					Account
@@ -56,5 +54,7 @@ watch(
 				<ConnectorsPanel v-else />
 			</SettingsPanel>
 		</SettingsContent>
+		<!-- Close. A phone has no backdrop to tap, since the dialog fills the screen (style.css). After the content, so the dialog does not open with focus on it. -->
+		<Button data-slot="settings-close" class="absolute right-2 top-2 z-10 sm:right-5 sm:top-[1.875rem]" variant="ghost" icon="lucide-x" aria-label="Close settings" @click="settings.open = false" />
 	</SettingsDialog>
 </template>

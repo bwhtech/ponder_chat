@@ -131,7 +131,7 @@ providePromptInput({
 		data-slot="prompt-input"
 		:data-status="status"
 		:data-dragging="dragging || undefined"
-		class="flex w-full min-w-0 flex-col rounded-7 border border-outline-gray-2 bg-surface-base shadow-sm transition-[border-color,box-shadow] focus-within:border-outline-gray-3 focus-within:shadow-md data-[dragging]:border-outline-gray-4 data-[dragging]:bg-surface-gray-1"
+		class="flex w-full min-w-0 flex-col rounded-7 border border-outline-gray-2 bg-surface-base shadow-sm transition-[border-color,box-shadow] duration-150 ease-out-strong focus-within:border-outline-gray-3 focus-within:shadow-md dark:bg-surface-gray-1 data-[dragging]:border-outline-gray-4 data-[dragging]:bg-surface-gray-1"
 		@submit.prevent="submit"
 		@dragenter="onDragEnter"
 		@dragover="onDragOver"

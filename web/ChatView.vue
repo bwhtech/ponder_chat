@@ -226,12 +226,16 @@ function answerApproval(id: string, approved: boolean) {
 const suggestions = computed(() => [
 	"Explain a concept like I'm new to it",
 	"Help me write a polite follow-up email",
-	features.value.python ? "Chart compound interest on ₹10,000 at 8% for 20 years" : "Plan a 3-day trip on a small budget",
+	features.value.python ? "Chart compound interest over 20 years" : "Plan a 3-day trip on a small budget",
 ]);
 
 // A long thread shows its latest messages first; older ones render only when asked for.
 // The start always falls on the person's message, so no turn is cut.
 const PAGE = 12;
+/** The newest reply keeps its copy button in view; older ones show it on hover. The model name always shows. */
+const lastReplyId = computed(() => messages.value.findLast((message) => message.role === "assistant")?.id);
+/** Messages on screen when the thread opened: they do not animate in; later ones rise in (style.css). */
+const shownAtStart = new Set(props.initialMessages.map((message) => message.id));
 const firstShown = ref(turnStart(props.initialMessages, props.initialMessages.length - PAGE));
 const shownMessages = computed(() => messages.value.slice(firstShown.value));
 
@@ -256,21 +260,14 @@ let footerTop = 0;
 watch(landing, () => (footerTop = footer.value?.getBoundingClientRect().top ?? 0), { flush: "pre" });
 watch(landing, (now) => !now && settleFooter(), { flush: "post" });
 
-/** The field moves from where it was to its place at the bottom; the conversation fades in. */
+/** The field moves from where it was to its place at the bottom. The first message shows at once, like every message you send. */
 function settleFooter() {
 	const field = footer.value;
 	if (!field) return;
 	const shift = footerTop - field.getBoundingClientRect().top;
-	const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-	if (Math.abs(shift) > 1 && !still) {
-		field.animate([{ transform: `translateY(${shift}px)` }, { transform: "none" }], {
-			duration: 400,
-			easing: "cubic-bezier(0.32, 0.72, 0, 1)",
-		});
-	}
-	area.value
-		?.querySelector("[data-slot=conversation]")
-		?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 250, delay: still ? 0 : 150, easing: "ease-out", fill: "backwards" });
+	if (Math.abs(shift) <= 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+	const easing = getComputedStyle(document.documentElement).getPropertyValue("--ease-out-strong").trim() || "ease-out";
+	field.animate([{ transform: `translateY(${shift}px)` }, { transform: "none" }], { duration: 300, easing });
 }
 
 /** The greeting fades out where it stood, out of the layout, so it does not hold the field up. */
@@ -479,20 +476,20 @@ function replyModelId(message: UIMessage) {
 
 <template>
 	<div ref="area" class="relative min-h-0 flex-1">
-		<Transition leave-active-class="transition-opacity duration-150 ease-out" leave-to-class="opacity-0" @before-leave="pinInPlace">
+		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
 			<ConversationEmptyState
 				v-if="landing"
-				class="sm:justify-end sm:pb-6"
+				class="gap-4 !pb-8 sm:!justify-end sm:!pb-6"
 			>
-				<img src="/logo.png" alt="" class="size-12" />
-				<div class="space-y-1.5">
-					<p class="text-lg-semibold text-ink-gray-8">What's on your mind?</p>
-					<p class="text-p-base text-ink-gray-5">Ask anything. Pick a model below; bigger models use more of your daily credits.</p>
+				<img src="/logo.png" alt="" class="size-11" />
+				<div class="space-y-2">
+					<p class="text-4xl-semibold text-ink-gray-9">What's on your mind?</p>
+					<p class="mx-auto max-w-sm text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything. Pick a model below; bigger models use more of your daily credits.</p>
 				</div>
 			</ConversationEmptyState>
 		</Transition>
 		<Conversation v-if="!landing">
-			<ConversationContent class="mx-auto w-full max-w-[770px] px-3 pb-6 pt-6 sm:px-5">
+			<ConversationContent class="mx-auto w-full max-w-[720px] px-4 pb-8 pt-8 sm:px-5">
 				<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">
 					<Button variant="ghost" size="sm" icon-left="lucide-chevrons-up" @click="showEarlier">
 						Show earlier messages ({{ firstShown }})
@@ -503,6 +500,7 @@ function replyModelId(message: UIMessage) {
 					:key="message.id"
 					:message-id="message.id"
 					:scroll-anchor="message.role === 'user'"
+					:data-new="shownAtStart.has(message.id) ? undefined : message.role"
 				>
 					<Message :from="message.role">
 						<MessageContent :bare="message.role === 'user'">
@@ -513,7 +511,7 @@ function replyModelId(message: UIMessage) {
 								v-for="name in askedSkills(message)"
 								:key="name"
 								data-slot="asked-skill"
-								class="flex items-center gap-1.5 text-p-sm text-ink-gray-5"
+								class="flex items-center gap-1.5 text-p-sm text-ink-gray-6"
 							>
 								<span class="lucide-sparkles size-3.5 shrink-0" aria-hidden="true" />
 								<span>Used skill <span class="text-ink-gray-7">{{ skillTitle(name) }}</span> · You asked for it</span>
@@ -524,16 +522,22 @@ function replyModelId(message: UIMessage) {
 								@approve="answerApproval($event, true)"
 								@deny="answerApproval($event, false)"
 							/>
-							<MessageActions v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)">
-								<MessageCopyAction :value="replyText(message)" />
-								<span v-if="replyModel(message)" class="px-1 text-p-xs text-ink-gray-5" data-slot="reply-model">{{ replyModel(message) }}</span>
+							<MessageActions
+								v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
+								data-reply-actions
+							>
+								<MessageCopyAction
+									:value="replyText(message)"
+									:class="{ 'opacity-0 transition-opacity duration-150 ease-out-strong focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100': message.id !== lastReplyId }"
+								/>
+								<span v-if="replyModel(message)" class="px-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
 							</MessageActions>
 							<div
 								v-for="{ save, operations } in remembered.get(message.id) ?? []"
 								:key="save.id"
 								data-slot="memory-saved"
 								:data-new="newSaves.has(save.id) || undefined"
-								class="flex flex-wrap items-start gap-x-1"
+								class="-ml-1 -mt-1 flex flex-wrap items-start gap-x-1"
 							>
 								<div class="min-w-0">
 									<button
@@ -541,20 +545,20 @@ function replyModelId(message: UIMessage) {
 										:key="op.memoryId + op.op"
 										type="button"
 										data-slot="memory-note"
-										class="flex w-fit max-w-full items-start gap-1.5 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-5 hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
+										class="flex w-fit max-w-full items-start gap-1.5 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-6 hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
 										:class="{ 'line-through': save.undoneAt }"
 										title="Open Memory"
 										@click="emit('openMemory')"
 									>
-										<span class="lucide-brain mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-										<span class="min-w-0"><span class="text-ink-gray-7">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
+										<span class="lucide-bookmark mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+										<span class="min-w-0"><span class="text-ink-gray-6">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
 									</button>
 								</div>
 								<button
 									v-if="canUndo(save)"
 									type="button"
 									data-slot="memory-undo"
-									class="rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-5 underline hover:bg-surface-gray-2 hover:text-ink-gray-8 active:bg-surface-gray-3"
+									class="rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-7 underline decoration-outline-gray-3 underline-offset-2 hover:bg-surface-gray-2 hover:decoration-current hover:text-ink-gray-8 active:bg-surface-gray-3"
 									@click="undoRemembered(save)"
 								>
 									Undo
@@ -580,11 +584,14 @@ function replyModelId(message: UIMessage) {
 		</Conversation>
 	</div>
 
-	<footer ref="footer" class="mx-auto flex w-full max-w-[770px] shrink-0 flex-col gap-2 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
+	<footer ref="footer" class="mx-auto flex w-full max-w-[720px] shrink-0 flex-col gap-2 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5 sm:pb-5">
 		<!-- Above the field on phones; under it in the middle of the page. -->
-		<Suggestions v-if="landing && !outOfCredits" class="sm:order-last">
-			<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
-		</Suggestions>
+		<!-- The chips fade out with the greeting when the first message goes. -->
+		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
+			<Suggestions v-if="landing && !outOfCredits" class="-mx-4 px-4 [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
+				<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
+			</Suggestions>
+		</Transition>
 		<Alert
 			v-if="outOfCredits"
 			theme="amber"

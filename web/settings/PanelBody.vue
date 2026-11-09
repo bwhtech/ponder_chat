@@ -9,7 +9,7 @@ import { ScrollArea } from "frappe-ui";
 </script>
 
 <template>
-	<ScrollArea class="min-h-0 flex-1" viewport-class="scroll-fade-y px-4 pb-16 sm:px-[4.4rem]">
+	<ScrollArea class="min-h-0 flex-1" viewport-class="scroll-fade-y px-4 pb-16 sm:px-12">
 		<slot />
 	</ScrollArea>
 </template>

@@ -406,3 +406,11 @@
   stroke: var(--pele-border);
   rx: 6px;
 }
+
+/* A column the markdown or the number check (markdown.ts) aligned. Prose styles would override the HTML attribute. */
+[data-slot='response-table'] :is(th, td)[align='right'] {
+  text-align: right;
+}
+[data-slot='response-table'] :is(th, td)[align='center'] {
+  text-align: center;
+}

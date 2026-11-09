@@ -7,11 +7,11 @@ defineProps<{ title?: string; description?: string }>();
 </script>
 
 <template>
-	<div class="shrink-0 px-4 pt-6 sm:px-[4.4rem] sm:pt-10">
+	<div class="shrink-0 px-4 pt-6 sm:px-12 sm:pt-8">
 		<slot>
 			<div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
 				<div class="flex min-w-0 flex-col gap-1">
-					<h2 v-if="title" class="text-lg font-semibold text-ink-gray-8">{{ title }}</h2>
+					<h2 v-if="title" class="text-2xl-semibold text-ink-gray-9">{{ title }}</h2>
 					<p v-if="description" class="text-base text-ink-gray-6">{{ description }}</p>
 				</div>
 				<div v-if="$slots.actions" class="flex shrink-0 items-center gap-2">

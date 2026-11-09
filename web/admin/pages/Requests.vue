@@ -87,12 +87,14 @@ const answer = (request: DecidedRequest) =>
 		<template #prefix><AccountMenu compact /></template>
 	</PageHeaderMobile>
 	<PageHeader v-else>
-		<h1 class="text-2xl text-ink-gray-9">Requests</h1>
+		<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
+			<h1 class="text-lg-semibold text-ink-gray-9">Requests</h1>
+		</div>
 	</PageHeader>
 
-	<div class="mx-auto max-w-4xl space-y-11 px-3 pb-16 pt-4 sm:px-5 md:pt-5">
+	<div class="mx-auto w-full max-w-5xl space-y-11 px-3 pb-16 pt-4 sm:px-5 md:pt-5">
 		<section class="space-y-2">
-			<h2 class="text-lg-semibold text-ink-gray-8">Waiting for an answer</h2>
+			<h2 class="text-base-medium text-ink-gray-8">Waiting for an answer</h2>
 
 			<!-- Phone: one request a row, with its two buttons under the numbers. -->
 			<List v-if="isMobile" class="-mx-3 list-row-px-3">
@@ -164,7 +166,7 @@ const answer = (request: DecidedRequest) =>
 		</section>
 
 		<section v-if="decided.length" class="space-y-2">
-			<h2 class="text-lg-semibold text-ink-gray-8">Answered, last 30 days</h2>
+			<h2 class="text-base-medium text-ink-gray-8">Answered, last 30 days</h2>
 
 			<List v-if="isMobile" class="-mx-3 list-row-px-3">
 				<ListRows :items="decided" v-slot="{ item }">

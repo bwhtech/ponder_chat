@@ -16,7 +16,7 @@ const format = (value: number) => (Number.isInteger(value) ? String(value) : val
 </script>
 
 <template>
-	<div class="flex flex-col gap-1.5 rounded-7 px-2 py-2" data-slot="credit-meter">
+	<div class="flex flex-col gap-1.5 rounded-7 px-4 py-2" data-slot="credit-meter">
 		<div class="flex items-baseline justify-between gap-2 text-p-sm">
 			<span class="text-ink-gray-6">Credits today</span>
 			<span class="tabular-nums text-ink-gray-8">
@@ -25,7 +25,7 @@ const format = (value: number) => (Number.isInteger(value) ? String(value) : val
 			</span>
 		</div>
 		<div
-			class="h-1.5 overflow-hidden rounded-full bg-surface-gray-3"
+			class="h-1 overflow-hidden rounded-full bg-surface-gray-3"
 			role="meter"
 			aria-label="Credits left today"
 			:aria-valuenow="credits.remaining"
@@ -33,11 +33,11 @@ const format = (value: number) => (Number.isInteger(value) ? String(value) : val
 			:aria-valuemax="credits.limit"
 		>
 			<div
-				class="h-full rounded-full transition-[width] duration-300 ease-out"
+				class="h-full w-full rounded-full transition-transform duration-300 ease-out-strong motion-reduce:transition-none"
 				:class="credits.remaining <= 0 ? 'bg-surface-red-5' : low ? 'bg-surface-amber-5' : 'bg-surface-gray-7'"
-				:style="{ width: `${left * 100}%` }"
+				:style="{ transform: `translateX(${(left - 1) * 100}%)` }"
 			/>
 		</div>
-		<span class="text-p-xs text-ink-gray-5">{{ refill }}</span>
+		<span class="text-p-xs text-ink-gray-6">{{ refill }}</span>
 	</div>
 </template>

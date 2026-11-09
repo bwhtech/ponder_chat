@@ -143,6 +143,9 @@ async function emailInvite() {
 		toast.error((e as Error).message);
 	}
 }
+
+/** Charts draw in quickly, and not at all with reduced motion (as on the Overview). */
+const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { animation: false } : { animationDuration: 250, animationDurationUpdate: 200 };
 </script>
 
 <template>
@@ -165,7 +168,7 @@ async function emailInvite() {
 			</div>
 		</PageHeader>
 
-		<div class="flex min-h-0 flex-1 flex-col md:flex-row">
+		<div data-slot="dashboard" class="flex min-h-0 flex-1 flex-col md:flex-row">
 			<div class="min-w-0 flex-1 space-y-6 px-3 pb-6 pt-4 sm:px-5 md:pb-16 md:pt-5">
 				<div class="flex items-center gap-3">
 					<Avatar :label="person.name" :size="isMobile ? 'xl' : '2xl'" />
@@ -196,12 +199,21 @@ async function emailInvite() {
 						<NumberCard title="Chats" :value="detail.chats" />
 					</div>
 
-					<div class="h-60 rounded-5 border border-outline-gray-1 p-3 md:h-64 md:p-4">
-						<BarChart title="Credits per day, last 30 days" :data="perDay" x="day" y="Credits" />
+					<div class="h-60 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+						<BarChart
+							title="Credits per day, last 30 days"
+							:data="perDay"
+							x="day"
+							y="Credits"
+							palette="categorical"
+							:echart-options="chartMotion"
+							:x-axis="{ type: 'category', echartOptions: { axisLabel: { rotate: 0, interval: (index: number) => (perDay.length - 1 - index) % 4 === 0, showMinLabel: false, showMaxLabel: true, fontSize: 12 } } }"
+							:y-axis="{ echartOptions: { axisLabel: { fontSize: 12 } } }"
+						/>
 					</div>
 
-					<div class="h-72 rounded-5 border border-outline-gray-1 p-3 md:h-64 md:p-4">
-						<DonutChart title="Models, last 30 days" :data="detail.models" category="model" value="credits" />
+					<div class="h-72 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+						<DonutChart :echart-options="chartMotion" title="Models, last 30 days" :data="detail.models" category="model" value="credits" />
 					</div>
 				</template>
 
@@ -288,7 +300,7 @@ async function emailInvite() {
 				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
 					<NumberCard v-for="title in ['Credits today', 'Last 7 days', 'Replies, 7 days', 'Chats']" :key="title" :title="title" :value="null" loading />
 				</div>
-				<div class="h-60 rounded-5 border border-outline-gray-1 p-3 md:h-64 md:p-4">
+				<div class="h-60 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
 					<BarChart title="Credits per day, last 30 days" :data="[]" x="day" y="Credits" loading />
 				</div>
 			</div>

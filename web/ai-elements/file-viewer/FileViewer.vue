@@ -86,11 +86,17 @@ function onBackdropClick(event: MouseEvent) {
 	color: rgb(255 255 255 / 0.8);
 	transition:
 		background-color 150ms ease,
-		transform 150ms ease-out;
+		transform 150ms var(--ease-out-strong, ease-out);
 }
 
 .viewer-button:active {
 	transform: scale(0.95);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.viewer-button:active {
+		transform: none;
+	}
 }
 
 @media (hover: hover) and (pointer: fine) {

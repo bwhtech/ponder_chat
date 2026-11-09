@@ -11,9 +11,9 @@ defineEmits<{ select: [suggestion: string] }>();
 	<Button
 		data-slot="suggestion"
 		variant="outline"
-		size="md"
+		size="sm"
 		:icon-left="icon"
-		class="shrink-0 rounded-full"
+		class="shrink-0 rounded-full px-2.5 font-normal text-ink-gray-7 max-sm:h-8 hover:text-ink-gray-9 transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.97] motion-reduce:transform-none"
 		@click="$emit('select', suggestion)"
 	>
 		<slot>{{ suggestion }}</slot>

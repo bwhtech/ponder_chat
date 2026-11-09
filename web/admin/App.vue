@@ -92,15 +92,13 @@ onBeforeUnmount(() => clearInterval(timer));
 
 			<DesktopShell v-else>
 				<template #sidebar>
-					<Sidebar width="14rem" class="border-r">
-						<div class="px-2 pb-1 pt-2">
-							<AccountMenu />
-						</div>
+					<Sidebar width="16rem" class="border-r">
+						<AccountMenu />
 						<ScrollArea class="min-h-0 flex-1" viewport-class="px-2 pt-1 pb-10">
 							<SidebarSection>
 								<div class="space-y-0.5">
-									<SidebarItem label="Overview" icon="lucide-chart-column" route="/" />
-									<SidebarItem label="Requests" icon="lucide-inbox" route="/requests">
+									<SidebarItem class="!h-8" label="Overview" icon="lucide-chart-column" route="/" />
+									<SidebarItem class="!h-8" label="Requests" icon="lucide-inbox" route="/requests">
 										<template #suffix>
 											<Badge
 												v-if="counts.pendingRequests"
@@ -112,17 +110,17 @@ onBeforeUnmount(() => clearInterval(timer));
 											/>
 										</template>
 									</SidebarItem>
-									<SidebarItem label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')">
+									<SidebarItem class="!h-8" label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')">
 										<template #suffix>
 											<span v-if="counts.invited" class="text-xs tabular-nums text-ink-gray-5">{{ counts.invited }} invited</span>
 										</template>
 									</SidebarItem>
-									<SidebarItem label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
+									<SidebarItem class="!h-8" label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
 								</div>
 							</SidebarSection>
 						</ScrollArea>
 						<div class="border-t border-outline-gray-1 px-2 py-2">
-							<SidebarItem label="Back to chat" icon="lucide-arrow-left" href="/" />
+							<SidebarItem class="!h-8" label="Back to chat" icon="lucide-arrow-left" href="/" />
 						</div>
 					</Sidebar>
 				</template>

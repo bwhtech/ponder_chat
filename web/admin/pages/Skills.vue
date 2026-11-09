@@ -129,11 +129,13 @@ const startedBy = (skill: SkillSummary) =>
 		<template #suffix><Button variant="ghost" icon="lucide-plus" aria-label="New skill" @click="newSkill" /></template>
 	</PageHeaderMobile>
 	<PageHeader v-else>
-		<h1 class="text-2xl text-ink-gray-9">Skills</h1>
-		<Button variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="ml-auto" @click="newSkill" />
+		<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
+			<h1 class="text-lg-semibold text-ink-gray-9">Skills</h1>
+			<Button variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="ml-auto" @click="newSkill" />
+		</div>
 	</PageHeader>
 
-	<div class="mx-auto max-w-5xl px-3 pb-16 pt-4 sm:px-5 md:pt-5">
+	<div class="mx-auto w-full max-w-5xl px-3 pb-16 pt-4 sm:px-5 md:pt-5">
 		<p class="max-w-[640px] pb-4 text-p-sm text-ink-gray-6">
 			A skill is a Markdown file of instructions. A skill that is on works for everyone. Ponder uses an automatic skill on its own when its
 			description fits, and anyone can start any skill by typing <span class="font-mono text-ink-gray-8">$name</span> in a message.

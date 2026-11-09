@@ -32,6 +32,7 @@ export class MarkdownRenderer {
 	private html(token: Token, links: TokensList["links"]) {
 		const cached = this.cache.get(token.raw);
 		if (cached !== undefined) return cached;
+		if (token.type === "table") alignNumbers(token as Tokens.Table);
 		const list = Object.assign([token], { links }) as unknown as Parameters<typeof marked.parser>[0];
 		const clean = DOMPurify.sanitize(marked.parser(list, { ...marked.defaults, gfm: true, breaks: true }), { ADD_ATTR: ["target"] });
 		// A wide table scrolls on its own instead of widening the reply. Focusable so keyboards can scroll it.
@@ -39,6 +40,25 @@ export class MarkdownRenderer {
 		if (this.cache.size > 500) this.cache.clear();
 		this.cache.set(token.raw, html);
 		return html;
+	}
+}
+
+/** An amount, a count or a percentage, such as 857.14, -3, 1,200, $5, ₹10,000 or 12%. */
+const NUMBER = /^[-+−]?[$€£₹]?\s?\d[\d,]*(?:\.\d+)?\s?%?$/;
+
+/**
+ * A column with no alignment in the markdown, whose cells are all numbers, is right-aligned,
+ * so the digits line up. Alignment the model wrote is kept.
+ */
+function alignNumbers(table: Tokens.Table) {
+	table.align = table.align.map((align, column) => {
+		if (align) return align;
+		const cells = table.rows.map((row) => row[column]?.text.trim() ?? "").filter(Boolean);
+		return cells.length && cells.every((text) => NUMBER.test(text)) ? "right" : align;
+	});
+	for (const [column, align] of table.align.entries()) {
+		if (table.header[column]) table.header[column].align = align;
+		for (const row of table.rows) if (row[column]) row[column].align = align;
 	}
 }
 

@@ -112,11 +112,13 @@ function invited() {
 		</template>
 	</PageHeaderMobile>
 	<PageHeader v-else>
-		<h1 class="text-2xl text-ink-gray-9">People</h1>
-		<Button variant="solid" theme="gray" icon-left="lucide-user-plus" label="Invite people" class="ml-auto" @click="inviting = true" />
+		<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
+			<h1 class="text-lg-semibold text-ink-gray-9">People</h1>
+			<Button variant="solid" theme="gray" icon-left="lucide-user-plus" label="Invite people" class="ml-auto" @click="inviting = true" />
+		</div>
 	</PageHeader>
 
-	<div class="px-3 pb-16 pt-3 sm:px-5 md:pt-5">
+	<div class="mx-auto w-full max-w-5xl px-3 pb-16 pt-3 sm:px-5 md:pt-6">
 		<div class="flex flex-col gap-2 pb-3 md:flex-row md:items-center">
 			<TextInput v-model="search" type="search" placeholder="Search" aria-label="Search people" class="w-full md:order-2 md:ml-auto md:w-60">
 				<template #prefix>
@@ -124,7 +126,7 @@ function invited() {
 				</template>
 			</TextInput>
 			<div class="-mx-3 overflow-x-auto px-3 md:order-1 md:mx-0 md:px-0">
-				<TabButtons v-model="filter" :options="filters" class="w-max" />
+				<TabButtons v-model="filter" :options="filters" class="w-max [&_[data-state=inactive]]:text-ink-gray-6" />
 			</div>
 		</div>
 
@@ -138,8 +140,8 @@ function invited() {
 							<span class="truncate text-base text-ink-gray-8">{{ item.name }}</span>
 							<Badge v-if="item.role === 'admin'" label="Admin" variant="outline" size="sm" />
 						</div>
-						<span class="truncate text-sm text-ink-gray-5">{{ item.email }}</span>
-						<span class="truncate text-sm text-ink-gray-5">
+						<span class="truncate text-sm text-ink-gray-6">{{ item.email }}</span>
+						<span class="truncate text-sm text-ink-gray-6">
 							{{ item.status === "invited" ? "Not signed in yet" : `Active ${lastActive(item.lastActive)}` }}
 						</span>
 					</ListCell>
@@ -186,7 +188,7 @@ function invited() {
 								<span class="truncate text-base text-ink-gray-8">{{ item.name }}</span>
 								<Badge v-if="item.role === 'admin'" label="Admin" variant="outline" size="sm" />
 							</div>
-							<div class="truncate text-sm text-ink-gray-5">
+							<div class="truncate text-sm text-ink-gray-6">
 								{{ item.email }}<template v-if="item.note"> · {{ item.note }}</template>
 							</div>
 						</div>
@@ -199,7 +201,7 @@ function invited() {
 					<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">
 						{{ item.status === "invited" ? "—" : credits(item.week) }}
 					</ListCell>
-					<ListCell class="justify-end text-sm text-ink-gray-5">
+					<ListCell class="justify-end text-sm text-ink-gray-6">
 						{{ item.status === "invited" ? "Not signed in" : lastActive(item.lastActive) }}
 					</ListCell>
 					<ListCell class="justify-end">
