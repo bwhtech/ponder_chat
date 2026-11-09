@@ -12,7 +12,7 @@ const form = useSettingsForm();
 	<PageHeaderMobile title="Settings">
 		<template #prefix><AccountMenu compact /></template>
 		<template #suffix>
-			<Button variant="ghost" label="Save" :loading="form.saving" :disabled="!form.canSave" @click="form.save" />
+			<Button v-if="!form.loadError" variant="solid" theme="gray" label="Save" :loading="form.saving" :disabled="!form.canSave" @click="form.save" />
 		</template>
 	</PageHeaderMobile>
 	<div class="px-3 pb-16">

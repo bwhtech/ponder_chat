@@ -121,7 +121,7 @@ function answerAll(approved: boolean) {
 
 /** A plan item's steps go under its line (PlanItemSteps); other steps sit in a plain column. */
 function stepsAttrs(group: Extract<Group, { kind: "steps" | "plan-item" }>) {
-	if (group.kind === "steps") return { "data-slot": "message-steps", class: "flex min-w-0 flex-col gap-1.5" };
+	if (group.kind === "steps") return { "data-slot": "message-steps", class: "flex min-w-0 flex-col gap-1 [&:not(:first-child)]:mt-1.5 [&:not(:last-child)]:mb-2" };
 	const item = buildPlan?.value?.items.find((candidate) => candidate.id === group.id);
 	return {
 		title: item?.title ?? group.id,
@@ -213,7 +213,7 @@ function isStreamingText(part: Part) {
 					target="_blank"
 					rel="noreferrer noopener"
 					@click="viewOnClick($event, { name: file.filename ?? 'Image', url: file.url, mediaType: file.mediaType })"
-					class="block size-24 overflow-hidden rounded-6 border border-outline-gray-2 transition-transform duration-150 ease-out active:scale-[0.97]"
+					class="block size-24 overflow-hidden rounded-6 border border-outline-gray-2 transition-transform duration-150 ease-out-strong active:scale-[0.97] motion-reduce:active:scale-100"
 				>
 					<img :src="file.url" :alt="file.filename ?? 'Image'" class="size-full object-cover" loading="lazy" />
 				</a>

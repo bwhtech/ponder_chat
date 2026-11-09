@@ -164,23 +164,25 @@
   }
 }
 
+/* `--scroll-fade-range` is how far the content scrolls while a fade grows to full size. Match it to
+   `--scroll-fade-size` for a fade that shows from the first scroll. */
 @supports (animation-timeline: scroll()) {
   .scroll-fade-y {
     animation: ai-scroll-fade-t 1ms ease-in-out, ai-scroll-fade-b 1ms ease-in-out;
     animation-timeline: scroll(self y), scroll(self y);
-    animation-range: 0 96px, calc(100% - 96px) 100%;
+    animation-range: 0 var(--scroll-fade-range, 96px), calc(100% - var(--scroll-fade-range, 96px)) 100%;
     animation-fill-mode: both;
   }
   .scroll-fade-b {
     animation: ai-scroll-fade-b 1ms ease-in-out;
     animation-timeline: scroll(self y);
-    animation-range: calc(100% - 96px) 100%;
+    animation-range: calc(100% - var(--scroll-fade-range, 96px)) 100%;
     animation-fill-mode: both;
   }
   .scroll-fade-x {
     animation: ai-scroll-fade-s 1ms ease-in-out, ai-scroll-fade-e 1ms ease-in-out;
     animation-timeline: scroll(self inline), scroll(self inline);
-    animation-range: 0 96px, calc(100% - 96px) 100%;
+    animation-range: 0 var(--scroll-fade-range, 96px), calc(100% - var(--scroll-fade-range, 96px)) 100%;
     animation-fill-mode: both;
   }
 }
@@ -307,7 +309,12 @@
   white-space: nowrap;
   vertical-align: 1px;
   text-decoration: none;
-  transition: background-color 150ms ease-out;
+  transition: background-color 150ms var(--ease-out-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='response'] a[data-citation] {
+    transition: none;
+  }
 }
 [data-slot='response'] a[data-citation]:hover,
 [data-slot='response'] a[data-citation]:focus-visible {
@@ -405,4 +412,12 @@
   fill: var(--pele-surface);
   stroke: var(--pele-border);
   rx: 6px;
+}
+
+/* A column the markdown or the number check (markdown.ts) aligned. Prose styles would override the HTML attribute. */
+[data-slot='response-table'] :is(th, td)[align='right'] {
+  text-align: right;
+}
+[data-slot='response-table'] :is(th, td)[align='center'] {
+  text-align: center;
 }

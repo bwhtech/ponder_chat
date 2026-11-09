@@ -49,7 +49,7 @@ async function save(value: Rule) {
 				<span class="truncate text-base" :class="rule === 'off' ? 'text-ink-gray-5' : 'text-ink-gray-8'" :title="`${toolTitle(tool)} (${tool.name})`">{{ toolTitle(tool) }}</span>
 				<Badge v-if="tool.readOnly" label="Read-only" size="sm" variant="subtle" theme="gray" class="shrink-0" />
 			</div>
-			<p v-if="tool.description" class="line-clamp-2 text-p-sm text-ink-gray-5" :title="tool.description">{{ tool.description }}</p>
+			<p v-if="tool.description" class="line-clamp-2 text-p-sm text-ink-gray-6" :title="tool.description">{{ tool.description }}</p>
 		</div>
 		<Select v-model="rule" :options="RULES" class="w-full shrink-0 sm:w-40" :aria-label="`When Ponder uses ${toolTitle(tool)}`" />
 	</div>

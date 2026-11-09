@@ -48,7 +48,7 @@ watch(
 				</div>
 			</div>
 		</div>
-		<p v-else class="px-3 py-4 text-p-sm text-ink-gray-5">No skill matches “{{ query }}”.</p>
+		<p v-else class="px-3 py-4 text-p-sm text-ink-gray-6">No skill matches “{{ query }}”.</p>
 		<div class="hidden items-center gap-3 border-t border-outline-gray-1 px-3 py-1.5 text-xs text-ink-gray-5 sm:flex">
 			<span>↑↓ to move</span>
 			<span>↵ or Tab to use</span>

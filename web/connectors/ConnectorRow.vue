@@ -12,10 +12,10 @@ const open = () => (settings.connector = c.value.id);
 
 const meta = computed(() => {
 	if (c.value.status === "needs_sign_in") return { text: `Sign-in ended · ${c.value.host}`, tone: "text-ink-amber-6" };
-	if (c.value.status === "error") return { text: `${c.value.lastError ?? "Not working"} · ${c.value.host}`, tone: "text-ink-red-5" };
+	if (c.value.status === "error") return { text: `${c.value.lastError ?? "Not working"} · ${c.value.host}`, tone: "text-ink-red-6" };
 	if (!c.value.enabled) return { text: `Off · ${c.value.host}`, tone: "text-ink-gray-5" };
 	const on = c.value.tools.filter((tool) => tool.rule !== "off").length;
-	return { text: `${c.value.host} · ${on} of ${c.value.tools.length} tools on`, tone: "text-ink-gray-5" };
+	return { text: `${c.value.host} · ${on} of ${c.value.tools.length} tools on`, tone: "text-ink-gray-6" };
 });
 
 const enabled = computed({

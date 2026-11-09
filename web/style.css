@@ -2,10 +2,23 @@
 @import "./ai-elements/styles.css";
 /* The chart colour ramp, for Mermaid diagrams. frappe-ui does not export this file, so it is imported by path. */
 @import "../node_modules/frappe-ui/src/charts/style.css";
+@import "./base.css";
 
-:root {
-  /* A strong ease-out: fast at the start, where the eye is. Tailwind: `ease-out-strong`. */
-  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+/* The header's hairline shows once the transcript scrolls under it, as on Claude.ai: the greeting and a
+   short chat have none. Browsers without scroll-driven animations keep the line. */
+@supports (animation-timeline: scroll()) {
+  [data-slot='chat-column'] {
+    timeline-scope: --transcript;
+  }
+  [data-slot='chat-column'] :is([data-slot='message-scroller-viewport'], [data-slot='memory-view']) {
+    scroll-timeline: --transcript block;
+  }
+  [data-slot='chat-column'] > [data-slot='chat-header'] {
+    border-bottom-color: transparent;
+    animation: header-edge linear both;
+    animation-timeline: --transcript;
+    animation-range: 0px 24px;
+  }
 }
 
 /* A memory note that arrives after a reply rises in; notes already there on load do not. */
@@ -26,6 +39,40 @@
   }
 }
 
+/* A reply that arrives in this visit rises in; the ones already there on load do not, and your own
+   message shows at once.
+   A reply's copy and model row fades in when the reply ends. */
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+[data-slot='message-scroller-item'][data-new='assistant'] {
+  animation: message-in 220ms var(--ease-out-strong);
+}
+[data-slot='message-scroller-item'][data-new] [data-reply-actions] {
+  animation: fade-in 200ms var(--ease-out-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='message-scroller-item'][data-new='assistant'] {
+    animation-name: fade-in;
+  }
+  /* The phone's sheet slides in and out; with reduced motion it only appears. */
+  .bottom-sheet-overlay[data-state],
+  .bottom-sheet-content[data-state] {
+    animation-duration: 1ms !important;
+  }
+  [data-slot='message-scroller-item'][data-new] [data-reply-actions] {
+    animation: none;
+  }
+}
+
 /* The app shell does not scroll, so stop iOS bouncing it and Android pulling to refresh it.
    Scroll areas inside (the transcript, the sheet) keep their own bounce. */
 html,
@@ -37,14 +84,6 @@ body {
    of the installed app (and fades it into the header), and Safari tints its bars from it. */
 html {
   background-color: var(--surface-base);
-}
-
-/* iOS zooms into a field under 16px on focus and does not zoom back. On touch screens every field
-   is 16px; :root lifts this over Tailwind's text-* utilities, including the !important ones. */
-@media (pointer: coarse) {
-  :root :is(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, select) {
-    font-size: 16px !important;
-  }
 }
 
 /* Controls are not text: a long press must not select a label or open the link callout. */
@@ -59,24 +98,30 @@ html {
   background-color: var(--surface-gray-3);
 }
 
-/* frappe-ui's SettingsDialog fills a phone's screen (w-screen, 100dvh), but the Dialog
-   around it keeps its padding and margin, so its right side runs off the screen. On a
-   phone, the Settings dialog drops them and fills the screen as meant. */
+/* In dark mode the sidebar's chat titles and quiet text are one step brighter, so they do not read as disabled. */
+[data-theme='dark'] [data-slot='thread-list'] {
+  --ink-gray-5: var(--ink-gray-6);
+}
+[data-theme='dark'] [data-slot='thread-list'] [data-slot='sidebar-item'][data-state='inactive'] {
+  color: var(--ink-gray-7);
+}
+
+/* Settings, Connectors with none yet: the empty state fills the panel under the heading, so it
+   sits in the middle of the panel and not near the top. The panel body's own bottom padding is
+   taken back, so the space above and below is the same. */
+[data-slot='connectors-empty'] {
+  min-height: calc(min(640px, 100dvh - 8rem) - 7.5rem);
+  margin-bottom: -4rem;
+}
 @media (max-width: 639px) {
-  .dialog-scroll-container > div:has(> [data-slot='content'] > [data-orientation='vertical']) {
-    padding: 0;
+  [data-slot='connectors-empty'] {
+    min-height: calc(100dvh - 12rem);
   }
-  [data-slot='content']:has(> [data-orientation='vertical']) {
-    margin: 0;
-    border-radius: 0;
-    max-width: none;
-  }
-  /* Clear of the notch and the home indicator, in the installed app. */
-  [data-slot='content'] > [data-orientation='vertical'] {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  [data-slot='settings-close'] {
-    top: calc(env(safe-area-inset-top) + 0.5rem);
-  }
+}
+
+/* The phone's sheet leaves on ease-in, which starts slowly. It leaves quickly on ease-out instead, as dialogs do (base.css). */
+.bottom-sheet-overlay[data-state='closed'],
+.bottom-sheet-content[data-state='closed'] {
+  animation-duration: 180ms;
+  animation-timing-function: var(--ease-out-strong);
 }

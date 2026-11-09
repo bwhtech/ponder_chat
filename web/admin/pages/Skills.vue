@@ -8,6 +8,7 @@ import { api, type SkillDetail, type SkillSummary } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import ListSkeleton from "../components/ListSkeleton.vue";
 import NewSkillDialog from "../components/NewSkillDialog.vue";
+import EmptyState from "../../EmptyState.vue";
 import { lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 
@@ -129,11 +130,13 @@ const startedBy = (skill: SkillSummary) =>
 		<template #suffix><Button variant="ghost" icon="lucide-plus" aria-label="New skill" @click="newSkill" /></template>
 	</PageHeaderMobile>
 	<PageHeader v-else>
-		<h1 class="text-2xl text-ink-gray-9">Skills</h1>
-		<Button variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="ml-auto" @click="newSkill" />
+		<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
+			<h1 class="text-lg-semibold text-ink-gray-9">Skills</h1>
+			<Button variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="ml-auto" @click="newSkill" />
+		</div>
 	</PageHeader>
 
-	<div class="mx-auto max-w-5xl px-3 pb-16 pt-4 sm:px-5 md:pt-5">
+	<div class="mx-auto w-full max-w-5xl px-3 pb-16 pt-4 sm:px-5 md:pt-6">
 		<p class="max-w-[640px] pb-4 text-p-sm text-ink-gray-6">
 			A skill is a Markdown file of instructions. A skill that is on works for everyone. Ponder uses an automatic skill on its own when its
 			description fits, and anyone can start any skill by typing <span class="font-mono text-ink-gray-8">$name</span> in a message.
@@ -154,7 +157,7 @@ const startedBy = (skill: SkillSummary) =>
 				<ListRow :route="`/skills/${item.id}`" class="py-3">
 					<ListCell class="flex-col items-stretch gap-1">
 						<span class="truncate font-mono text-sm" :class="item.enabled ? 'text-ink-gray-9' : 'text-ink-gray-5'">${{ item.name }}</span>
-						<span class="line-clamp-2 text-p-sm text-ink-gray-5">{{ item.description }}</span>
+						<span class="line-clamp-2 text-p-sm text-ink-gray-6">{{ item.description }}</span>
 						<span><Badge v-bind="item.automatic ? { theme: 'violet', label: 'Automatic' } : { theme: 'gray', label: 'When asked' }" variant="subtle" size="sm" /></span>
 					</ListCell>
 					<ListCell class="self-start" @click.stop.prevent>
@@ -165,70 +168,62 @@ const startedBy = (skill: SkillSummary) =>
 		</List>
 
 		<!-- Desktop: a table. A row is a link stretched under the row, so the switch and the menu can sit on top. -->
-		<List v-else-if="loading || rows.length" :columns="['minmax(14rem,1fr)', '8rem', '4.5rem', '10rem', '2.5rem']" :row-height="60" class="-mx-3 list-row-px-3">
-			<ListHeader>
-				<ListHeaderCell>Skill</ListHeaderCell>
-				<ListHeaderCell>Started</ListHeaderCell>
-				<ListHeaderCell>On</ListHeaderCell>
-				<ListHeaderCell class="justify-end">Last edit</ListHeaderCell>
-				<ListHeaderCell />
-			</ListHeader>
-			<ListRows :items="loading ? [] : rows" v-slot="{ item }">
-				<ListRow class="rounded-4 hover:bg-surface-gray-2">
-					<ListCell>
-						<RouterLink :to="`/skills/${item.id}`" class="absolute inset-0 rounded-4" :aria-label="`Edit ${skillTitle(item.name)}`" />
-						<div class="min-w-0">
-							<p class="truncate font-mono text-sm" :class="item.enabled ? 'text-ink-gray-9' : 'text-ink-gray-5'">${{ item.name }}</p>
-							<p class="mt-1 truncate text-sm text-ink-gray-5">{{ item.description }}</p>
-						</div>
-					</ListCell>
-					<ListCell>
-						<Tooltip :text="startedBy(item)">
-							<Badge v-bind="item.automatic ? { theme: 'violet', label: 'Automatic' } : { theme: 'gray', label: 'When asked' }" variant="subtle" />
-						</Tooltip>
-					</ListCell>
-					<ListCell>
-						<Switch
-							class="relative"
-							:model-value="item.enabled"
-							:aria-label="`${skillTitle(item.name)} on for everyone`"
-							@update:model-value="(on: boolean) => setEnabled(item, on)"
-						/>
-					</ListCell>
-					<ListCell class="justify-end">
-						<div class="min-w-0 text-right">
-							<p class="text-sm text-ink-gray-7">{{ lastActive(item.updatedAt) }}</p>
-							<p v-if="item.updatedBy" class="mt-0.5 truncate text-xs text-ink-gray-5">{{ item.updatedBy }}</p>
-						</div>
-					</ListCell>
-					<ListCell class="justify-end">
-						<Dropdown :options="actionsFor(item)">
-							<Button variant="ghost" icon="lucide-ellipsis" class="relative" :aria-label="`Actions for ${skillTitle(item.name)}`" />
-						</Dropdown>
-					</ListCell>
-				</ListRow>
-			</ListRows>
-		</List>
-
-		<div v-if="status.kind === 'error'" class="flex flex-col items-center gap-3 py-16 text-center" role="alert">
-			<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
-				<span class="lucide-circle-alert size-6" aria-hidden="true" />
-			</div>
-			<p class="text-base text-ink-gray-7">The skills could not load</p>
-			<p class="text-sm text-ink-gray-5">{{ status.message }}</p>
-			<Button label="Try again" class="mt-2" @click="retry" />
+		<div v-else-if="status.kind !== 'error' && (loading || rows.length)" class="scroll-fade-x scrollbar-thin -mx-3 overflow-x-auto [--scroll-fade-range:24px] [--scroll-fade-size:24px]">
+			<List :columns="['minmax(14rem,1fr)', '8rem', '4.5rem', '10rem', '2.5rem']" :row-height="60" class="min-w-[44rem] list-row-px-3">
+				<ListHeader>
+					<ListHeaderCell>Skill</ListHeaderCell>
+					<ListHeaderCell>Started</ListHeaderCell>
+					<ListHeaderCell>On</ListHeaderCell>
+					<ListHeaderCell class="justify-end">Last edit</ListHeaderCell>
+					<ListHeaderCell />
+				</ListHeader>
+				<ListRows :items="loading ? [] : rows" v-slot="{ item }">
+					<ListRow class="rounded-4 hover:bg-surface-gray-2">
+						<ListCell>
+							<RouterLink :to="`/skills/${item.id}`" class="absolute inset-0 rounded-4" :aria-label="`Edit ${skillTitle(item.name)}`" />
+							<div class="min-w-0">
+								<p class="truncate font-mono text-sm" :class="item.enabled ? 'text-ink-gray-9' : 'text-ink-gray-5'">${{ item.name }}</p>
+								<p class="mt-1 truncate text-sm text-ink-gray-6">{{ item.description }}</p>
+							</div>
+						</ListCell>
+						<ListCell>
+							<Tooltip :text="startedBy(item)">
+								<Badge v-bind="item.automatic ? { theme: 'violet', label: 'Automatic' } : { theme: 'gray', label: 'When asked' }" variant="subtle" />
+							</Tooltip>
+						</ListCell>
+						<ListCell>
+							<Switch
+								class="relative"
+								:model-value="item.enabled"
+								:aria-label="`${skillTitle(item.name)} on for everyone`"
+								@update:model-value="(on: boolean) => setEnabled(item, on)"
+							/>
+						</ListCell>
+						<ListCell class="justify-end">
+							<div class="min-w-0 text-right">
+								<p class="text-sm text-ink-gray-7">{{ lastActive(item.updatedAt) }}</p>
+								<p v-if="item.updatedBy" class="mt-0.5 truncate text-xs text-ink-gray-5">{{ item.updatedBy }}</p>
+							</div>
+						</ListCell>
+						<ListCell class="justify-end">
+							<Dropdown :options="actionsFor(item)">
+								<Button variant="ghost" icon="lucide-ellipsis" class="relative" :aria-label="`Actions for ${skillTitle(item.name)}`" />
+							</Dropdown>
+						</ListCell>
+					</ListRow>
+				</ListRows>
+			</List>
 		</div>
 
-		<ListSkeleton v-else-if="loading" :rows="4" avatar="sm" two-lines label="Loading skills" />
+		<EmptyState v-if="status.kind === 'error'" icon="lucide-circle-alert" title="The skills could not load" :body="status.message" alert>
+			<Button label="Try again" @click="retry" />
+		</EmptyState>
 
-		<div v-else-if="!rows.length" class="flex flex-col items-center gap-3 py-16 text-center">
-			<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
-				<span class="lucide-sparkles size-6" aria-hidden="true" />
-			</div>
-			<p class="text-base text-ink-gray-7">{{ emptyText.title }}</p>
-			<p class="max-w-sm text-sm text-ink-gray-5">{{ emptyText.body }}</p>
-			<Button v-if="!skills.length" variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" class="mt-2" @click="newSkill" />
-		</div>
+		<ListSkeleton v-else-if="loading" :rows="4" :avatar="false" two-lines label="Loading skills" />
+
+		<EmptyState v-else-if="!rows.length" icon="lucide-sparkles" :title="emptyText.title" :body="emptyText.body">
+			<Button v-if="!skills.length" variant="solid" theme="gray" icon-left="lucide-plus" label="New skill" @click="newSkill" />
+		</EmptyState>
 	</div>
 
 	<NewSkillDialog v-model:open="creating" :from="copyOf" />

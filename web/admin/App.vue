@@ -20,6 +20,7 @@ import NoAccess from "./components/NoAccess.vue";
 import SettingsModal from "./components/SettingsModal.vue";
 import { isMobile } from "./lib/viewport";
 import { counts, refreshCounts, settingsOpen, viewer } from "./store";
+import EmptyState from "../EmptyState.vue";
 
 /**
  * The admin shell. Signed out goes to the chat's sign-in page. Signed in without the
@@ -55,11 +56,9 @@ onBeforeUnmount(() => clearInterval(timer));
 <template>
 	<FrappeUIProvider>
 		<div class="h-dvh w-full bg-surface-base text-ink-gray-8">
-			<div v-if="!viewer && viewerError" class="flex h-full flex-col items-center justify-center gap-3 px-4 text-center" role="alert">
-				<span class="lucide-wifi-off size-6 text-ink-gray-5" aria-hidden="true" />
-				<p class="max-w-sm text-p-base text-ink-gray-7">Could not reach the server. Check your connection, then try again.</p>
-				<Button label="Retry" @click="retryViewer" />
-			</div>
+			<EmptyState v-if="!viewer && viewerError" icon="lucide-wifi-off" title="Can't reach Ponder" body="Check your connection, then try again." alert class="h-full">
+				<Button label="Try again" @click="retryViewer" />
+			</EmptyState>
 			<div v-else-if="!viewer" class="h-full" aria-busy="true" />
 			<NoAccess v-else-if="!isAdmin" :email="viewer.user.email" />
 
@@ -67,8 +66,8 @@ onBeforeUnmount(() => clearInterval(timer));
 				<RouterView />
 				<template #nav>
 					<MobileNav>
-						<MobileNavItem label="Overview" icon="lucide-chart-column" route="/" />
-						<MobileNavItem label="Requests" icon="lucide-inbox" route="/requests">
+						<MobileNavItem label="Overview" icon="lucide-chart-column" route="/" :active="route.path === '/'" />
+						<MobileNavItem label="Requests" icon="lucide-inbox" route="/requests" :active="route.path === '/requests'">
 							<template #default="{ active }">
 								<span class="relative">
 									<span class="lucide-inbox block size-6" :class="active ? 'text-ink-gray-8' : 'text-ink-gray-5'" aria-hidden="true" />
@@ -85,22 +84,20 @@ onBeforeUnmount(() => clearInterval(timer));
 						</MobileNavItem>
 						<MobileNavItem label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')" />
 						<MobileNavItem label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
-						<MobileNavItem label="Settings" icon="lucide-settings" route="/settings" />
+						<MobileNavItem label="Settings" icon="lucide-settings" route="/settings" :active="route.path === '/settings'" />
 					</MobileNav>
 				</template>
 			</MobileShell>
 
 			<DesktopShell v-else>
 				<template #sidebar>
-					<Sidebar width="14rem" class="border-r">
-						<div class="px-2 pb-1 pt-2">
-							<AccountMenu />
-						</div>
+					<Sidebar width="16rem" class="border-r">
+						<AccountMenu />
 						<ScrollArea class="min-h-0 flex-1" viewport-class="px-2 pt-1 pb-10">
 							<SidebarSection>
 								<div class="space-y-0.5">
-									<SidebarItem label="Overview" icon="lucide-chart-column" route="/" />
-									<SidebarItem label="Requests" icon="lucide-inbox" route="/requests">
+									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Overview" icon="lucide-chart-column" route="/" />
+									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Requests" icon="lucide-inbox" route="/requests">
 										<template #suffix>
 											<Badge
 												v-if="counts.pendingRequests"
@@ -112,17 +109,17 @@ onBeforeUnmount(() => clearInterval(timer));
 											/>
 										</template>
 									</SidebarItem>
-									<SidebarItem label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')">
+									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')">
 										<template #suffix>
 											<span v-if="counts.invited" class="text-xs tabular-nums text-ink-gray-5">{{ counts.invited }} invited</span>
 										</template>
 									</SidebarItem>
-									<SidebarItem label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
+									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
 								</div>
 							</SidebarSection>
 						</ScrollArea>
-						<div class="border-t border-outline-gray-1 px-2 py-2">
-							<SidebarItem label="Back to chat" icon="lucide-arrow-left" href="/" />
+						<div class="px-2 py-2">
+							<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Back to chat" icon="lucide-arrow-left" href="/" />
 						</div>
 					</Sidebar>
 				</template>

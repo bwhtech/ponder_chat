@@ -82,12 +82,3 @@ export const KIND_LABELS: Record<Memory["kind"], string> = {
 	project: "Project",
 	preference: "Preference",
 };
-
-/** "just now", "5 min ago", "3 h ago", or a date. */
-export function timeAgo(iso: string) {
-	const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
-	if (minutes < 1) return "just now";
-	if (minutes < 60) return `${minutes} min ago`;
-	if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h ago`;
-	return new Date(iso).toLocaleDateString(undefined, { day: "numeric", month: "short" });
-}

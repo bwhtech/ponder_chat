@@ -6,6 +6,7 @@ import { loadModels } from "./models";
 import SignIn from "./SignIn.vue";
 import { useThreads } from "./threads";
 import Workspace from "./Workspace.vue";
+import EmptyState from "./EmptyState.vue";
 
 /** Sign-in first, then the workspace. */
 const { init } = useThreads();
@@ -30,15 +31,9 @@ watch(
 
 <template>
 	<FrappeUIProvider>
-		<main
-			v-if="me === undefined && meError"
-			class="flex h-dvh flex-col items-center justify-center gap-3 bg-surface-base px-4 text-center"
-			role="alert"
-		>
-			<span class="lucide-wifi-off size-6 text-ink-gray-5" aria-hidden="true" />
-			<p class="max-w-sm text-p-base text-ink-gray-7">{{ meError }}</p>
-			<Button label="Retry" @click="retry" />
-		</main>
+		<EmptyState v-if="me === undefined && meError" icon="lucide-wifi-off" title="Can't reach Ponder" :body="meError" alert class="h-dvh bg-surface-base">
+			<Button label="Try again" @click="retry" />
+		</EmptyState>
 		<div v-else-if="me === undefined" class="h-dvh bg-surface-base" aria-busy="true" />
 		<SignIn v-else-if="me === null" />
 		<Workspace v-else />

@@ -47,7 +47,11 @@ function forgetLinkError() {
 }
 
 async function send() {
-	if (!email.value.trim() || sending.value) return;
+	if (sending.value) return;
+	if (!email.value.trim()) {
+		error.value = "Enter your email address.";
+		return;
+	}
 	sending.value = true;
 	error.value = "";
 	try {
@@ -89,10 +93,10 @@ function useAnotherEmail() {
 
 <template>
 	<main class="flex min-h-dvh items-center justify-center bg-surface-base px-4 text-ink-gray-8" data-slot="sign-in">
-		<div class="flex w-full max-w-sm flex-col gap-6">
+		<div class="flex w-full max-w-sm flex-col gap-8">
 			<div class="flex flex-col items-center gap-3 text-center">
-				<img src="/logo.png" alt="" class="size-12" />
-				<h1 class="text-2xl-semibold text-ink-gray-9">Sign in to Ponder Chat</h1>
+				<img src="/logo.png" alt="" class="mb-1 size-11" />
+				<h1 class="text-4xl-semibold text-ink-gray-9">Sign in to Ponder Chat</h1>
 				<p class="text-p-base text-ink-gray-6">We'll email you a code and a link. No password needed.</p>
 			</div>
 
@@ -106,23 +110,23 @@ function useAnotherEmail() {
 						ref="codeField"
 						v-model="code"
 						label="Code"
-						size="lg"
+						size="md"
 						placeholder="123456"
 						inputmode="numeric"
 						autocomplete="one-time-code"
 						:error="codeError || undefined"
-						class="[&_input]:text-center [&_input]:tabular-nums [&_input]:tracking-[0.3em]"
+						class="[&_input]:text-center [&_input]:tabular-nums [&_input]:tracking-[0.3em] [@media(pointer:coarse)]:[&_input]:h-11"
 						required
 					/>
-					<Button type="submit" variant="solid" size="md" :loading="checking" :disabled="code.length !== 6">Sign in</Button>
+					<Button type="submit" variant="solid" size="md" class="[@media(pointer:coarse)]:h-11" :loading="checking" :disabled="code.length !== 6">Sign in</Button>
 				</form>
 				<p class="text-p-sm text-ink-gray-5">Or open the link in the email. The code and the link expire in 15 minutes.</p>
 				<Button variant="ghost" class="mx-auto" @click="useAnotherEmail">Use another email</Button>
 			</div>
 
 			<form v-else class="flex flex-col gap-3" @submit.prevent="send">
-				<FormControl v-model="email" type="email" label="Email" placeholder="you@example.org" autocomplete="email" autofocus required />
-				<Button type="submit" variant="solid" size="md" :loading="sending" :disabled="!email.trim()">Email me a link</Button>
+				<FormControl v-model="email" type="email" label="Email" size="md" class="[&_label]:text-p-sm [&_label]:text-ink-gray-7 [@media(pointer:coarse)]:[&_input]:h-11" placeholder="you@example.org" autocomplete="email" autofocus />
+				<Button type="submit" variant="solid" size="md" class="[@media(pointer:coarse)]:h-11" :loading="sending">Email me a link</Button>
 			</form>
 
 			<Alert v-if="error" theme="red" title="Could not sign you in" :description="error" />

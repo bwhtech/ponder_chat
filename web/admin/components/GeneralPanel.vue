@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Button, SettingsBody, SettingsHeader } from "frappe-ui";
+import { Button } from "frappe-ui";
+import PanelBody from "../../settings/PanelBody.vue";
+import PanelHeader from "../../settings/PanelHeader.vue";
 import { useSettingsForm } from "../lib/settings-form";
 import GeneralSettings from "./GeneralSettings.vue";
 
@@ -8,12 +10,12 @@ const form = useSettingsForm();
 </script>
 
 <template>
-	<SettingsHeader title="General">
+	<PanelHeader title="General">
 		<template #actions>
-			<Button variant="solid" theme="gray" label="Save" :loading="form.saving" :disabled="!form.canSave" @click="form.save" />
+			<Button v-if="!form.loadError" variant="solid" theme="gray" label="Save" :loading="form.saving" :disabled="!form.canSave" @click="form.save" />
 		</template>
-	</SettingsHeader>
-	<SettingsBody>
+	</PanelHeader>
+	<PanelBody>
 		<GeneralSettings :form="form" />
-	</SettingsBody>
+	</PanelBody>
 </template>

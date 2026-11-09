@@ -22,7 +22,7 @@ const title = computed(() => skillTitle(props.name));
 			<button
 				v-if="removable"
 				type="button"
-				class="ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-surface-violet-3"
+				class="touch-target ml-0.5 flex size-4 shrink-0 items-center justify-center rounded-full hover:bg-surface-violet-3"
 				:aria-label="`Remove ${title}`"
 				@click="$emit('remove')"
 			>

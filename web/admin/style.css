@@ -1,8 +1,52 @@
 @import "frappe-ui/style.css";
+@import "../ai-elements/styles.css";
+@import "../base.css";
 
-/* iOS zooms into a field under 16px on focus and does not zoom back (as in the chat's style.css). */
-@media (pointer: coarse) {
-  :root :is(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, select) {
-    font-size: 16px !important;
+/* Page headers show their hairline once the page scrolls under them, as the chat's header does. */
+@supports (animation-timeline: scroll()) {
+  [data-slot='desktop-shell-content'] {
+    timeline-scope: --admin-page;
   }
+  [data-slot='desktop-shell-content'] > [data-slot='scroll-area'] [data-slot='scroll-area-viewport'] {
+    scroll-timeline: --admin-page block;
+  }
+  [data-slot='mobile-shell'] {
+    timeline-scope: --admin-page;
+  }
+  [data-slot='mobile-shell-scroll'] {
+    scroll-timeline: --admin-page block;
+  }
+  :is([data-slot='desktop-shell-content'], [data-slot='mobile-shell']) > div:first-child > header {
+    border-bottom-color: transparent;
+    animation: header-edge linear both;
+    animation-timeline: --admin-page;
+    animation-range: 0px 24px;
+  }
+}
+
+/* The dashboard's labels (chart axes, legends, card titles) read at gray-6, not the faint gray-5,
+   in both themes. frappe-ui's charts read these variables from the plot's own element. */
+[data-slot='dashboard'] {
+  --ink-gray-4: var(--ink-gray-6);
+  --ink-gray-5: var(--ink-gray-6);
+}
+
+/* Dark cards sit on a dark page, so their labels need one more step of contrast. */
+[data-theme='dark'] [data-slot='dashboard'] {
+  --ink-gray-4: var(--ink-gray-7);
+  --ink-gray-5: var(--ink-gray-7);
+  /* Dark outline-gray-1 is the card's own colour, so card edges vanish; one step firmer, as frappe-ui's chart gridlines do. */
+  --outline-gray-1: var(--outline-gray-2);
+}
+
+/* Table column labels at gray-6, like the dashboard's labels. */
+[data-slot='list-header'],
+[data-slot='list-header'] button {
+  color: var(--ink-gray-6);
+  font-weight: 500;
+}
+
+/* In dark mode, sidebar labels that are not selected are one step brighter, as in the chat. */
+[data-theme='dark'] [data-slot='sidebar-item'][data-state='inactive'] {
+  color: var(--ink-gray-7);
 }

@@ -54,7 +54,7 @@ defineExpose({ focus: () => textarea()?.focus() });
 			:disabled="disabled"
 			aria-label="Message"
 			enterkeyhint="send"
-			class="!min-h-12 w-full resize-none !border-0 !bg-transparent !px-3.5 !pt-3 !text-p-base !shadow-none !ring-0 focus-visible:!outline-none"
+			class="!min-h-12 w-full resize-none !border-0 !bg-transparent !px-3.5 !pt-3 !text-p-md !tracking-normal !shadow-none !ring-0 focus-visible:!outline-none"
 			@keydown="onKeydown"
 		/>
 	</div>

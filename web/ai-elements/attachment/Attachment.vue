@@ -55,7 +55,7 @@ function formatSize(bytes?: number) {
 		@click="isLink && url && viewOnClick($event, { name, url, mediaType: mediaType ?? '' })"
 		:aria-busy="state === 'uploading' || undefined"
 		:class="[
-			'group/attachment relative flex h-8 w-fit max-w-full items-center gap-2 rounded-4 border border-outline-gray-2 bg-surface-base pl-2.5 data-[state=error]:border-outline-red-3 [&:is(a)]:transition-[background-color,transform] [&:is(a)]:duration-150 [&:is(a)]:ease-out [&:is(a):hover]:bg-surface-gray-1 [&:is(a):active]:scale-[0.98]',
+			'group/attachment relative flex h-8 w-fit max-w-full items-center gap-2 rounded-4 border border-outline-gray-2 bg-surface-base pl-2.5 data-[state=error]:border-outline-red-3 [&:is(a)]:transition-[background-color,transform] [&:is(a)]:duration-150 [&:is(a)]:ease-out-strong [&:is(a):hover]:bg-surface-gray-1 [&:is(a):active]:scale-[0.98] motion-reduce:[&:is(a):active]:scale-100',
 			removable ? 'pr-1' : 'pr-2.5',
 		]"
 	>
@@ -64,6 +64,6 @@ function formatSize(bytes?: number) {
 		<span v-else :class="[look.icon, look.ink, 'size-4 shrink-0']" aria-hidden="true" />
 		<span class="min-w-0 truncate text-sm text-ink-gray-7">{{ name }}</span>
 		<span v-if="detail" class="shrink-0 text-xs text-ink-gray-5 group-data-[state=error]/attachment:text-ink-red-6">{{ detail }}</span>
-		<Button v-if="removable" variant="ghost" size="xs" icon="lucide-x" :aria-label="`Remove ${name}`" @click="$emit('remove')" />
+		<Button v-if="removable" variant="ghost" size="xs" class="touch-target" icon="lucide-x" :aria-label="`Remove ${name}`" @click="$emit('remove')" />
 	</component>
 </template>

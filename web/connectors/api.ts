@@ -74,7 +74,7 @@ export async function loadConnectors() {
 	try {
 		fresh = (await request<{ connectors: Connector[] }>("")).connectors;
 	} catch (error) {
-		if (load === newestLoad) connectorsError.value = error instanceof Error ? error.message : "The connectors did not load.";
+		if (load === newestLoad) connectorsError.value = error instanceof Error ? error.message : "The connectors could not load.";
 		throw error;
 	}
 	// A newer list is already shown.

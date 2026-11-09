@@ -5,7 +5,7 @@ import type { Status } from "../api";
 defineProps<{ status: Status }>();
 
 const label = { active: "Active", invited: "Invited", banned: "Banned" } as const;
-const theme = { active: "gray", invited: "blue", banned: "red" } as const;
+const theme = { active: "green", invited: "blue", banned: "red" } as const;
 </script>
 
 <template>

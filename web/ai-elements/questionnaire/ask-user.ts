@@ -2,6 +2,7 @@
 // The server defines the tool without `execute`; the UI answers with addToolOutput.
 
 import type { QuestionnaireSubmitPayload } from "./context";
+import { fullDate } from "../../dates";
 
 export const ASK_USER_TOOL = "ask_user";
 
@@ -143,8 +144,7 @@ export function formatAskUserAnswer(question: AskUserQuestion, answer: AskUserAn
 function formatDate(value: string) {
 	const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
 	if (!match) return value;
-	const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
-	return date.toLocaleDateString(undefined, { dateStyle: "medium" });
+	return fullDate(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
