@@ -2,7 +2,9 @@
 import { Button } from "frappe-ui";
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import DocumentView from "../artifacts/DocumentView.vue";
+import PresentMode from "../artifacts/PresentMode.vue";
 import SlidesView from "../artifacts/SlidesView.vue";
+import { slideCount } from "../artifacts/slides";
 import { panelHeader } from "./header";
 import { closePanel, fileKind, panelItem } from "./panel";
 import TableView from "./TableView.vue";
@@ -19,7 +21,12 @@ const artifact = computed(() => (item.value?.type === "artifact" ? item.value.ar
 const file = computed(() => (item.value?.type === "file" ? item.value.file : null));
 const kind = computed(() => (file.value ? fileKind(file.value.mediaType, file.value.name) : null));
 const rows = ref<number | null>(null);
-watch(item, () => (rows.value = null));
+const presenting = ref(false);
+watch(item, () => {
+	rows.value = null;
+	presenting.value = false;
+});
+const canPresent = computed(() => artifact.value?.kind === "slides" && !artifact.value.writing && slideCount(artifact.value.content) > 0);
 
 const header = computed(() => panelHeader(item.value, rows.value));
 const copied = ref(false);
@@ -35,7 +42,7 @@ async function copy() {
 
 /** Escape closes the panel, unless something else uses the key: a field, a menu or a dialog. */
 function onKeydown(event: KeyboardEvent) {
-	if (event.key !== "Escape" || event.defaultPrevented || !item.value) return;
+	if (event.key !== "Escape" || event.defaultPrevented || !item.value || presenting.value) return;
 	const target = event.target as HTMLElement | null;
 	if (target?.closest("input, textarea, select, [contenteditable], dialog, [role=dialog], [role=menu]")) return;
 	closePanel();
@@ -60,6 +67,7 @@ onBeforeUnmount(() => {
 				<h2 class="min-w-0 truncate text-base-medium text-ink-gray-9" :title="header.title">{{ header.title }}</h2>
 				<span v-if="header.meta" class="shrink-0 whitespace-nowrap text-sm text-ink-gray-5">{{ header.meta }}</span>
 				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
+					<Button v-if="canPresent" variant="ghost" icon-left="lucide-play" label="Present" class="mr-1" @click="presenting = true" />
 					<Button v-if="artifact" variant="ghost" :icon="copied ? 'lucide-check' : 'lucide-copy'" :tooltip="copied ? 'Copied' : header.copyLabel" :aria-label="header.copyLabel" :disabled="artifact.writing" @click="copy" />
 					<a v-if="header.download" :href="header.download.url" :download="header.download.name" :aria-label="`Download ${header.download.name}`" title="Download" class="panel-icon">
 						<span class="lucide-download size-4" aria-hidden="true" />
@@ -80,6 +88,7 @@ onBeforeUnmount(() => {
 					<img :src="file.url" :alt="file.name" class="max-h-[calc(100dvh-7rem)] max-w-full rounded-4 object-contain" />
 				</div>
 			</div>
+			<PresentMode v-if="presenting && artifact" :artifact="artifact" @close="presenting = false" />
 		</aside>
 	</Transition>
 </template>

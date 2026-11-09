@@ -27,6 +27,11 @@ export function framedDeck(html: string) {
 	return page(html, FRAME_STYLE);
 }
 
+/** For present mode: the slides edge to edge, with no gap, so slide n starts at n × 720. */
+export function presentedDeck(html: string) {
+	return page(html, PRESENT_STYLE);
+}
+
 /** A file to download: the same slides, which print one to a page, as a PDF. */
 export function standaloneDeck(html: string, title: string) {
 	return page(html, FILE_STYLE, title);
@@ -81,6 +86,10 @@ const FRAME_STYLE = `
 html, body { background: transparent; overflow: hidden; }
 body { display: flex; flex-direction: column; gap: ${SLIDE_GAP}px; }
 section { flex-shrink: 0; border-radius: 12px; box-shadow: 0 0 0 2px rgb(0 0 0 / 0.06); }
+`;
+
+const PRESENT_STYLE = `
+html, body { background: #000; overflow: hidden; }
 `;
 
 const FILE_STYLE = `
