@@ -8,9 +8,10 @@ const { open, toggle, contentId } = useTraceCollapsible("TraceCollapsibleTrigger
 	<button
 		type="button"
 		data-slot="trace-collapsible-trigger"
+		data-trace-trigger
 		:aria-expanded="open"
 		:aria-controls="contentId"
-		class="group/trace-trigger flex w-fit min-w-0 max-w-full [@media(pointer:coarse)]:min-h-11 cursor-pointer items-center gap-1 rounded-4 text-left text-ink-gray-6 transition-colors hover:text-ink-gray-8 [&>[data-slot=trace-line]]:text-inherit"
+		class="touch-target group/trace-trigger flex w-fit min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-4 text-left text-ink-gray-6 transition-colors hover:text-ink-gray-8 [&>[data-slot=trace-line]]:text-inherit"
 		@click="toggle"
 	>
 		<slot />

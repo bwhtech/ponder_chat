@@ -77,6 +77,7 @@ These rules took the chat and /admin from 6.5 to 10/10 in two design councils. F
 ### Touch (`pointer: coarse`)
 
 - Every control reaches 44px. Use `touch-target`, an invisible area that does not move the layout. Phone admin headers and segmented tabs already get it.
+- Never reach 44px by growing a row's layout height (`min-h-11`) in a chat reply: it pushes text and steps apart. Use the invisible area. Step rows stacked in an open fold or a run of steps are the one exception to 44px: on touch they sit 12px apart, and their areas fill exactly that gap (32px a row, `base.css`).
 - Neighbouring areas must not overlap. Add touch-only spacing such as `[@media(pointer:coarse)]:gap-x-2`, or let a row grow to `min-h-11` when targets are stacked close together.
 
 ### Dark mode

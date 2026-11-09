@@ -35,6 +35,13 @@
     height: max(100% + 16px, 44px);
     transform: translate(-50%, -50%);
   }
+  /* Step rows stacked in an open fold or a run of steps sit 12px apart on touch. Their areas fill that gap
+     and stop there, so a tap never lands on the neighbour: 32px a row, where 44px rows would push them apart.
+     A step line on its own keeps the 44px area. Tool and reasoning rows rename the trigger's data-slot,
+     so the rule finds it by data-trace-trigger. */
+  :is([data-slot='trace'], [data-slot='message-steps']:has(> :nth-child(2))) [data-trace-trigger]::after {
+    height: calc(100% + 12px);
+  }
   [data-slot='tab-button']::after,
   a[data-slot='attachment']::after {
     content: '';
