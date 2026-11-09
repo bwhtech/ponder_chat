@@ -1,7 +1,8 @@
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { Grid } from "@astryxdesign/core/Grid";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
+import { HStack, Layout, LayoutContent, LayoutFooter, VStack } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { AcademicCapIcon, ChartBarIcon, MapIcon, PencilSquareIcon, SparklesIcon } from "@heroicons/react/24/outline";
@@ -12,8 +13,9 @@ import { useStore } from "../lib/store";
 
 /**
  * A new chat, before anything is written: a greeting, the message field in the middle of the
- * page, and ideas to start from, after Astryx's ai-chat-landing template. A category shows
- * its ideas as cards; a card puts its prompt in the field to finish and send.
+ * page (docked at the bottom on a phone), and ideas to start from, after Astryx's
+ * ai-chat-landing template. A category shows its ideas as cards; a card puts its prompt in the
+ * field to finish and send.
  */
 type Idea = { heading: string; body: string; prompt: string };
 
@@ -55,51 +57,64 @@ export default function Landing({ composer, onIdea }: { composer: ReactNode; onI
 	const person = useStore(me);
 	const python = useStore(features).python;
 	const [category, setCategory] = useState<string | null>(null);
+	// On a phone the greeting steps down a size, and the message field docks at the bottom,
+	// where the thumb and the keyboard are, with the ideas above it.
+	const narrow = useMediaQuery("(max-width: 639px)");
 	const name = displayName(person);
 	// Charts need Python; without it the first idea is left out.
 	const ideas = category ? IDEAS[category]!.filter((idea) => python || idea.heading !== "Chart some numbers") : [];
 
 	return (
-		<div className="flex min-h-0 flex-1 overflow-y-auto" data-slot="landing">
-			<div className="m-auto flex w-full max-w-[720px] flex-col gap-8 px-4 py-10 sm:px-6">
-				<VStack gap={1}>
-					<HStack gap={2} vAlign="center">
-						<Icon icon={SparklesIcon} size="md" color="accent" />
-						<Text type="large" as="h2">
-							{name ? `Hi, ${name}` : "Hi there"}
-						</Text>
-					</HStack>
-					<Text type="display-2" as="h1">
-						Where should we start?
-					</Text>
-				</VStack>
+		<Layout
+			height="fill"
+			contentWidth={720}
+			padding={narrow ? 4 : 6}
+			content={
+				<LayoutContent>
+					<VStack gap={narrow ? 6 : 8} vAlign="center" minHeight="100%" data-slot="landing">
+						<VStack gap={1}>
+							<HStack gap={2} vAlign="center">
+								<Icon icon={SparklesIcon} size="md" color="accent" />
+								<Text type="large">{name ? `Hi, ${name}` : "Hi there"}</Text>
+							</HStack>
+							<Text type={narrow ? "display-3" : "display-2"} as="h1">
+								Where should we start?
+							</Text>
+						</VStack>
 
-				{composer}
+						{!narrow && composer}
 
-				<VStack gap={5}>
-					<div className="overflow-x-auto">
-						<ToggleButtonGroup label="Ideas" value={category} onChange={(value) => setCategory(value as string | null)} size="lg">
-							{CATEGORIES.map((each) => (
-								<ToggleButton key={each.key} value={each.key} label={each.label} icon={<Icon icon={each.icon} size="sm" />} />
-							))}
-						</ToggleButtonGroup>
-					</div>
-					{ideas.length > 0 && (
-						<Grid columns={{ minWidth: 260, max: 2 }} gap={3}>
-							{ideas.map((idea) => (
-								<ClickableCard key={idea.heading} label={idea.heading} variant="muted" padding={3} onClick={() => onIdea(idea.prompt)}>
-									<VStack gap={0.5}>
-										<Heading level={4}>{idea.heading}</Heading>
-										<Text type="body" color="secondary" size="xsm">
-											{idea.body}
-										</Text>
-									</VStack>
-								</ClickableCard>
-							))}
-						</Grid>
-					)}
-				</VStack>
-			</div>
-		</div>
+						<VStack gap={narrow ? 4 : 5}>
+							<ToggleButtonGroup
+								label="Ideas"
+								value={category}
+								onChange={(value) => setCategory(value as string | null)}
+								size={narrow ? "md" : "lg"}
+								className="flex-wrap"
+							>
+								{CATEGORIES.map((each) => (
+									<ToggleButton key={each.key} value={each.key} label={each.label} icon={<Icon icon={each.icon} size="sm" />} />
+								))}
+							</ToggleButtonGroup>
+							{ideas.length > 0 && (
+								<Grid columns={{ minWidth: 260, max: 2 }} gap={narrow ? 2 : 3}>
+									{ideas.map((idea) => (
+										<ClickableCard key={idea.heading} label={idea.heading} variant="muted" padding={3} onClick={() => onIdea(idea.prompt)}>
+											<VStack gap={0.5}>
+												<Heading level={4}>{idea.heading}</Heading>
+												<Text type="body" color="secondary" size="xsm">
+													{idea.body}
+												</Text>
+											</VStack>
+										</ClickableCard>
+									))}
+								</Grid>
+							)}
+						</VStack>
+					</VStack>
+				</LayoutContent>
+			}
+			footer={narrow ? <LayoutFooter>{composer}</LayoutFooter> : undefined}
+		/>
 	);
 }

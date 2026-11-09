@@ -51,7 +51,7 @@ export default function MessageParts({ message, streaming, onApproval = () => {}
 				</div>
 			)}
 			{groups.map((group, index) => {
-				const key = groupKey(group, index);
+				const key = groupKey(group, message.parts);
 				if (group.kind === "text") {
 					if (!group.part.text.trim()) return null;
 					// Keep the person's line breaks and indents; a long word or URL still wraps.
@@ -98,16 +98,13 @@ function groupParts(parts: Part[]): Group[] {
 }
 
 /**
- * Keys from part identity, not position: answering an approval folds it into the steps
- * before it, so groups shift. A tool part is its call id; other parts are their place in
- * the list, which only grows.
+ * Keys from part identity, not the group's place: answering an approval folds it into the
+ * steps before it, so groups shift. A tool part is its call id; other parts are their place
+ * in the message's parts, which only grows.
  */
-function groupKey(group: Group, index: number) {
-	if (group.kind === "steps") {
-		const first = group.parts[0];
-		return `steps:${first && isTool(first) ? first.toolCallId : index}`;
-	}
-	return `${group.kind}:${index}`;
+function groupKey(group: Group, parts: Part[]) {
+	const first = group.kind === "text" ? group.part : group.parts[0]!;
+	return isTool(first) ? `steps:${first.toolCallId}` : `${group.kind}:${parts.indexOf(first)}`;
 }
 
 /** Attached files: images as pictures that open in the side panel, other files as chips. */

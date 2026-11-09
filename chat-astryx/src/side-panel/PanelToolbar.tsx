@@ -1,20 +1,23 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Text } from "@astryxdesign/core/Text";
 import { DialogHeader } from "@astryxdesign/core/Dialog";
 import { Toolbar } from "@astryxdesign/core/Toolbar";
-import { ArrowDownTrayIcon, PlayIcon } from "@heroicons/react/24/outline";
+import { ArrowDownTrayIcon, ArrowTopRightOnSquareIcon, ClipboardDocumentIcon, CodeBracketIcon, EyeIcon, PlayIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState } from "react";
 import { slideCount } from "../artifacts/slides";
+import { toast } from "../lib/toast";
 import { saveFile, type PanelHeader } from "./header";
 import { closePanel, type PanelItem } from "./panel";
 
 /**
  * The panel's header: what it shows, and Present, Copy, Download, Open in a new tab and Close.
  * Beside the chat it is a toolbar; where the panel covers the page it is the dialog's header,
- * whose title takes the focus when it opens.
+ * whose title takes the focus when it opens, with the actions in one menu (as in Astryx's
+ * ai-chat template), so the title keeps the width.
  */
 type Props = {
 	item: PanelItem;
@@ -32,7 +35,7 @@ export default function PanelToolbar({ narrow, header, ...actions }: Props) {
 				title={header.title}
 				subtitle={header.meta || undefined}
 				startContent={<Icon icon={header.look.icon} color={header.look.color} size="sm" />}
-				endContent={<Actions header={header} {...actions} />}
+				endContent={<NarrowActions header={header} {...actions} />}
 				onOpenChange={(open) => !open && closePanel()}
 			/>
 		);
@@ -101,6 +104,36 @@ function Actions({ item, header, pageView, onPageView, onPresent }: Omit<Props, 
 			)}
 		</>
 	);
+}
+
+/** The same actions as one menu, for the dialog header on a phone or a small tablet. */
+function NarrowActions({ item, header, pageView, onPageView, onPresent }: Omit<Props, "narrow">) {
+	const artifact = item.type === "artifact" ? item.artifact : null;
+	const file = item.type === "file" ? item.file : null;
+	const canPresent = artifact?.kind === "slides" && !artifact.writing && slideCount(artifact.content) > 0;
+	const items = [
+		...(artifact?.kind === "html" && !artifact.writing
+			? [
+					pageView === "preview"
+						? { label: "Show code", icon: CodeBracketIcon, onClick: () => onPageView("code") }
+						: { label: "Show preview", icon: EyeIcon, onClick: () => onPageView("preview") },
+				]
+			: []),
+		...(canPresent ? [{ label: "Present", icon: PlayIcon, onClick: onPresent }] : []),
+		...(artifact && !artifact.writing
+			? [
+					{
+						label: header.copyLabel,
+						icon: ClipboardDocumentIcon,
+						onClick: () => void navigator.clipboard.writeText(artifact.content).then(() => toast("Copied"), () => undefined),
+					},
+				]
+			: []),
+		...(header.download ? [{ label: "Download", icon: ArrowDownTrayIcon, onClick: () => saveFile(header.download!()) }] : []),
+		...(file ? [{ label: "Open in a new tab", icon: ArrowTopRightOnSquareIcon, onClick: () => void open(file.url, "_blank", "noopener,noreferrer") }] : []),
+	];
+	if (!items.length) return null;
+	return <MoreMenu label={`${header.title} actions`} size="sm" alignment="end" items={items} />;
 }
 
 /** Copies the artifact's Markdown or HTML, and says so for a moment. */

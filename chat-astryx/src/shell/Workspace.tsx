@@ -3,12 +3,8 @@ import { Avatar } from "@astryxdesign/core/Avatar";
 import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
-import { IconButton } from "@astryxdesign/core/IconButton";
 import { NavIcon } from "@astryxdesign/core/NavIcon";
 import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
-import { Toolbar } from "@astryxdesign/core/Toolbar";
-import { Skeleton } from "@astryxdesign/core/Skeleton";
-import { Heading } from "@astryxdesign/core/Text";
 import {
 	ArrowRightStartOnRectangleIcon,
 	ComputerDesktopIcon,
@@ -24,6 +20,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { useLayoutEffect, type ReactNode } from "react";
 import { displayName, me, refreshCredits, signOut } from "../lib/account";
+import { useCreditRequestWatch } from "../lib/credit-request";
 import { useStore } from "../lib/store";
 import { themeMode, type ThemeMode } from "../lib/theme";
 import { current, loading, messages, open, refresh, revision, running, start, threads } from "../lib/threads";
@@ -31,6 +28,7 @@ import { showChat, showMemory, view } from "../lib/view";
 import ChatView from "../chat/ChatView";
 import ThreadSkeleton from "../chat/ThreadSkeleton";
 import CreditMeter from "./CreditMeter";
+import PageFrame from "./PageFrame";
 import MemoryPage from "../memory/MemoryPage";
 import { closePanel } from "../side-panel/panel";
 import SidePanel from "../side-panel/SidePanel";
@@ -60,6 +58,8 @@ export default function Workspace() {
 	useLayoutEffect(() => closePanel(), [id, page]);
 	// Back from a connector's sign-in in this tab (a phone): opens Settings on that connector.
 	useSignInReturn();
+	// A request for more credits is followed on every page, Memory too (credit-request.ts).
+	useCreditRequestWatch();
 
 	function pick(threadId: string) {
 		showChat();
@@ -76,7 +76,7 @@ export default function Workspace() {
 	return (
 		<AppShell
 			contentPadding={0}
-			mobileNav={{ breakpoint: "md" }}
+			mobileNav={{ breakpoint: "md", hasToggle: false }}
 			sideNav={
 				<SideNav
 					header={
@@ -110,53 +110,20 @@ export default function Workspace() {
 		>
 			<div className="flex h-full min-h-0">
 				<div className="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
-					<Toolbar
-						label="Chat"
-						size="lg"
-						dividers={["bottom"]}
-						startContent={
-							isLoading && !thread && page === "chat" ? (
-								<Skeleton width={192} height={18} />
-							) : (
-								<Heading level={1} className="block max-w-[calc(100vw-7rem)] truncate !text-lg md:max-w-[min(40rem,calc(100vw-30rem))]">
-									{title}
-								</Heading>
-							)
-						}
-						endContent={<HeaderActions onNewChat={newThread} />}
-					/>
-					{page === "memory" ? (
-						<MemoryPage onOpenThread={pick} />
-					) : isLoading ? (
-						<ThreadSkeleton />
-					) : id ? (
-						<ChatView key={`${id}:${version}`} threadId={id} initialMessages={shown} running={isRunning} onSaved={onSaved} onRefused={() => void refreshCredits()} />
-					) : null}
+					<PageFrame title={title} isLoading={isLoading && !thread && page === "chat"} onNewChat={newThread}>
+						{page === "memory" ? (
+							<MemoryPage onOpenThread={pick} />
+						) : isLoading ? (
+							<ThreadSkeleton />
+						) : id ? (
+							<ChatView key={`${id}:${version}`} threadId={id} initialMessages={shown} running={isRunning} onSaved={onSaved} onRefused={() => void refreshCredits()} />
+						) : null}
+					</PageFrame>
 				</div>
 				<SidePanel />
 			</div>
 			<SettingsDialog />
 		</AppShell>
-	);
-}
-
-/** Quick actions at the right of the header: light or dark, the theme, and a new chat. */
-function HeaderActions({ onNewChat }: { onNewChat: () => void }) {
-	const mode = useStore(themeMode);
-	const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-	return (
-		<div className="flex items-center gap-1">
-			<IconButton
-				className="max-md:hidden"
-				label={dark ? "Light mode" : "Dark mode"}
-				tooltip={dark ? "Light mode" : "Dark mode"}
-				variant="ghost"
-				icon={<Icon icon={dark ? SunIcon : MoonIcon} />}
-				onClick={() => themeMode.set(dark ? "light" : "dark")}
-			/>
-			<IconButton className="max-md:hidden" label="Theme" tooltip="Theme" variant="ghost" icon={<Icon icon={PaintBrushIcon} />} onClick={() => openSettings("appearance")} />
-			<IconButton label="New chat" tooltip="New chat" variant="ghost" icon={<Icon icon={PencilSquareIcon} />} onClick={onNewChat} />
-		</div>
 	);
 }
 

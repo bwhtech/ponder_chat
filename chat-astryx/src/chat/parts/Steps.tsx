@@ -27,36 +27,39 @@ export default function Steps({ parts, message, streaming, onApproval }: StepsPr
 	const renderers = useStore(toolRenderers);
 	const labeler = useStore(toolLabeler);
 	const custom = new Set(Object.keys(renderers).filter((name) => !renderers[name]!.foldable));
-	const toCall = (part: Part, index: number) => stepCall(part, index, { message, streaming, renderers, labeler });
+	const toCall = (part: Part) => stepCall(part, { message, streaming, renderers, labeler });
 	return (
 		<div className="flex min-w-0 flex-col gap-1" data-slot="message-steps">
-			{foldSteps(parts, custom).map((item, index) => {
+			{foldSteps(parts, custom).map((item) => {
 				if (item.kind === "fold") {
 					const { summary, failed } = summarizeSteps(item.parts, streaming);
-					return <ChatToolCalls key={stepKey(item.parts[0]!, index)} calls={item.parts.map(toCall)} label={failed ? `${summary} · ${failed} failed` : summary} />;
+					return <ChatToolCalls key={stepKey(item.parts[0]!, message)} calls={item.parts.map(toCall)} label={failed ? `${summary} · ${failed} failed` : summary} />;
 				}
 				const part = item.part;
-				if (needsAnswer(part)) return <ApprovalCard key={stepKey(part, index)} part={part} onApproval={onApproval} />;
+				if (needsAnswer(part)) return <ApprovalCard key={stepKey(part, message)} part={part} onApproval={onApproval} />;
 				const Renderer = isTool(part) && custom.has(toolName(part)) ? renderers[toolName(part)]!.component : undefined;
-				if (Renderer && isTool(part)) return <Renderer key={stepKey(part, index)} part={part} name={toolName(part)} message={message} streaming={streaming} />;
-				return <ChatToolCalls key={stepKey(part, index)} calls={[toCall(part, index)]} />;
+				if (Renderer && isTool(part)) return <Renderer key={stepKey(part, message)} part={part} name={toolName(part)} message={message} streaming={streaming} />;
+				return <ChatToolCalls key={stepKey(part, message)} calls={[toCall(part)]} />;
 			})}
 		</div>
 	);
 }
 
-/** Keys from part identity: answering an approval folds it into the steps before it, so rows shift. */
-function stepKey(part: Part, index: number) {
-	return isTool(part) ? `tool:${part.toolCallId}` : `${part.type}:${index}`;
+/**
+ * Keys from part identity: answering an approval folds it into the steps before it, so rows
+ * shift. A tool is its call id; other parts are their place in the message's parts.
+ */
+function stepKey(part: Part, message: UIMessage) {
+	return isTool(part) ? `tool:${part.toolCallId}` : `${part.type}:${message.parts.indexOf(part)}`;
 }
 
 type CallContext = { message: UIMessage; streaming: boolean; renderers: Record<string, ToolRenderer>; labeler: (name: string) => ToolLabel | undefined };
 
-function stepCall(part: Part, index: number, { message, streaming, renderers, labeler }: CallContext): ChatToolCallItem {
+function stepCall(part: Part, { message, streaming, renderers, labeler }: CallContext): ChatToolCallItem {
 	if (part.type === "reasoning") {
 		const thinking = streaming && part.state === "streaming";
 		return {
-			key: `reasoning:${index}`,
+			key: stepKey(part, message),
 			name: thinking ? "Thinking" : "Thought",
 			status: thinking ? "running" : "complete",
 			resultDetail: part.text.trim() ? (
@@ -67,7 +70,7 @@ function stepCall(part: Part, index: number, { message, streaming, renderers, la
 	const tool = part as ToolPart;
 	const name = toolName(tool);
 	const phase = toolPhase(tool, { streaming });
-	const base = { key: `tool:${tool.toolCallId}`, status: callStatus(phase), errorMessage: phaseError(tool, phase) };
+	const base = { key: stepKey(tool, message), status: callStatus(phase), errorMessage: phaseError(tool, phase) };
 	const renderer = renderers[name];
 	if (renderer?.line) {
 		const props = { part: tool, name, message, streaming };

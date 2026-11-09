@@ -53,7 +53,7 @@ export default function Composer({ composer, onStop, model, onModelChange, statu
 		<VStack gap={2} className="mx-auto w-full max-w-[760px]">
 			<CreditNotice />
 			{composer.uploadError && <Banner status="error" title={composer.uploadError} description="Attach the files again to send them." />}
-			<div {...drop.handlers} data-dragging={drop.dragging || undefined} className="rounded-xl data-dragging:outline-2 data-dragging:outline-offset-2 data-dragging:outline-accent data-dragging:outline-dashed">
+			<div {...drop.handlers} data-dragging={drop.dragging || undefined} className="rounded-xl [&_:has(>[data-slot=composer-footer-actions])]:min-w-0 data-dragging:outline-2 data-dragging:outline-offset-2 data-dragging:outline-accent data-dragging:outline-dashed">
 				<QueuePanel
 					items={queue.items}
 					editing={queue.editing}
@@ -113,7 +113,7 @@ export default function Composer({ composer, onStop, model, onModelChange, statu
 						/>
 					}
 					footerActions={
-						<HStack gap={1} vAlign="center">
+						<HStack gap={1} vAlign="center" className="min-w-0" data-slot="composer-footer-actions">
 							<IconButton label="Attach files" tooltip="Attach files" variant="ghost" size="sm" icon={<Icon icon={PaperClipIcon} />} isDisabled={composer.disabled} onClick={() => fileInput.current?.click()} />
 							<ModelPicker value={model} onChange={onModelChange} />
 							{composer.uploading && <Text type="supporting">Uploading…</Text>}

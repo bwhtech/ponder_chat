@@ -22,7 +22,8 @@ export type ComposerOptions = {
 	setMessages: (messages: UIMessage[]) => void;
 	sendMessage: SendMessage;
 	status: ChatStatus;
-	stopRun: () => Promise<unknown>;
+	/** False when the reply could not be stopped. */
+	stopRun: () => Promise<boolean>;
 	outOfCredits: boolean;
 	/** Renders older messages, for a quote above the ones on screen; false when there are none left. */
 	showEarlier?: () => boolean;

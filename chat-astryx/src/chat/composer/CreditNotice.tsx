@@ -2,7 +2,7 @@ import { useImperativeAlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { me } from "../../lib/account";
-import { askForMoreCredits, outOfCreditsNotice, useCreditRequestWatch } from "../../lib/credit-request";
+import { askForMoreCredits, outOfCreditsNotice } from "../../lib/credit-request";
 import { clockTime } from "../../lib/dates";
 import { useStore } from "../../lib/store";
 import { toastError } from "../../lib/toast";
@@ -11,7 +11,6 @@ import { toastError } from "../../lib/toast";
 export default function CreditNotice() {
 	const credits = useStore(me)?.credits;
 	const confirm = useImperativeAlertDialog();
-	useCreditRequestWatch();
 	if (!credits || credits.remaining > 0) return null;
 	// While a request for more credits waits, the notice says so and has no button.
 	const notice = outOfCreditsNotice(credits, clockTime(credits.resetsAt));

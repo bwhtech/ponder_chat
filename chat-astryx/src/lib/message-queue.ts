@@ -41,8 +41,8 @@ type QueueOptions = {
 	outOfCredits: boolean;
 	/** Sends one message now. */
 	send: (item: Queued) => Promise<unknown> | unknown;
-	/** Stops the reply on its way. */
-	stopReply: () => Promise<unknown>;
+	/** Stops the reply on its way. False when it could not be stopped. */
+	stopReply: () => Promise<boolean>;
 };
 
 /**
@@ -56,8 +56,8 @@ export function useMessageQueue(threadId: string, options: QueueOptions) {
 	const [paused, setPaused] = useState(false);
 	/** The id of the queued message the person is editing. */
 	const [editing, setEditing] = useState<string | null>(null);
-	const latest = useRef({ options, paused, editing });
-	latest.current = { options, paused, editing };
+	const latest = useRef({ options, paused, editing, threadId });
+	latest.current = { options, paused, editing, threadId };
 	// A message can finish uploading after its chat has closed (the person switched threads).
 	const mounted = useRef(false);
 	useEffect(() => {
@@ -94,11 +94,24 @@ export function useMessageQueue(threadId: string, options: QueueOptions) {
 		return item;
 	}
 
-	/** Steer: stop the reply on its way and send this message now. */
+	/**
+	 * Steer: stop the reply on its way and send this message now. The message goes back to
+	 * its place when the reply could not be stopped, or when, by the time it stopped, the chat
+	 * closed, moved to another thread or ran out of credits.
+	 */
 	async function steer(id: string) {
+		const at = queueOf(threadId).findIndex((queued) => queued.id === id);
 		const item = take(id);
 		if (!item) return;
-		if (latest.current.options.busy) await latest.current.options.stopReply();
+		const wasPaused = latest.current.paused;
+		// So the reply's end does not send the next queued message before this one.
+		setPaused(true);
+		const stopped = !latest.current.options.busy || (await latest.current.options.stopReply());
+		if (!stopped || !mounted.current || latest.current.threadId !== threadId || latest.current.options.outOfCredits) {
+			setQueue(threadId, (list) => [...list.slice(0, at), item, ...list.slice(at)]);
+			if (mounted.current) setPaused(wasPaused);
+			return;
+		}
 		await sendNow(item);
 	}
 

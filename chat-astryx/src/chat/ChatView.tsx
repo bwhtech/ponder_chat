@@ -1,17 +1,20 @@
 import { useChat } from "@ai-sdk/react";
-import { WorkflowChatTransport } from "@ai-sdk/workflow/client";
+import { WorkflowChatTransport, type ReconnectToStreamOptions, type WorkflowChatTransportOptions } from "@ai-sdk/workflow/client";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { ChevronDoubleUpIcon } from "@heroicons/react/24/outline";
 import { ChatLayout, ChatMessage, ChatMessageList, ChatMessageMetadata } from "@astryxdesign/core/Chat";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
-import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from "ai";
+import { lastAssistantMessageIsCompleteWithApprovalResponses, type ChatRequestOptions, type UIMessage, type UIMessageChunk } from "ai";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { me } from "../lib/account";
 import { model as lastPicked, modelName, models as modelList } from "../lib/models";
 import { useStore } from "../lib/store";
 import { chatBusy, remember } from "../lib/threads";
+import { toastError } from "../lib/toast";
 import SentQuotes from "../cite/SentQuotes";
 import Composer from "./Composer";
 import Landing from "./Landing";
@@ -38,6 +41,8 @@ export type ChatViewProps = {
 
 export default function ChatView({ threadId, initialMessages, running, onSaved, onRefused }: ChatViewProps) {
 	const person = useStore(me);
+	// On a phone the replies get the whole column: compact density and no avatar beside them.
+	const narrow = useMediaQuery("(max-width: 639px)");
 	const models = useStore(modelList);
 	// The model for this chat: the one that wrote its last reply, so going back to a chat
 	// brings back its model. A new chat starts on the model picked last, and a pick here
@@ -58,23 +63,28 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	const callbacks = useRef({ onSaved, onRefused });
 	callbacks.current = { onSaved, onRefused };
 
+	// The messages the run this chat follows started from: what it last sent, or, for a reply
+	// still being written when the thread loaded, the thread as it loaded (the server saves
+	// the thread before the run, and a chat closed mid-reply keeps only this, see below).
+	const base = useRef(initialMessages);
+	const restoreBase = useRef(() => {});
 	const transport = useMemo(
 		() =>
 			// Each reply is a durable workflow run on the server. When the connection drops before
 			// the reply ends (a server restart, a flaky network), the transport reconnects to the
 			// run and picks up where it left off. The model goes with every request.
-			new WorkflowChatTransport({
+			new ReplayTransport(() => restoreBase.current(), {
 				api: "/api/chat",
-				prepareSendMessagesRequest: ({ id, messages }) => ({
-					headers: { "Content-Type": "application/json" },
-					body: { id, messages, model: modelRef.current },
-				}),
+				prepareSendMessagesRequest: ({ id, messages }) => {
+					base.current = messages;
+					return { headers: { "Content-Type": "application/json" }, body: { id, messages, model: modelRef.current } };
+				},
 				fetch: patientFetch,
 			}),
 		[],
 	);
 
-	const { messages, setMessages, sendMessage, addToolApprovalResponse, status, error, stop, resumeStream } = useChat({
+	const { messages, setMessages, sendMessage, addToolApprovalResponse, status, error, stop, resumeStream, regenerate } = useChat({
 		id: threadId,
 		messages: initialMessages,
 		transport,
@@ -84,16 +94,28 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		onError: () => callbacks.current.onRefused(),
 	});
 
-	// The reply was still being written when the thread loaded (after a reload, say): follow it.
-	// Until the server answers, the composer acts as if busy, so the queue does not send into a run.
+	// The replay rebuilds the reply on the run's base, as the server does when it saves (saveReply).
+	restoreBase.current = () => setMessages(base.current);
+
+	// Reconnecting to the run waits for the server before the SDK's status changes. Until the
+	// replay starts, the chat counts as busy: for the queue, the list's revalidation (chatBusy),
+	// the messages on screen, and what is kept when the chat closes.
 	const [resuming, setResuming] = useState(running);
+	const resumes = useRef(0);
+	/** Stop could not reach the server: a banner offers to try again. */
+	const [stopFailed, setStopFailed] = useState(false);
+	async function reconnect() {
+		const token = ++resumes.current;
+		setResuming(true);
+		try {
+			await resumeStream();
+		} finally {
+			if (token === resumes.current) setResuming(false);
+		}
+	}
+	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	useEffect(() => {
-		if (!running) return;
-		let live = true;
-		void resumeStream().finally(() => live && setResuming(false));
-		return () => {
-			live = false;
-		};
+		if (running) void reconnect();
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 	// "Always allow" answers once its rule is saved; by then this chat may have closed.
@@ -105,20 +127,23 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		};
 	}, []);
 
-	const busy = status === "submitted" || status === "streaming";
+	const chatStatus = resuming && status === "ready" ? "submitted" : status;
+	const busy = chatStatus === "submitted" || chatStatus === "streaming";
 	const latest = useRef(messages);
 	latest.current = messages;
 	const wasBusy = useRef(busy);
 	useEffect(() => {
 		chatBusy.set(busy);
 		// A reply ended: keep this chat's messages, so coming back to it is instant. After an error
-		// (a dropped connection, say) the run may go on, so the next open follows it again.
-		if (wasBusy.current && !busy) remember(threadId, { messages: latest.current, running: status === "error" });
+		// the run may go on; the next open asks the server, which says so.
+		if (wasBusy.current && !busy) remember(threadId, { messages: latest.current, running: false });
 		wasBusy.current = busy;
-	}, [busy, status, threadId]);
+		if (!busy) setStopFailed(false);
+	}, [busy, threadId]);
 	useEffect(
 		() => () => {
-			if (wasBusy.current) remember(threadId, { messages: latest.current, running: true });
+			// Closed mid-reply: the next open follows the run again, and its replay rebuilds the reply on the base.
+			if (wasBusy.current) remember(threadId, { messages: base.current, running: true });
 			chatBusy.set(false);
 		},
 		[threadId],
@@ -126,10 +151,33 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 
 	const outOfCredits = (person?.credits.remaining ?? 1) <= 0;
 
-	/** The run outlives the request, so Stop tells the server, then drops the stream here. */
+	/**
+	 * The run outlives the request, so Stop tells the server, then drops the stream here.
+	 * When the server could not be told, the reply goes on, the chat keeps following it, and
+	 * the person can try again. True when the run stopped.
+	 */
 	async function stopRun() {
-		await fetch(`/api/chat/${encodeURIComponent(threadId)}/stop`, { method: "POST" }).catch(() => undefined);
+		const response = await fetch(`/api/chat/${encodeURIComponent(threadId)}/stop`, { method: "POST" }).catch(() => undefined);
+		if (!response?.ok) {
+			if (mounted.current) setStopFailed(true);
+			return false;
+		}
+		setStopFailed(false);
 		await stop();
+		return true;
+	}
+
+	/**
+	 * Retry after an error. A reply still running on the server (the connection dropped) is
+	 * followed again; otherwise the last message is sent again (regenerate).
+	 */
+	async function retry() {
+		const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}`, { cache: "no-store" }).catch(() => undefined);
+		if (!response?.ok) return toastError("Ponder Chat could not reach the server. Try again.");
+		const thread = (await response.json()) as { running?: boolean };
+		if (!mounted.current) return;
+		if (thread.running) await reconnect();
+		else await regenerate();
 	}
 
 	const lastMessage = messages[messages.length - 1];
@@ -144,7 +192,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		messages,
 		setMessages,
 		sendMessage,
-		status: resuming && status === "ready" ? "submitted" : status,
+		status: chatStatus,
 		stopRun,
 		outOfCredits,
 		showEarlier,
@@ -158,7 +206,6 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 			onModelChange={pickModel}
 			isEmpty={false}
 			outOfCredits={outOfCredits}
-			status={error && !busy ? { type: "error", message: errorMessage(error) } : undefined}
 		/>
 	);
 
@@ -180,9 +227,10 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		<div ref={area} className="flex min-h-0 flex-1 flex-col" data-slot="chat-view">
 			<ChatLayout
 				composer={field}
+				density={narrow ? "compact" : "balanced"}
 			>
 				{messages.length > 0 && (
-					<ChatMessageList isStreaming={busy} className="mx-auto w-full max-w-[760px]">
+					<ChatMessageList isStreaming={busy} density={narrow ? "compact" : "balanced"} className="mx-auto w-full max-w-[760px]">
 						{conversation.hidden > 0 && (
 							<div className="flex justify-center pb-4" data-slot="show-earlier">
 								<Button label={`Show earlier messages (${conversation.hidden})`} variant="ghost" size="sm" icon={<Icon icon={ChevronDoubleUpIcon} />} onClick={conversation.showEarlier} />
@@ -195,7 +243,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 								<ChatMessage
 									key={message.id}
 									sender={message.role === "user" ? "user" : "assistant"}
-									avatar={message.role === "assistant" ? <PonderAvatar /> : undefined}
+									avatar={message.role === "assistant" && !narrow ? <PonderAvatar /> : null}
 									metadata={
 										message.role === "assistant" && !streaming && text ? (
 											<ChatMessageMetadata
@@ -229,9 +277,28 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 							);
 						})}
 						{conversation.thinkingAlone && (
-							<ChatMessage sender="assistant" avatar={<PonderAvatar />}>
+							<ChatMessage sender="assistant" avatar={narrow ? null : <PonderAvatar />}>
 								<ThinkingLine text={conversation.thinkingText} />
 							</ChatMessage>
+						)}
+						{stopFailed && busy && (
+							<Banner
+								status="error"
+								title="Ponder could not stop the reply"
+								description="The reply goes on. Try again."
+								endContent={<Button label="Stop" variant="secondary" size="sm" onClick={() => composer.queue.stop()} />}
+								data-slot="stop-error"
+							/>
+						)}
+						{/* Out of credits, the notice under the field says why and when they refill. */}
+						{error && !busy && !outOfCredits && (
+							<Banner
+								status="error"
+								title="Something went wrong"
+								description={errorMessage(error)}
+								endContent={<Button label="Retry" variant="secondary" size="sm" onClick={() => void retry()} />}
+								data-slot="chat-error"
+							/>
 						)}
 					</ChatMessageList>
 				)}
@@ -253,9 +320,46 @@ async function patientFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 			const response = await fetch(input, init);
 			if (![502, 503, 504].includes(response.status) || Date.now() > deadline) return response;
 		} catch (error) {
-			if (init?.signal?.aborted || Date.now() > deadline) throw error;
+			if (init?.signal?.aborted) throw error;
+			// Not a TypeError: the SDK would keep the half-built reply for the next reconnect, and the replay would add to it.
+			if (Date.now() > deadline) throw new Error("Ponder Chat could not reach the server.", { cause: error });
 		}
 		await new Promise((resolve) => setTimeout(resolve, Math.min(500 * 2 ** attempt, 3_000)));
+	}
+}
+
+/**
+ * The workflow transport, for a reconnect (a reload, or Retry). The server replays the run
+ * from its first chunk, so once the replay starts `onReplay` puts the messages back to the
+ * run's base, and the replay builds the reply again instead of adding to what is on screen.
+ * The SDK reads the messages after this returns, so the replay is waited for first.
+ */
+class ReplayTransport extends WorkflowChatTransport<UIMessage> {
+	constructor(
+		private onReplay: () => void,
+		options: WorkflowChatTransportOptions<UIMessage>,
+	) {
+		super(options);
+	}
+
+	override async reconnectToStream(options: ReconnectToStreamOptions & ChatRequestOptions) {
+		const stream = await super.reconnectToStream(options);
+		if (!stream) return stream;
+		const reader = stream.getReader();
+		const first = await reader.read();
+		this.onReplay();
+		return new ReadableStream<UIMessageChunk>({
+			start(controller) {
+				if (first.done) controller.close();
+				else controller.enqueue(first.value);
+			},
+			async pull(controller) {
+				const next = await reader.read();
+				if (next.done) controller.close();
+				else controller.enqueue(next.value);
+			},
+			cancel: (reason) => reader.cancel(reason),
+		});
 	}
 }
 

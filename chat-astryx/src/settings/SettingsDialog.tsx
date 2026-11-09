@@ -1,13 +1,12 @@
-import { Button } from "@astryxdesign/core/Button";
 import { Dialog } from "@astryxdesign/core/Dialog";
-import { Divider } from "@astryxdesign/core/Divider";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
+import { HStack, Layout, LayoutContent, StackItem } from "@astryxdesign/core/Layout";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Heading } from "@astryxdesign/core/Text";
 import { PaintBrushIcon, PuzzlePieceIcon, UserCircleIcon } from "@heroicons/react/24/outline";
 import { useEffect, useId } from "react";
 import AddConnector from "../connectors/AddConnector";
@@ -24,7 +23,7 @@ import { closeSettings, openSettings, settings, toggleSettings, type SettingsPla
 /**
  * Settings, with Account, Appearance and Connectors: a side nav and the open panel, after Astryx's
  * settings-dialog template. Cmd+Shift+, (Ctrl+Shift+,) opens it too. On a phone it fills
- * the screen, with the tabs in a row at the top.
+ * the screen, with the sections as tabs at the top.
  */
 const TABS: { tab: SettingsTab; label: string; icon: typeof UserCircleIcon }[] = [
 	{ tab: "account", label: "Account", icon: UserCircleIcon },
@@ -38,6 +37,7 @@ export default function SettingsDialog() {
 	const attention = needsAttention(list);
 	const narrow = useMediaQuery("(max-width: 639px)");
 	const titleId = useId();
+	const panelId = useId();
 	const open = Boolean(place);
 
 	// The chat shows connector tools by their connector's name, and asks before they run.
@@ -81,25 +81,27 @@ export default function SettingsDialog() {
 				{place &&
 					(narrow ? (
 						<div className="flex h-full flex-col">
-							<div className="flex items-center gap-2 px-3 py-3">
-								<span className="min-w-0 flex-1">
-									<Text type="label" id={titleId}>
+							<HStack gap={2} vAlign="center" padding={3}>
+								<StackItem size="fill">
+									<Heading level={4} id={titleId}>
 										Settings
-									</Text>
-								</span>
+									</Heading>
+								</StackItem>
 								{close}
-							</div>
-							<Divider />
-							<nav aria-label="Settings sections" className="flex gap-1 px-3 py-2">
+							</HStack>
+							<TabList value={tab} onChange={(next) => pick(next as SettingsTab)} size="sm" role="tablist" aria-label="Settings sections" hasDivider>
 								{TABS.map((each) => (
-									<span key={each.tab} className="relative">
-										<Button label={each.label} size="sm" icon={<Icon icon={each.icon} size="sm" />} variant={each.tab === tab ? "secondary" : "ghost"} onClick={() => pick(each.tab)} />
-										{each.tab === "connectors" && dot && <span className="absolute -top-0.5 -right-0.5">{dot}</span>}
-									</span>
+									<Tab
+										key={each.tab}
+										value={each.tab}
+										label={each.label}
+										panelId={panelId}
+										icon={<Icon icon={each.icon} size="sm" />}
+										endContent={each.tab === "connectors" ? dot : undefined}
+									/>
 								))}
-							</nav>
-							<Divider />
-							<div className="@container min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+							</TabList>
+							<div id={panelId} role="tabpanel" aria-label={TABS.find((each) => each.tab === tab)?.label} className="@container min-h-0 flex-1 overflow-y-auto p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
 								<Panel place={place} />
 							</div>
 						</div>
