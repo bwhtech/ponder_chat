@@ -372,6 +372,15 @@ onBeforeUnmount(() => {
 useAttention(busy, computed(() => waitingOnPerson(messages.value)));
 
 const { thinking, text: thinkingText } = useThinking(busy, messages);
+/** "Thinking" sits in the reply's place before the reply exists: the turn after the person's message. */
+const thinkingAlone = computed(() => thinking.value && lastMessage.value?.role !== "assistant");
+// The reply that takes over that place is already on screen, so it does not rise in.
+watch(
+	() => lastMessage.value?.id,
+	() => {
+		if (thinking.value && lastMessage.value?.role === "assistant") shownAtStart.add(lastMessage.value.id);
+	},
+);
 
 // Messages written while a reply streams wait here; the first goes out when it ends (message-queue.ts).
 const queue = useMessageQueue(props.threadId, {
@@ -519,6 +528,7 @@ function replyModelId(message: UIMessage) {
 								@deny="answerApproval($event, false)"
 							/>
 							</div>
+							<Loader v-if="thinking && message === lastMessage && message.role === 'assistant'" :text="thinkingText" />
 							<MessageActions
 								v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
 								data-reply-actions
@@ -565,8 +575,10 @@ function replyModelId(message: UIMessage) {
 						</MessageContent>
 					</Message>
 				</ConversationItem>
-				<ConversationItem v-if="thinking">
-					<Loader :text="thinkingText" />
+				<ConversationItem v-if="thinkingAlone">
+					<Message from="assistant">
+						<MessageContent><Loader :text="thinkingText" /></MessageContent>
+					</Message>
 				</ConversationItem>
 				<ConversationItem v-if="error && !outOfCredits">
 					<Alert

@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
 import { waitingOnPerson } from "./message-queue";
 
 /**
- * "Thinking…" while a reply is on its way and nothing else on screen moves. Text and
+ * "Thinking" while a reply is on its way and nothing else on screen moves. Text and
  * reasoning that stream, and a running tool ("Searching …"), show it themselves. Every
  * other moment shows it: before the first word (a model can think for 20 seconds before
  * it writes), after a tool returns, and between steps. It shows after a short quiet, so it
@@ -42,7 +42,7 @@ export function useThinking(busy: Ref<boolean>, messages: Ref<UIMessage[]>) {
 	);
 	onBeforeUnmount(clear);
 
-	const text = computed(() => (seconds.value >= 5 ? `Thinking… ${seconds.value}s` : "Thinking…"));
+	const text = computed(() => (seconds.value >= 5 ? `Thinking for ${seconds.value}s` : "Thinking"));
 	return { thinking, text };
 }
 
