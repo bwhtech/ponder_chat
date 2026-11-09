@@ -6,8 +6,11 @@ import { computed, shallowRef, type Ref } from "vue";
  */
 export type ViewedFile = { name: string; url: string; mediaType: string };
 
+/** document: Markdown. slides: HTML sections. html: one web page that runs (web/artifacts/html.ts). */
+export type ArtifactKind = "document" | "slides" | "html";
+
 /** An artifact as the panel reads it. `writing` is true while the reply still streams it. */
-export type Artifact = { id: string; kind: "document" | "slides"; title: string; content: string; writing: boolean };
+export type Artifact = { id: string; kind: ArtifactKind; title: string; content: string; writing: boolean };
 
 export type PanelItem =
 	| { type: "file"; key: string; file: ViewedFile }
