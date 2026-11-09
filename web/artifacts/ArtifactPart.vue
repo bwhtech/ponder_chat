@@ -9,8 +9,8 @@ import { panelItem, viewArtifact, type Artifact } from "../side-panel/panel";
  * A write_artifact call (server/artifacts/schema.ts) as a card in the reply. A click opens
  * the artifact in the side panel. Each call is one version: its card opens that version.
  *
- * A reply that starts writing one opens it in the panel on a wide screen, and the panel
- * follows the new version of an artifact it already shows.
+ * A reply that starts writing one opens it in the panel on a wide screen. A panel that
+ * already shows an artifact moves to the new one; a file the person opened stays.
  */
 type Input = Partial<{ id: string; kind: "document" | "slides"; title: string; content: string }>;
 
@@ -48,8 +48,7 @@ watch(
 	(started) => {
 		if (!started || isOpen.value) return;
 		const shown = panelItem.value;
-		const newVersion = shown?.type === "artifact" && shown.artifact.value.id === artifact.value.id;
-		if (newVersion || (!shown && matchMedia("(min-width: 1024px)").matches)) open();
+		if (shown?.type === "artifact" || (!shown && matchMedia("(min-width: 1024px)").matches)) open();
 	},
 	{ immediate: true },
 );
