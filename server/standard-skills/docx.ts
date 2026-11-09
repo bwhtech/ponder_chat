@@ -42,11 +42,11 @@ doc = Document()
 - **Body text:** set the font once on \`doc.styles["Normal"].font\` (\`name\`, \`size\`). Do not set it on every run.
 - **Lists:** use \`style="List Bullet"\` or \`"List Number"\` (\`"List Bullet 2"\` for the second level). Never type \`•\` or \`1.\` as text. All \`"List Number"\` paragraphs continue one count. To start a second list at 1, use \`restart_numbering\` below.
 - **Spacing:** one \`add_paragraph\` for each paragraph. Do not put \`"\\n"\` or empty paragraphs in for space. Use \`paragraph_format.space_before\` and \`space_after\`.
-- **Tables:** \`table = doc.add_table(rows, cols)\`, \`table.style = "Table Grid"\` for borders, \`table.autofit = False\`. Set \`cell.width\` on every cell in a column. Word reads the cell widths and ignores column widths. The widths must add up to the page width less the margins.
+- **Tables:** \`table = doc.add_table(rows, cols)\`, \`table.style = "Table Grid"\` for borders, \`table.autofit = False\`. Set each width twice: \`table.columns[i].width\` (the grid, which LibreOffice and Google Docs read) and \`cell.width\` on every cell in that column (which Word reads). The widths must add up to the page width less the margins.
 - **Table shading:** set \`w:shd\` with \`w:val="clear"\` (helper below). Never use \`"solid"\`, because Word shows it as black.
 - **Header row:** mark the first row so that it repeats on each page (helper below).
 - **Images:** \`doc.add_picture(path_or_stream, width=Inches(6))\`. Save a matplotlib chart to a \`BytesIO\` as PNG first. Keep the width inside the margins.
-- **Page break:** \`doc.add_page_break()\`.
+- **Page break:** \`doc.add_page_break()\`. A new section (\`doc.add_section()\`) starts a new page by itself. A page break before it adds a blank page.
 - **Horizontal rule:** a paragraph bottom border (helper below). Do not use a table as a rule.
 - **Right-aligned text on the same line, with dot leaders:** add a tab stop: \`p.paragraph_format.tab_stops.add_tab_stop(Inches(6), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS)\`. Then put \`"\\t"\` between the two parts. Do not pad with dots or spaces.
 - **Title and author:** set \`doc.core_properties.title\` and \`.author\`.
