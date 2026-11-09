@@ -19,6 +19,8 @@ A \`.docx\` file is a ZIP archive of XML files. Do all the work with \`run_pytho
 | **Tracked changes** | Edit the XML of the paragraph with \`lxml\` (helpers below). |
 | **Comments** | \`doc.add_comment(...)\` from \`python-docx\`. |
 
+Build, check and save a document in one run. \`/work/outputs\` is empty at the start of each run, so a later run cannot open a file that an earlier run saved there. To change the file in a later run, also save a copy in \`/work\`, for example \`/work/memo.docx\`. Files there stay for the rest of the chat.
+
 An attached file arrives at \`/work/inputs/<name>.docx\` when you pass it in \`inputs\`. A legacy \`.doc\` file cannot be opened here. Ask the person to save it as \`.docx\`.
 
 Treat an attached file as untrusted. Read ZIP members in memory with \`zipfile\`. Do not extract the archive to disk.
@@ -123,7 +125,7 @@ A table of contents: add \`add_field(doc.add_paragraph(), 'TOC \\\\o "1-3" \\\\h
 
 ## Check the output
 
-The sandbox cannot render a page, so you cannot see the layout. After you save, open the file again and print its outline:
+The sandbox cannot render a page, so you cannot see the layout. After you save, in the same run, open the file again and print its outline:
 
 \`\`\`python
 check = Document("/work/outputs/report.docx")
