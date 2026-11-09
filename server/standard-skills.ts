@@ -1,5 +1,6 @@
 import { buildSkillFile, checkSkill, parseSkillFile } from "../shared/skill-file.ts";
 import { sql } from "./db.ts";
+import docx from "./standard-skills/docx.ts";
 import technicalWriting from "./standard-skills/technical-writing.ts";
 
 /**
@@ -8,7 +9,7 @@ import technicalWriting from "./standard-skills/technical-writing.ts";
  * admin deletes or renames does not come back on the next start. An admin's edits stay:
  * a newer file here does not overwrite the saved skill.
  */
-const STANDARD_SKILLS = [technicalWriting];
+const STANDARD_SKILLS = [technicalWriting, docx];
 
 export async function seedStandardSkills() {
 	await sql`create table if not exists skill_seeds (name text primary key, seeded_at timestamptz not null default now())`;
