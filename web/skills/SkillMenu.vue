@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from "vue";
-import type { SkillOption } from "./skills";
+import { skillTitle, type SkillOption } from "./skills";
 
 /**
  * The list of skills over the message box (picker.ts). mousedown.prevent on each row keeps
@@ -36,16 +36,14 @@ watch(
 				role="option"
 				:data-index="index"
 				:aria-selected="index === active"
-				class="flex cursor-pointer items-start gap-2.5 rounded-4 px-2 py-2"
+				:title="skill.description"
+				class="flex h-9 cursor-pointer items-center gap-2.5 rounded-4 px-2.5"
 				:class="index === active ? 'bg-surface-gray-3' : ''"
 				@mouseenter="emit('hover', index)"
 				@mousedown.prevent="emit('choose', skill)"
 			>
-				<span class="lucide-sparkles mt-0.5 size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
-				<div class="min-w-0 flex-1">
-					<p class="font-mono text-sm text-ink-gray-9">${{ skill.name }}</p>
-					<p class="mt-0.5 line-clamp-2 text-p-sm text-ink-gray-6">{{ skill.description }}</p>
-				</div>
+				<span class="shrink-0 text-sm font-medium text-ink-gray-9">{{ skillTitle(skill.name) }}</span>
+				<span class="min-w-0 flex-1 truncate text-sm text-ink-gray-5">{{ skill.description }}</span>
 			</div>
 		</div>
 		<p v-else class="px-3 py-4 text-p-sm text-ink-gray-6">No skill matches “{{ query }}”.</p>
