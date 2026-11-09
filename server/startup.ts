@@ -10,6 +10,7 @@ import { migratePythonState } from "./python/state.ts";
 import { migrateConnectors } from "./mcp/store.ts";
 import { migrateSecrets } from "./secrets.ts";
 import { migrateSkills } from "./skills.ts";
+import { seedStandardSkills } from "./standard-skills.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
 import { setupTelemetry } from "./telemetry.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
@@ -51,6 +52,7 @@ async function migrateAll() {
 	await migrateSecrets();
 	await migrateConnectors();
 	await migrateSkills();
+	await seedStandardSkills();
 	setToolApprovalSecret();
 	await migratePythonState();
 	await migrateThreadRuns();

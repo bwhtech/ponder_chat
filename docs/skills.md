@@ -7,6 +7,16 @@ A skill is a name, a description and Markdown instructions that an admin writes 
 
 A person can start any skill that is on: they type `$name` anywhere in a message, or `/name` at the start. The skill then shows as a chip in the message box.
 
+## Standard skills
+
+Some skills ship with Ponder, in `server/standard-skills/`. Startup adds each one to the `skills` table once, on. The `skill_seeds` table records the names it added. A standard skill that an admin deletes or renames does not come back. A newer copy of the file does not overwrite an admin's changes.
+
+To add a standard skill, put its `SKILL.md` in a `.ts` file in `server/standard-skills/` as the default export, and add it to `STANDARD_SKILLS` in `server/standard-skills.ts`.
+
+| Skill | Source |
+| --- | --- |
+| `technical-writing` | [frappe/skills](https://github.com/frappe/skills), unchanged |
+
 ## Writing a skill
 
 "New skill" asks for a name and a description, both required. The skill then opens in the editor, off. The instructions go in the code editor (Markdown); the name, the description and the two switches sit beside it. A skill can be turned on only when it has instructions.
@@ -42,6 +52,7 @@ The body is the instructions, at most 20,000 characters. `shared/skill-file.ts` 
 | --- | --- |
 | `shared/skill-file.ts` | Checks a skill. Writes it as a `SKILL.md` file, and reads one back. |
 | `server/skills.ts` | The `skills` table, and saving, listing and deleting skills. |
+| `server/standard-skills.ts`, `server/standard-skills/` | The skills that ship with Ponder, and the startup step that adds them. |
 | `server/admin/routes.ts` | `/api/admin/skills`: list, read, create, save, on/off, delete. |
 | `server/workflow/skills.ts` | A reply's skills: the step, the instructions section, `use_skill`, and the `<skill>` text for a skill the person asked for. |
 | `web/skills/` | The `$` menu, the chips, and the `use_skill` line in a reply. |
