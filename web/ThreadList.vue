@@ -98,7 +98,7 @@ function askDelete(thread: ThreadSummary) {
 			<div v-if="searching" data-slot="thread-search-results" class="space-y-0.5" :aria-busy="search.searching.value">
 				<!-- The first answer: rows shaped like results. A newer search over results already shown dims them instead. -->
 				<div v-if="search.searching.value && !search.hits.value.length" aria-label="Searching chats" class="space-y-0.5">
-					<div v-for="width in ['w-36', 'w-44', 'w-28']" :key="width" class="flex flex-col gap-1.5 px-4 py-2">
+					<div v-for="width in ['w-36', 'w-44', 'w-28']" :key="width" class="flex flex-col gap-1.5 px-2 py-2">
 						<Skeleton :class="['h-3.5 rounded-4', width]" />
 						<Skeleton class="h-2.5 w-full rounded-4" />
 						<Skeleton class="h-2.5 w-3/4 rounded-4" />
@@ -108,7 +108,7 @@ function askDelete(thread: ThreadSummary) {
 					v-for="hit in search.hits.value"
 					:key="hit.id"
 					type="button"
-					class="flex w-full flex-col gap-0.5 rounded-4 px-4 py-1.5 text-left transition-opacity duration-150 ease-out-strong motion-reduce:transition-none hover:bg-surface-gray-2 active:bg-surface-gray-3"
+					class="flex w-full flex-col gap-0.5 rounded-4 px-2 py-1.5 text-left transition-opacity duration-150 ease-out-strong motion-reduce:transition-none hover:bg-surface-gray-2 active:bg-surface-gray-3"
 					:class="{ 'bg-surface-elevation-3 shadow-sm': props.highlight && hit.id === current, 'opacity-50': search.searching.value }"
 					@click="emit('select', hit.id)"
 					@pointerenter="prefetch(hit.id)"
@@ -127,7 +127,7 @@ function askDelete(thread: ThreadSummary) {
 			<!-- A group that starts while the page is open (the first chat today) fades in. -->
 			<TransitionGroup tag="div" class="flex flex-col gap-4 empty:hidden" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none" enter-from-class="opacity-0">
 				<div v-for="group in searching ? [] : groups" :key="group.label" class="space-y-0.5" data-slot="thread-group">
-					<SidebarLabel class="!pl-4 [&_h3]:text-xs-medium [&_h3]:text-ink-gray-5">{{ group.label }}</SidebarLabel>
+					<SidebarLabel class="[&_h3]:text-xs-medium [&_h3]:text-ink-gray-5">{{ group.label }}</SidebarLabel>
 					<!-- A new or newly active chat slides in at the top; the others move down. -->
 					<TransitionGroup
 						tag="div"
@@ -149,6 +149,9 @@ function askDelete(thread: ThreadSummary) {
 							@focusin="prefetch(thread.id)"
 							@touchstart.passive="prefetch(thread.id)"
 						>
+							<!-- SidebarItem keeps an 8px gap for an icon; these rows have none, so the title takes it back
+							     and starts on the sidebar's 16px edge with the search icon, the group label and the credits. -->
+							<span class="-ml-2 truncate text-sm leading-tighter">{{ thread.title }}</span>
 							<template #suffix>
 								<Dropdown :options="menu(thread)" align="end">
 									<template #trigger>

@@ -92,6 +92,8 @@ function useAnotherEmail() {
 </script>
 
 <template>
+	<!-- One centred column: the heading says what each field is for, so the fields carry no labels above them
+	     that would start a second, left edge under a centred heading. -->
 	<main class="flex min-h-dvh items-center justify-center bg-surface-base px-4 text-ink-gray-8" data-slot="sign-in">
 		<div class="flex w-full max-w-sm flex-col gap-8">
 			<div class="flex flex-col items-center gap-3 text-center">
@@ -105,11 +107,11 @@ function useAnotherEmail() {
 				<p class="text-p-base text-ink-gray-8">
 					Check your email. We sent a code to <span class="font-medium text-ink-gray-9">{{ sentTo }}</span>.
 				</p>
-				<form class="flex flex-col gap-3 text-left" @submit.prevent="checkCode">
+				<form class="flex flex-col gap-3" @submit.prevent="checkCode">
 					<FormControl
 						ref="codeField"
 						v-model="code"
-						label="Code"
+						aria-label="Code"
 						size="md"
 						placeholder="123456"
 						inputmode="numeric"
@@ -125,7 +127,7 @@ function useAnotherEmail() {
 			</div>
 
 			<form v-else class="flex flex-col gap-3" @submit.prevent="send">
-				<FormControl v-model="email" type="email" label="Email" size="md" class="[&_label]:text-p-sm [&_label]:text-ink-gray-7 [@media(pointer:coarse)]:[&_input]:h-11" placeholder="you@example.org" autocomplete="email" autofocus />
+				<FormControl v-model="email" type="email" aria-label="Email" size="md" class="[@media(pointer:coarse)]:[&_input]:h-11" placeholder="Email address" autocomplete="email" autofocus />
 				<Button type="submit" variant="solid" size="md" class="[@media(pointer:coarse)]:h-11" :loading="sending">Email me a link</Button>
 			</form>
 

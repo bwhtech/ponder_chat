@@ -593,7 +593,7 @@ function replyModelId(message: UIMessage) {
 		</Conversation>
 	</div>
 
-	<footer ref="footer" class="mx-auto flex w-full max-w-[720px] shrink-0 flex-col gap-2 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5 sm:pb-5">
+	<footer ref="footer" class="scroll-gutter-match flex shrink-0 flex-col gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 		<!-- Above the field on phones; under it in the middle of the page. -->
 		<!-- The chips fade out with the greeting when the first message goes. -->
 		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
