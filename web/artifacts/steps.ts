@@ -1,12 +1,14 @@
 /**
  * What a reply has written of an artifact so far, as steps the card lists while it streams:
  * a deck's look (its <style>), then each slide by its heading; a document's sections by
- * their headings. The last step is the one being written, unless the artifact is finished.
+ * their headings. A web page has no steps. The last step is the one being written, unless the artifact is finished.
  */
+import type { ArtifactKind } from "../side-panel/panel";
+
 export type ArtifactStep = { key: string; label: string; done: boolean };
 
-export function artifactSteps(kind: "document" | "slides", content: string, finished: boolean): ArtifactStep[] {
-	const steps = kind === "slides" ? slideSteps(content) : documentSteps(content);
+export function artifactSteps(kind: ArtifactKind, content: string, finished: boolean): ArtifactStep[] {
+	const steps = kind === "slides" ? slideSteps(content) : kind === "document" ? documentSteps(content) : [];
 	return finished ? steps.map((step) => ({ ...step, done: true })) : steps;
 }
 
@@ -43,9 +45,9 @@ function plainText(text: string) {
 }
 
 /** "Writing slide 4…": what the card's second line says while a reply writes the artifact. */
-export function currentStepText(kind: "document" | "slides", steps: ArtifactStep[]) {
+export function currentStepText(kind: ArtifactKind, steps: ArtifactStep[]) {
 	const current = steps.at(-1);
-	if (!current || current.done) return kind === "slides" ? "Writing slides…" : "Writing document…";
+	if (!current || current.done) return { document: "Writing document…", slides: "Writing slides…", html: "Writing page…" }[kind];
 	if (current.key === "look") return "Setting up the look…";
 	return kind === "slides" ? `Writing ${current.label.split(" · ")[0]!.toLowerCase()}…` : `Writing “${current.label}”…`;
 }

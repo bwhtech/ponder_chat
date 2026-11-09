@@ -1,5 +1,5 @@
 import { slideCount, standaloneDeck } from "../artifacts/slides";
-import { fileKind, type Artifact, type PanelItem, type ViewedFile } from "./panel";
+import { fileKind, type Artifact, type ArtifactKind, type PanelItem, type ViewedFile } from "./panel";
 
 /** What the panel's header shows for the item it holds: icon, title, a short detail and the download. */
 export type PanelHeader = {
@@ -19,23 +19,37 @@ export function panelHeader(item: PanelItem | null, rows: number | null): PanelH
 	return { title: "", icon: "", ink: "", meta: "", copyLabel: "", download: null, inset: false };
 }
 
+/** Each kind's icon and colour, for the panel's header and the card in the reply. */
+export const ARTIFACT_LOOK: Record<ArtifactKind, { icon: string; ink: string; label: string }> = {
+	document: { icon: "lucide-file-text", ink: "text-ink-blue-6", label: "Document" },
+	slides: { icon: "lucide-presentation", ink: "text-ink-amber-6", label: "Slides" },
+	html: { icon: "lucide-app-window", ink: "text-ink-violet-6", label: "Web page" },
+};
+
 function artifactHeader(artifact: Artifact): PanelHeader {
-	const slides = artifact.kind === "slides";
 	const title = artifact.title || "Untitled";
 	return {
 		title,
-		icon: slides ? "lucide-presentation" : "lucide-file-text",
-		ink: slides ? "text-ink-amber-6" : "text-ink-blue-6",
-		meta: artifact.writing ? "Writing…" : slides ? plural(slideCount(artifact.content), "slide") : plural(wordCount(artifact.content), "word"),
-		copyLabel: slides ? "Copy HTML" : "Copy Markdown",
+		...ARTIFACT_LOOK[artifact.kind],
+		meta: artifact.writing ? "Writing…" : artifactMeta(artifact),
+		copyLabel: artifact.kind === "document" ? "Copy Markdown" : "Copy HTML",
 		// Made only once the reply finished writing it, not on every streamed word.
-		download: artifact.writing
-			? null
-			: slides
-				? { url: dataUrl("text/html", standaloneDeck(artifact.content, title)), name: `${fileName(title)}.html` }
-				: { url: dataUrl("text/markdown", artifact.content), name: `${fileName(title)}.md` },
-		inset: slides,
+		download: artifact.writing ? null : artifactFile(artifact, title),
+		inset: artifact.kind === "slides",
 	};
+}
+
+function artifactMeta(artifact: Artifact) {
+	if (artifact.kind === "slides") return plural(slideCount(artifact.content), "slide");
+	if (artifact.kind === "document") return plural(wordCount(artifact.content), "word");
+	return "";
+}
+
+function artifactFile(artifact: Artifact, title: string) {
+	const name = fileName(title);
+	if (artifact.kind === "slides") return { url: dataUrl("text/html", standaloneDeck(artifact.content, title)), name: `${name}.html` };
+	if (artifact.kind === "html") return { url: dataUrl("text/html", artifact.content), name: `${name}.html` };
+	return { url: dataUrl("text/markdown", artifact.content), name: `${name}.md` };
 }
 
 function fileHeader(file: ViewedFile, rows: number | null): PanelHeader {

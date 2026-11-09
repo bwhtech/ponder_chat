@@ -4,7 +4,8 @@ import Shimmer from "../ai-elements/shimmer/Shimmer.vue";
 import { getToolPhase, type ToolMessagePart } from "../ai-elements/tool";
 import { slideCount } from "./slides";
 import { artifactSteps, currentStepText } from "./steps";
-import { panelItem, viewArtifact, type Artifact } from "../side-panel/panel";
+import { ARTIFACT_LOOK } from "../side-panel/header";
+import { panelItem, viewArtifact, type Artifact, type ArtifactKind } from "../side-panel/panel";
 
 /**
  * A write_artifact call (server/artifacts/schema.ts) as a card in the reply. A click opens
@@ -16,7 +17,8 @@ import { panelItem, viewArtifact, type Artifact } from "../side-panel/panel";
  * While the reply writes it, the card lists the steps so far under it: a deck's look,
  * then each slide by its heading, or a document's sections. They go when it is written.
  */
-type Input = Partial<{ id: string; kind: "document" | "slides"; title: string; content: string }>;
+type Input = Partial<{ id: string; kind: ArtifactKind; title: string; content: string }>;
+const KINDS: ArtifactKind[] = ["document", "slides", "html"];
 
 const props = defineProps<{ part: ToolMessagePart; streaming?: boolean }>();
 const key = computed(() => `artifact:${props.part.toolCallId}`);
@@ -27,19 +29,19 @@ const artifact = computed<Artifact>(() => {
 	const input = (props.part.input ?? {}) as Input;
 	return {
 		id: input.id ?? "",
-		kind: input.kind === "slides" ? "slides" : "document",
+		kind: input.kind && KINDS.includes(input.kind) ? input.kind : "document",
 		title: input.title?.trim() || "Untitled",
 		content: input.content ?? "",
 		writing: phase.value === "preparing",
 	};
 });
 
-const slides = computed(() => artifact.value.kind === "slides");
+const look = computed(() => ARTIFACT_LOOK[artifact.value.kind]);
 const isOpen = computed(() => panelItem.value?.key === key.value);
 const detail = computed(() => {
 	if (failed.value) return "Could not be written";
-	const kind = slides.value ? "Slides" : "Document";
-	return slides.value ? `${kind} · ${slideCount(artifact.value.content)} slides` : kind;
+	const { label } = look.value;
+	return artifact.value.kind === "slides" ? `${label} · ${slideCount(artifact.value.content)} slides` : label;
 });
 
 const steps = computed(() => (artifact.value.writing ? artifactSteps(artifact.value.kind, artifact.value.content, false) : []));
@@ -73,7 +75,7 @@ watch(
 		@click="open"
 	>
 		<span class="flex size-10 shrink-0 items-center justify-center rounded-5 bg-surface-gray-2" aria-hidden="true">
-			<span :class="[slides ? 'lucide-presentation text-ink-amber-6' : 'lucide-file-text text-ink-blue-6', 'size-5']" />
+			<span :class="[look.icon, look.ink, 'size-5']" />
 		</span>
 		<span class="flex min-w-0 flex-1 flex-col gap-1">
 			<span class="truncate text-base-medium text-ink-gray-9">{{ artifact.title }}</span>

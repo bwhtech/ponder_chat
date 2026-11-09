@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { Button } from "frappe-ui";
+import { Button, TabButtons } from "frappe-ui";
 import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
 import DocumentView from "../artifacts/DocumentView.vue";
+import HtmlView from "../artifacts/HtmlView.vue";
 import PresentMode from "../artifacts/PresentMode.vue";
 import SlidesView from "../artifacts/SlidesView.vue";
 import { slideCount } from "../artifacts/slides";
@@ -22,9 +23,16 @@ const file = computed(() => (item.value?.type === "file" ? item.value.file : nul
 const kind = computed(() => (file.value ? fileKind(file.value.mediaType, file.value.name) : null));
 const rows = ref<number | null>(null);
 const presenting = ref(false);
+// A web page shows its preview or its code. While the reply writes it, only the code.
+const pageView = ref<"preview" | "code">("preview");
+const pageViews = [
+	{ value: "preview", label: "Preview" },
+	{ value: "code", label: "Code" },
+];
 watch(item, () => {
 	rows.value = null;
 	presenting.value = false;
+	pageView.value = "preview";
 });
 const canPresent = computed(() => artifact.value?.kind === "slides" && !artifact.value.writing && slideCount(artifact.value.content) > 0);
 
@@ -67,6 +75,7 @@ onBeforeUnmount(() => {
 				<h2 class="min-w-0 truncate text-base-medium text-ink-gray-9" :title="header.title">{{ header.title }}</h2>
 				<span v-if="header.meta" class="shrink-0 whitespace-nowrap text-sm text-ink-gray-5">{{ header.meta }}</span>
 				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
+					<TabButtons v-if="artifact?.kind === 'html' && !artifact.writing" v-model="pageView" :options="pageViews" class="mr-1" />
 					<Button v-if="canPresent" variant="ghost" icon-left="lucide-play" label="Present" class="mr-1" @click="presenting = true" />
 					<Button v-if="artifact" variant="ghost" :icon="copied ? 'lucide-check' : 'lucide-copy'" :tooltip="copied ? 'Copied' : header.copyLabel" :aria-label="header.copyLabel" :disabled="artifact.writing" @click="copy" />
 					<a v-if="header.download" :href="header.download.url" :download="header.download.name" :aria-label="`Download ${header.download.name}`" title="Download" class="panel-icon">
@@ -81,7 +90,8 @@ onBeforeUnmount(() => {
 
 			<div :key="item.key" class="min-h-0 flex-1 overflow-auto overscroll-contain" :class="header.inset ? 'bg-surface-gray-1' : ''">
 				<DocumentView v-if="artifact?.kind === 'document'" :artifact="artifact" />
-				<SlidesView v-else-if="artifact" :artifact="artifact" class="p-4 sm:p-6" />
+				<SlidesView v-else-if="artifact?.kind === 'slides'" :artifact="artifact" class="p-4 sm:p-6" />
+				<HtmlView v-else-if="artifact" :artifact="artifact" :view="pageView" />
 				<PdfPages v-else-if="file && kind === 'pdf'" :url="file.url" :name="file.name" />
 				<TableView v-else-if="file && kind === 'table'" :url="file.url" :name="file.name" :media-type="file.mediaType" @rows="rows = $event" />
 				<div v-else-if="file" class="flex min-h-full items-center justify-center p-4 sm:p-6">
