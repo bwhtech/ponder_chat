@@ -23,7 +23,12 @@ export async function fetchPage(address: string): Promise<FetchedPage> {
 	const response = await fetchFollowing(address);
 	const type = response.headers.get("content-type") ?? "";
 	if (!response.ok) throw new Error(`The page answered ${response.status}.`);
-	if (!HTML.test(type) && !TEXT.test(type)) throw new Error(`The page is ${type.split(";")[0] || "of an unknown type"}, not text that can be read.`);
+	// An image or another file is there, which is often what the model wants to know. Not an error.
+	if (!HTML.test(type) && !TEXT.test(type)) {
+		await response.body?.cancel();
+		const kind = type.split(";")[0] || "a file of an unknown type";
+		return { url: response.url || address, title: "", text: `The address answers with ${kind}, not text, so it cannot be read. It exists.`, truncated: false };
+	}
 
 	const raw = decode(await readCapped(response.body), type);
 	const page = HTML.test(type) ? readable(raw) : { title: "", text: raw };

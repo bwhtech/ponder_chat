@@ -102,7 +102,7 @@ export function getStatusBadge(state: ToolState, context: ToolStateContext = {})
 		"needs-approval": { label: "Needs approval", theme: "amber" },
 		approved: { label: "Approved", theme: "gray" },
 		denied: { label: "Denied", theme: "gray" },
-		stopped: { label: "Stopped", theme: "red" },
+		stopped: { label: "Stopped", theme: "gray" },
 		failed: { label: "Error", theme: "red" },
 		done: { label: "Done", theme: "green" },
 	};

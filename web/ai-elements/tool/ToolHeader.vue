@@ -27,6 +27,8 @@ const context = computed(() => ({ streaming: props.streaming, approved: props.ap
 const status = computed(() => getToolStatus(props.state, context.value));
 const label = computed(() => props.title ?? getToolTitle(props.state, humanizeToolName(props.toolName ?? "tool"), context.value));
 const badge = computed(() => getStatusBadge(props.state, context.value));
+// "Done" needs no badge, and a failed step's title and icon already say it failed.
+const showsBadge = computed(() => props.showBadge && badge.value.label !== "Done" && badge.value.label !== "Error");
 const iconName = computed(() => (status.value === "error" ? "lucide-circle-x" : (props.icon ?? getToolIcon(props.toolName ?? ""))));
 </script>
 
@@ -35,7 +37,7 @@ const iconName = computed(() => (status.value === "error" ? "lucide-circle-x" : 
 		<TraceLine :status="status">
 			<TraceIcon :icon="iconName" />
 			<TraceTitle :title="label">{{ label }}</TraceTitle>
-			<Badge v-if="showBadge && badge.label !== 'Done'" size="sm" :theme="badge.theme" :label="badge.label" class="shrink-0" />
+			<Badge v-if="showsBadge" size="sm" :theme="badge.theme" :label="badge.label" class="shrink-0" />
 		</TraceLine>
 	</TraceCollapsibleTrigger>
 </template>

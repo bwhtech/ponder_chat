@@ -10,7 +10,7 @@ const { open, toggle, contentId } = useTraceCollapsible("TraceCollapsibleTrigger
 		data-slot="trace-collapsible-trigger"
 		:aria-expanded="open"
 		:aria-controls="contentId"
-		class="group/trace-trigger flex w-fit min-w-0 max-w-full [@media(pointer:coarse)]:min-h-11 cursor-pointer items-center gap-1 rounded-4 text-left text-ink-gray-6 transition-colors hover:text-ink-gray-8 has-[[data-status=error]]:text-ink-red-6 [&>[data-slot=trace-line]]:text-inherit"
+		class="group/trace-trigger flex w-fit min-w-0 max-w-full [@media(pointer:coarse)]:min-h-11 cursor-pointer items-center gap-1 rounded-4 text-left text-ink-gray-6 transition-colors hover:text-ink-gray-8 [&>[data-slot=trace-line]]:text-inherit"
 		@click="toggle"
 	>
 		<slot />
