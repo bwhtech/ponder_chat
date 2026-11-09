@@ -4,8 +4,8 @@ import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { ChevronDoubleUpIcon } from "@heroicons/react/24/outline";
 import { ChatLayout, ChatMessage, ChatMessageList, ChatMessageMetadata } from "@astryxdesign/core/Chat";
-import { HStack, VStack } from "@astryxdesign/core/Layout";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { HStack } from "@astryxdesign/core/Layout";
+import { Text } from "@astryxdesign/core/Text";
 import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from "ai";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { me } from "../lib/account";
@@ -14,6 +14,8 @@ import { useStore } from "../lib/store";
 import { chatBusy, remember } from "../lib/threads";
 import SentQuotes from "../cite/SentQuotes";
 import Composer from "./Composer";
+import Landing from "./Landing";
+import PonderAvatar from "./PonderAvatar";
 import { useComposer } from "./composer/useComposer";
 import CopyButton from "./CopyButton";
 import MessageParts from "./MessageParts";
@@ -148,21 +150,36 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		showEarlier,
 	});
 
+	const field = (
+		<Composer
+			composer={composer}
+			onStop={() => composer.queue.stop()}
+			model={threadModel}
+			onModelChange={pickModel}
+			isEmpty={false}
+			outOfCredits={outOfCredits}
+			status={error && !busy ? { type: "error", message: errorMessage(error) } : undefined}
+		/>
+	);
+
+	// A new chat: the message field sits in the middle of the page, with ideas under it.
+	if (messages.length === 0)
+		return (
+			<div ref={area} className="flex min-h-0 flex-1 flex-col" data-slot="chat-view">
+				<Landing
+					composer={field}
+					onIdea={(prompt) => {
+						composer.setInput(prompt);
+						requestAnimationFrame(() => area.current?.querySelector<HTMLElement>('[contenteditable="true"], textarea')?.focus());
+					}}
+				/>
+			</div>
+		);
+
 	return (
 		<div ref={area} className="flex min-h-0 flex-1 flex-col" data-slot="chat-view">
 			<ChatLayout
-				emptyState={<Landing />}
-				composer={
-					<Composer
-						composer={composer}
-						onStop={() => composer.queue.stop()}
-						model={threadModel}
-						onModelChange={pickModel}
-						isEmpty={messages.length === 0}
-						outOfCredits={outOfCredits}
-						status={error && !busy ? { type: "error", message: errorMessage(error) } : undefined}
-					/>
-				}
+				composer={field}
 			>
 				{messages.length > 0 && (
 					<ChatMessageList isStreaming={busy} className="mx-auto w-full max-w-[760px]">
@@ -178,6 +195,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 								<ChatMessage
 									key={message.id}
 									sender={message.role === "user" ? "user" : "assistant"}
+									avatar={message.role === "assistant" ? <PonderAvatar /> : undefined}
 									metadata={
 										message.role === "assistant" && !streaming && text ? (
 											<ChatMessageMetadata
@@ -211,7 +229,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 							);
 						})}
 						{conversation.thinkingAlone && (
-							<ChatMessage sender="assistant">
+							<ChatMessage sender="assistant" avatar={<PonderAvatar />}>
 								<ThinkingLine text={conversation.thinkingText} />
 							</ChatMessage>
 						)}
@@ -219,20 +237,6 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 				)}
 			</ChatLayout>
 		</div>
-	);
-}
-
-function Landing() {
-	return (
-		<VStack gap={4} hAlign="center" className="px-4 text-center" data-slot="landing">
-			<img src="/logo.png" alt="" className="size-11" />
-			<VStack gap={2} hAlign="center">
-				<Heading level={2}>What's on your mind?</Heading>
-				<Text color="secondary" className="max-w-sm text-balance">
-					Ask anything. Pick a model below; bigger models use more of your daily credits.
-				</Text>
-			</VStack>
-		</VStack>
 	);
 }
 

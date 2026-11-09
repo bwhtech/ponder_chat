@@ -3,7 +3,10 @@ import { Avatar } from "@astryxdesign/core/Avatar";
 import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
-import { SideNav, SideNavHeading } from "@astryxdesign/core/SideNav";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { NavIcon } from "@astryxdesign/core/NavIcon";
+import { SideNav, SideNavHeading, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
+import { Toolbar } from "@astryxdesign/core/Toolbar";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Heading } from "@astryxdesign/core/Text";
 import {
@@ -12,8 +15,10 @@ import {
 	Cog6ToothIcon,
 	LightBulbIcon,
 	MoonIcon,
+	PaintBrushIcon,
 	PencilSquareIcon,
 	PuzzlePieceIcon,
+	SparklesIcon,
 	ShieldCheckIcon,
 	SunIcon,
 } from "@heroicons/react/24/outline";
@@ -70,15 +75,26 @@ export default function Workspace() {
 
 	return (
 		<AppShell
-			variant="section"
 			contentPadding={0}
 			mobileNav={{ breakpoint: "md" }}
 			sideNav={
 				<SideNav
-					header={<SideNavHeading heading="Ponder Chat" subheading={displayName(person)} icon={<img src="/logo.png" alt="" className="size-6" />} />}
+					header={
+						<SideNavHeading
+							heading="Ponder"
+							subheading={displayName(person)}
+							icon={<NavIcon icon={<Icon icon={SparklesIcon} size="sm" />} />}
+						/>
+					}
 					topContent={
-						<div className="px-2 pb-2">
-							<Button label="New chat" icon={<Icon icon={PencilSquareIcon} />} variant="secondary" width="100%" onClick={newThread} />
+						<div className="flex flex-col gap-2 pb-1">
+							<div className="px-2">
+								<Button label="New chat" icon={<Icon icon={PencilSquareIcon} />} variant="primary" width="100%" onClick={newThread} />
+							</div>
+							<SideNavSection title="Places" isHeaderHidden>
+										<SideNavItem label="Memory" icon={LightBulbIcon} isSelected={page === "memory"} onClick={(event) => (event.preventDefault(), showMemory())} />
+										<SideNavItem label="Connectors" icon={PuzzlePieceIcon} onClick={(event) => (event.preventDefault(), openSettings("connectors"))} />
+							</SideNavSection>
 						</div>
 					}
 					footer={
@@ -94,17 +110,21 @@ export default function Workspace() {
 		>
 			<div className="flex h-full min-h-0">
 				<div className="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
-					<header data-slot="chat-header" className="flex min-h-12 shrink-0 items-center gap-2 border-b border-border px-4">
-						{isLoading && !thread && page === "chat" ? (
-							<div className="min-w-0 flex-1">
-								<Skeleton width={192} height={16} />
-							</div>
-						) : (
-							<Heading level={1} className="min-w-0 flex-1 truncate !text-base">
-								{title}
-							</Heading>
-						)}
-					</header>
+					<Toolbar
+						label="Chat"
+						size="lg"
+						dividers={["bottom"]}
+						startContent={
+							isLoading && !thread && page === "chat" ? (
+								<Skeleton width={192} height={18} />
+							) : (
+								<Heading level={1} className="block max-w-[calc(100vw-7rem)] truncate !text-lg md:max-w-[min(40rem,calc(100vw-30rem))]">
+									{title}
+								</Heading>
+							)
+						}
+						endContent={<HeaderActions onNewChat={newThread} />}
+					/>
 					{page === "memory" ? (
 						<MemoryPage onOpenThread={pick} />
 					) : isLoading ? (
@@ -120,6 +140,26 @@ export default function Workspace() {
 	);
 }
 
+/** Quick actions at the right of the header: light or dark, the theme, and a new chat. */
+function HeaderActions({ onNewChat }: { onNewChat: () => void }) {
+	const mode = useStore(themeMode);
+	const dark = mode === "dark" || (mode === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+	return (
+		<div className="flex items-center gap-1">
+			<IconButton
+				className="max-md:hidden"
+				label={dark ? "Light mode" : "Dark mode"}
+				tooltip={dark ? "Light mode" : "Dark mode"}
+				variant="ghost"
+				icon={<Icon icon={dark ? SunIcon : MoonIcon} />}
+				onClick={() => themeMode.set(dark ? "light" : "dark")}
+			/>
+			<IconButton className="max-md:hidden" label="Theme" tooltip="Theme" variant="ghost" icon={<Icon icon={PaintBrushIcon} />} onClick={() => openSettings("appearance")} />
+			<IconButton label="New chat" tooltip="New chat" variant="ghost" icon={<Icon icon={PencilSquareIcon} />} onClick={onNewChat} />
+		</div>
+	);
+}
+
 /** A reply finished: its place in the list and the credits left may have changed. */
 function onSaved() {
 	void refresh();
@@ -132,7 +172,7 @@ const THEMES: { mode: ThemeMode; label: string; icon: typeof SunIcon }[] = [
 	{ mode: "system", label: "System", icon: ComputerDesktopIcon },
 ];
 
-/** Memory, Admin (for admins), Connectors, Settings, Theme and Sign out. */
+/** Memory, Admin (for admins), Connectors, Appearance, Settings, light or dark, and Sign out. */
 function AccountMenu() {
 	const person = useStore(me);
 	const mode = useStore(themeMode);
@@ -149,18 +189,19 @@ function AccountMenu() {
 				placement="above"
 				menuWidth={240}
 				hasChevron={false}
-				button={{ label: name, variant: "ghost", width: "100%", icon: <Avatar name={name} size="xsm" /> }}
+				button={{ label: name, variant: "ghost", width: "100%", icon: <Avatar name={name} size="sm" /> }}
 				items={[
 					item("Memory", LightBulbIcon, showMemory),
 					...(person?.user.role === "admin" ? [item("Admin", ShieldCheckIcon, () => location.assign("/admin"))] : []),
 					item("Connectors", PuzzlePieceIcon, () => openSettings("connectors")),
+					item("Appearance", PaintBrushIcon, () => openSettings("appearance")),
 					item("Settings", Cog6ToothIcon, () => openSettings("account")),
 					{ type: "divider" as const },
 					...THEMES.map((theme) => ({
-						label: `${theme.label} theme`,
+						label: `${theme.label} mode`,
 						icon: <Icon icon={theme.icon} />,
 						onClick: () => themeMode.set(theme.mode),
-						endContent: mode === theme.mode ? <span className="text-secondary">✓</span> : undefined,
+						endContent: mode === theme.mode ? <Icon icon="check" size="sm" color="secondary" /> : undefined,
 					})),
 					{ type: "divider" as const },
 					item("Sign out", ArrowRightStartOnRectangleIcon, () => void signOut()),
