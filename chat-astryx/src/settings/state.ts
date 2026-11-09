@@ -1,7 +1,7 @@
 import { createStore } from "../lib/store";
 
 /** The Settings dialog: closed, or open on a tab. Stub until it is ported. */
-export type SettingsTab = "account" | "connectors" | "skills";
+export type SettingsTab = "account" | "connectors";
 
 export const settings = createStore<{ tab: SettingsTab; connector?: string | null } | null>(null);
 
