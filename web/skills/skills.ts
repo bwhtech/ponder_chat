@@ -14,14 +14,10 @@ export const SKILL_PART = "data-skill";
 export type SkillPart = { type: typeof SKILL_PART; data: { name: string } };
 
 export const skills = ref<SkillOption[]>([]);
-/** The list came from the server: a skill not in it is off, or was deleted. */
-export const skillsLoaded = ref(false);
 
 export async function loadSkills() {
 	const response = await fetch("/api/skills").catch(() => undefined);
-	if (!response?.ok) return;
-	skills.value = (await response.json()).skills;
-	skillsLoaded.value = true;
+	if (response?.ok) skills.value = (await response.json()).skills;
 }
 
 export function skillDescription(name: string) {
