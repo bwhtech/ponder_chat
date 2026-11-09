@@ -3,7 +3,7 @@ import type { ReasoningUIPart, SourceUrlUIPart, UIMessage } from "ai";
 import { computed } from "vue";
 import Attachment from "../attachment/Attachment.vue";
 import Bubble from "../bubble/Bubble.vue";
-import { viewOnClick } from "../file-viewer/viewer";
+import { viewOnClick } from "../../side-panel/panel";
 import BubbleContent from "../bubble/BubbleContent.vue";
 import ConfirmationBatch from "../confirmation/ConfirmationBatch.vue";
 import { collectCitations } from "../inline-citation/collect";

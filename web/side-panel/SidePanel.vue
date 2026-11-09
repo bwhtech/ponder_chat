@@ -1,0 +1,135 @@
+<script setup lang="ts">
+import { Button } from "frappe-ui";
+import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
+import DocumentView from "../artifacts/DocumentView.vue";
+import SlidesView from "../artifacts/SlidesView.vue";
+import { panelHeader } from "./header";
+import { closePanel, fileKind, panelItem } from "./panel";
+import TableView from "./TableView.vue";
+
+/**
+ * The panel at the right of the chat, for a file or an artifact. On a wide screen it sits
+ * beside the chat; on a narrower one it covers the page. Mount it once, in the shell's row.
+ * pdf.js loads the first time a PDF opens, not with the app.
+ */
+const PdfPages = defineAsyncComponent(() => import("./PdfPages.vue"));
+
+const item = panelItem;
+const artifact = computed(() => (item.value?.type === "artifact" ? item.value.artifact.value : null));
+const file = computed(() => (item.value?.type === "file" ? item.value.file : null));
+const kind = computed(() => (file.value ? fileKind(file.value.mediaType, file.value.name) : null));
+const rows = ref<number | null>(null);
+watch(item, () => (rows.value = null));
+
+const header = computed(() => panelHeader(item.value, rows.value));
+const copied = ref(false);
+let copiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function copy() {
+	if (!artifact.value) return;
+	await navigator.clipboard.writeText(artifact.value.content).catch(() => undefined);
+	copied.value = true;
+	clearTimeout(copiedTimer);
+	copiedTimer = setTimeout(() => (copied.value = false), 2000);
+}
+
+/** Escape closes the panel, unless something else uses the key: a field, a menu or a dialog. */
+function onKeydown(event: KeyboardEvent) {
+	if (event.key !== "Escape" || event.defaultPrevented || !item.value) return;
+	const target = event.target as HTMLElement | null;
+	if (target?.closest("input, textarea, select, [contenteditable], dialog, [role=dialog], [role=menu]")) return;
+	closePanel();
+}
+watch(item, (open) => (open ? addEventListener("keydown", onKeydown) : removeEventListener("keydown", onKeydown)));
+onBeforeUnmount(() => {
+	removeEventListener("keydown", onKeydown);
+	clearTimeout(copiedTimer);
+});
+</script>
+
+<template>
+	<Transition name="side-panel">
+		<aside
+			v-if="item"
+			data-slot="side-panel"
+			:aria-label="header.title"
+			class="fixed inset-0 z-30 flex flex-col bg-surface-base pt-[env(safe-area-inset-top)] lg:static lg:z-auto lg:w-[clamp(380px,46vw,880px)] lg:shrink-0 lg:border-l lg:border-outline-gray-1 lg:pt-0"
+		>
+			<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-outline-gray-1 pl-4 pr-2 sm:pl-5">
+				<span :class="[header.icon, header.ink, 'size-4 shrink-0']" aria-hidden="true" />
+				<h2 class="min-w-0 truncate text-base-medium text-ink-gray-9" :title="header.title">{{ header.title }}</h2>
+				<span v-if="header.meta" class="shrink-0 whitespace-nowrap text-sm text-ink-gray-5">{{ header.meta }}</span>
+				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
+					<Button v-if="artifact" variant="ghost" :icon="copied ? 'lucide-check' : 'lucide-copy'" :tooltip="copied ? 'Copied' : header.copyLabel" :aria-label="header.copyLabel" :disabled="artifact.writing" @click="copy" />
+					<a v-if="header.download" :href="header.download.url" :download="header.download.name" :aria-label="`Download ${header.download.name}`" title="Download" class="panel-icon">
+						<span class="lucide-download size-4" aria-hidden="true" />
+					</a>
+					<a v-if="file" :href="file.url" target="_blank" rel="noreferrer noopener" aria-label="Open in a new tab" title="Open in a new tab" class="panel-icon">
+						<span class="lucide-external-link size-4" aria-hidden="true" />
+					</a>
+					<Button variant="ghost" icon="lucide-x" tooltip="Close (Esc)" aria-label="Close" @click="closePanel" />
+				</div>
+			</header>
+
+			<div :key="item.key" class="min-h-0 flex-1 overflow-auto overscroll-contain" :class="header.inset ? 'bg-surface-gray-1' : ''">
+				<DocumentView v-if="artifact?.kind === 'document'" :artifact="artifact" />
+				<SlidesView v-else-if="artifact" :artifact="artifact" class="p-4 sm:p-6" />
+				<PdfPages v-else-if="file && kind === 'pdf'" :url="file.url" :name="file.name" />
+				<TableView v-else-if="file && kind === 'table'" :url="file.url" :name="file.name" :media-type="file.mediaType" @rows="rows = $event" />
+				<div v-else-if="file" class="flex min-h-full items-center justify-center p-4 sm:p-6">
+					<img :src="file.url" :alt="file.name" class="max-h-[calc(100dvh-7rem)] max-w-full rounded-4 object-contain" />
+				</div>
+			</div>
+		</aside>
+	</Transition>
+</template>
+
+<style scoped>
+/* A link styled as frappe-ui's ghost icon Button, for downloads, which need a real link. */
+.panel-icon {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 0.5rem;
+	color: var(--ink-gray-7);
+	transition: background-color 150ms ease;
+}
+.panel-icon:hover {
+	background: var(--surface-gray-3);
+}
+.panel-icon:active {
+	background: var(--surface-gray-4);
+}
+.panel-icon:focus-visible {
+	outline: none;
+	box-shadow: 0 0 0 2px var(--outline-gray-3);
+}
+
+.side-panel-enter-active,
+.side-panel-leave-active {
+	transition:
+		opacity 180ms var(--ease-out-strong, ease-out),
+		transform 220ms var(--ease-out-strong, ease-out);
+}
+.side-panel-enter-from,
+.side-panel-leave-to {
+	opacity: 0;
+	transform: translateX(24px);
+}
+@media (max-width: 1023px) {
+	.side-panel-enter-from,
+	.side-panel-leave-to {
+		opacity: 1;
+		transform: translateX(100%);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.side-panel-enter-from,
+	.side-panel-leave-to {
+		transform: none;
+	}
+}
+</style>

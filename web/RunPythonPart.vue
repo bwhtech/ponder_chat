@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { Attachment } from "./ai-elements/attachment";
-import { viewOnClick } from "./ai-elements/file-viewer";
+import { viewOnClick } from "./side-panel/panel";
 import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockTitle } from "./ai-elements/code-block";
 import { getToolPhase, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "./ai-elements/tool";
 

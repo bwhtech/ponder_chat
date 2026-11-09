@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
 import { computed } from "vue";
-import { viewOnClick } from "../file-viewer/viewer";
+import { viewOnClick } from "../../side-panel/panel";
 
 /** A file chip on one line: a coloured icon or a small image, the name, the size, and an optional remove button. */
 const props = withDefaults(

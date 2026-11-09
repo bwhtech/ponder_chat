@@ -7,7 +7,7 @@ import { onBeforeUnmount, onMounted, ref, shallowRef } from "vue";
 /**
  * Every page of a PDF in one column that scrolls. A page draws when it comes
  * near the screen, so a long PDF does not draw all its pages at once.
- * This file and pdf.js load only when the viewer first opens a PDF.
+ * This file and pdf.js load only when the side panel first opens a PDF.
  */
 const props = defineProps<{ url: string; name: string }>();
 
@@ -96,10 +96,10 @@ async function draw(number: number, element: HTMLElement) {
 </script>
 
 <template>
-	<div data-slot="pdf-pages" class="flex min-h-full flex-col items-center gap-3 px-3 pb-8 sm:px-8" aria-live="polite">
+	<div data-slot="pdf-pages" class="flex min-h-full flex-col items-center gap-3 p-3 pb-8 sm:p-6" aria-live="polite">
 		<div v-if="failed" class="mt-[20vh] flex flex-col items-center gap-3 text-center">
-			<p class="text-base text-white/80">This PDF could not be shown.</p>
-			<a :href="url" :download="name" class="text-sm-medium text-white underline underline-offset-2">Download it</a>
+			<p class="text-base text-ink-gray-7">This PDF could not be shown.</p>
+			<a :href="url" :download="name" class="text-sm-medium text-ink-gray-8 underline underline-offset-2">Download it</a>
 		</div>
 		<template v-else-if="pages.length">
 			<div
@@ -107,7 +107,7 @@ async function draw(number: number, element: HTMLElement) {
 				:key="page.number"
 				:ref="watchPage"
 				:data-page="page.number"
-				class="relative w-full max-w-[860px] overflow-hidden rounded-2 bg-white shadow-2xl"
+				class="relative w-full max-w-[860px] overflow-hidden rounded-2 bg-white shadow-sm ring-1 ring-black/5"
 				:style="{ aspectRatio: page.ratio }"
 				:aria-label="`Page ${page.number} of ${pages.length}`"
 				role="img"
@@ -120,6 +120,6 @@ async function draw(number: number, element: HTMLElement) {
 			</div>
 		</template>
 		<!-- Loading: a page-shaped placeholder. -->
-		<Skeleton v-else class="aspect-[1/1.414] w-full max-w-[860px] rounded-2 !bg-white/10" />
+		<Skeleton v-else class="aspect-[1/1.414] w-full max-w-[860px] rounded-2" />
 	</div>
 </template>

@@ -19,6 +19,7 @@ import CitationChip, { type CiteAnchor } from "./cite/CitationChip.vue";
 import CiteButton from "./cite/CiteButton.vue";
 import { markQuote, revealCitation } from "./cite/highlight";
 import { useCiteSelection } from "./cite/selection";
+import ArtifactPart from "./artifacts/ArtifactPart.vue";
 import RunPythonPart from "./RunPythonPart.vue";
 import { useSkillPicker } from "./skills/picker";
 import SkillChip from "./skills/SkillChip.vue";
@@ -153,8 +154,9 @@ const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,applica
 // A Python run shows its code, what it printed, and the files it made.
 // Searches and page reads are one line each, so they fold with the steps around them.
 // A skill Ponder chose (use_skill) stays a line of its own, so the person sees which skill shaped the reply.
+// An artifact (write_artifact) is a card that opens it in the side panel.
 provideToolRenderers(
-	{ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart, use_skill: UseSkillPart },
+	{ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart, use_skill: UseSkillPart, write_artifact: ArtifactPart },
 	{ foldable: ["web_search", "web_fetch"] },
 );
 

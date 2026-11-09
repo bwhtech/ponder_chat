@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import { BottomSheet, Button, Sidebar, SidebarHeader, Skeleton, toast } from "frappe-ui";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { me, refreshCredits, signOut } from "./account";
 import { loadConnectors } from "./connectors/api";
 import SettingsModal from "./settings/SettingsModal.vue";
 import { openSettings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
-import { FileViewer } from "./ai-elements/file-viewer";
 import CreditMeter from "./CreditMeter.vue";
 import { useCreditRequestWatch } from "./credit-request";
 import MemoryView from "./MemoryView.vue";
 import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
+import { closePanel } from "./side-panel/panel";
+import SidePanel from "./side-panel/SidePanel.vue";
 import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
 
@@ -26,6 +27,8 @@ useCreditRequestWatch();
 // The main area shows the open chat, or the Memory page (?view=memory).
 const view = ref<"chat" | "memory">(viewInUrl());
 addEventListener("popstate", () => (view.value = viewInUrl()));
+// The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
+watch([current, view], closePanel);
 
 function viewInUrl() {
 	return new URL(location.href).searchParams.get("view") === "memory" ? "memory" : "chat";
@@ -135,6 +138,8 @@ function onSaved() {
 					@open-memory="showMemory"
 				/>
 			</div>
+
+			<SidePanel />
 		</div>
 
 		<BottomSheet v-model:open="sheetOpen" title="Chats">
@@ -147,8 +152,6 @@ function onSaved() {
 				</div>
 			</div>
 		</BottomSheet>
-
-		<FileViewer />
 
 		<SettingsModal />
 	</div>
