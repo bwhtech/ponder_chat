@@ -33,6 +33,11 @@ export const revision = createStore(0);
  * saves them (remember) without an etag, so the next open fetches the thread whole.
  */
 export const chatBusy = createStore(false);
+/**
+ * Threads whose chat closed after an error. The run may go on, or have ended, on the server,
+ * so the copy kept here may be behind: the next open waits for the server's copy.
+ */
+const unsure = new Set<string>();
 // Each open() takes a number; a slower answer for a thread no longer open is dropped.
 let opening = 0;
 const inflight = new Map<string, Promise<CachedThread | "same" | undefined>>();
@@ -74,16 +79,18 @@ export async function refresh() {
 }
 
 export async function open(id: string, { push = true } = {}) {
-	if (id === current.get()) return;
+	const again = id === current.get();
+	if (again && !unsure.has(id)) return;
 	const token = ++opening;
+	const trusted = !unsure.delete(id);
 	// The messages change with the id, so the chat never mounts the new thread with the old one's messages.
-	const peeked = peekThread(id);
+	const peeked = trusted ? peekThread(id) : undefined;
 	if (peeked) show(peeked);
 	else loading.set(true);
 	current.set(id);
-	setUrl(id, push);
+	if (!again) setUrl(id, push);
 
-	const cached = peeked ?? (await readThread(id));
+	const cached = peeked ?? (trusted ? await readThread(id) : undefined);
 	if (token !== opening) return;
 	if (cached && !peeked) show(cached);
 
@@ -97,6 +104,15 @@ export async function open(id: string, { push = true } = {}) {
 	if (chatBusy.get()) return;
 	show(fresh);
 	revision.set((value) => value + 1);
+}
+
+/**
+ * The chat of this thread closed after an error (unsure). For the open thread (Memory shows)
+ * the server is asked now, so the chat mounts again only with its copy, however the person comes back.
+ */
+export function markUnsure(id: string) {
+	unsure.add(id);
+	if (id === current.get()) void open(id, { push: false });
 }
 
 /** Fetches a thread into the cache ahead of a click: on hover, focus or touch in the list. */

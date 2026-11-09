@@ -13,8 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { me } from "../lib/account";
 import { model as lastPicked, modelName, models as modelList } from "../lib/models";
 import { useStore } from "../lib/store";
-import { chatBusy, remember } from "../lib/threads";
-import { toastError } from "../lib/toast";
+import { chatBusy, markUnsure, remember } from "../lib/threads";
 import SentQuotes from "../cite/SentQuotes";
 import Composer from "./Composer";
 import Landing from "./Landing";
@@ -26,6 +25,7 @@ import "./parts/register";
 import RememberedNotes from "./parts/RememberedNotes";
 import { AskedSkills, ThinkingLine } from "./parts/ReplyLines";
 import { useConversation } from "./parts/useConversation";
+import { useRecovery } from "./useRecovery";
 
 /** One chat: the conversation and the message field. The shell mounts a new one per thread. */
 export type ChatViewProps = {
@@ -84,7 +84,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		[],
 	);
 
-	const { messages, setMessages, sendMessage, addToolApprovalResponse, status, error, stop, resumeStream, regenerate } = useChat({
+	const { messages, setMessages, sendMessage, addToolApprovalResponse, status, error, stop, resumeStream, regenerate, clearError } = useChat({
 		id: threadId,
 		messages: initialMessages,
 		transport,
@@ -97,27 +97,16 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	// The replay rebuilds the reply on the run's base, as the server does when it saves (saveReply).
 	restoreBase.current = () => setMessages(base.current);
 
-	// Reconnecting to the run waits for the server before the SDK's status changes. Until the
-	// replay starts, the chat counts as busy: for the queue, the list's revalidation (chatBusy),
-	// the messages on screen, and what is kept when the chat closes.
-	const [resuming, setResuming] = useState(running);
-	const resumes = useRef(0);
+	// Following the reply again after a reload, and Retry (useRecovery.ts).
+	const recovery = useRecovery({
+		threadId,
+		running,
+		chat: { status, setMessages, sendMessage, regenerate, resumeStream, clearError },
+		base,
+		onSaved: () => callbacks.current.onSaved(),
+	});
 	/** Stop could not reach the server: a banner offers to try again. */
 	const [stopFailed, setStopFailed] = useState(false);
-	async function reconnect() {
-		const token = ++resumes.current;
-		setResuming(true);
-		try {
-			await resumeStream();
-		} finally {
-			if (token === resumes.current) setResuming(false);
-		}
-	}
-	// The reply was still being written when the thread loaded (after a reload, say): follow it.
-	useEffect(() => {
-		if (running) void reconnect();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, []);
 	// "Always allow" answers once its rule is saved; by then this chat may have closed.
 	const mounted = useRef(false);
 	useEffect(() => {
@@ -127,10 +116,13 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		};
 	}, []);
 
-	const chatStatus = resuming && status === "ready" ? "submitted" : status;
+	// While recovery waits for the server, the SDK's status still says ready, or error.
+	const chatStatus = recovery.pending && (status === "ready" || status === "error") ? "submitted" : status;
 	const busy = chatStatus === "submitted" || chatStatus === "streaming";
 	const latest = useRef(messages);
 	latest.current = messages;
+	const failed = useRef(false);
+	failed.current = status === "error";
 	const wasBusy = useRef(busy);
 	useEffect(() => {
 		chatBusy.set(busy);
@@ -142,8 +134,10 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	}, [busy, threadId]);
 	useEffect(
 		() => () => {
+			// Closed after an error: the run may go on, or have ended, on the server. The next open asks it first.
+			if (failed.current) markUnsure(threadId);
 			// Closed mid-reply: the next open follows the run again, and its replay rebuilds the reply on the base.
-			if (wasBusy.current) remember(threadId, { messages: base.current, running: true });
+			else if (wasBusy.current) remember(threadId, { messages: base.current, running: true });
 			chatBusy.set(false);
 		},
 		[threadId],
@@ -157,6 +151,8 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	 * the person can try again. True when the run stopped.
 	 */
 	async function stopRun() {
+		// A Retry still asking the server is dropped: it must not start a reply after Stop.
+		recovery.cancel();
 		const response = await fetch(`/api/chat/${encodeURIComponent(threadId)}/stop`, { method: "POST" }).catch(() => undefined);
 		if (!response?.ok) {
 			if (mounted.current) setStopFailed(true);
@@ -165,19 +161,6 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		setStopFailed(false);
 		await stop();
 		return true;
-	}
-
-	/**
-	 * Retry after an error. A reply still running on the server (the connection dropped) is
-	 * followed again; otherwise the last message is sent again (regenerate).
-	 */
-	async function retry() {
-		const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}`, { cache: "no-store" }).catch(() => undefined);
-		if (!response?.ok) return toastError("Ponder Chat could not reach the server. Try again.");
-		const thread = (await response.json()) as { running?: boolean };
-		if (!mounted.current) return;
-		if (thread.running) await reconnect();
-		else await regenerate();
 	}
 
 	const lastMessage = messages[messages.length - 1];
@@ -296,7 +279,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 								status="error"
 								title="Something went wrong"
 								description={errorMessage(error)}
-								endContent={<Button label="Retry" variant="secondary" size="sm" onClick={() => void retry()} />}
+								endContent={<Button label="Retry" variant="secondary" size="sm" onClick={() => void recovery.retry()} />}
 								data-slot="chat-error"
 							/>
 						)}
