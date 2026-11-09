@@ -207,7 +207,7 @@
 :is(a, button) > [data-slot='trace-line'] {
   cursor: pointer;
 }
-:is(a, button):hover > [data-slot='trace-line']:not([data-status='error']) {
+:is(a, button):hover > [data-slot='trace-line'] {
   color: var(--ink-gray-8);
 }
 
