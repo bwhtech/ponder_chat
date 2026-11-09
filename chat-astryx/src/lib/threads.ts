@@ -33,11 +33,21 @@ export const revision = createStore(0);
  * saves them (remember) without an etag, so the next open fetches the thread whole.
  */
 export const chatBusy = createStore(false);
+/** A reply that failed in a chat that then closed: what was sent, what the chat showed, and why. */
+export type Failure = { sent: UIMessage[]; messages: UIMessage[]; error: string };
 /**
- * Threads whose chat closed after an error. The run may go on, or have ended, on the server,
- * so the copy kept here may be behind: the next open waits for the server's copy.
+ * Failed replies by thread, kept until a reply succeeds or the server shows it took the
+ * attempt. Reopened, the chat shows its own messages again and offers Retry (useRecovery.ts).
+ */
+const failures = new Map<string, Failure>();
+export const failureOf = (id: string) => failures.get(id);
+/**
+ * Failed threads the server has not been asked about yet. The run may go on, or have ended,
+ * there, so the next open waits for the server's copy; until it answers, they stay here.
  */
 const unsure = new Set<string>();
+/** Failed threads to ask the server about once their chat has closed (markFailed). */
+const closing = new Set<string>();
 // Each open() takes a number; a slower answer for a thread no longer open is dropped.
 let opening = 0;
 const inflight = new Map<string, Promise<CachedThread | "same" | undefined>>();
@@ -82,7 +92,7 @@ export async function open(id: string, { push = true } = {}) {
 	const again = id === current.get();
 	if (again && !unsure.has(id)) return;
 	const token = ++opening;
-	const trusted = !unsure.delete(id);
+	const trusted = !unsure.has(id);
 	// The messages change with the id, so the chat never mounts the new thread with the old one's messages.
 	const peeked = trusted ? peekThread(id) : undefined;
 	if (peeked) show(peeked);
@@ -97,6 +107,7 @@ export async function open(id: string, { push = true } = {}) {
 	const fresh = await fetchThread(id, cached?.etag ?? null);
 	if (token !== opening) return;
 	loading.set(false);
+	if (!trusted) return showFailed(id, fresh);
 	if (!cached) return show(fresh && fresh !== "same" ? fresh : (peekThread(id) ?? { messages: [], running: false, etag: null }));
 	// Nothing new, or the same messages under a new version (the page saved them itself).
 	if (!fresh || fresh === "same" || sameThread(cached, fresh)) return;
@@ -107,12 +118,55 @@ export async function open(id: string, { push = true } = {}) {
 }
 
 /**
- * The chat of this thread closed after an error (unsure). For the open thread (Memory shows)
- * the server is asked now, so the chat mounts again only with its copy, however the person comes back.
+ * The chat of this thread closed after an error. For the open thread (Memory shows) the
+ * server is asked now, so the chat mounts again only after it answers, however the person
+ * comes back. Not when the chat mounted again at once (StrictMode, in development): see chatMounted.
  */
-export function markUnsure(id: string) {
+export function markFailed(id: string, failure: Failure) {
+	failures.set(id, failure);
 	unsure.add(id);
-	if (id === current.get()) void open(id, { push: false });
+	closing.add(id);
+	queueMicrotask(() => {
+		if (closing.delete(id) && id === current.get()) void open(id, { push: false });
+	});
+}
+
+/** A chat mounted for this thread: one that closed a moment ago mounted again (StrictMode, in development). */
+export function chatMounted(id: string) {
+	closing.delete(id);
+}
+
+/** A reply succeeded, or Retry found the server's: the failure is over. */
+export function forgetFailure(id: string) {
+	failures.delete(id);
+	unsure.delete(id);
+}
+
+/**
+ * A failed thread, after the server answered (or did not). A reply that runs there, or one
+ * that took the attempt, shows the server's copy. Otherwise the chat keeps its own messages
+ * and offers Retry; when the server could not be reached, the next open asks again.
+ */
+function showFailed(id: string, fresh: CachedThread | "same" | undefined) {
+	const failure = failures.get(id);
+	const server = fresh && fresh !== "same" ? fresh : undefined;
+	if (server) unsure.delete(id);
+	if (server && (!failure || server.running || repliedOnServer(server.messages, failure.sent))) {
+		failures.delete(id);
+		return show(server);
+	}
+	show({ messages: failure?.messages ?? peekThread(id)?.messages ?? [], running: false, etag: null });
+}
+
+/**
+ * The server holds a reply to `sent` that the chat does not: messages after its last one,
+ * or more parts in the assistant message it carried on (server/workflow/reply.ts, saveReply).
+ */
+export function repliedOnServer(server: UIMessage[], sent: UIMessage[]) {
+	const last = sent[sent.length - 1];
+	const at = last ? server.findIndex((message) => message.id === last.id) : -1;
+	if (at === -1) return false;
+	return at < server.length - 1 || (last.role === "assistant" && server[at].parts.length > last.parts.length);
 }
 
 /** Fetches a thread into the cache ahead of a click: on hover, focus or touch in the list. */

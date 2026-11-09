@@ -13,7 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { me } from "../lib/account";
 import { model as lastPicked, modelName, models as modelList } from "../lib/models";
 import { useStore } from "../lib/store";
-import { chatBusy, markUnsure, remember } from "../lib/threads";
+import { chatBusy, chatMounted, failureOf, forgetFailure, markFailed, remember } from "../lib/threads";
 import SentQuotes from "../cite/SentQuotes";
 import Composer from "./Composer";
 import Landing from "./Landing";
@@ -63,10 +63,16 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	const callbacks = useRef({ onSaved, onRefused });
 	callbacks.current = { onSaved, onRefused };
 
+	// A reply that failed before this chat last closed (threads.ts): Retry is offered again.
+	const [failure] = useState(() => failureOf(threadId));
+	useEffect(() => {
+		chatMounted(threadId);
+	}, [threadId]);
 	// The messages the run this chat follows started from: what it last sent, or, for a reply
 	// still being written when the thread loaded, the thread as it loaded (the server saves
 	// the thread before the run, and a chat closed mid-reply keeps only this, see below).
-	const base = useRef(initialMessages);
+	// After a failure, what the failed attempt sent.
+	const base = useRef(failure?.sent ?? initialMessages);
 	const restoreBase = useRef(() => {});
 	const transport = useMemo(
 		() =>
@@ -103,6 +109,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		running,
 		chat: { status, setMessages, sendMessage, regenerate, resumeStream, clearError },
 		base,
+		failure,
 		onSaved: () => callbacks.current.onSaved(),
 	});
 	/** Stop could not reach the server: a banner offers to try again. */
@@ -116,26 +123,33 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		};
 	}, []);
 
+	// A failure from before the chat closed counts as an error: the queue waits, Retry shows.
+	const sdkStatus = recovery.failure && status === "ready" ? "error" : status;
 	// While recovery waits for the server, the SDK's status still says ready, or error.
-	const chatStatus = recovery.pending && (status === "ready" || status === "error") ? "submitted" : status;
+	const chatStatus = recovery.pending && (sdkStatus === "ready" || sdkStatus === "error") ? "submitted" : sdkStatus;
+	const errorText = error ? errorMessage(error) : recovery.failure?.error;
 	const busy = chatStatus === "submitted" || chatStatus === "streaming";
 	const latest = useRef(messages);
 	latest.current = messages;
-	const failed = useRef(false);
-	failed.current = status === "error";
+	const failed = useRef<string | undefined>(undefined);
+	failed.current = sdkStatus === "error" ? (errorText ?? "") : undefined;
 	const wasBusy = useRef(busy);
 	useEffect(() => {
 		chatBusy.set(busy);
 		// A reply ended: keep this chat's messages, so coming back to it is instant. After an error
 		// the run may go on; the next open asks the server, which says so.
-		if (wasBusy.current && !busy) remember(threadId, { messages: latest.current, running: false });
+		if (wasBusy.current && !busy) {
+			remember(threadId, { messages: latest.current, running: false });
+			if (sdkStatus !== "error") forgetFailure(threadId);
+		}
 		wasBusy.current = busy;
 		if (!busy) setStopFailed(false);
 	}, [busy, threadId]);
 	useEffect(
 		() => () => {
-			// Closed after an error: the run may go on, or have ended, on the server. The next open asks it first.
-			if (failed.current) markUnsure(threadId);
+			// Closed after an error: the run may go on, or have ended, on the server. The next open asks
+			// it first, and keeps this chat's messages and Retry unless the server took the attempt.
+			if (failed.current !== undefined) markFailed(threadId, { sent: base.current, messages: latest.current, error: failed.current });
 			// Closed mid-reply: the next open follows the run again, and its replay rebuilds the reply on the base.
 			else if (wasBusy.current) remember(threadId, { messages: base.current, running: true });
 			chatBusy.set(false);
@@ -274,11 +288,11 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 							/>
 						)}
 						{/* Out of credits, the notice under the field says why and when they refill. */}
-						{error && !busy && !outOfCredits && (
+						{errorText !== undefined && !busy && !outOfCredits && (
 							<Banner
 								status="error"
 								title="Something went wrong"
-								description={errorMessage(error)}
+								description={errorText || "Something went wrong. Try again."}
 								endContent={<Button label="Retry" variant="secondary" size="sm" onClick={() => void recovery.retry()} />}
 								data-slot="chat-error"
 							/>

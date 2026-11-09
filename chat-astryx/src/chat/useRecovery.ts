@@ -1,5 +1,6 @@
 import type { ChatStatus, UIMessage } from "ai";
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { repliedOnServer, type Failure } from "../lib/threads";
 import { toastError } from "../lib/toast";
 
 /** What recovery needs from useChat. */
@@ -19,6 +20,8 @@ type RecoveryOptions = {
 	chat: Chat;
 	/** The messages the run this chat follows started from (ChatView). */
 	base: RefObject<UIMessage[]>;
+	/** The reply failed before the chat last closed (threads.ts): Retry is offered again. */
+	failure: Failure | undefined;
 	/** Retry found the reply finished on the server: its place in the list and the credits changed. */
 	onSaved: () => void;
 };
@@ -32,10 +35,12 @@ type RecoveryOptions = {
  * Retry first asks the server what became of the reply. One that still runs is followed
  * again; one the server finished is shown; otherwise what failed is sent again: the
  * person's message (regenerate), or an answered approval, which carries on its message.
+ * A reply that failed before the chat closed comes back as `failure`, with Retry.
  */
-export function useRecovery({ threadId, running, chat, base, onSaved }: RecoveryOptions) {
+export function useRecovery({ threadId, running, chat, base, failure, onSaved }: RecoveryOptions) {
 	const latest = useRef({ chat, onSaved });
 	latest.current = { chat, onSaved };
+	const restoredRef = useRef(failure);
 	const mounted = useRef(false);
 	useEffect(() => {
 		mounted.current = true;
@@ -61,6 +66,14 @@ export function useRecovery({ threadId, running, chat, base, onSaved }: Recovery
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
+	// A failure from before the chat closed, until a reply starts: the chat acts as after an error.
+	const [restored, setRestored] = useState(failure);
+	restoredRef.current = restored;
+	const busy = chat.status === "submitted" || chat.status === "streaming";
+	useEffect(() => {
+		if (busy) setRestored(undefined);
+	}, [busy]);
+
 	// Retry asking the server: one at a time. Its token, or null; Stop drops it (cancel).
 	const [checking, setChecking] = useState(false);
 	const check = useRef<number | null>(null);
@@ -84,8 +97,9 @@ export function useRecovery({ threadId, running, chat, base, onSaved }: Recovery
 		setChecking(false);
 		const { chat } = latest.current;
 		// The chat closed, or a reply started meanwhile (an approval answered, say).
-		if (!mounted.current || chat.status !== "error") return;
+		if (!mounted.current || (chat.status !== "error" && !restoredRef.current)) return;
 		if (!thread) return toastError("Ponder Chat could not reach the server. Try again.");
+		setRestored(undefined);
 		if (thread.running) return follow();
 		if (repliedOnServer(thread.messages, base.current)) {
 			base.current = thread.messages;
@@ -103,7 +117,7 @@ export function useRecovery({ threadId, running, chat, base, onSaved }: Recovery
 		else await chat.regenerate();
 	}
 
-	return { pending: following || checking, retry, cancel };
+	return { pending: following || checking, failure: restored, retry, cancel };
 }
 
 /** The server's copy of the thread, or null when it could not be reached. */
@@ -116,15 +130,4 @@ async function serverThread(threadId: string): Promise<{ messages: UIMessage[]; 
 	} catch {
 		return null;
 	}
-}
-
-/**
- * The server holds a reply to `sent` that the chat does not: messages after its last one,
- * or more parts in the assistant message it carried on (server/workflow/reply.ts, saveReply).
- */
-function repliedOnServer(server: UIMessage[], sent: UIMessage[]) {
-	const last = sent[sent.length - 1];
-	const at = last ? server.findIndex((message) => message.id === last.id) : -1;
-	if (at === -1) return false;
-	return at < server.length - 1 || (last.role === "assistant" && server[at].parts.length > last.parts.length);
 }
