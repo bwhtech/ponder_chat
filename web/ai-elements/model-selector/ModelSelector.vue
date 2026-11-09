@@ -40,7 +40,7 @@ const touch = matchMedia("(pointer: coarse)").matches;
 		@update:model-value="(value) => value != null && (model = String(value))"
 	>
 		<template #trigger>
-			<Button variant="ghost" size="sm" icon-right="lucide-chevron-down" :aria-label="`${label}: ${current?.name ?? 'none'}`" class="min-w-0 max-w-full !text-ink-gray-7 hover:!text-ink-gray-8">
+			<Button variant="ghost" size="sm" icon-right="lucide-chevron-down" :aria-label="`${label}: ${current?.name ?? 'none'}`" class="min-w-0 max-w-full !text-ink-gray-6 hover:!text-ink-gray-8 relative after:absolute after:inset-0 after:content-[''] [@media(pointer:coarse)]:after:-inset-y-2">
 				{{ current?.name ?? label }}
 			</Button>
 		</template>

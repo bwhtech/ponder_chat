@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button, SettingsContent, SettingsDialog, SettingsNavGroup, SettingsNavItem, SettingsPanel, SettingsSidebar } from "frappe-ui";
 import { computed, watch } from "vue";
-import { connectors, loadConnectors } from "../connectors/api";
+import { connectors, connectorsError, loadConnectors } from "../connectors/api";
 import ConnectorPage from "../connectors/ConnectorPage.vue";
 import ConnectorsPanel from "../connectors/ConnectorsPanel.vue";
 import AccountPanel from "./AccountPanel.vue";
@@ -34,11 +34,11 @@ watch(
 	<SettingsDialog v-model:open="settings.open" v-model:tab="tab">
 		<SettingsSidebar>
 			<SettingsNavGroup label="Settings" class="[&>div:first-child]:text-xs-medium">
-				<SettingsNavItem value="account">
+				<SettingsNavItem value="account" class="!text-sm [@media(pointer:coarse)]:!h-11">
 					<template #prefix><span class="lucide-circle-user size-4 text-ink-gray-6" aria-hidden="true" /></template>
 					Account
 				</SettingsNavItem>
-				<SettingsNavItem value="connectors">
+				<SettingsNavItem value="connectors" class="!text-sm [@media(pointer:coarse)]:!h-11">
 					<template #prefix><span class="lucide-plug size-4 text-ink-gray-6" aria-hidden="true" /></template>
 					Connectors
 					<template #suffix>
@@ -50,11 +50,11 @@ watch(
 		<SettingsContent>
 			<SettingsPanel value="account"><AccountPanel /></SettingsPanel>
 			<SettingsPanel value="connectors">
-				<ConnectorPage v-if="connector" :key="connector.id" :connector="connector" />
+				<ConnectorPage v-if="connector && !connectorsError" :key="connector.id" :connector="connector" />
 				<ConnectorsPanel v-else />
 			</SettingsPanel>
 		</SettingsContent>
 		<!-- Close. A phone has no backdrop to tap, since the dialog fills the screen (style.css). After the content, so the dialog does not open with focus on it. -->
-		<Button data-slot="settings-close" class="absolute right-2 top-2 z-10 sm:right-5 sm:top-[1.875rem]" variant="ghost" icon="lucide-x" aria-label="Close settings" @click="settings.open = false" />
+		<Button data-slot="settings-close" class="absolute right-2 top-2 z-10 after:absolute after:inset-0 after:content-[''] sm:right-8 sm:top-9 [@media(pointer:coarse)]:after:-inset-2" variant="ghost" icon="lucide-x" aria-label="Close settings" @click="settings.open = false" />
 	</SettingsDialog>
 </template>

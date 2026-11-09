@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { Alert, Button, Skeleton } from "frappe-ui";
+import { Button, Skeleton } from "frappe-ui";
 import { ref } from "vue";
 import PanelBody from "../settings/PanelBody.vue";
 import PanelHeader from "../settings/PanelHeader.vue";
 import AddConnectorDialog from "./AddConnectorDialog.vue";
 import { connectors, connectorsError, loadConnectors } from "./api";
 import ConnectorRow from "./ConnectorRow.vue";
+import EmptyState from "../EmptyState.vue";
 
 /** Settings, Connectors: the MCP servers the person connected, and Add connector. */
 const adding = ref(false);
@@ -14,18 +15,14 @@ const retry = () => void loadConnectors().catch(() => undefined);
 
 <template>
 	<PanelHeader title="Connectors" description="Apps that Ponder can use for you.">
-		<template v-if="connectors?.length" #actions>
+		<template v-if="connectors?.length && !connectorsError" #actions>
 			<Button variant="solid" theme="gray" icon-left="lucide-plus" label="Add connector" @click="adding = true" />
 		</template>
 	</PanelHeader>
 	<PanelBody>
-		<Alert
-			v-if="!connectors && connectorsError"
-			theme="red"
-			title="The connectors did not load"
-			:description="connectorsError"
-			:primary-action="{ label: 'Retry', onClick: retry }"
-		/>
+		<EmptyState v-if="connectorsError" icon="lucide-circle-alert" title="The connectors could not load" :body="connectorsError" alert>
+			<Button label="Try again" @click="retry" />
+		</EmptyState>
 
 		<div v-else-if="!connectors" class="divide-y divide-outline-gray-1" aria-busy="true" aria-label="Loading connectors">
 			<div v-for="n in 3" :key="n" class="flex items-center gap-3 py-3">
@@ -48,14 +45,15 @@ const retry = () => void loadConnectors().catch(() => undefined);
 			</p>
 		</template>
 
-		<div v-else data-slot="connectors-empty" class="flex flex-col items-center justify-center text-center">
-			<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-6">
-				<span class="lucide-plug size-6" aria-hidden="true" />
-			</div>
-			<p class="mt-4 text-lg-medium text-ink-gray-8">No connectors yet</p>
-			<p class="mt-1.5 max-w-md text-balance text-p-base text-ink-gray-6">Connect Linear, Notion, a Frappe site or any MCP server. Then Ponder can look things up and do things there for you.</p>
-			<Button variant="solid" theme="gray" icon-left="lucide-plus" label="Add connector" class="mt-6" @click="adding = true" />
-		</div>
+		<EmptyState
+			v-else
+			data-slot="connectors-empty"
+			icon="lucide-plug"
+			title="No connectors yet"
+			body="Connect Linear, Notion, a Frappe site or any MCP server. Then Ponder can look things up and do things there for you."
+		>
+			<Button variant="solid" theme="gray" icon-left="lucide-plus" label="Add connector" @click="adding = true" />
+		</EmptyState>
 	</PanelBody>
 	<AddConnectorDialog v-model:open="adding" />
 </template>

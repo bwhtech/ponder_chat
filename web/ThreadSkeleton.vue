@@ -23,8 +23,8 @@ const turns = [
 			</div>
 		</div>
 	</div>
-	<footer class="mx-auto w-full max-w-[720px] shrink-0 px-4 pb-3 sm:px-5">
-		<div class="flex h-[104px] flex-col justify-between rounded-7 border border-outline-gray-2 p-3">
+	<footer class="mx-auto w-full max-w-[720px] shrink-0 px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5 sm:pb-5">
+		<div class="flex h-[90px] flex-col justify-between rounded-7 border border-outline-gray-2 p-3">
 			<Skeleton class="h-3.5 w-2/3 rounded-4" />
 			<div class="flex items-center gap-2">
 				<Skeleton class="size-7 rounded-full" />

@@ -20,6 +20,7 @@ import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skill
 import UseSkillPart from "./skills/UseSkillPart.vue";
 import WebToolPart from "./WebToolPart.vue";
 import { useThreads } from "./threads";
+import { clockTime } from "./dates";
 import {
 	Conversation,
 	ConversationContent,
@@ -160,7 +161,7 @@ onMounted(() => {
 
 const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
 const refillTime = computed(() =>
-	me.value ? new Date(me.value.credits.resetsAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "",
+	me.value ? clockTime(me.value.credits.resetsAt) : "",
 );
 // While a request for more credits waits, the notice says so and has no button.
 const creditNotice = computed(() => outOfCreditsNotice(me.value?.credits, refillTime.value));
@@ -484,7 +485,7 @@ function replyModelId(message: UIMessage) {
 				<img src="/logo.png" alt="" class="size-11" />
 				<div class="space-y-2">
 					<p class="text-4xl-semibold text-ink-gray-9">What's on your mind?</p>
-					<p class="mx-auto max-w-sm text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything. Pick a model below; bigger models use more of your daily credits.</p>
+					<p class="mx-auto max-w-sm text-balance text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything. Pick a model below; bigger models use more of your daily credits.</p>
 				</div>
 			</ConversationEmptyState>
 		</Transition>
@@ -530,14 +531,14 @@ function replyModelId(message: UIMessage) {
 									:value="replyText(message)"
 									:class="{ 'opacity-0 transition-opacity duration-150 ease-out-strong focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100': message.id !== lastReplyId }"
 								/>
-								<span v-if="replyModel(message)" class="px-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
+								<span v-if="replyModel(message)" class="pr-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
 							</MessageActions>
 							<div
 								v-for="{ save, operations } in remembered.get(message.id) ?? []"
 								:key="save.id"
 								data-slot="memory-saved"
 								:data-new="newSaves.has(save.id) || undefined"
-								class="-ml-1 -mt-1 flex flex-wrap items-start gap-x-1"
+								class="-ml-1 -mt-3 flex flex-wrap items-start gap-x-1 [@media(pointer:coarse)]:mt-0 [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:gap-x-2"
 							>
 								<div class="min-w-0">
 									<button
@@ -545,25 +546,25 @@ function replyModelId(message: UIMessage) {
 										:key="op.memoryId + op.op"
 										type="button"
 										data-slot="memory-note"
-										class="flex w-fit max-w-full items-start gap-1.5 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-6 hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
+										class="flex w-fit max-w-full items-start gap-2 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-6 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
 										:class="{ 'line-through': save.undoneAt }"
 										title="Open Memory"
 										@click="emit('openMemory')"
 									>
-										<span class="lucide-bookmark mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-										<span class="min-w-0"><span class="text-ink-gray-6">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
+										<span class="lucide-bookmark mt-0.5 size-4 shrink-0" aria-hidden="true" />
+										<span class="min-w-0"><span class="text-ink-gray-7">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
 									</button>
 								</div>
 								<button
 									v-if="canUndo(save)"
 									type="button"
 									data-slot="memory-undo"
-									class="rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-7 underline decoration-outline-gray-3 underline-offset-2 hover:bg-surface-gray-2 hover:decoration-current hover:text-ink-gray-8 active:bg-surface-gray-3"
+									class="touch-target rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-7 underline decoration-outline-gray-3 underline-offset-2 hover:bg-surface-gray-2 hover:decoration-current hover:text-ink-gray-8 active:bg-surface-gray-3"
 									@click="undoRemembered(save)"
 								>
 									Undo
 								</button>
-								<span v-else-if="save.undoneAt" class="px-1 py-0.5 text-p-sm text-ink-gray-4">Undone</span>
+								<span v-else-if="save.undoneAt" class="px-1 py-0.5 text-p-sm text-ink-gray-5">Undone</span>
 							</div>
 						</MessageContent>
 					</Message>
@@ -588,7 +589,7 @@ function replyModelId(message: UIMessage) {
 		<!-- Above the field on phones; under it in the middle of the page. -->
 		<!-- The chips fade out with the greeting when the first message goes. -->
 		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
-			<Suggestions v-if="landing && !outOfCredits" class="-mx-4 px-4 [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
+			<Suggestions v-if="landing && !outOfCredits" class="-mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
 				<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
 			</Suggestions>
 		</Transition>
@@ -622,7 +623,7 @@ function replyModelId(message: UIMessage) {
 				@stop="stopReply"
 			>
 				<PromptInputHeader />
-				<div v-if="skillChips.length" data-slot="prompt-input-skills" class="flex flex-wrap gap-1.5 px-3 pt-3">
+				<div v-if="skillChips.length" data-slot="prompt-input-skills" class="flex flex-wrap gap-1.5 px-3 pt-3 [@media(pointer:coarse)]:gap-y-5">
 					<SkillChip v-for="name in skillChips" :key="name" :name="name" removable @remove="removeSkill(name)" />
 				</div>
 				<PromptInputTextarea :placeholder="placeholder" autofocus />
@@ -630,7 +631,7 @@ function replyModelId(message: UIMessage) {
 					<PromptInputTools>
 						<PromptInputAttachButton />
 						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
-						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-4">Uploading…</span>
+						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-6">Uploading…</span>
 					</PromptInputTools>
 					<PromptInputSubmit />
 				</PromptInputFooter>

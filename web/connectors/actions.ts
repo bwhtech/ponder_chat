@@ -60,13 +60,3 @@ export function confirmRemove(connector: Connector): Promise<boolean> {
 		});
 	});
 }
-
-/** "5 minutes ago". */
-export function ago(iso: string | null) {
-	if (!iso) return "never";
-	const seconds = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
-	const format = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-	const units: [Intl.RelativeTimeFormatUnit, number][] = [["year", 31_536_000], ["month", 2_592_000], ["day", 86_400], ["hour", 3_600], ["minute", 60]];
-	for (const [unit, size] of units) if (Math.abs(seconds) >= size) return format.format(Math.round(seconds / size), unit);
-	return "just now";
-}

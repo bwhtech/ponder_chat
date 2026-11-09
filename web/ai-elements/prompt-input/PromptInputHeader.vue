@@ -34,7 +34,7 @@ onBeforeUnmount(() => previews.forEach((url) => URL.revokeObjectURL(url)));
 </script>
 
 <template>
-	<div v-if="$slots.default || files.length" data-slot="prompt-input-header" class="flex flex-wrap gap-2 px-2.5 pt-2.5">
+	<div v-if="$slots.default || files.length" data-slot="prompt-input-header" class="flex flex-wrap gap-2 px-2.5 pt-2.5 [@media(pointer:coarse)]:gap-y-3">
 		<slot>
 			<Attachment
 				v-for="file in files"

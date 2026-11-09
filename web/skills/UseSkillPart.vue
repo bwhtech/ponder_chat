@@ -7,11 +7,13 @@ import { skillDescription, skillTitle } from "./skills";
 const props = defineProps<{ part: ToolMessagePart; streaming?: boolean }>();
 const name = computed(() => String((props.part.input as { name?: string } | undefined)?.name ?? ""));
 const phase = computed(() => getToolPhase(props.part.state, { streaming: props.streaming, approved: props.part.approval?.approved }));
+/** A skill's name in curly quotes, as Memory quotes chat titles. */
+const quoted = (skill: string) => (name.value ? `“${skill}”` : skill);
 const title = computed(() => {
 	const skill = name.value ? skillTitle(name.value) : "a skill";
-	if (phase.value === "preparing" || phase.value === "running") return `Loading skill ${skill}`;
-	if (phase.value === "failed" || phase.value === "stopped") return `Could not load skill ${skill}`;
-	return `Picked skill ${skill}`;
+	if (phase.value === "preparing" || phase.value === "running") return `Loading skill ${quoted(skill)}`;
+	if (phase.value === "failed" || phase.value === "stopped") return `Could not load skill ${quoted(skill)}`;
+	return `Picked skill ${quoted(skill)}`;
 });
 const description = computed(() => skillDescription(name.value));
 </script>

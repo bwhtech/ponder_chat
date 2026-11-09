@@ -92,6 +92,12 @@ function onBackdropClick(event: MouseEvent) {
 .viewer-button:active {
 	transform: scale(0.95);
 }
+@media (pointer: coarse) {
+	.viewer-button {
+		width: 2.75rem;
+		height: 2.75rem;
+	}
+}
 
 @media (prefers-reduced-motion: reduce) {
 	.viewer-button:active {

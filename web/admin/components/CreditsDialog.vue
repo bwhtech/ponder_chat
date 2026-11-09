@@ -2,7 +2,7 @@
 import { Button, Dialog, FormControl, Radio, RadioGroup, toast } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { api, type Person } from "../api";
-import { creditValue } from "../lib/format";
+import { credits, creditValue } from "../lib/format";
 import { settings } from "../store";
 
 /** Set one person's daily credits: the default, or their own number. For an invite, the limit they start with. */
@@ -49,7 +49,7 @@ async function save() {
 		<div class="space-y-4">
 			<!-- frappe-ui 1.0.2 takes the options as <Radio> children (the prototype's 1.1.0 has an options prop). -->
 			<RadioGroup v-model="choice" label="Limit">
-				<Radio value="default" :label="`Default (${settings.defaultDailyCredits} a day)`" />
+				<Radio value="default" :label="`Default (${credits(settings.defaultDailyCredits)} a day)`" />
 				<Radio value="custom" label="Their own limit" />
 			</RadioGroup>
 			<FormControl

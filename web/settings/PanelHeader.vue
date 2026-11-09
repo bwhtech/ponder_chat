@@ -7,7 +7,7 @@ defineProps<{ title?: string; description?: string }>();
 </script>
 
 <template>
-	<div class="shrink-0 px-4 pt-6 sm:px-12 sm:pt-8">
+	<div class="shrink-0 pl-4 pr-14 pt-6 sm:pl-12 sm:pr-16 sm:pt-[2.375rem]">
 		<slot>
 			<div class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
 				<div class="flex min-w-0 flex-col gap-1">

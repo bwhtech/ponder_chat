@@ -2,10 +2,23 @@
 @import "./ai-elements/styles.css";
 /* The chart colour ramp, for Mermaid diagrams. frappe-ui does not export this file, so it is imported by path. */
 @import "../node_modules/frappe-ui/src/charts/style.css";
+@import "./base.css";
 
-:root {
-  /* A strong ease-out: fast at the start, where the eye is. Tailwind: `ease-out-strong`. */
-  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+/* The header's hairline shows once the transcript scrolls under it, as on Claude.ai: the greeting and a
+   short chat have none. Browsers without scroll-driven animations keep the line. */
+@supports (animation-timeline: scroll()) {
+  [data-slot='chat-column'] {
+    timeline-scope: --transcript;
+  }
+  [data-slot='chat-column'] :is([data-slot='message-scroller-viewport'], [data-slot='memory-view']) {
+    scroll-timeline: --transcript block;
+  }
+  [data-slot='chat-column'] > [data-slot='chat-header'] {
+    border-bottom-color: transparent;
+    animation: header-edge linear both;
+    animation-timeline: --transcript;
+    animation-range: 0px 24px;
+  }
 }
 
 /* A memory note that arrives after a reply rises in; notes already there on load do not. */
@@ -30,36 +43,34 @@
    message shows at once.
    A reply's copy and model row fades in when the reply ends. */
 @keyframes message-in {
-	from {
-		opacity: 0;
-		transform: translateY(6px);
-	}
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 @keyframes fade-in {
-	from {
-		opacity: 0;
-	}
+  from {
+    opacity: 0;
+  }
 }
 [data-slot='message-scroller-item'][data-new='assistant'] {
-	animation: message-in 220ms var(--ease-out-strong);
+  animation: message-in 220ms var(--ease-out-strong);
 }
 [data-slot='message-scroller-item'][data-new] [data-reply-actions] {
-	animation: fade-in 200ms var(--ease-out-strong);
+  animation: fade-in 200ms var(--ease-out-strong);
 }
 @media (prefers-reduced-motion: reduce) {
-	[data-slot='message-scroller-item'][data-new='assistant'] {
-		animation-name: fade-in;
-	}
-	/* frappe-ui's dialogs scale in and out; with reduced motion they only appear. */
-	.dialog-overlay[data-state],
-	.dialog-content[data-state],
-	.bottom-sheet-overlay[data-state],
-	.bottom-sheet-content[data-state] {
-		animation-duration: 1ms !important;
-	}
-	[data-slot='message-scroller-item'][data-new] [data-reply-actions] {
-		animation: none;
-	}
+  [data-slot='message-scroller-item'][data-new='assistant'] {
+    animation-name: fade-in;
+  }
+  /* The phone's sheet slides in and out; with reduced motion it only appears. */
+  .bottom-sheet-overlay[data-state],
+  .bottom-sheet-content[data-state] {
+    animation-duration: 1ms !important;
+  }
+  [data-slot='message-scroller-item'][data-new] [data-reply-actions] {
+    animation: none;
+  }
 }
 
 /* The app shell does not scroll, so stop iOS bouncing it and Android pulling to refresh it.
@@ -75,14 +86,6 @@ html {
   background-color: var(--surface-base);
 }
 
-/* iOS zooms into a field under 16px on focus and does not zoom back. On touch screens every field
-   is 16px; :root lifts this over Tailwind's text-* utilities, including the !important ones. */
-@media (pointer: coarse) {
-  :root :is(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, select) {
-    font-size: 16px !important;
-  }
-}
-
 /* Controls are not text: a long press must not select a label or open the link callout. */
 :is(button, [role='button'], [role='menuitem'], [role='tab'], [data-slot='sidebar-item']) {
   -webkit-user-select: none;
@@ -93,36 +96,6 @@ html {
 /* Touch has no hover, so a sidebar row (a chat in the sheet) shows the press instead. */
 [data-slot='sidebar-item'][data-state='inactive']:active {
   background-color: var(--surface-gray-3);
-}
-
-/* frappe-ui's SettingsDialog fills a phone's screen (w-screen, 100dvh), but the Dialog
-   around it keeps its padding and margin, so its right side runs off the screen. On a
-   phone, the Settings dialog drops them and fills the screen as meant. */
-@media (max-width: 639px) {
-  .dialog-scroll-container > div:has(> [data-slot='content'] > [data-orientation='vertical']) {
-    padding: 0;
-  }
-  [data-slot='content']:has(> [data-orientation='vertical']) {
-    margin: 0;
-    border-radius: 0;
-    max-width: none;
-  }
-  /* Clear of the notch and the home indicator, in the installed app. */
-  [data-slot='content'] > [data-orientation='vertical'] {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  [data-slot='settings-close'] {
-    top: calc(env(safe-area-inset-top) + 0.5rem);
-  }
-}
-
-/* On a desktop, Settings is as tall as it needs, up to 640px, not most of the screen. */
-@media (min-width: 640px) {
-  [data-slot='content'] > [data-orientation='vertical'] {
-    height: min(640px, calc(100dvh - 8rem));
-    min-height: 0;
-  }
 }
 
 /* In dark mode the sidebar's chat titles and quiet text are one step brighter, so they do not read as disabled. */
@@ -146,22 +119,7 @@ html {
   }
 }
 
-/* Placeholders read as quiet text, not as missing text. */
-:root :is(input, textarea)::placeholder {
-  color: var(--ink-gray-5);
-  opacity: 1;
-}
-[data-theme='dark'] :is(input, textarea)::placeholder {
-  color: var(--ink-gray-6);
-}
-
-/* frappe-ui's dialogs and the phone's sheet leave on ease-in, which starts slowly. They leave
-   quickly on the app's ease-out instead. */
-.dialog-overlay[data-state='closed'],
-.dialog-content[data-state='closed'] {
-  animation-duration: 120ms;
-  animation-timing-function: var(--ease-out-strong);
-}
+/* The phone's sheet leaves on ease-in, which starts slowly. It leaves quickly on ease-out instead, as dialogs do (base.css). */
 .bottom-sheet-overlay[data-state='closed'],
 .bottom-sheet-content[data-state='closed'] {
   animation-duration: 180ms;

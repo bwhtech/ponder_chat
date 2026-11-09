@@ -71,7 +71,7 @@ const printed = computed(() => [output.value?.stdout, failed.value ? output.valu
 			class="block w-fit max-w-full"
 			@click="viewOnClick($event, { name: image.name, url: image.url, mediaType: image.media_type })"
 		>
-			<img :src="image.url" :alt="image.name" class="max-h-[420px] max-w-full rounded-7 border border-outline-gray-2 bg-surface-elevation-2 p-2" loading="lazy" />
+			<img :src="image.url" :alt="image.name" class="max-h-[440px] max-w-full rounded-7 border border-outline-gray-2 bg-surface-elevation-2 p-2" loading="lazy" />
 		</a>
 		<div v-if="others.length" class="flex flex-wrap gap-2">
 			<Attachment

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Alert, Breadcrumbs, Button, Dropdown, FormControl, PageHeader, PageHeaderMobile, Switch, TabButtons, dialog, toast } from "frappe-ui";
+import { Alert, Breadcrumbs, Button, Dropdown, FormControl, PageHeader, PageHeaderMobile, Skeleton, Switch, TabButtons, dialog, toast } from "frappe-ui";
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
 import { checkSkill, MAX_DESCRIPTION, parseSkillFile, skillTitle, toSkillName, type SkillFields } from "../../../shared/skill-file";
@@ -9,6 +9,7 @@ import NewSkillDialog from "../components/NewSkillDialog.vue";
 import SkillInstructionsEditor from "../components/SkillInstructionsEditor.vue";
 import { lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
+import EmptyState from "../../EmptyState.vue";
 
 /**
  * One skill: its instructions in the code editor, and its name, description and switches
@@ -157,45 +158,61 @@ function onKeydown(event: KeyboardEvent) {
 		<PageHeaderMobile v-if="isMobile" :title="heading">
 			<template #prefix><Button variant="ghost" icon="lucide-chevron-left" aria-label="Back to skills" route="/skills" /></template>
 			<template #suffix>
-				<Button variant="solid" theme="gray" label="Save" :loading="saving" :disabled="!dirty" @click="save" />
+				<Button v-if="status.kind !== 'error'" variant="solid" theme="gray" label="Save" :loading="saving" :disabled="status.kind !== 'loaded' || !dirty" @click="save" />
 			</template>
 		</PageHeaderMobile>
 		<PageHeader v-else>
-			<Breadcrumbs :items="[{ label: 'Skills', route: '/skills' }, { label: heading }]" />
+			<Breadcrumbs class="-ml-0.5" :items="[{ label: 'Skills', route: '/skills' }, ...(skill ? [{ label: heading }] : [])]" />
 			<div class="ml-auto flex items-center gap-2">
-				<span v-if="dirty" class="text-sm text-ink-gray-5">Not saved</span>
+				<span v-if="dirty" class="text-sm text-ink-gray-6">Not saved</span>
 				<Dropdown v-if="status.kind === 'loaded'" :options="more">
 					<Button variant="ghost" icon="lucide-ellipsis" aria-label="More" />
 				</Dropdown>
-				<Button variant="solid" theme="gray" label="Save" :loading="saving" :disabled="status.kind !== 'loaded' || !dirty" @click="save" />
+				<Button v-if="status.kind !== 'error'" variant="solid" theme="gray" label="Save" :loading="saving" :disabled="status.kind !== 'loaded' || !dirty" @click="save" />
 			</div>
 		</PageHeader>
 
-		<div v-if="status.kind === 'error'" class="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center" role="alert">
-			<p class="text-base text-ink-gray-7">{{ status.missing ? "This skill was deleted" : "The skill could not load" }}</p>
-			<p v-if="!status.missing" class="text-sm text-ink-gray-5">{{ status.message }}</p>
-			<div class="flex gap-2">
-				<Button label="Back to skills" route="/skills" />
-				<Button v-if="!status.missing" label="Try again" @click="load" />
-			</div>
+		<div v-if="status.kind === 'error'" class="flex-1 px-3 pt-4 sm:px-5 md:pt-6">
+			<EmptyState
+				:icon="status.missing ? 'lucide-file-x' : 'lucide-circle-alert'"
+				:title="status.missing ? 'This skill was deleted' : 'The skill could not load'"
+				:body="status.missing ? undefined : status.message"
+				alert
+			>
+				<div class="flex gap-2">
+					<Button label="Back to skills" route="/skills" />
+					<Button v-if="!status.missing" label="Try again" @click="load" />
+				</div>
+			</EmptyState>
 		</div>
 
-		<div v-else-if="status.kind === 'loading'" class="flex-1" aria-busy="true" aria-label="Loading the skill" />
+		<div v-else-if="status.kind === 'loading'" class="flex min-h-0 flex-1 flex-col md:flex-row" aria-busy="true" aria-label="Loading the skill">
+			<div class="flex min-h-[28rem] min-w-0 flex-1 flex-col px-3 pb-5 pt-4 sm:px-5 md:pt-6">
+				<Skeleton class="h-7 w-40 rounded-4" />
+				<Skeleton class="mt-3 min-h-0 flex-1 rounded-4" />
+			</div>
+			<aside class="w-full shrink-0 space-y-6 border-t border-outline-gray-1 px-3 pb-10 pt-5 sm:px-5 md:w-[22rem] md:border-l md:border-t-0 md:pt-6">
+				<div v-for="width in ['w-24', 'w-32', 'w-20']" :key="width" class="space-y-2">
+					<Skeleton :class="['h-3.5 rounded-4', width]" />
+					<Skeleton class="h-7 w-full rounded-4" />
+				</div>
+			</aside>
+		</div>
 
 		<div v-else class="flex min-h-0 flex-1 flex-col md:flex-row">
-			<div class="flex min-h-[28rem] min-w-0 flex-1 flex-col px-3 pb-5 pt-4 sm:px-5">
+			<div class="flex min-h-[28rem] min-w-0 flex-1 flex-col px-3 pb-5 pt-4 sm:px-5 md:pt-6">
 				<div class="flex items-center gap-3">
 					<TabButtons v-model="tab" :options="tabs" class="w-max" />
-					<span class="ml-auto truncate text-sm text-ink-gray-5">Instructions · {{ words }} words</span>
+					<span class="ml-auto truncate text-sm text-ink-gray-6">Instructions · {{ words }} words</span>
 				</div>
 				<SkillInstructionsEditor v-if="tab === 'edit'" v-model="form.body" class="mt-3 min-h-0 flex-1" />
 				<div v-else class="mt-3 min-h-0 flex-1 overflow-y-auto rounded-4 border border-outline-gray-2 p-5">
 					<Response v-if="form.body.trim()" :content="form.body" class="max-w-[770px]" />
-					<p v-else class="text-p-sm text-ink-gray-5">No instructions yet.</p>
+					<p v-else class="text-p-sm text-ink-gray-6">No instructions yet.</p>
 				</div>
 			</div>
 
-			<aside class="w-full shrink-0 space-y-6 overflow-y-auto border-t border-outline-gray-1 px-5 pb-10 pt-5 md:w-[22rem] md:border-l md:border-t-0">
+			<aside class="w-full shrink-0 space-y-6 overflow-y-auto border-t border-outline-gray-1 px-3 pb-10 pt-5 sm:px-5 md:w-[22rem] md:border-l md:border-t-0 md:pt-6">
 				<Alert v-if="errors.length" theme="red" title="Fix before you save">
 					<template #description>
 						<ul class="list-disc space-y-1 pl-4 text-p-sm">
@@ -228,7 +245,7 @@ function onKeydown(event: KeyboardEvent) {
 				</div>
 
 				<div class="space-y-3 border-t border-outline-gray-1 pt-5">
-					<p class="text-sm text-ink-gray-5">What Ponder sees first</p>
+					<p class="text-sm text-ink-gray-6">What Ponder sees first</p>
 					<p v-if="form.automatic" class="break-words rounded-4 bg-surface-gray-1 p-3 font-mono text-xs leading-5 text-ink-gray-7">
 						- {{ form.name || "name" }}: {{ form.description || "…" }}
 					</p>
@@ -236,7 +253,7 @@ function onKeydown(event: KeyboardEvent) {
 				</div>
 
 				<div v-if="skill" class="space-y-1 border-t border-outline-gray-1 pt-5 text-sm">
-					<p class="text-ink-gray-5">Last edit</p>
+					<p class="text-ink-gray-6">Last edit</p>
 					<p class="text-ink-gray-7">{{ skill.updatedBy ? `${skill.updatedBy}, ` : "" }}{{ lastActive(skill.updatedAt) }}</p>
 				</div>
 			</aside>

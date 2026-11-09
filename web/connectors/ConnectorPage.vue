@@ -5,7 +5,8 @@ import PanelBody from "../settings/PanelBody.vue";
 import PanelHeader from "../settings/PanelHeader.vue";
 import { settings } from "../settings/state";
 import { changeConnector, refreshConnector, RULES, type Connector, type Header, type Rule } from "./api";
-import { ago, confirmRemove, signInAgain } from "./actions";
+import { fullDate, when } from "../dates";
+import { confirmRemove, signInAgain } from "./actions";
 import ConnectorAvatar from "./ConnectorAvatar.vue";
 import HeadersInput from "./HeadersInput.vue";
 import ToolRuleRow from "./ToolRuleRow.vue";
@@ -127,7 +128,7 @@ function copyUrl() {
 				<ConnectorAvatar :name="c.name" size="2xl" />
 				<div class="min-w-0 flex-1 basis-48 space-y-1">
 					<h2 class="truncate text-xl-semibold text-ink-gray-9">{{ c.name }}</h2>
-					<p class="text-p-sm text-ink-gray-6">{{ c.host }} · {{ status }} · Tools checked {{ ago(c.toolsCheckedAt) }}</p>
+					<p class="text-p-sm text-ink-gray-6">{{ c.host }} · {{ status }} · {{ c.toolsCheckedAt ? `Tools checked ${when(c.toolsCheckedAt)}` : "Tools never checked" }}</p>
 				</div>
 				<Switch v-model="enabled" label="Use in chats" :disabled="c.status !== 'connected'" />
 			</div>
@@ -157,7 +158,7 @@ function copyUrl() {
 			<section class="space-y-3 pt-4">
 				<div class="flex flex-wrap items-end justify-between gap-3">
 					<div>
-						<h3 class="text-base-semibold text-ink-gray-8">Tools</h3>
+						<h3 class="text-base-semibold text-ink-gray-9">Tools</h3>
 						<p class="text-p-sm text-ink-gray-6">{{ counts.allow }} always allowed · {{ counts.ask }} ask first · {{ counts.off }} off</p>
 					</div>
 					<div v-if="c.tools.length" class="flex items-center gap-2">
@@ -171,8 +172,8 @@ function copyUrl() {
 				<div class="divide-y divide-outline-gray-1">
 					<ToolRuleRow v-for="tool in shown" :key="tool.name" :connector="c" :tool="tool" />
 				</div>
-				<p v-if="!c.tools.length" class="py-6 text-center text-p-sm text-ink-gray-5">This server lists no tools.</p>
-				<p v-else-if="!shown.length" class="py-6 text-center text-p-sm text-ink-gray-5">No tools match “{{ query }}”.</p>
+				<p v-if="!c.tools.length" class="py-6 text-center text-p-sm text-ink-gray-6">This server lists no tools.</p>
+				<p v-else-if="!shown.length" class="py-6 text-center text-p-sm text-ink-gray-6">No tools match “{{ query }}”.</p>
 				<p class="text-p-sm text-ink-gray-5">
 					“Read-only” is what {{ c.name }} says about a tool. Ponder uses it only to choose where each tool starts, so check the rules of the tools you rely on.
 				</p>
@@ -198,11 +199,11 @@ function copyUrl() {
 					</div>
 					<div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
 						<dt class="text-ink-gray-6">Added</dt>
-						<dd class="text-p-sm text-ink-gray-7">{{ new Date(c.createdAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }) }}</dd>
+						<dd class="text-p-sm text-ink-gray-7">{{ fullDate(c.createdAt) }}</dd>
 					</div>
 					<div class="grid grid-cols-[7rem_minmax(0,1fr)] gap-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]">
 						<dt class="text-ink-gray-6">Last used</dt>
-						<dd class="text-p-sm text-ink-gray-7">{{ c.lastUsedAt ? ago(c.lastUsedAt) : "Not yet" }}</dd>
+						<dd class="text-p-sm text-ink-gray-7">{{ c.lastUsedAt ? when(c.lastUsedAt) : "Never" }}</dd>
 					</div>
 				</dl>
 			</section>

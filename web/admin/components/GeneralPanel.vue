@@ -12,7 +12,7 @@ const form = useSettingsForm();
 <template>
 	<PanelHeader title="General">
 		<template #actions>
-			<Button variant="solid" theme="gray" label="Save" :loading="form.saving" :disabled="!form.canSave" @click="form.save" />
+			<Button v-if="!form.loadError" variant="solid" theme="gray" label="Save" :loading="form.saving" :disabled="!form.canSave" @click="form.save" />
 		</template>
 	</PanelHeader>
 	<PanelBody>

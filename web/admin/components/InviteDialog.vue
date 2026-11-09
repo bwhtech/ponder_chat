@@ -2,6 +2,7 @@
 import { Button, Checkbox, Dialog, FormControl, toast } from "frappe-ui";
 import { computed, ref } from "vue";
 import { api } from "../api";
+import { credits } from "../lib/format";
 import { settings } from "../store";
 
 /** Invite people: adds them to the invite list, and optionally emails them that they can sign in. */
@@ -80,7 +81,7 @@ async function invite() {
 				v-model="dailyCredits"
 				type="number"
 				label="Daily credits"
-				:description="`Leave empty to use the default, ${settings.defaultDailyCredits} a day.`"
+				:description="`Leave empty to use the default, ${credits(settings.defaultDailyCredits)} a day.`"
 				:error="creditsError"
 			/>
 			<Checkbox v-model="sendEmail" label="Email them that they can sign in" />

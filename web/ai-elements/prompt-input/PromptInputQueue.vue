@@ -104,7 +104,7 @@ function onDrop(target: string) {
 								v-for="item in items"
 								:key="item.id"
 								data-slot="prompt-input-queue-item"
-								class="group flex items-center gap-1.5 py-0.5 pl-1.5 pr-2"
+								class="group flex items-center gap-1.5 py-0.5 pl-1.5 pr-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:gap-x-4"
 								:class="over === item.id && dragged !== item.id && 'shadow-[inset_0_2px_0_var(--outline-gray-4)]'"
 								@dragover.prevent="over = item.id"
 								@dragleave="over === item.id && (over = null)"
@@ -135,13 +135,13 @@ function onDrop(target: string) {
 									</span>
 								</p>
 								<Tooltip text="Edit">
-									<Button variant="ghost" size="sm" icon="lucide-pencil" aria-label="Edit" @click="edit(item)" />
+									<Button variant="ghost" size="sm" class="touch-target" icon="lucide-pencil" aria-label="Edit" @click="edit(item)" />
 								</Tooltip>
 								<Tooltip text="Stop the current reply and send this now">
-									<Button variant="ghost" size="sm" icon-left="lucide-corner-up-right" label="Steer" @click="emit('steer', item.id)" />
+									<Button variant="ghost" size="sm" class="touch-target" icon-left="lucide-corner-up-right" label="Steer" @click="emit('steer', item.id)" />
 								</Tooltip>
 								<Tooltip text="Remove">
-									<Button variant="ghost" size="sm" icon="lucide-x" aria-label="Remove" @click="emit('remove', item.id)" />
+									<Button variant="ghost" size="sm" class="touch-target" icon="lucide-x" aria-label="Remove" @click="emit('remove', item.id)" />
 								</Tooltip>
 							</li>
 						</ol>

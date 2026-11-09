@@ -7,6 +7,7 @@ import AccountMenu from "../components/AccountMenu.vue";
 import CreditBar from "../components/CreditBar.vue";
 import ExtraCreditsDialog from "../components/ExtraCreditsDialog.vue";
 import ListSkeleton from "../components/ListSkeleton.vue";
+import EmptyState from "../../EmptyState.vue";
 import { credits, lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 import { counts, refreshCounts } from "../store";
@@ -92,9 +93,9 @@ const answer = (request: DecidedRequest) =>
 		</div>
 	</PageHeader>
 
-	<div class="mx-auto w-full max-w-5xl space-y-11 px-3 pb-16 pt-4 sm:px-5 md:pt-5">
-		<section class="space-y-2">
-			<h2 class="text-base-medium text-ink-gray-8">Waiting for an answer</h2>
+	<div class="mx-auto w-full max-w-5xl space-y-8 px-3 pb-16 pt-4 sm:px-5 md:pt-6">
+		<section class="space-y-3">
+			<h2 v-if="loading || pending.length || decided.length || status.kind === 'error'" class="text-base-semibold text-ink-gray-9">Waiting for an answer</h2>
 
 			<!-- Phone: one request a row, with its two buttons under the numbers. -->
 			<List v-if="isMobile" class="-mx-3 list-row-px-3">
@@ -106,10 +107,10 @@ const answer = (request: DecidedRequest) =>
 								<RouterLink :to="`/people/${encodeURIComponent(item.person.id)}`" class="truncate text-base text-ink-gray-8">
 									{{ item.person.name }}
 								</RouterLink>
-								<span class="shrink-0 text-sm text-ink-gray-5">{{ lastActive(item.createdAt) }}</span>
+								<span class="shrink-0 text-sm text-ink-gray-6">{{ lastActive(item.createdAt) }}</span>
 							</div>
 							<CreditBar :used="item.today.used" :limit="item.today.limit" />
-							<span class="text-sm text-ink-gray-5">{{ credits(item.week) }} credits in the last 7 days</span>
+							<span class="text-sm text-ink-gray-6">{{ credits(item.week) }} credits in the last 7 days</span>
 							<div class="flex gap-2 pt-1">
 								<Button label="Decline" class="flex-1" @click="decline(item)" />
 								<Button variant="solid" theme="gray" label="Approve" class="flex-1" @click="approve(item)" />
@@ -119,54 +120,45 @@ const answer = (request: DecidedRequest) =>
 				</ListRows>
 			</List>
 
-			<List v-else :columns="['minmax(0,1fr)', '8.5rem', '10rem', '6rem', '11rem']" :row-height="60" class="-mx-3 list-row-px-3">
-				<ListHeader>
-					<ListHeaderCell>Person</ListHeaderCell>
-					<ListHeaderCell>Asked</ListHeaderCell>
-					<ListHeaderCell>Credits today</ListHeaderCell>
-					<ListHeaderCell class="justify-end">Last 7 days</ListHeaderCell>
-					<ListHeaderCell />
-				</ListHeader>
-				<ListRows :items="pending" v-slot="{ item }">
-					<ListRow>
-						<ListCell class="gap-3">
-							<Avatar :label="item.person.name" size="md" />
-							<RouterLink :to="`/people/${encodeURIComponent(item.person.id)}`" class="min-w-0">
-								<span class="block truncate text-base text-ink-gray-8">{{ item.person.name }}</span>
-								<span class="block truncate text-sm text-ink-gray-5">{{ item.person.email }}</span>
-							</RouterLink>
-						</ListCell>
-						<ListCell class="truncate text-sm text-ink-gray-5">{{ lastActive(item.createdAt) }}</ListCell>
-						<ListCell><CreditBar :used="item.today.used" :limit="item.today.limit" /></ListCell>
-						<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">{{ credits(item.week) }}</ListCell>
-						<ListCell class="justify-end gap-2">
-							<Button label="Decline" @click="decline(item)" />
-							<Button variant="solid" theme="gray" label="Approve" @click="approve(item)" />
-						</ListCell>
-					</ListRow>
-				</ListRows>
-			</List>
+			<div v-else-if="loading || pending.length" class="scroll-fade-x scrollbar-thin -mx-3 overflow-x-auto [--scroll-fade-range:24px] [--scroll-fade-size:24px]">
+				<List :columns="['minmax(0,1fr)', '8.5rem', '10rem', '6rem', '11rem']" :row-height="60" class="min-w-[48rem] list-row-px-3">
+					<ListHeader>
+						<ListHeaderCell>Person</ListHeaderCell>
+						<ListHeaderCell>Asked</ListHeaderCell>
+						<ListHeaderCell>Credits today</ListHeaderCell>
+						<ListHeaderCell class="justify-end">Last 7 days</ListHeaderCell>
+						<ListHeaderCell />
+					</ListHeader>
+					<ListRows :items="pending" v-slot="{ item }">
+						<ListRow>
+							<ListCell class="gap-3">
+								<Avatar :label="item.person.name" size="md" />
+								<RouterLink :to="`/people/${encodeURIComponent(item.person.id)}`" class="min-w-0">
+									<span class="block truncate text-base text-ink-gray-8">{{ item.person.name }}</span>
+									<span class="block truncate text-sm text-ink-gray-6">{{ item.person.email }}</span>
+								</RouterLink>
+							</ListCell>
+							<ListCell class="truncate text-sm text-ink-gray-6">{{ lastActive(item.createdAt) }}</ListCell>
+							<ListCell><CreditBar :used="item.today.used" :limit="item.today.limit" /></ListCell>
+							<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">{{ credits(item.week) }}</ListCell>
+							<ListCell class="justify-end gap-2">
+								<Button label="Decline" @click="decline(item)" />
+								<Button variant="solid" theme="gray" label="Approve" @click="approve(item)" />
+							</ListCell>
+						</ListRow>
+					</ListRows>
+				</List>
+			</div>
 
 			<ListSkeleton v-if="loading" :rows="3" :avatar="isMobile ? 'lg' : 'md'" two-lines label="Loading requests" />
-			<div v-else-if="status.kind === 'error'" class="flex flex-col items-center gap-3 py-12 text-center" role="alert">
-				<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
-					<span class="lucide-circle-alert size-6" aria-hidden="true" />
-				</div>
-				<p class="text-base text-ink-gray-7">The requests could not load</p>
-				<p class="text-sm text-ink-gray-5">{{ status.message }}</p>
-				<Button label="Try again" class="mt-2" @click="retry" />
-			</div>
-			<div v-else-if="!pending.length" class="flex flex-col items-center gap-3 py-12 text-center">
-				<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
-					<span class="lucide-inbox size-6" aria-hidden="true" />
-				</div>
-				<p class="text-base text-ink-gray-7">No requests waiting</p>
-				<p class="text-sm text-ink-gray-5">When someone uses today's credits and asks for more, it shows here.</p>
-			</div>
+			<EmptyState v-else-if="status.kind === 'error'" icon="lucide-circle-alert" title="The requests could not load" :body="status.message" alert>
+				<Button label="Try again" @click="retry" />
+			</EmptyState>
+			<EmptyState v-else-if="!pending.length" icon="lucide-inbox" title="No requests waiting" body="When someone uses today's credits and asks for more, it shows here." />
 		</section>
 
-		<section v-if="decided.length" class="space-y-2">
-			<h2 class="text-base-medium text-ink-gray-8">Answered, last 30 days</h2>
+		<section v-if="decided.length" class="space-y-3">
+			<h2 class="text-base-semibold text-ink-gray-9">Answered, last 30 days</h2>
 
 			<List v-if="isMobile" class="-mx-3 list-row-px-3">
 				<ListRows :items="decided" v-slot="{ item }">
@@ -174,7 +166,7 @@ const answer = (request: DecidedRequest) =>
 						<ListCell class="self-start pt-0.5"><Avatar :label="item.person.name" size="lg" /></ListCell>
 						<ListCell class="flex-col items-stretch gap-0.5">
 							<span class="truncate text-base text-ink-gray-8">{{ item.person.name }}</span>
-							<span class="truncate text-sm text-ink-gray-5">{{ item.decidedBy }}, {{ lastActive(item.decidedAt) }}</span>
+							<span class="truncate text-sm text-ink-gray-6">{{ item.decidedBy }}, {{ lastActive(item.decidedAt) }}</span>
 						</ListCell>
 						<ListCell class="flex-col items-end gap-1 self-start">
 							<Badge
@@ -182,46 +174,49 @@ const answer = (request: DecidedRequest) =>
 								:theme="item.status === 'approved' ? 'green' : 'gray'"
 								variant="subtle"
 							/>
-							<span class="text-xs tabular-nums text-ink-gray-5">{{ answer(item) }}</span>
+							<span class="text-xs tabular-nums text-ink-gray-6">{{ answer(item) }}</span>
 						</ListCell>
 					</ListRow>
 				</ListRows>
 			</List>
 
-			<List v-else :columns="['minmax(0,1fr)', '8.5rem', '7rem', '7rem', '10rem']" :row-height="52" class="-mx-3 list-row-px-3">
-				<ListHeader>
-					<ListHeaderCell>Person</ListHeaderCell>
-					<ListHeaderCell>Asked</ListHeaderCell>
-					<ListHeaderCell>Answer</ListHeaderCell>
-					<ListHeaderCell class="justify-end">Credits</ListHeaderCell>
-					<ListHeaderCell>Answered by</ListHeaderCell>
-				</ListHeader>
-				<ListRows :items="decided" v-slot="{ item }">
-					<ListRow :route="`/people/${encodeURIComponent(item.person.id)}`">
-						<ListCell class="gap-2.5">
-							<Avatar :label="item.person.name" size="sm" />
-							<span class="truncate text-base text-ink-gray-8">{{ item.person.name }}</span>
-						</ListCell>
-						<ListCell class="text-sm text-ink-gray-5">{{ lastActive(item.createdAt) }}</ListCell>
-						<ListCell>
-							<Badge
-								:label="item.status === 'approved' ? 'Approved' : 'Declined'"
-								:theme="item.status === 'approved' ? 'green' : 'gray'"
-								variant="subtle"
-							/>
-						</ListCell>
-						<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">
-							{{ item.status === "approved" ? `+${credits(item.credits ?? 0)}` : "—" }}
-						</ListCell>
-						<ListCell>
-							<div class="min-w-0">
-								<div class="truncate text-sm text-ink-gray-7">{{ item.decidedBy }}</div>
-								<div class="truncate text-xs text-ink-gray-5">{{ lastActive(item.decidedAt) }}</div>
-							</div>
-						</ListCell>
-					</ListRow>
-				</ListRows>
-			</List>
+			<div v-else class="scroll-fade-x scrollbar-thin -mx-3 overflow-x-auto [--scroll-fade-range:24px] [--scroll-fade-size:24px]">
+				<List :columns="['minmax(0,1fr)', '8.5rem', '7rem', '7rem', '10rem']" :row-height="52" class="min-w-[44rem] list-row-px-3">
+					<ListHeader>
+						<ListHeaderCell>Person</ListHeaderCell>
+						<ListHeaderCell>Asked</ListHeaderCell>
+						<ListHeaderCell>Answer</ListHeaderCell>
+						<ListHeaderCell class="justify-end">Credits</ListHeaderCell>
+						<ListHeaderCell>Answered by</ListHeaderCell>
+					</ListHeader>
+					<ListRows :items="decided" v-slot="{ item }">
+						<ListRow :route="`/people/${encodeURIComponent(item.person.id)}`">
+							<ListCell class="gap-2.5">
+								<Avatar :label="item.person.name" size="sm" />
+								<span class="truncate text-base text-ink-gray-8">{{ item.person.name }}</span>
+							</ListCell>
+							<ListCell class="text-sm text-ink-gray-6">{{ lastActive(item.createdAt) }}</ListCell>
+							<ListCell>
+								<Badge
+									:label="item.status === 'approved' ? 'Approved' : 'Declined'"
+									:theme="item.status === 'approved' ? 'green' : 'gray'"
+									variant="subtle"
+								/>
+							</ListCell>
+							<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">
+								<template v-if="item.status === 'approved'">+{{ credits(item.credits ?? 0) }}</template>
+								<span v-else class="text-ink-gray-4">—</span>
+							</ListCell>
+							<ListCell>
+								<div class="min-w-0">
+									<div class="truncate text-sm text-ink-gray-7">{{ item.decidedBy }}</div>
+									<div class="truncate text-xs text-ink-gray-5">{{ lastActive(item.decidedAt) }}</div>
+								</div>
+							</ListCell>
+						</ListRow>
+					</ListRows>
+				</List>
+			</div>
 		</section>
 	</div>
 

@@ -64,6 +64,6 @@ function formatSize(bytes?: number) {
 		<span v-else :class="[look.icon, look.ink, 'size-4 shrink-0']" aria-hidden="true" />
 		<span class="min-w-0 truncate text-sm text-ink-gray-7">{{ name }}</span>
 		<span v-if="detail" class="shrink-0 text-xs text-ink-gray-5 group-data-[state=error]/attachment:text-ink-red-6">{{ detail }}</span>
-		<Button v-if="removable" variant="ghost" size="xs" icon="lucide-x" :aria-label="`Remove ${name}`" @click="$emit('remove')" />
+		<Button v-if="removable" variant="ghost" size="xs" class="touch-target" icon="lucide-x" :aria-label="`Remove ${name}`" @click="$emit('remove')" />
 	</component>
 </template>

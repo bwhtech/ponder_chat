@@ -99,7 +99,7 @@ function nameFrom(address: string) {
 
 const probeLine = computed(() => {
 	const answer = probe.value;
-	if (answer.kind !== "ok") return { icon: "lucide-circle-alert", tone: "text-ink-red-5" };
+	if (answer.kind !== "ok") return { icon: "lucide-circle-alert", tone: "text-ink-red-6" };
 	return { icon: { oauth: "lucide-log-in", headers: "lucide-key-round", none: "lucide-circle-check" }[answer.found.auth], tone: "text-ink-gray-7" };
 });
 /** The server's answer, when it found one. */

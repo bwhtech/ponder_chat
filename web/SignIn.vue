@@ -110,23 +110,23 @@ function useAnotherEmail() {
 						ref="codeField"
 						v-model="code"
 						label="Code"
-						size="lg"
+						size="md"
 						placeholder="123456"
 						inputmode="numeric"
 						autocomplete="one-time-code"
 						:error="codeError || undefined"
-						class="[&_input]:text-center [&_input]:tabular-nums [&_input]:tracking-[0.3em]"
+						class="[&_input]:text-center [&_input]:tabular-nums [&_input]:tracking-[0.3em] [@media(pointer:coarse)]:[&_input]:h-11"
 						required
 					/>
-					<Button type="submit" variant="solid" size="lg" :loading="checking" :disabled="code.length !== 6">Sign in</Button>
+					<Button type="submit" variant="solid" size="md" class="[@media(pointer:coarse)]:h-11" :loading="checking" :disabled="code.length !== 6">Sign in</Button>
 				</form>
 				<p class="text-p-sm text-ink-gray-5">Or open the link in the email. The code and the link expire in 15 minutes.</p>
 				<Button variant="ghost" class="mx-auto" @click="useAnotherEmail">Use another email</Button>
 			</div>
 
 			<form v-else class="flex flex-col gap-3" @submit.prevent="send">
-				<FormControl v-model="email" type="email" label="Email" size="lg" class="[&_label]:text-p-sm [&_label]:text-ink-gray-7" placeholder="you@example.org" autocomplete="email" autofocus />
-				<Button type="submit" variant="solid" size="lg" :loading="sending">Email me a link</Button>
+				<FormControl v-model="email" type="email" label="Email" size="md" class="[&_label]:text-p-sm [&_label]:text-ink-gray-7 [@media(pointer:coarse)]:[&_input]:h-11" placeholder="you@example.org" autocomplete="email" autofocus />
+				<Button type="submit" variant="solid" size="md" class="[@media(pointer:coarse)]:h-11" :loading="sending">Email me a link</Button>
 			</form>
 
 			<Alert v-if="error" theme="red" title="Could not sign you in" :description="error" />

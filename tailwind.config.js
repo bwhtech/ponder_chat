@@ -8,7 +8,7 @@ export default {
 	content: [...content, `${here}web/**/*.{html,vue,ts}`],
 	theme: {
 		extend: {
-			// `ease-out-strong`: the curve for things that enter, leave or open. Defined in style.css.
+			// `ease-out-strong`: the curve for things that enter, leave or open. Defined in base.css.
 			transitionTimingFunction: { "out-strong": "var(--ease-out-strong)" },
 		},
 	},

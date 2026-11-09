@@ -13,7 +13,7 @@ defineEmits<{ select: [suggestion: string] }>();
 		variant="outline"
 		size="sm"
 		:icon-left="icon"
-		class="shrink-0 rounded-full px-2.5 font-normal text-ink-gray-7 max-sm:h-8 hover:text-ink-gray-9 transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.97] motion-reduce:transform-none"
+		class="shrink-0 rounded-full px-2.5 font-normal !text-ink-gray-6 max-sm:h-8 hover:!text-ink-gray-8 relative after:absolute after:inset-0 after:content-[''] [@media(pointer:coarse)]:after:-inset-y-1.5 sm:[@media(pointer:coarse)]:after:-inset-y-2 transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.97] motion-reduce:transform-none"
 		@click="$emit('select', suggestion)"
 	>
 		<slot>{{ suggestion }}</slot>

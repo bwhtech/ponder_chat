@@ -19,8 +19,12 @@ import { api, ApiError, type Person, type PersonDetail } from "../api";
 import CreditsDialog from "../components/CreditsDialog.vue";
 import ExtraCreditsDialog from "../components/ExtraCreditsDialog.vue";
 import StatusBadge from "../components/StatusBadge.vue";
+import EmptyState from "../../EmptyState.vue";
 import { personActions } from "../lib/actions";
-import { credits, date, dollars, lastActive, shortDay } from "../lib/format";
+import { shortDay } from "../../dates";
+import PrivacyNote from "../components/PrivacyNote.vue";
+import { count } from "../../numbers";
+import { credits, date, dollars, lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 import { settings } from "../store";
 
@@ -100,6 +104,7 @@ const week = computed(() => days.value.slice(-7));
 const weekCredits = computed(() => Math.round(week.value.reduce((sum, day) => sum + day.credits, 0) * 10) / 10);
 const weekReplies = computed(() => week.value.reduce((sum, day) => sum + day.replies, 0));
 const perDay = computed(() => days.value.map((d) => ({ day: shortDay(d.date), Credits: d.credits })));
+const monthCredits = computed(() => perDay.value.reduce((total, day) => total + day.Credits, 0));
 
 // Better Auth stores "No reason" when a ban has none.
 const banText = computed(() => {
@@ -109,22 +114,32 @@ const banText = computed(() => {
 	return p.banExpires ? `${reason} Until ${date(p.banExpires)}.` : reason;
 });
 
-const limitText = computed(() =>
-	person.value?.dailyCredits === null ? `${settings.defaultDailyCredits} (default)` : `${person.value?.dailyCredits} (own limit)`,
+/** The daily limit leads; where it comes from follows in a quieter tone. */
+const limit = computed(() =>
+	person.value?.dailyCredits === null
+		? { value: credits(settings.defaultDailyCredits), hint: "(default)" }
+		: { value: credits(person.value?.dailyCredits ?? 0), hint: "(own limit)" },
 );
+/** Shown under the charts on desktop, and at the end of the side panel on phones. */
+const PRIVACY_NOTE = "Their chats are private. Admins see usage only.";
+/** The details' labels, in order. The loading frame shows them as they are, with bars only for the values. */
+const DETAIL_LABELS = ["Role", "Daily credits", "Extra today", "Note", "Invited", "Invited by", "First sign-in", "Last active"] as const;
+type DetailLabel = (typeof DETAIL_LABELS)[number];
+
 const details = computed(() => {
 	const p = person.value;
 	if (!p) return [];
-	return [
-		{ label: "Role", value: p.role === "admin" ? "Admin" : "User" },
-		{ label: "Daily credits", value: limitText.value },
-		...(p.status === "invited" ? [] : [{ label: "Extra today", value: p.today.extra ? `+${credits(p.today.extra)}` : "None" }]),
-		{ label: "Note", value: p.note || "—" },
-		{ label: "Invited", value: date(p.invitedAt) },
-		{ label: "Invited by", value: p.invitedBy ?? "—" },
-		{ label: "First sign-in", value: date(p.joinedAt) },
-		{ label: "Last active", value: lastActive(p.lastActive) },
-	];
+	const values: Record<DetailLabel, { value: string; hint?: string } | null> = {
+		Role: { value: p.role === "admin" ? "Admin" : "User" },
+		"Daily credits": { value: limit.value.value, hint: limit.value.hint },
+		"Extra today": p.status === "invited" ? null : { value: p.today.extra ? `+${credits(p.today.extra)}` : "None" },
+		Note: { value: p.note || "—" },
+		Invited: { value: date(p.invitedAt) },
+		"Invited by": { value: p.invitedBy ?? "—" },
+		"First sign-in": { value: date(p.joinedAt) },
+		"Last active": { value: lastActive(p.lastActive) },
+	};
+	return DETAIL_LABELS.flatMap((label) => (values[label] ? [{ label, ...values[label] }] : []));
 });
 
 const invitedText = computed(() => {
@@ -159,7 +174,7 @@ const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { a
 			</template>
 		</PageHeaderMobile>
 		<PageHeader v-else>
-			<Breadcrumbs :items="[{ label: 'People', route: '/people' }, { label: person.name }]" />
+			<Breadcrumbs class="-ml-0.5" :items="[{ label: 'People', route: '/people' }, { label: person.name }]" />
 			<div class="ml-auto flex items-center gap-2">
 				<Button label="Set daily credits" icon-left="lucide-gauge" @click="creditsOpen = true" />
 				<Dropdown :options="actions">
@@ -168,8 +183,8 @@ const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { a
 			</div>
 		</PageHeader>
 
-		<div data-slot="dashboard" class="flex min-h-0 flex-1 flex-col md:flex-row">
-			<div class="min-w-0 flex-1 space-y-6 px-3 pb-6 pt-4 sm:px-5 md:pb-16 md:pt-5">
+		<div class="flex min-h-0 flex-1 flex-col md:flex-row">
+			<div class="min-w-0 flex-1 space-y-6 px-3 pb-6 pt-4 sm:px-5 md:pb-16 md:pt-6">
 				<div class="flex items-center gap-3">
 					<Avatar :label="person.name" :size="isMobile ? 'xl' : '2xl'" />
 					<div class="min-w-0">
@@ -191,64 +206,61 @@ const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { a
 				/>
 				<Alert v-if="person.status === 'banned'" theme="red" title="Banned" :description="banText" />
 
-				<template v-if="person.status !== 'invited'">
-					<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
+				<div v-if="person.status !== 'invited'" class="space-y-4">
+					<div data-slot="dashboard" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
 						<NumberCard title="Credits today" :value="`${credits(person.today.used)} / ${credits(person.today.limit)}`" />
-						<NumberCard title="Last 7 days" :value="credits(weekCredits)" :delta-caption="dollars(weekCredits)" />
-						<NumberCard title="Replies, 7 days" :value="weekReplies" />
-						<NumberCard title="Chats" :value="detail.chats" />
+						<NumberCard title="Credits, last 7 days" :value="weekCredits" :format="credits" :delta-caption="dollars(weekCredits)" />
+						<NumberCard title="Replies, last 7 days" :value="weekReplies" :format="count" />
+						<NumberCard title="Chats" :value="detail.chats" :format="count" />
 					</div>
 
-					<div class="h-60 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+					<div data-slot="dashboard" class="h-60 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
 						<BarChart
-							title="Credits per day, last 30 days"
+							title="Credits used per day"
+							:subtitle="`Last 30 days · ${credits(monthCredits)} credits · ${dollars(monthCredits)}`"
 							:data="perDay"
 							x="day"
 							y="Credits"
 							palette="categorical"
 							:echart-options="chartMotion"
-							:x-axis="{ type: 'category', echartOptions: { axisLabel: { rotate: 0, interval: (index: number) => (perDay.length - 1 - index) % 4 === 0, showMinLabel: false, showMaxLabel: true, fontSize: 12 } } }"
+							:x-axis="{ type: 'category', echartOptions: { axisLabel: { rotate: 0, interval: (index: number) => (perDay.length - 1 - index) % (isMobile ? 7 : 4) === 0, showMinLabel: false, showMaxLabel: true, fontSize: 12 } } }"
 							:y-axis="{ echartOptions: { axisLabel: { fontSize: 12 } } }"
 						/>
 					</div>
 
-					<div class="h-72 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
-						<DonutChart :echart-options="chartMotion" title="Models, last 30 days" :data="detail.models" category="model" value="credits" />
+					<div data-slot="dashboard" class="h-72 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+						<DonutChart :echart-options="chartMotion" :format="credits" title="Credits by model" :subtitle="`Last 30 days · ${credits(monthCredits)} credits`" :data="detail.models" category="model" value="credits" />
 					</div>
-				</template>
+				</div>
 
-				<p v-if="!isMobile" class="flex items-center gap-1.5 text-sm text-ink-gray-5">
-					<span class="lucide-lock size-3.5 shrink-0" aria-hidden="true" />
-					Their chats are private. Admins see usage only.
-				</p>
+				<PrivacyNote v-if="!isMobile">{{ PRIVACY_NOTE }}</PrivacyNote>
 			</div>
 
 			<!-- Desktop: a side panel. Phone: a section under the charts. -->
-			<aside class="space-y-5 border-outline-gray-1 px-3 pb-16 sm:px-5 md:w-[20rem] md:shrink-0 md:border-l md:pt-5">
-				<h2 v-if="isMobile" class="text-lg-semibold text-ink-gray-8">Details</h2>
+			<aside aria-label="Details" class="space-y-5 px-3 pb-16 sm:px-5 md:w-[20rem] md:shrink-0 md:pt-6 md:relative md:before:absolute md:before:bottom-16 md:before:left-0 md:before:top-6 md:before:w-px md:before:bg-[var(--outline-gray-1)] md:before:content-['']">
+				<h2 v-if="isMobile" class="text-base-semibold text-ink-gray-9">Details</h2>
 				<dl class="space-y-3 text-base">
 					<div v-for="row in details" :key="row.label" class="flex justify-between gap-3">
 						<dt class="shrink-0 text-ink-gray-6">{{ row.label }}</dt>
-						<dd class="truncate text-right tabular-nums text-ink-gray-8">{{ row.value }}</dd>
+						<dd class="truncate text-right tabular-nums" :class="row.value === '—' ? 'text-ink-gray-4' : 'text-ink-gray-8'">
+							{{ row.value }}<span v-if="row.hint" class="ml-1 text-ink-gray-5">{{ row.hint }}</span>
+						</dd>
 					</div>
 				</dl>
 
 				<div v-if="person.status !== 'invited'" class="space-y-2 border-t border-outline-gray-1 pt-5">
-					<h2 class="text-sm text-ink-gray-5">Signed in on</h2>
-					<ul v-if="detail.sessions.length" class="space-y-2">
+					<h2 :class="isMobile ? 'text-base-semibold text-ink-gray-9' : 'text-sm text-ink-gray-6'">Signed in on</h2>
+					<ul v-if="detail.sessions.length" class="space-y-3">
 						<li v-for="(session, index) in detail.sessions" :key="index" class="flex items-center gap-2 text-base">
 							<span class="lucide-monitor-smartphone size-4 shrink-0 text-ink-gray-5" aria-hidden="true" />
 							<span class="min-w-0 flex-1 truncate text-ink-gray-8">{{ session.device }}</span>
-							<span class="text-sm text-ink-gray-5">{{ lastActive(session.lastUsed) }}</span>
+							<span class="text-xs text-ink-gray-5">{{ lastActive(session.lastUsed) }}</span>
 						</li>
 					</ul>
-					<p v-else class="text-sm text-ink-gray-5">Not signed in anywhere.</p>
+					<p v-else class="text-sm text-ink-gray-6">Not signed in anywhere.</p>
 				</div>
 
-				<p v-if="isMobile" class="flex items-center gap-1.5 text-sm text-ink-gray-5">
-					<span class="lucide-lock size-3.5 shrink-0" aria-hidden="true" />
-					Their chats are private. Admins see usage only.
-				</p>
+				<PrivacyNote v-if="isMobile">{{ PRIVACY_NOTE }}</PrivacyNote>
 			</aside>
 		</div>
 
@@ -262,53 +274,80 @@ const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { a
 		/>
 	</template>
 
-	<div v-else-if="state.kind === 'missing'" class="flex flex-col items-center gap-3 px-3 py-24 text-center">
-		<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
-			<span class="lucide-user-x size-6" aria-hidden="true" />
-		</div>
-		<p class="text-base text-ink-gray-7">No one here</p>
-		<p class="text-sm text-ink-gray-5">They may have been removed.</p>
-		<Button label="All people" route="/people" class="mt-2" />
-	</div>
-	<div v-else-if="state.kind === 'error'" class="flex flex-col items-center gap-3 px-3 py-24 text-center" role="alert">
-		<div class="rounded-full bg-surface-gray-2 p-3 text-ink-gray-5">
-			<span class="lucide-circle-alert size-6" aria-hidden="true" />
-		</div>
-		<p class="text-base text-ink-gray-7">This page could not load</p>
-		<p class="text-sm text-ink-gray-5">{{ state.message }}</p>
-		<Button label="Try again" class="mt-2" @click="retry" />
-	</div>
-	<!-- Loading: the page's own frame, with skeletons where its numbers go. NumberCard
-	     and the chart draw frappe-ui's own skeletons with `loading`. -->
+	<!-- Missing, error and loading keep the page's own frame. While loading, skeletons stand where its
+	     numbers go; NumberCard and the chart draw frappe-ui's own skeletons with `loading`. -->
 	<template v-else>
-		<PageHeaderMobile v-if="isMobile" title="">
+		<PageHeaderMobile v-if="isMobile" :title="state.kind === 'missing' ? 'Not found' : state.kind === 'error' ? 'Could not load' : ''">
 			<template #prefix><PageHeaderBackButton :fallback-route="{ path: '/people' }" /></template>
 		</PageHeaderMobile>
 		<PageHeader v-else>
-			<Breadcrumbs :items="[{ label: 'People', route: '/people' }]" />
+			<!-- Loading: "People" stays a parent link, as it is once loaded, and a bar stands where the name lands. Same classes as frappe-ui's Breadcrumbs. -->
+			<nav v-if="state.kind === 'loading'" aria-label="Breadcrumb" class="-ml-0.5 flex items-center leading-tighter">
+				<RouterLink to="/people" class="rounded-4 px-0.5 py-1 text-lg-medium leading-tighter text-ink-gray-5 hover:text-ink-gray-7">People</RouterLink>
+				<span class="mx-0.5 text-base text-ink-gray-4" aria-hidden="true">/</span>
+				<span class="flex px-0.5 py-1"><Skeleton class="h-3.5 w-16 rounded-4" /></span>
+			</nav>
+			<Breadcrumbs v-else class="-ml-0.5" :items="[{ label: 'People', route: '/people' }, { label: state.kind === 'missing' ? 'Not found' : 'Could not load' }]" />
+			<div v-if="state.kind === 'loading'" class="ml-auto flex items-center gap-2">
+				<Button label="Set daily credits" icon-left="lucide-gauge" disabled />
+				<Button icon="lucide-ellipsis" aria-label="More actions" disabled />
+			</div>
 		</PageHeader>
 
-		<div class="flex min-h-0 flex-1 flex-col md:flex-row" aria-busy="true" aria-label="Loading this person">
-			<div class="min-w-0 flex-1 space-y-6 px-3 pb-6 pt-4 sm:px-5 md:pb-16 md:pt-5">
+		<div v-if="state.kind === 'missing' || state.kind === 'error'" class="px-3 pt-4 sm:px-5 md:pt-6">
+			<EmptyState v-if="state.kind === 'missing'" icon="lucide-user-x" title="No one here" body="They may have been removed.">
+				<Button label="All people" route="/people" />
+			</EmptyState>
+			<EmptyState v-else icon="lucide-circle-alert" title="This page could not load" :body="state.message" alert>
+				<Button label="Try again" @click="retry" />
+			</EmptyState>
+		</div>
+		<div v-else class="flex min-h-0 flex-1 flex-col md:flex-row" aria-busy="true" aria-label="Loading this person">
+			<div class="min-w-0 flex-1 space-y-6 px-3 pb-6 pt-4 sm:px-5 md:pb-16 md:pt-6">
 				<div class="flex items-center gap-3">
-					<Skeleton class="size-10 shrink-0 rounded-full md:size-12" />
-					<div class="min-w-0 flex-1 space-y-2">
-						<Skeleton class="h-5 w-40 max-w-full rounded-4 md:h-6 md:w-56" />
-						<Skeleton class="h-3.5 w-52 max-w-full rounded-4" />
+					<Skeleton class="size-8 shrink-0 rounded-full md:size-10" />
+					<div class="min-w-0 flex-1">
+						<div class="flex h-[1lh] items-center text-xl-semibold md:text-2xl-semibold">
+							<Skeleton class="h-5 w-40 max-w-full rounded-4 md:w-56" />
+						</div>
+						<div class="flex h-[1lh] items-center text-base">
+							<Skeleton class="h-3.5 w-52 max-w-full rounded-4" />
+						</div>
 					</div>
 				</div>
-				<div class="grid grid-cols-2 gap-3 lg:grid-cols-4">
-					<NumberCard v-for="title in ['Credits today', 'Last 7 days', 'Replies, 7 days', 'Chats']" :key="title" :title="title" :value="null" loading />
+				<div class="space-y-4">
+					<div data-slot="dashboard" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+						<NumberCard v-for="title in ['Credits today', 'Credits, last 7 days', 'Replies, last 7 days', 'Chats']" :key="title" :title="title" :value="null" loading />
+					</div>
+					<div data-slot="dashboard" class="h-60 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+						<BarChart title="Credits used per day" :data="[]" x="day" y="Credits" loading />
+					</div>
+					<div data-slot="dashboard" class="h-72 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
+						<DonutChart title="Credits by model" :data="[]" category="model" value="credits" loading />
+					</div>
 				</div>
-				<div class="h-60 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:h-64 md:p-4">
-					<BarChart title="Credits per day, last 30 days" :data="[]" x="day" y="Credits" loading />
-				</div>
+				<PrivacyNote v-if="!isMobile">{{ PRIVACY_NOTE }}</PrivacyNote>
 			</div>
-			<aside class="space-y-3 border-outline-gray-1 px-3 pb-16 sm:px-5 md:w-[20rem] md:shrink-0 md:border-l md:pt-5">
-				<div v-for="(width, row) in ['w-20', 'w-24', 'w-16', 'w-28', 'w-20']" :key="row" class="flex justify-between gap-3">
-					<Skeleton class="h-3.5 w-20 rounded-4" />
-					<Skeleton :class="['h-3.5 rounded-4', width]" />
+			<aside aria-label="Details" class="space-y-5 px-3 pb-16 sm:px-5 md:w-[20rem] md:shrink-0 md:pt-6 md:relative md:before:absolute md:before:bottom-16 md:before:left-0 md:before:top-6 md:before:w-px md:before:bg-[var(--outline-gray-1)] md:before:content-['']">
+				<h2 v-if="isMobile" class="text-base-semibold text-ink-gray-9">Details</h2>
+				<dl class="space-y-3 text-base">
+					<div v-for="(label, row) in DETAIL_LABELS" :key="label" class="flex h-[1lh] items-center justify-between gap-3">
+						<dt class="shrink-0 text-ink-gray-6">{{ label }}</dt>
+						<dd><Skeleton :class="['h-3.5 rounded-4', ['w-12', 'w-20', 'w-10', 'w-6', 'w-6', 'w-6', 'w-24', 'w-20'][row]]" /></dd>
+					</div>
+				</dl>
+				<div class="space-y-2 border-t border-outline-gray-1 pt-5">
+					<h2 :class="isMobile ? 'text-base-semibold text-ink-gray-9' : 'text-sm text-ink-gray-6'">Signed in on</h2>
+					<div class="space-y-3 text-base">
+						<div v-for="(width, index) in ['w-28', 'w-32', 'w-28']" :key="index" class="flex h-[1lh] items-center gap-2">
+							<Skeleton class="size-4 shrink-0 rounded-4" />
+							<Skeleton :class="['h-3.5 flex-none rounded-4', width]" />
+							<Skeleton class="ml-auto h-3 w-16 rounded-4" />
+						</div>
+					</div>
 				</div>
+
+				<PrivacyNote v-if="isMobile">{{ PRIVACY_NOTE }}</PrivacyNote>
 			</aside>
 		</div>
 	</template>
