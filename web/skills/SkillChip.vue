@@ -1,24 +1,26 @@
 <script setup lang="ts">
-import { HoverCard } from "frappe-ui";
+import { Badge, HoverCard } from "frappe-ui";
 import { computed, ref } from "vue";
 import { skillDescription, skillsLoaded, skillTitle } from "./skills";
 
 /**
  * A skill the person chose: in the message box (removable), and on their sent message.
- * Hovering it shows what the skill does. A skill an admin turned off or deleted since
- * has no description, so the card says so.
+ * Hovering it shows a card with what the skill does and its $name. A skill an admin
+ * turned off or deleted since says so, and what Ponder does instead (server/workflow/skills.ts).
  */
 const props = defineProps<{ name: string; removable?: boolean }>();
 defineEmits<{ remove: [] }>();
 
 const title = computed(() => skillTitle(props.name));
+const description = computed(() => skillDescription(props.name));
+const off = computed(() => !description.value && skillsLoaded.value);
 // Never opens empty: before the skills list loads, there is nothing to show.
 const open = ref(false);
-const description = computed(() => skillDescription(props.name) ?? (skillsLoaded.value ? "This skill is off now." : ""));
+const canOpen = computed(() => Boolean(description.value) || off.value);
 </script>
 
 <template>
-	<HoverCard :open="open" :hover-delay="300" :leave-delay="100" side="top" @update:open="open = $event && Boolean(description)">
+	<HoverCard :open="open" :hover-delay="300" :leave-delay="100" :offset="6" side="top" @update:open="open = $event && canOpen">
 		<template #trigger>
 			<span
 				data-slot="skill-chip"
@@ -38,12 +40,26 @@ const description = computed(() => skillDescription(props.name) ?? (skillsLoaded
 				</button>
 			</span>
 		</template>
-		<div class="flex w-72 max-w-[calc(100vw-2rem)] flex-col gap-1 p-3">
-			<p class="flex items-center gap-1.5 text-sm-medium text-ink-gray-8">
-				<span class="lucide-sparkles size-3.5 shrink-0 text-ink-violet-7" aria-hidden="true" />
-				{{ title }}
+		<div data-slot="skill-card" class="w-80 max-w-[calc(100vw-2rem)] p-3">
+			<div class="flex items-center gap-2.5">
+				<span
+					class="flex size-8 shrink-0 items-center justify-center rounded-4"
+					:class="off ? 'bg-surface-gray-2 text-ink-gray-5' : 'bg-surface-violet-2 text-ink-violet-7'"
+					aria-hidden="true"
+				>
+					<span class="lucide-sparkles size-4" />
+				</span>
+				<div class="min-w-0 flex-1">
+					<p class="flex items-center gap-1.5 text-base-semibold text-ink-gray-9">
+						<span class="truncate">{{ title }}</span>
+						<Badge v-if="off" label="Off" size="sm" theme="gray" />
+					</p>
+					<p class="mt-0.5 truncate font-mono text-xs text-ink-gray-5">${{ name }}</p>
+				</div>
+			</div>
+			<p class="mt-2.5 text-p-sm text-ink-gray-7">
+				{{ description ?? "An admin turned this skill off, so Ponder answers without it." }}
 			</p>
-			<p class="text-p-xs text-ink-gray-6">{{ description }}</p>
 		</div>
 	</HoverCard>
 </template>
