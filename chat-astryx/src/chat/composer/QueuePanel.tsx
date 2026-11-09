@@ -4,7 +4,7 @@ import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { HStack } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextArea } from "@astryxdesign/core/TextArea";
 import { ArrowTurnUpRightIcon, Bars2Icon, PaperClipIcon, PencilIcon, QueueListIcon, XMarkIcon } from "@heroicons/react/24/outline";
 import { useEffect, useState, type KeyboardEvent } from "react";
 import type { QueuedRow } from "../../lib/message-queue";
@@ -116,7 +116,17 @@ export default function QueuePanel(props: QueuePanelProps) {
 							</span>
 							{editing === item.id ? (
 								<div className="min-w-0 flex-1">
-									<TextInput label="Edit queued message" isLabelHidden size="sm" hasAutoFocus value={draft} onChange={setDraft} onKeyDown={onEditKeyDown} onBlur={save} />
+									<TextArea
+										label="Edit queued message"
+										isLabelHidden
+										size="sm"
+										rows={Math.min(6, draft.split("\n").length)}
+										hasAutoFocus
+										value={draft}
+										onChange={setDraft}
+										onKeyDown={onEditKeyDown}
+										onBlur={save}
+									/>
 								</div>
 							) : (
 								<span className="flex min-w-0 flex-1 items-center gap-1" title={item.text}>

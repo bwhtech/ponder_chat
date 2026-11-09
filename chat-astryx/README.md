@@ -15,6 +15,7 @@ In the project folder, `npm run build:astryx` builds the admin pages (Vue), then
 ## How it is built
 
 - Astryx components for everything they cover: `AppShell` and `SideNav` for the frame, the `Chat` family (`ChatLayout`, `ChatMessageList`, `ChatMessage`, `ChatComposer`, `ChatToolCalls`) for the conversation, `Markdown` for replies.
+- Model Markdown (replies, reasoning, documents) goes through one component, `src/chat/markdown/ChatMarkdown.tsx`: Astryx `Markdown` with KaTeX maths, Mermaid diagrams drawn by Pele, and single newlines as line breaks. KaTeX and Pele load on first use.
 - Layout and small styles use Tailwind v4 through Astryx's token bridge (`src/styles.css`): `text-secondary`, `bg-surface`, `border-border`. No hardcoded colours or raw hex. `npx astryx docs principles` lists the rules.
 - Shared state lives in small stores (`src/lib/store.ts`, `useStore`), one per concern, as the Vue page kept refs.
 - Extension points keep features apart: tool renderers (`src/chat/tool-renderers.ts`), thread menu actions (`src/shell/thread-actions.ts`).

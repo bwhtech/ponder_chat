@@ -75,8 +75,9 @@ export function useComposer({ threadId, area, messages, setMessages, sendMessage
 	function sendNow({ text, files, skills: chosen, citations: quoted }: Queued) {
 		const closed = closeOpenCalls(latest.current);
 		if (closed) setMessages(closed);
-		// The first message: the thread shows in the list now, not once the reply ends.
-		if (!latest.current.some((message) => message.role === "user")) added(threadId, text || chosen.map(skillTitle).join(", ") || citationLabel(quoted[0]!));
+		// The first message: the thread shows in the list now, not once the reply ends. Files alone
+		// leave it untitled ("New chat"), as the server names it, until it gets a title.
+		if (!latest.current.some((message) => message.role === "user")) added(threadId, text || chosen.map(skillTitle).join(", ") || (quoted[0] ? citationLabel(quoted[0]) : ""));
 		if (!chosen.length && !quoted.length) return sendMessage(files.length ? { text, files } : { text });
 		// The skills go first in the message, so their instructions come before the person's text (server/workflow/skills.ts).
 		// The quotes come next, so the text that follows can refer to them (server/workflow/citations.ts).

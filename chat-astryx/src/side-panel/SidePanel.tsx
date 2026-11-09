@@ -7,14 +7,10 @@ import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from
 // The artifact card in replies opens artifacts here, so it registers with the panel.
 import "../artifacts/register";
 import DocumentView from "../artifacts/DocumentView";
-import HtmlView from "../artifacts/HtmlView";
-import PresentMode from "../artifacts/PresentMode";
-import SlidesView from "../artifacts/SlidesView";
 import { useStore } from "../lib/store";
 import { panelHeader } from "./header";
 import PanelToolbar from "./PanelToolbar";
 import { closePanel, fileKind, panel, type PanelItem } from "./panel";
-import TableView from "./TableView";
 
 /**
  * The panel at the right of the chat, for a file or an artifact. On a wide screen it sits
@@ -22,6 +18,11 @@ import TableView from "./TableView";
  * Mount it once, in the shell's row. pdf.js loads the first time a PDF opens, not with the app.
  */
 const PdfPages = lazy(() => import("./PdfPages"));
+// The rarer views load when first opened too. A document is drawn as replies are, so it stays.
+const HtmlView = lazy(() => import("../artifacts/HtmlView"));
+const PresentMode = lazy(() => import("../artifacts/PresentMode"));
+const SlidesView = lazy(() => import("../artifacts/SlidesView"));
+const TableView = lazy(() => import("./TableView"));
 
 export default function SidePanel() {
 	const item = useStore(panel);
@@ -70,26 +71,32 @@ function PanelView({ item, narrow }: { item: PanelItem; narrow: boolean }) {
 	);
 	const body = (
 		<div data-slot="side-panel-body" className={`h-full overflow-auto overscroll-contain ${header.inset ? "bg-muted" : ""}`}>
-			{artifact?.kind === "document" ? (
-				<DocumentView artifact={artifact} />
-			) : artifact?.kind === "slides" ? (
-				<SlidesView artifact={artifact} />
-			) : artifact ? (
-				<HtmlView artifact={artifact} view={pageView} />
-			) : file && kind === "pdf" ? (
-				<Suspense fallback={<PdfLoading />}>
-					<PdfPages url={file.url} name={file.name} />
-				</Suspense>
-			) : file && kind === "table" ? (
-				<TableView url={file.url} name={file.name} mediaType={file.mediaType} onRows={setRows} />
-			) : file ? (
-				<div className="flex min-h-full items-center justify-center p-4 sm:p-6">
-					<img src={file.url} alt={file.name} className="max-h-[calc(100dvh-7rem)] max-w-full rounded-xl object-contain" />
-				</div>
-			) : null}
+			<Suspense>
+				{artifact?.kind === "document" ? (
+					<DocumentView artifact={artifact} />
+				) : artifact?.kind === "slides" ? (
+					<SlidesView artifact={artifact} />
+				) : artifact ? (
+					<HtmlView artifact={artifact} view={pageView} />
+				) : file && kind === "pdf" ? (
+					<Suspense fallback={<PdfLoading />}>
+						<PdfPages url={file.url} name={file.name} />
+					</Suspense>
+				) : file && kind === "table" ? (
+					<TableView url={file.url} name={file.name} mediaType={file.mediaType} onRows={setRows} />
+				) : file ? (
+					<div className="flex min-h-full items-center justify-center p-4 sm:p-6">
+						<img src={file.url} alt={file.name} className="max-h-[calc(100dvh-7rem)] max-w-full rounded-xl object-contain" />
+					</div>
+				) : null}
+			</Suspense>
 		</div>
 	);
-	const present = presenting && artifact && <PresentMode artifact={artifact} onClose={stopPresenting} />;
+	const present = presenting && artifact && (
+		<Suspense>
+			<PresentMode artifact={artifact} onClose={stopPresenting} />
+		</Suspense>
+	);
 
 	// Where the panel covers the page, it lays out as the dialog's header and content.
 	if (narrow)

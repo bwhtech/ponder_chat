@@ -5,7 +5,7 @@ import { createStore } from "../lib/store";
  * steps open on Connectors. Kept here so the chat (a connector that needs a new sign-in)
  * and the account menu can open it.
  */
-export type SettingsTab = "account" | "connectors";
+export type SettingsTab = "account" | "appearance" | "connectors";
 export type SettingsPlace = { tab: SettingsTab; connector?: string | null; adding?: boolean };
 
 export const settings = createStore<SettingsPlace | null>(null);

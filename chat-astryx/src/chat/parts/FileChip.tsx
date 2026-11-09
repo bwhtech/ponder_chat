@@ -1,6 +1,7 @@
 import { Icon } from "@astryxdesign/core/Icon";
 import { Token } from "@astryxdesign/core/Token";
 import { DocumentIcon } from "@heroicons/react/24/outline";
+import { fileSize } from "../../lib/numbers";
 import { canView, viewFile } from "../../side-panel/panel";
 
 /**
@@ -25,10 +26,4 @@ export default function FileChip({ name, url, mediaType, size }: { name: string;
 			description={url && canView(mediaType, name) ? "Opens in the side panel" : url ? "Downloads the file" : undefined}
 		/>
 	);
-}
-
-function fileSize(bytes: number) {
-	if (bytes < 1024) return `${bytes} B`;
-	if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-	return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

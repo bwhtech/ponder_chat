@@ -2,7 +2,7 @@ import type { UIMessage } from "ai";
 import { nameFromFirstMessage } from "./thread-name";
 import { request } from "./api";
 import { createStore } from "./store";
-import { forgetThread, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
+import { forgetThread, generationOf, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
 
 /**
  * The person's threads and the one open now. The open thread lives in the URL
@@ -38,19 +38,24 @@ let opening = 0;
 const inflight = new Map<string, Promise<CachedThread | "same" | undefined>>();
 /** Threads started on this page that the server's list may not have yet. */
 const pending = new Map<string, ThreadSummary>();
+let listening = false;
 
 /** Opens the thread in the URL, or a new one, and keeps it in step with Back / Forward. */
 export async function init() {
 	// Read now, not on load: signing in (account.ts) may have just cleared another person's list.
 	threads.set(storedList());
 	listLoaded.set(threads.get().length > 0);
+	// Once for the page, however often init runs.
+	if (!listening) {
+		listening = true;
+		addEventListener("popstate", () => {
+			const id = new URL(location.href).searchParams.get("t");
+			if (id && id !== current.get()) void open(id, { push: false });
+			else if (!id) start({ push: false });
+		});
+	}
 	const id = new URL(location.href).searchParams.get("t");
 	await Promise.all([refresh(), id ? open(id, { push: false }) : start({ push: false })]);
-	addEventListener("popstate", () => {
-		const id = new URL(location.href).searchParams.get("t");
-		if (id && id !== current.get()) void open(id, { push: false });
-		else if (!id) start({ push: false });
-	});
 }
 
 export async function refresh() {
@@ -85,7 +90,7 @@ export async function open(id: string, { push = true } = {}) {
 	const fresh = await fetchThread(id, cached?.etag ?? null);
 	if (token !== opening) return;
 	loading.set(false);
-	if (!cached) return show(fresh && fresh !== "same" ? fresh : { messages: [], running: false, etag: null });
+	if (!cached) return show(fresh && fresh !== "same" ? fresh : (peekThread(id) ?? { messages: [], running: false, etag: null }));
 	// Nothing new, or the same messages under a new version (the page saved them itself).
 	if (!fresh || fresh === "same" || sameThread(cached, fresh)) return;
 	// A reply is on its way: the chat's own messages will be newer than this copy (chatBusy).
@@ -103,13 +108,19 @@ export function prefetch(id: string) {
 /** The chat's own messages after a reply, so coming back to the thread is instant. */
 export function remember(id: string, thread: Omit<CachedThread, "etag">) {
 	writeThread(id, { ...thread, etag: null });
+	// The open thread too: back from Memory, the chat mounts again with these, not the ones it opened with.
+	if (id === current.get()) {
+		messages.set(thread.messages);
+		running.set(thread.running);
+	}
 }
 
-/** The server's copy, "same" when it matches `etag` (a 304), or undefined when it could not be reached. */
+/** The server's copy, "same" when it matches `etag` (a 304), or undefined when it could not be reached or is older than the chat's. */
 function fetchThread(id: string, etag: string | null) {
 	const pending = inflight.get(id);
 	if (pending) return pending;
 	const request = (async () => {
+		const before = generationOf(id);
 		try {
 			const response = await fetch(`/api/threads/${encodeURIComponent(id)}`, {
 				// The cache here does the revalidating; the browser's would only add a second copy.
@@ -119,6 +130,8 @@ function fetchThread(id: string, etag: string | null) {
 			if (response.status === 304) return "same" as const;
 			if (!response.ok) return undefined;
 			const body = await response.json();
+			// The chat saved the thread meanwhile (remember): this copy is older, so it is dropped.
+			if (generationOf(id) !== before) return undefined;
 			const thread: CachedThread = { messages: body.messages, running: !!body.running, etag: response.headers.get("ETag") };
 			// Not saved yet (a new thread in the URL): nothing to keep.
 			if (thread.etag) writeThread(id, thread);

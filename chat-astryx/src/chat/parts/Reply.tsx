@@ -1,9 +1,10 @@
 import { Citation } from "@astryxdesign/core/Citation";
 import { HoverCard } from "@astryxdesign/core/HoverCard";
 import { Link } from "@astryxdesign/core/Link";
-import { Markdown, type MarkdownComponents } from "@astryxdesign/core/Markdown";
+import type { MarkdownComponents } from "@astryxdesign/core/Markdown";
 import { Text } from "@astryxdesign/core/Text";
 import { Children, createContext, isValidElement, use, type ReactNode } from "react";
+import ChatMarkdown, { chatMarkdownComponents } from "../markdown/ChatMarkdown";
 import { hostname, sourceKey, type PageSource, type SourceIndex } from "./sources";
 
 /**
@@ -14,9 +15,9 @@ import { hostname, sourceKey, type PageSource, type SourceIndex } from "./source
 export default function Reply({ text, streaming, sources }: { text: string; streaming: boolean; sources: SourceIndex }) {
 	return (
 		<Sources value={sources}>
-			<Markdown density="compact" isStreaming={streaming} autolink="gfm" contentWidth="100%" components={components}>
+			<ChatMarkdown density="compact" streaming={streaming} components={components}>
 				{text}
-			</Markdown>
+			</ChatMarkdown>
 		</Sources>
 	);
 }
@@ -24,7 +25,7 @@ export default function Reply({ text, streaming, sources }: { text: string; stre
 const Sources = createContext<SourceIndex>(new Map());
 
 // One object for every reply, so a streamed chunk does not remount the links.
-const components: Partial<MarkdownComponents> = { link: ReplyLink };
+const components: MarkdownComponents = { ...chatMarkdownComponents, link: ReplyLink };
 
 function ReplyLink({ href, children }: { href: string; children: ReactNode }) {
 	const sources = use(Sources);

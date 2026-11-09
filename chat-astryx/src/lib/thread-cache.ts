@@ -15,6 +15,8 @@ const memory = new Map<string, CachedThread>();
  */
 const generation = new Map<string, number>();
 const bump = (id: string) => generation.set(id, (generation.get(id) ?? 0) + 1);
+/** The thread's generation now: a fetch compares it with the one it started at. */
+export const generationOf = (id: string) => generation.get(id) ?? 0;
 /** Threads kept in IndexedDB, most recently opened first. */
 const KEEP = 30;
 const DB = "ponder-chat";

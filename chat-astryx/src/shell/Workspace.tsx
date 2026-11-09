@@ -17,7 +17,7 @@ import {
 	ShieldCheckIcon,
 	SunIcon,
 } from "@heroicons/react/24/outline";
-import { useEffect, type ReactNode } from "react";
+import { useLayoutEffect, type ReactNode } from "react";
 import { displayName, me, refreshCredits, signOut } from "../lib/account";
 import { useStore } from "../lib/store";
 import { themeMode, type ThemeMode } from "../lib/theme";
@@ -51,7 +51,8 @@ export default function Workspace() {
 	const thread = list.find((each) => each.id === id);
 
 	// The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
-	useEffect(() => closePanel(), [id, page]);
+	// A layout effect runs before the new chat's effects, so an artifact it is writing can open again (ArtifactPart.tsx).
+	useLayoutEffect(() => closePanel(), [id, page]);
 	// Back from a connector's sign-in in this tab (a phone): opens Settings on that connector.
 	useSignInReturn();
 

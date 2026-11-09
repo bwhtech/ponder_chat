@@ -54,7 +54,13 @@ export default function MessageParts({ message, streaming, onApproval = () => {}
 				const key = groupKey(group, index);
 				if (group.kind === "text") {
 					if (!group.part.text.trim()) return null;
-					if (message.role === "user") return <ChatMessageBubble key={key}>{group.part.text}</ChatMessageBubble>;
+					// Keep the person's line breaks and indents; a long word or URL still wraps.
+					if (message.role === "user")
+						return (
+							<ChatMessageBubble key={key}>
+								<span className="whitespace-pre-wrap wrap-anywhere">{group.part.text}</span>
+							</ChatMessageBubble>
+						);
 					return (
 						<ChatMessageBubble key={key} variant="ghost" width="100%">
 							<Reply text={group.part.text} streaming={streaming && message.parts.indexOf(group.part) === lastText} sources={sources} />

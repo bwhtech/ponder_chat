@@ -26,6 +26,10 @@ export function useCiteChips(area: RefObject<HTMLElement | null>, focusField: ()
 		if (!pending || pending.tooLong) return;
 		document.getSelection()?.removeAllRanges();
 		dismiss();
+		// The same quote again opens its chip rather than add a second one (the chips are keyed by range).
+		const { citation } = pending;
+		const same = chips.findIndex((chip) => chip.messageId === citation.messageId && chip.start === citation.start && chip.end === citation.end);
+		if (same !== -1) return edit(same, chips[same], pending.range);
 		setChips((list) => [...list, pending.citation]);
 		edit(chips.length, pending.citation, pending.range);
 		newCite.current = true;

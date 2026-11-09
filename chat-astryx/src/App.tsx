@@ -2,7 +2,6 @@ import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Theme } from "@astryxdesign/core/theme";
 import { ToastViewport } from "@astryxdesign/core/Toast";
-import { neutralTheme } from "@astryxdesign/theme-neutral/built";
 import { WifiIcon } from "@heroicons/react/24/outline";
 import { Icon } from "@astryxdesign/core/Icon";
 import { useEffect } from "react";
@@ -10,7 +9,8 @@ import { loadMe, me, meError } from "./lib/account";
 import { loadModels } from "./lib/models";
 import { useStore } from "./lib/store";
 import { useToastBridge } from "./lib/toast";
-import { themeMode } from "./lib/theme";
+import { themeMode, themeName } from "./lib/theme";
+import { builtThemes, loadFonts } from "./lib/themes";
 import { init } from "./lib/threads";
 import SignIn from "./SignIn";
 import Workspace from "./shell/Workspace";
@@ -22,6 +22,8 @@ void loadMe();
 export default function App() {
 	const current = useStore(me);
 	const mode = useStore(themeMode);
+	const name = useStore(themeName);
+	useEffect(() => loadFonts(name), [name]);
 
 	// Offline at first: ask again when the connection comes back, or on Retry.
 	useEffect(() => {
@@ -39,7 +41,7 @@ export default function App() {
 	}, [current]);
 
 	return (
-		<Theme theme={neutralTheme} mode={mode}>
+		<Theme theme={builtThemes[name]} mode={mode}>
 			<ToastViewport>
 				<Screens />
 			</ToastViewport>

@@ -58,6 +58,14 @@ export function useMessageQueue(threadId: string, options: QueueOptions) {
 	const [editing, setEditing] = useState<string | null>(null);
 	const latest = useRef({ options, paused, editing });
 	latest.current = { options, paused, editing };
+	// A message can finish uploading after its chat has closed (the person switched threads).
+	const mounted = useRef(false);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
+	}, []);
 
 	const items: QueuedRow[] = queue.map((item) => ({
 		id: item.id,
@@ -70,9 +78,13 @@ export function useMessageQueue(threadId: string, options: QueueOptions) {
 		await latest.current.options.send(item);
 	}, []);
 
-	/** While a reply is on its way, the message waits; otherwise it goes out now. */
+	/**
+	 * While a reply is on its way, the message waits; otherwise it goes out now. Read at the
+	 * call, not the render: a reply may have started while the files uploaded. A chat that
+	 * closed meanwhile keeps the message in its queue, to go out when the thread opens again.
+	 */
 	async function send(item: Queued) {
-		if (options.busy) setQueue(threadId, (list) => [...list, item]);
+		if (latest.current.options.busy || !mounted.current) setQueue(threadId, (list) => [...list, item]);
 		else await sendNow(item);
 	}
 
@@ -86,7 +98,7 @@ export function useMessageQueue(threadId: string, options: QueueOptions) {
 	async function steer(id: string) {
 		const item = take(id);
 		if (!item) return;
-		if (options.busy) await options.stopReply();
+		if (latest.current.options.busy) await latest.current.options.stopReply();
 		await sendNow(item);
 	}
 

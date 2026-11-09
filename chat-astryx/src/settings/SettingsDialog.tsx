@@ -8,7 +8,7 @@ import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { SideNav, SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { PuzzlePieceIcon, UserCircleIcon } from "@heroicons/react/24/outline";
+import { PaintBrushIcon, PuzzlePieceIcon, UserCircleIcon } from "@heroicons/react/24/outline";
 import { useEffect, useId } from "react";
 import AddConnector from "../connectors/AddConnector";
 import { connectors, connectorsError, loadConnectors, needsAttention } from "../connectors/api";
@@ -18,15 +18,17 @@ import RemoveConnectorDialog from "../connectors/RemoveConnectorDialog";
 import { registerToolLabels } from "../connectors/tool-labels";
 import { useStore } from "../lib/store";
 import AccountPanel from "./AccountPanel";
+import AppearancePanel from "./AppearancePanel";
 import { closeSettings, openSettings, settings, toggleSettings, type SettingsPlace, type SettingsTab } from "./state";
 
 /**
- * Settings, with Account and Connectors: a side nav and the open panel, after Astryx's
+ * Settings, with Account, Appearance and Connectors: a side nav and the open panel, after Astryx's
  * settings-dialog template. Cmd+Shift+, (Ctrl+Shift+,) opens it too. On a phone it fills
  * the screen, with the tabs in a row at the top.
  */
 const TABS: { tab: SettingsTab; label: string; icon: typeof UserCircleIcon }[] = [
 	{ tab: "account", label: "Account", icon: UserCircleIcon },
+	{ tab: "appearance", label: "Appearance", icon: PaintBrushIcon },
 	{ tab: "connectors", label: "Connectors", icon: PuzzlePieceIcon },
 ];
 
@@ -154,6 +156,7 @@ function Panel({ place }: { place: SettingsPlace }) {
 	const list = useStore(connectors);
 	const error = useStore(connectorsError);
 	if (place.tab === "account") return <AccountPanel />;
+	if (place.tab === "appearance") return <AppearancePanel />;
 	if (place.adding) return <AddConnector />;
 	const connector = list?.find((each) => each.id === place.connector);
 	return connector && !error ? <ConnectorPage key={connector.id} connector={connector} /> : <ConnectorsPanel />;

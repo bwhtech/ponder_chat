@@ -1,6 +1,6 @@
 import { ChatToolCalls, type ChatToolCallItem } from "@astryxdesign/core/Chat";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
-import { Markdown } from "@astryxdesign/core/Markdown";
+import ChatMarkdown from "../markdown/ChatMarkdown";
 import type { UIMessage } from "ai";
 import { useStore } from "../../lib/store";
 import { toolLabeler, toolName, toolRenderers, type ToolLabel, type ToolPart, type ToolRenderer } from "../tool-renderers";
@@ -60,9 +60,7 @@ function stepCall(part: Part, index: number, { message, streaming, renderers, la
 			name: thinking ? "Thinking" : "Thought",
 			status: thinking ? "running" : "complete",
 			resultDetail: part.text.trim() ? (
-				<Markdown density="compact" contentWidth="100%">
-					{part.text}
-				</Markdown>
+				<ChatMarkdown density="compact">{part.text}</ChatMarkdown>
 			) : undefined,
 		};
 	}

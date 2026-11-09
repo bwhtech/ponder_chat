@@ -83,9 +83,24 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	});
 
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
+	// Until the server answers, the composer acts as if busy, so the queue does not send into a run.
+	const [resuming, setResuming] = useState(running);
 	useEffect(() => {
-		if (running) void resumeStream();
+		if (!running) return;
+		let live = true;
+		void resumeStream().finally(() => live && setResuming(false));
+		return () => {
+			live = false;
+		};
 		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, []);
+	// "Always allow" answers once its rule is saved; by then this chat may have closed.
+	const mounted = useRef(false);
+	useEffect(() => {
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+		};
 	}, []);
 
 	const busy = status === "submitted" || status === "streaming";
@@ -94,10 +109,11 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	const wasBusy = useRef(busy);
 	useEffect(() => {
 		chatBusy.set(busy);
-		// A reply ended: keep this chat's messages, so coming back to it is instant.
-		if (wasBusy.current && !busy) remember(threadId, { messages: latest.current, running: false });
+		// A reply ended: keep this chat's messages, so coming back to it is instant. After an error
+		// (a dropped connection, say) the run may go on, so the next open follows it again.
+		if (wasBusy.current && !busy) remember(threadId, { messages: latest.current, running: status === "error" });
 		wasBusy.current = busy;
-	}, [busy, threadId]);
+	}, [busy, status, threadId]);
 	useEffect(
 		() => () => {
 			if (wasBusy.current) remember(threadId, { messages: latest.current, running: true });
@@ -120,7 +136,17 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	// Writing and sending: drafts, files, skills, quotes and the queue (composer/useComposer.ts).
 	const area = useRef<HTMLDivElement>(null);
 	const showEarlier = () => conversation.hidden > 0 && (conversation.showEarlier(), true);
-	const composer = useComposer({ threadId, area, messages, setMessages, sendMessage, status, stopRun, outOfCredits, showEarlier });
+	const composer = useComposer({
+		threadId,
+		area,
+		messages,
+		setMessages,
+		sendMessage,
+		status: resuming && status === "ready" ? "submitted" : status,
+		stopRun,
+		outOfCredits,
+		showEarlier,
+	});
 
 	return (
 		<div ref={area} className="flex min-h-0 flex-1 flex-col" data-slot="chat-view">
@@ -176,7 +202,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 										<MessageParts
 											message={message}
 											streaming={streaming}
-											onApproval={(id, approved) => addToolApprovalResponse({ id, approved, reason: approved ? undefined : "The person denied this." })}
+											onApproval={(id, approved) => mounted.current && void addToolApprovalResponse({ id, approved, reason: approved ? undefined : "The person denied this." })}
 										/>
 									</div>
 									{conversation.thinkingAfter(message) && <ThinkingLine text={conversation.thinkingText} />}
