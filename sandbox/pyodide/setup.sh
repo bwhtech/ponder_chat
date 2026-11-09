@@ -13,5 +13,5 @@ deno run --no-prompt --allow-read=. --allow-write=node_modules/pyodide --allow-n
 # 3. Pure-Python packages that Pyodide does not ship, unpacked into vendor/ (read-only at run time).
 rm -rf vendor
 uv pip install --quiet --target vendor --no-deps --python-version 3.14 --only-binary=:all: \
-	openpyxl==3.1.5 et-xmlfile==2.0.0 seaborn==0.13.2 dill==0.4.0 tabulate==0.9.0
+	openpyxl==3.1.5 et-xmlfile==2.0.0 seaborn==0.13.2 dill==0.4.0 tabulate==0.9.0 python-docx==1.2.0
 echo "Python sandbox ready."

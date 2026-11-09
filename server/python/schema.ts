@@ -26,8 +26,8 @@ export type RunPythonInput = z.infer<typeof runPythonInput>;
 
 export const RUN_PYTHON_DESCRIPTION =
 	"Run Python to calculate, analyse data or make a file: statistics, cleaning and joining data, a chart as an image, " +
-	"an Excel or CSV file to download, or reading a spreadsheet or CSV the person attached. " +
-	"Installed: pandas, numpy, matplotlib, seaborn, scipy, scikit-learn, statsmodels, sympy, networkx, openpyxl, xlrd, pillow, " +
+	"an Excel, Word or CSV file to download, or reading a spreadsheet, Word document or CSV the person attached. " +
+	"Installed: pandas, numpy, matplotlib, seaborn, scipy, scikit-learn, statsmodels, sympy, networkx, openpyxl, python-docx, xlrd, pillow, " +
 	"beautifulsoup4, lxml, pyyaml, regex, tabulate. Nothing else can be installed, and there is no internet. " +
 	"Variables, imports and files in /work stay between runs in this chat. " +
 	"Files the code writes to /work/outputs are shown to the person; images show in the chat. " +

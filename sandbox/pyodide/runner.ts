@@ -24,6 +24,7 @@
  *   imported as. LangChain's dill session load into __main__ fails in this Pyodide.
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
+import { vendorImports } from "./packages.ts";
 
 type InFile = { path: string; base64: string };
 type Request = {
@@ -120,9 +121,11 @@ async function run(request: Request): Promise<Reply> {
 
 	const helpers = pyodide.globals;
 	try {
-		// The code's imports, dill, and the modules the earlier runs imported, which the state refers to.
+		// The code's imports and what its vendored imports need, dill, and the modules the
+		// earlier runs imported, which the state refers to.
 		const earlier = (request.state?.imports ?? []).map((module) => `import ${module}`);
-		const imports = [request.code, "import dill", ...earlier].join("\n");
+		const code = [request.code, "import dill", ...earlier].join("\n");
+		const imports = [code, ...vendorImports(code)].join("\n");
 		await pyodide.loadPackagesFromImports(imports, {
 			messageCallback: (text) => {
 				const loaded = text.match(/^Loaded (.+)$/);

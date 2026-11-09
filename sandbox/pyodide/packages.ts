@@ -20,4 +20,20 @@ export const PACKAGES = [
 	"lxml",
 	"pyyaml",
 	"regex",
+	"typing-extensions",
 ];
+
+/**
+ * Pyodide packages that a vendored package imports. loadPackagesFromImports sees only the
+ * code's own imports, so `import docx` alone would not load lxml.
+ */
+export const VENDOR_NEEDS: Record<string, string[]> = {
+	docx: ["lxml", "typing_extensions"],
+};
+
+/** Import lines for the Pyodide packages that the code's vendored imports need. */
+export function vendorImports(code: string) {
+	return Object.entries(VENDOR_NEEDS)
+		.filter(([module]) => new RegExp(`^\\s*(import|from)\\s+${module}\\b`, "m").test(code))
+		.flatMap(([, needs]) => needs.map((name) => `import ${name}`));
+}
