@@ -9,8 +9,10 @@ import { useAttention } from "./attention";
 import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
 import { changeConnector, connectors, findTool, loadConnectors, toolTitle } from "./connectors/api";
 import { useDraft } from "./drafts";
-import { canUndo, fetchThreadSaves, undoSave, type MemoryOperation, type MemorySave } from "./memory";
-import { closeOpenCalls, queueFor, waitingOnPerson, type Queued } from "./message-queue";
+import { canUndo } from "./memory";
+import { MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
+import { useThinking } from "./thinking";
+import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from "./message-queue";
 import { features, model, modelName, models } from "./models";
 import RunPythonPart from "./RunPythonPart.vue";
 import { useSkillPicker } from "./skills/picker";
@@ -96,7 +98,7 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 	sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
 	onFinish: () => {
 		emit("saved");
-		void loadRemembered({ wait: true });
+		void notes.load({ wait: true });
 	},
 	onError: () => emit("refused"),
 });
@@ -120,41 +122,11 @@ async function patientFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 	}
 }
 
-// What each reply added to memory, by message id, one entry per save so each can be undone.
-// Memory saves after the reply, so the page asks again once a reply finishes, and the server waits for the save.
-type Remembered = { save: MemorySave; operations: MemoryOperation[] };
-const remembered = ref(new Map<string, Remembered[]>());
-const MEMORY_LABELS = { add: "Remembered", update: "Updated memory", forget: "Forgot" } as const;
-// Saves that arrived after the first load (a reply just finished): only these animate in.
-const newSaves = ref(new Set<number>());
-const shownSaves = new Set<number>();
-let loadedSaves = false;
-
-async function loadRemembered({ wait = false } = {}) {
-	const saves = await fetchThreadSaves(props.threadId, { wait });
-	const byMessage = new Map<string, Remembered[]>();
-	for (const save of [...saves].reverse()) {
-		if (!save.messageId) continue;
-		const operations = save.operations.filter((op) => op.status === "applied");
-		if (operations.length) byMessage.set(save.messageId, [...(byMessage.get(save.messageId) ?? []), { save, operations }]);
-	}
-	const ids = [...byMessage.values()].flat().map(({ save }) => save.id);
-	newSaves.value = new Set(loadedSaves ? ids.filter((id) => !shownSaves.has(id)) : []);
-	for (const id of ids) shownSaves.add(id);
-	loadedSaves = true;
-	remembered.value = byMessage;
-}
-
-async function undoRemembered(save: MemorySave) {
-	try {
-		await undoSave(save.id);
-	} finally {
-		await loadRemembered();
-	}
-}
+const notes = useRememberedNotes(props.threadId);
+const { byMessage: remembered, fresh: newSaves, undo: undoRemembered } = notes;
 
 onMounted(() => {
-	void loadRemembered();
+	void notes.load();
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	if (props.running) void resumeStream();
 });
@@ -298,59 +270,17 @@ onBeforeUnmount(() => {
 // While the tab is hidden, a finished reply puts a count on the favicon.
 useAttention(busy, computed(() => waitingOnPerson(messages.value)));
 
-// While a reply is on its way, something on screen always moves. Text and reasoning that are
-// streaming, and a running tool ("Searching …"), show it themselves. Every other moment shows
-// "Thinking…": before the first word (the stream opens at once, but a model can think for
-// 20 seconds before it writes), after a tool returns, and between steps.
-const quiet = computed(() => {
-	if (!busy.value || waitingOnPerson(messages.value)) return false;
-	const last = lastMessage.value;
-	if (last?.role !== "assistant") return true;
-	const part = last.parts[last.parts.length - 1];
-	if (!part) return true;
-	if (part.type === "text" || part.type === "reasoning") return part.state !== "streaming";
-	if (part.type.startsWith("tool-") || part.type === "dynamic-tool") {
-		const state = (part as { state?: string }).state;
-		return state !== "input-streaming" && state !== "input-available";
-	}
-	return true;
-});
-// Shown after a short quiet, so it does not blink between the last word and the end of the run.
-const thinking = ref(false);
-const thinkingFor = ref(0);
-let showTimer: ReturnType<typeof setTimeout> | undefined;
-let tickTimer: ReturnType<typeof setInterval> | undefined;
-watch(
-	quiet,
-	(now) => {
-		clearTimeout(showTimer);
-		clearInterval(tickTimer);
-		thinking.value = false;
-		if (!now) return;
-		showTimer = setTimeout(() => {
-			thinking.value = true;
-			thinkingFor.value = 0;
-			tickTimer = setInterval(() => thinkingFor.value++, 1_000);
-		}, 300);
-	},
-	{ immediate: true },
-);
-onBeforeUnmount(() => {
-	clearTimeout(showTimer);
-	clearInterval(tickTimer);
-});
-// A long wait counts the seconds, so it reads as work going on, not as stuck.
-const thinkingText = computed(() => (thinkingFor.value >= 5 ? `Thinking… ${thinkingFor.value}s` : "Thinking…"));
+const { thinking, text: thinkingText } = useThinking(busy, messages);
 
-// Messages written while a reply streams wait here; the first goes out when it ends.
-const queue = queueFor(props.threadId);
-// After Stop the queue waits, so it does not send what the person may no longer want; sending or Steer resumes it.
-const queuePaused = ref(false);
-// The queued message the person is editing does not go out until they finish.
-const queueEditing = ref<string | null>(null);
-const queueItems = computed(() =>
-	queue.map((item) => ({ id: item.id, text: item.text || item.skills.map((name) => `$${name}`).join(" "), files: item.files.length })),
-);
+// Messages written while a reply streams wait here; the first goes out when it ends (message-queue.ts).
+const queue = useMessageQueue(props.threadId, {
+	busy,
+	ready: computed(() => status.value === "ready"),
+	outOfCredits,
+	send: sendNow,
+	stopReply: stopRun,
+});
+const queueEditing = queue.editing;
 
 /** While a reply streams, the message is queued; otherwise it goes out now. */
 async function send(text: string, files: File[] = []) {
@@ -367,13 +297,10 @@ async function send(text: string, files: File[] = []) {
 	const attached = await upload(files);
 	// The field cleared on submit; give the text back so only the files need attaching again.
 	if (!attached) return giveBack();
-	const item = { id: crypto.randomUUID(), text, files: attached, skills: chosen };
-	if (busy.value) queue.push(item);
-	else await sendNow(item);
+	await queue.send({ id: crypto.randomUUID(), text, files: attached, skills: chosen });
 }
 
-async function sendNow({ text, files, skills: chosen }: Pick<Queued, "text" | "files" | "skills">) {
-	queuePaused.value = false;
+function sendNow({ text, files, skills: chosen }: Queued) {
 	const closed = closeOpenCalls(messages.value);
 	if (closed) messages.value = closed;
 	// The first message: the thread shows in the list now, not once the reply ends.
@@ -383,54 +310,11 @@ async function sendNow({ text, files, skills: chosen }: Pick<Queued, "text" | "f
 	sendMessage({ parts: [...files, ...chosen.map(skillPart), ...(text ? [{ type: "text" as const, text }] : [])] });
 }
 
-function takeFromQueue(id: string) {
-	const index = queue.findIndex((item) => item.id === id);
-	return index === -1 ? undefined : queue.splice(index, 1)[0];
-}
-
-/** Steer: stop the reply on its way and send this message now. */
-async function steer(id: string) {
-	const item = takeFromQueue(id);
-	if (!item) return;
-	if (busy.value) await stopRun();
-	await sendNow(item);
-}
-
-function stopReply() {
-	if (queue.length) queuePaused.value = true;
-	void stopRun();
-}
-
 /** The run outlives the request, so Stop tells the server, then drops the stream here. */
 async function stopRun() {
 	await fetch(`/api/chat/${encodeURIComponent(props.threadId)}/stop`, { method: "POST" }).catch(() => undefined);
 	await stop();
 }
-
-function updateQueued(id: string, text: string) {
-	const item = queue.find((queued) => queued.id === id);
-	if (item) item.text = text;
-}
-
-function reorderQueue(ids: string[]) {
-	const byId = new Map(queue.map((item) => [item.id, item]));
-	queue.splice(0, queue.length, ...ids.map((id) => byId.get(id)!).filter(Boolean));
-}
-
-// Send the next queued message once the reply ends. Not after an error or Stop, and not without
-// credits: a queue that waits for credits goes out when they come back.
-watch(
-	() => [status.value, queue.length, outOfCredits.value, queueEditing.value] as const,
-	([current, queued, noCredits]) => {
-		if (current !== "ready" || !queued || noCredits) return;
-		setTimeout(() => {
-			if (status.value !== "ready" || !queue.length || queuePaused.value || outOfCredits.value) return;
-			if (queue[0].id === queueEditing.value) return;
-			void sendNow(queue.shift()!);
-		});
-	},
-	{ immediate: true },
-);
 
 /** Uploads the attached files; the message carries links to them. Returns null if any failed. */
 async function upload(files: File[]): Promise<FileUIPart[] | null> {
@@ -611,7 +495,7 @@ function replyModelId(message: UIMessage) {
 				@choose="chooseSkill"
 				@hover="(index) => (skillActive = index)"
 			/>
-			<PromptInputQueue v-model:editing="queueEditing" :items="queueItems" @steer="steer" @remove="takeFromQueue" @update="updateQueued" @reorder="reorderQueue" />
+			<PromptInputQueue v-model:editing="queueEditing" :items="queue.items.value" @steer="queue.steer" @remove="queue.remove" @update="queue.update" @reorder="queue.reorder" />
 			<PromptInput
 				v-model="input"
 				queue
@@ -620,7 +504,7 @@ function replyModelId(message: UIMessage) {
 				:accept="ACCEPT"
 				:ready="skillChips.length > 0"
 				@submit="send($event.text, $event.files)"
-				@stop="stopReply"
+				@stop="queue.stop"
 			>
 				<PromptInputHeader />
 				<div v-if="skillChips.length" data-slot="prompt-input-skills" class="flex flex-wrap gap-1.5 px-3 pt-3 [@media(pointer:coarse)]:gap-y-5">
