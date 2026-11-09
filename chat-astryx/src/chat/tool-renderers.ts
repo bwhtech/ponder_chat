@@ -1,3 +1,4 @@
+import type { ChatToolCallItem } from "@astryxdesign/core/Chat";
 import type { UIMessage } from "ai";
 import type { ComponentType } from "react";
 import { createStore } from "../lib/store";
@@ -22,6 +23,8 @@ export type ToolRenderer = {
 	component: ComponentType<ToolRendererProps>;
 	/** Shown in the folded steps row with the calls around it (searches, page reads), rather than on its own. */
 	foldable?: boolean;
+	/** For a foldable renderer: its line in the steps ("Searched “query”"). The component draws what opens under it. */
+	line?: (props: ToolRendererProps) => Pick<ChatToolCallItem, "name" | "target">;
 };
 
 export const toolRenderers = createStore<Record<string, ToolRenderer>>({});

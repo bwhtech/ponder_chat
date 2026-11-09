@@ -1,0 +1,10 @@
+/* The quote whose comment is being written, and the quote that "Go to source" scrolled
+   to (highlight.ts). The page's own selection is left alone. */
+::highlight(ponder-cite-comment) {
+	background-color: var(--color-info-muted);
+	color: inherit;
+}
+::highlight(ponder-cite-flash) {
+	background-color: var(--color-warning-muted);
+	color: inherit;
+}

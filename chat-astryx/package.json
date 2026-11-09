@@ -19,6 +19,8 @@
     "@stylexjs/stylex": "^0.19.1",
     "ai": "^7.0.162",
     "better-auth": "^1.7.12",
+    "dompurify": "^3.4.17",
+    "pdfjs-dist": "^6.5.438",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"
   },

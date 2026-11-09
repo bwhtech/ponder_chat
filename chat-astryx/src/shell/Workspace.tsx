@@ -29,6 +29,7 @@ import CreditMeter from "./CreditMeter";
 import MemoryPage from "../memory/MemoryPage";
 import { closePanel } from "../side-panel/panel";
 import SidePanel from "../side-panel/SidePanel";
+import { useSignInReturn } from "../connectors/use-sign-in-return";
 import SettingsDialog from "../settings/SettingsDialog";
 import { openSettings } from "../settings/state";
 import ThreadList from "./ThreadList";
@@ -51,6 +52,8 @@ export default function Workspace() {
 
 	// The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
 	useEffect(() => closePanel(), [id, page]);
+	// Back from a connector's sign-in in this tab (a phone): opens Settings on that connector.
+	useSignInReturn();
 
 	function pick(threadId: string) {
 		showChat();

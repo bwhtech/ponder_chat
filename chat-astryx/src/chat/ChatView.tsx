@@ -1,19 +1,26 @@
 import { useChat } from "@ai-sdk/react";
 import { WorkflowChatTransport } from "@ai-sdk/workflow/client";
-import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
+import { Icon } from "@astryxdesign/core/Icon";
+import { ChevronDoubleUpIcon } from "@heroicons/react/24/outline";
 import { ChatLayout, ChatMessage, ChatMessageList, ChatMessageMetadata } from "@astryxdesign/core/Chat";
 import { HStack, VStack } from "@astryxdesign/core/Layout";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { lastAssistantMessageIsCompleteWithApprovalResponses, type UIMessage } from "ai";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { me } from "../lib/account";
-import { clockTime } from "../lib/dates";
 import { model as lastPicked, modelName, models as modelList } from "../lib/models";
 import { useStore } from "../lib/store";
-import { added, chatBusy, remember } from "../lib/threads";
+import { chatBusy, remember } from "../lib/threads";
+import SentQuotes from "../cite/SentQuotes";
 import Composer from "./Composer";
+import { useComposer } from "./composer/useComposer";
 import CopyButton from "./CopyButton";
 import MessageParts from "./MessageParts";
+import "./parts/register";
+import RememberedNotes from "./parts/RememberedNotes";
+import { AskedSkills, ThinkingLine } from "./parts/ReplyLines";
+import { useConversation } from "./parts/useConversation";
 
 /** One chat: the conversation and the message field. The shell mounts a new one per thread. */
 export type ChatViewProps = {
@@ -65,7 +72,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		[],
 	);
 
-	const { messages, sendMessage, addToolApprovalResponse, status, error, stop, resumeStream } = useChat({
+	const { messages, setMessages, sendMessage, addToolApprovalResponse, status, error, stop, resumeStream } = useChat({
 		id: threadId,
 		messages: initialMessages,
 		transport,
@@ -99,16 +106,7 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 		[threadId],
 	);
 
-	const [input, setInput] = useState("");
-	const credits = person?.credits;
-	const outOfCredits = (credits?.remaining ?? 1) <= 0;
-
-	function send(text: string) {
-		if (!text.trim() || outOfCredits) return;
-		if (!messages.some((message) => message.role === "user")) added(threadId, text);
-		setInput("");
-		void sendMessage({ text });
-	}
+	const outOfCredits = (person?.credits.remaining ?? 1) <= 0;
 
 	/** The run outlives the request, so Stop tells the server, then drops the stream here. */
 	async function stopRun() {
@@ -117,35 +115,37 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 	}
 
 	const lastMessage = messages[messages.length - 1];
-	const thinking = busy && lastMessage?.role !== "assistant";
+	// Paging, the "Thinking" line, memory notes under replies, and the tab badge (parts/useConversation.ts).
+	const conversation = useConversation({ threadId, initialMessages, messages, busy });
+	// Writing and sending: drafts, files, skills, quotes and the queue (composer/useComposer.ts).
+	const area = useRef<HTMLDivElement>(null);
+	const showEarlier = () => conversation.hidden > 0 && (conversation.showEarlier(), true);
+	const composer = useComposer({ threadId, area, messages, setMessages, sendMessage, status, stopRun, outOfCredits, showEarlier });
 
 	return (
-		<div className="flex min-h-0 flex-1 flex-col" data-slot="chat-view">
+		<div ref={area} className="flex min-h-0 flex-1 flex-col" data-slot="chat-view">
 			<ChatLayout
 				emptyState={<Landing />}
 				composer={
-					<VStack gap={2} className="mx-auto w-full max-w-[760px]">
-						{outOfCredits && credits && (
-							<Banner status="warning" title="You've used today's credits" description={`They refill at ${clockTime(credits.resetsAt)}.`} />
-						)}
-						<Composer
-							value={input}
-							onChange={setInput}
-							onSubmit={send}
-							onStop={() => void stopRun()}
-							busy={busy}
-							model={threadModel}
-							onModelChange={pickModel}
-							placeholder="Message Ponder Chat"
-							isDisabled={outOfCredits}
-							status={error && !busy ? { type: "error", message: errorMessage(error) } : undefined}
-						/>
-					</VStack>
+					<Composer
+						composer={composer}
+						onStop={() => composer.queue.stop()}
+						model={threadModel}
+						onModelChange={pickModel}
+						isEmpty={messages.length === 0}
+						outOfCredits={outOfCredits}
+						status={error && !busy ? { type: "error", message: errorMessage(error) } : undefined}
+					/>
 				}
 			>
 				{messages.length > 0 && (
 					<ChatMessageList isStreaming={busy} className="mx-auto w-full max-w-[760px]">
-						{messages.map((message) => {
+						{conversation.hidden > 0 && (
+							<div className="flex justify-center pb-4" data-slot="show-earlier">
+								<Button label={`Show earlier messages (${conversation.hidden})`} variant="ghost" size="sm" icon={<Icon icon={ChevronDoubleUpIcon} />} onClick={conversation.showEarlier} />
+							</div>
+						)}
+						{conversation.shown.map((message) => {
 							const streaming = busy && message === lastMessage;
 							const text = replyText(message);
 							return (
@@ -169,19 +169,24 @@ export default function ChatView({ threadId, initialMessages, running, onSaved, 
 										) : undefined
 									}
 								>
-									<MessageParts
-										message={message}
-										streaming={streaming}
-										onApproval={(id, approved) => addToolApprovalResponse({ id, approved, reason: approved ? undefined : "The person denied this." })}
-									/>
+									<AskedSkills names={conversation.askedSkills(message)} />
+									<SentQuotes message={message} onReveal={composer.cites.reveal} />
+									{/* The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). */}
+									<div className="contents" data-cite-source={message.role === "assistant" && !streaming ? message.id : undefined}>
+										<MessageParts
+											message={message}
+											streaming={streaming}
+											onApproval={(id, approved) => addToolApprovalResponse({ id, approved, reason: approved ? undefined : "The person denied this." })}
+										/>
+									</div>
+									{conversation.thinkingAfter(message) && <ThinkingLine text={conversation.thinkingText} />}
+									<RememberedNotes notes={conversation.notes.byMessage.get(message.id) ?? []} fresh={conversation.notes.fresh} onUndo={conversation.notes.undo} />
 								</ChatMessage>
 							);
 						})}
-						{thinking && (
+						{conversation.thinkingAlone && (
 							<ChatMessage sender="assistant">
-								<Text color="secondary" className="animate-pulse">
-									Thinking…
-								</Text>
+								<ThinkingLine text={conversation.thinkingText} />
 							</ChatMessage>
 						)}
 					</ChatMessageList>
