@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button, Popover } from "frappe-ui";
 import { computed } from "vue";
-import { citationLabel, type Citation } from "./citations";
+import { CITATION_MAX_COMMENT, citationLabel, type Citation } from "./citations";
 import CommentEditor from "./CommentEditor.vue";
 
 /** Something the comment editor can sit against: the quoted text in the reply. */
@@ -16,12 +16,16 @@ const props = defineProps<{ citation: Citation; composer?: boolean; editing?: bo
 const emit = defineEmits<{ reveal: []; edit: []; remove: []; save: [comment: string]; send: [comment: string]; cancel: [] }>();
 
 const label = computed(() => citationLabel(props.citation));
-// What the editor holds: a click outside it saves this, like T3 Code.
+// What the editor holds. A click outside saves it only when it changed, like T3 Code
+// (assistantCitationCommentDismissal.ts); otherwise the click away counts as Cancel.
 let draft: string | null = null;
 
 function onEditorOpen(open: boolean) {
 	if (open || !props.editing) return;
-	if (draft !== null) emit("save", draft);
+	// Too long to save: the editor stays open and says so.
+	if (draft !== null && draft.length > CITATION_MAX_COMMENT) return;
+	const changed = draft !== null && draft.trim() !== (props.citation.comment ?? "").trim();
+	if (changed) emit("save", draft!);
 	else emit("cancel");
 	draft = null;
 }

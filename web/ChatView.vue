@@ -265,6 +265,12 @@ const { pending: pendingCite, dismiss: dismissCite } = useCiteSelection(area);
 const editingCite = ref<number | null>(null);
 const citeAnchor = ref<CiteAnchor | null>(null);
 let unmarkQuote = () => {};
+/**
+ * The open editor belongs to a quote Cite just added. Like T3 Code, cancelling that first
+ * comment (Cancel, Escape, or a click away with nothing written) takes the quote out again;
+ * only Save keeps it. Cancelling a later edit (the pencil) only closes the editor.
+ */
+let newCite = false;
 onBeforeUnmount(() => unmarkQuote());
 
 function cite() {
@@ -274,10 +280,12 @@ function cite() {
 	dismissCite();
 	citeChips.value = [...citeChips.value, shown.citation];
 	editComment(citeChips.value.length - 1, shown.range);
+	newCite = true;
 }
 
 /** Opens a chip's comment editor beside its quote when the quote is on screen, else beside the chip. */
 function editComment(index: number, range?: Range | null) {
+	newCite = false;
 	unmarkQuote();
 	const citation = citeChips.value[index];
 	if (!citation) return;
@@ -307,10 +315,17 @@ function quoteAnchor(range: Range): CiteAnchor {
 }
 
 function closeComment() {
+	newCite = false;
 	unmarkQuote();
 	editingCite.value = null;
 	citeAnchor.value = null;
 	composer.value?.querySelector("textarea")?.focus();
+}
+
+/** Cancel, Escape, or a click away that changed nothing. */
+function cancelComment(index: number) {
+	if (newCite) removeCite(index);
+	else closeComment();
 }
 
 function saveComment(index: number, comment: string) {
@@ -620,7 +635,7 @@ function replyModelId(message: UIMessage) {
 							saveComment(index, $event);
 							promptInput?.submit();
 						"
-						@cancel="closeComment"
+						@cancel="cancelComment(index)"
 					/>
 				</div>
 				<PromptInputTextarea :placeholder="placeholder" autofocus />
