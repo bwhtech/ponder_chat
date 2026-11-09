@@ -25,6 +25,14 @@ echo "$SANDBOX_HASH" > sandbox/pyodide/.hash
 step "Build"
 npm run build --silent
 
+# A tab opened before this deploy still asks for the old release's chunks, such as the
+# Mermaid renderer it loads on first use. Their names carry a hash, so keep the last two
+# weeks of them next to the new ones; otherwise the import fails in that tab.
+if [ -n "$PREVIOUS" ] && [ -d "$PREVIOUS/dist/assets" ]; then
+	find "$PREVIOUS/dist/assets" -type f -mtime -14 -exec sh -c 'for f; do [ -e "dist/assets/${f##*/}" ] || cp -p "$f" dist/assets/; done' sh {} +
+	echo "Kept the earlier releases' assets"
+fi
+
 step "Database migrations (the workflow tables; the app's own run at start-up)"
 set -a; . /etc/ponder-chat/env; set +a
 npx --no-install bootstrap

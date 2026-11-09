@@ -22,12 +22,24 @@ const error = ref("");
 let diagram: Mounted | null = null;
 let drawn: HTMLElement | null = null;
 
+/** Draws, or shows the code with the reason, such as a renderer that could not load. Never an empty box. */
 async function draw() {
+	try {
+		await drawDiagram();
+	} catch (reason) {
+		error.value = errorMessage(reason) || "The diagram could not be drawn.";
+	}
+}
+
+async function drawDiagram() {
 	if (!props.complete || showCode.value || !host.value) return;
 	const element = host.value;
 	const options = { ...OPTIONS, onRender: () => inkSliceLabels(element) };
 	// Loaded on first use, with each diagram type fetched as it is needed.
-	const { detectType, load, mountAsync } = await import("pele/lazy");
+	const { detectType, load, mountAsync } = await import("pele/lazy").catch(() => {
+		// Most often a tab opened before a deploy, asking for a file the new release renamed.
+		throw new Error("The diagram drawer could not load. Reload the page to try again.");
+	});
 	if (element !== host.value) return;
 	const source = props.code.trim();
 	if (diagram && drawn === element) {
