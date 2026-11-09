@@ -13,7 +13,7 @@ const refill = computed(() => `Refills ${fromNow(props.credits.resetsAt)}`);
 </script>
 
 <template>
-	<div class="flex flex-col gap-1.5 rounded-7 px-4 py-2" data-slot="credit-meter">
+	<div class="flex flex-col gap-1.5 rounded-7 px-2 py-2" data-slot="credit-meter">
 		<div class="flex items-baseline justify-between gap-2 text-p-sm">
 			<span class="text-ink-gray-6">Credits left</span>
 			<span class="tabular-nums text-ink-gray-8">

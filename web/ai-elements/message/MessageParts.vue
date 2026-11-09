@@ -121,7 +121,7 @@ function answerAll(approved: boolean) {
 
 /** A plan item's steps go under its line (PlanItemSteps); other steps sit in a plain column. */
 function stepsAttrs(group: Extract<Group, { kind: "steps" | "plan-item" }>) {
-	if (group.kind === "steps") return { "data-slot": "message-steps", class: "flex min-w-0 flex-col gap-1 [&:not(:first-child)]:mt-1.5 [&:not(:last-child)]:mb-2" };
+	if (group.kind === "steps") return { "data-slot": "message-steps", class: "flex min-w-0 flex-col gap-1 [&:not(:first-child)]:mt-1.5 [&:not(:last-child)]:mb-1.5" };
 	const item = buildPlan?.value?.items.find((candidate) => candidate.id === group.id);
 	return {
 		title: item?.title ?? group.id,

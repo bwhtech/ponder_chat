@@ -21,6 +21,24 @@
   }
 }
 
+/* From sm, the transcript and Memory reserve a scrollbar gutter on both sides. Their 720px column then starts one
+   gutter further in once the chat area is narrower than the column (the side panel is open, or a small window).
+   The header, the composer and the loading skeleton sit outside those scrollers, so they reserve the same width
+   (--scroll-gutter, measured in main.ts; 0 with overlay scrollbars) and every part starts on one edge.
+   This class owns the column's width and side padding: do not add mx-auto, w-full, max-w-* or px-* next to it. */
+.scroll-gutter-match {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 720px;
+  padding-inline: 1rem;
+}
+@media (min-width: 640px) {
+  .scroll-gutter-match {
+    max-width: calc(720px + 2 * var(--scroll-gutter, 0px));
+    padding-inline: calc(1.25rem + var(--scroll-gutter, 0px));
+  }
+}
+
 /* A memory note that arrives after a reply rises in; notes already there on load do not. */
 @keyframes memory-saved-in {
   from {
