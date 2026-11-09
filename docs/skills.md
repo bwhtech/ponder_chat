@@ -16,6 +16,7 @@ To add a standard skill, put its `SKILL.md` in a `.ts` file in `server/standard-
 | Skill | Source |
 | --- | --- |
 | `technical-writing` | [frappe/skills](https://github.com/frappe/skills), unchanged |
+| `docx` | [anthropics/skills](https://github.com/anthropics/skills), Apache 2.0 (`server/standard-skills/LICENSE.anthropic-skills.txt`). Changed to run in the Python sandbox with `python-docx`. |
 
 ## Writing a skill
 

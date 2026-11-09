@@ -24,6 +24,7 @@
  *   imported as. LangChain's dill session load into __main__ fails in this Pyodide.
  */
 import { loadPyodide, type PyodideInterface } from "pyodide";
+import { vendorImports } from "./packages.ts";
 
 type InFile = { path: string; base64: string };
 type Request = {
@@ -72,14 +73,34 @@ def _ponder_dump_globals(max_bytes: int):
             modules[name] = value.__name__
             continue
         try:
-            dill.dumps(value)
+            if not _ponder_survives(value):
+                raise ValueError(name)
             values[name] = value
         except Exception:
             skipped.append(name)
     data = dill.dumps({"values": values, "modules": modules})
     if len(data) > max_bytes:
         return None, sorted(values), skipped, []
-    return base64.b64encode(data).decode(), sorted(values), skipped, sorted(set(modules.values()))
+    # The packages the kept values come from, such as docx for Pt or pandas for DataFrame:
+    # loading the state imports them, so the next run must load their Pyodide packages first.
+    packages = {_ponder_package(value) for value in values.values()} - {None}
+    return base64.b64encode(data).decode(), sorted(values), skipped, sorted(set(modules.values()) | packages)
+
+def _ponder_survives(value):
+    """False for a number or text subclass that comes back changed, such as python-docx's
+    Pt(11), which stores EMUs and is rebuilt as Pt(139700)."""
+    import dill
+    data = dill.dumps(value)
+    if isinstance(value, (int, float, str)) and type(value) not in (int, float, str, bool):
+        return dill.loads(data) == value
+    return True
+
+def _ponder_package(value):
+    module = getattr(value, "__module__", None)
+    if not isinstance(module, str):
+        module = type(value).__module__
+    top = module.split(".")[0]
+    return None if top.startswith("_") or top in ("__main__", "builtins") or top not in sys.modules else top
 `;
 
 async function main() {
@@ -120,9 +141,11 @@ async function run(request: Request): Promise<Reply> {
 
 	const helpers = pyodide.globals;
 	try {
-		// The code's imports, dill, and the modules the earlier runs imported, which the state refers to.
+		// The code's imports and what its vendored imports need, dill, and the modules the
+		// earlier runs imported, which the state refers to.
 		const earlier = (request.state?.imports ?? []).map((module) => `import ${module}`);
-		const imports = [request.code, "import dill", ...earlier].join("\n");
+		const code = [request.code, "import dill", ...earlier].join("\n");
+		const imports = [code, ...vendorImports(code)].join("\n");
 		await pyodide.loadPackagesFromImports(imports, {
 			messageCallback: (text) => {
 				const loaded = text.match(/^Loaded (.+)$/);
