@@ -9,9 +9,14 @@ import { waitingOnPerson } from "./message-queue";
  * it writes), after a tool returns, and between steps. It shows after a short quiet, so it
  * does not blink between the last word and the end of the run, and a long wait counts the
  * seconds, so it reads as work going on, not as stuck.
+ *
+ * Text that stops streaming for a moment counts as quiet too. A model that writes a tool
+ * call can send nothing for many seconds after its last word, while the text part still
+ * reads "streaming".
  */
 export function useThinking(busy: Ref<boolean>, messages: Ref<UIMessage[]>) {
-	const quiet = computed(() => busy.value && !waitingOnPerson(messages.value) && !moving(messages.value.at(-1)));
+	const stalled = useStalled(() => lastText(messages.value.at(-1)));
+	const quiet = computed(() => busy.value && !waitingOnPerson(messages.value) && (!moving(messages.value.at(-1)) || stalled.value));
 	const thinking = ref(false);
 	const seconds = ref(0);
 	let showTimer: ReturnType<typeof setTimeout> | undefined;
@@ -52,4 +57,30 @@ function moving(last: UIMessage | undefined) {
 		return state === "input-streaming" || state === "input-available";
 	}
 	return false;
+}
+
+const STALL_MS = 1_500;
+
+/** True when `value` is set and has not changed for STALL_MS. */
+function useStalled(value: () => string | undefined) {
+	const stalled = ref(false);
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	watch(
+		value,
+		(now) => {
+			clearTimeout(timer);
+			stalled.value = false;
+			if (now !== undefined) timer = setTimeout(() => (stalled.value = true), STALL_MS);
+		},
+		{ immediate: true },
+	);
+	onBeforeUnmount(() => clearTimeout(timer));
+	return stalled;
+}
+
+/** The text that streams at the end of the reply, with its place, so a new part counts as a change. */
+function lastText(last: UIMessage | undefined) {
+	const part = last?.role === "assistant" ? last.parts.at(-1) : undefined;
+	if (part?.type !== "text" || part.state !== "streaming") return undefined;
+	return `${last!.parts.length}:${part.text.length}`;
 }

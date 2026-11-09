@@ -3,6 +3,7 @@ import { Skeleton } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import type { Artifact } from "../side-panel/panel";
 import { finishedSlides, framedDeck, SLIDE_GAP, SLIDE_HEIGHT, SLIDE_WIDTH, slideCount } from "./slides";
+import { artifactSteps, currentStepText } from "./steps";
 
 /**
  * A slide deck in the panel, every slide in one column. The frame is drawn at the slides'
@@ -15,6 +16,8 @@ const html = computed(() => (props.artifact.writing ? finishedSlides(props.artif
 const count = computed(() => slideCount(html.value));
 // A new page for the frame only when a slide is added, not on every streamed word.
 const page = computed(() => framedDeck(html.value));
+// "Writing slide 4…" or "Setting up the look…" on the placeholder for the slide on its way.
+const writingText = computed(() => currentStepText("slides", artifactSteps("slides", props.artifact.content, false)));
 const frameHeight = computed(() => count.value * SLIDE_HEIGHT + Math.max(0, count.value - 1) * SLIDE_GAP);
 
 const column = ref<HTMLElement | null>(null);
@@ -46,7 +49,7 @@ onBeforeUnmount(() => observer?.disconnect());
 		</div>
 		<div v-if="artifact.writing" class="relative aspect-video w-full overflow-hidden rounded-4">
 			<Skeleton class="absolute inset-0 !rounded-[inherit]" />
-			<p class="absolute inset-0 flex items-center justify-center text-sm text-ink-gray-5">Writing slide {{ count + 1 }}…</p>
+			<p class="absolute inset-0 flex items-center justify-center text-sm text-ink-gray-5">{{ writingText }}</p>
 		</div>
 		<p v-else-if="!count" class="pt-[20vh] text-center text-base text-ink-gray-6">This deck has no slides.</p>
 	</div>
