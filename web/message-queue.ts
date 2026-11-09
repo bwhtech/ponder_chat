@@ -1,5 +1,6 @@
 import type { FileUIPart, UIMessage } from "ai";
 import { computed, reactive, ref, watch, type Ref } from "vue";
+import { citationLabel, type Citation } from "./cite/citations";
 
 /** A message the person wrote while the agent was working, with its uploaded files. */
 export interface Queued {
@@ -8,6 +9,8 @@ export interface Queued {
 	files: FileUIPart[];
 	/** The skills the person chose with $name. */
 	skills: string[];
+	/** Text quoted from earlier replies (cite/). */
+	citations: Citation[];
 }
 
 /**
@@ -46,7 +49,7 @@ export function useMessageQueue(threadId: string, options: QueueOptions) {
 	/** The id of the queued message the person is editing. */
 	const editing = ref<string | null>(null);
 	const items = computed(() =>
-		queue.map((item) => ({ id: item.id, text: item.text || item.skills.map((name) => `$${name}`).join(" "), files: item.files.length })),
+		queue.map((item) => ({ id: item.id, text: item.text || [...item.skills.map((name) => `$${name}`), ...item.citations.map((citation) => `“${citationLabel(citation)}”`)].join(" "), files: item.files.length })),
 	);
 
 	/** While a reply is on its way, the message waits; otherwise it goes out now. */

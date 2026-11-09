@@ -14,6 +14,11 @@ import { MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { useThinking } from "./thinking";
 import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from "./message-queue";
 import { features, model, modelName, models } from "./models";
+import { chosenCitations, citationLabel, citationPart, findSource, resolveRange, withComment, type Citation } from "./cite/citations";
+import CitationChip, { type CiteAnchor } from "./cite/CitationChip.vue";
+import CiteButton from "./cite/CiteButton.vue";
+import { markQuote, revealCitation } from "./cite/highlight";
+import { useCiteSelection } from "./cite/selection";
 import RunPythonPart from "./RunPythonPart.vue";
 import { useSkillPicker } from "./skills/picker";
 import SkillChip from "./skills/SkillChip.vue";
@@ -250,6 +255,85 @@ function pinInPlace(element: Element) {
 	Object.assign(el.style, { position: "fixed", top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` });
 }
 
+// Citations: selecting text in a reply shows a Cite button (cite/selection.ts). Cite puts the
+// quote in the message box as a chip and opens a field for an optional comment, beside the
+// quoted text, which stays marked while the comment is written. Adapted from T3 Code.
+const promptInput = ref<{ submit: () => void } | null>(null);
+const citeChips = ref<Citation[]>([]);
+const { pending: pendingCite, dismiss: dismissCite } = useCiteSelection(area);
+/** The chip whose comment is open, and what its editor sits against: the quote, or the chip. */
+const editingCite = ref<number | null>(null);
+const citeAnchor = ref<CiteAnchor | null>(null);
+let unmarkQuote = () => {};
+onBeforeUnmount(() => unmarkQuote());
+
+function cite() {
+	const shown = pendingCite.value;
+	if (!shown || shown.tooLong) return;
+	document.getSelection()?.removeAllRanges();
+	dismissCite();
+	citeChips.value = [...citeChips.value, shown.citation];
+	editComment(citeChips.value.length - 1, shown.range);
+}
+
+/** Opens a chip's comment editor beside its quote when the quote is on screen, else beside the chip. */
+function editComment(index: number, range?: Range | null) {
+	unmarkQuote();
+	const citation = citeChips.value[index];
+	if (!citation) return;
+	if (range === undefined) {
+		const source = findSource(citation.messageId);
+		range = source && resolveRange(source, citation);
+	}
+	const onScreen = range && area.value && isInside(range.getBoundingClientRect(), area.value.getBoundingClientRect());
+	citeAnchor.value = range && onScreen ? quoteAnchor(range) : null;
+	if (range && onScreen) unmarkQuote = markQuote(range);
+	editingCite.value = index;
+}
+
+function isInside(rect: DOMRect, bounds: DOMRect) {
+	return rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom;
+}
+
+/** The quote's last line, for the editor to sit under. */
+function quoteAnchor(range: Range): CiteAnchor {
+	return {
+		contextElement: range.startContainer.parentElement ?? undefined,
+		getBoundingClientRect: () => {
+			const lines = range.getClientRects();
+			return lines.item(lines.length - 1) ?? range.getBoundingClientRect();
+		},
+	};
+}
+
+function closeComment() {
+	unmarkQuote();
+	editingCite.value = null;
+	citeAnchor.value = null;
+	composer.value?.querySelector("textarea")?.focus();
+}
+
+function saveComment(index: number, comment: string) {
+	citeChips.value = citeChips.value.map((citation, at) => (at === index ? withComment(citation, comment) : citation));
+	closeComment();
+}
+
+function removeCite(index: number) {
+	if (editingCite.value === index) closeComment();
+	else if (editingCite.value !== null && editingCite.value > index) editingCite.value--;
+	citeChips.value = citeChips.value.filter((_, at) => at !== index);
+	composer.value?.querySelector("textarea")?.focus();
+}
+
+/** Scrolls to the quote in its reply, rendering older messages when it is above them. */
+function revealQuote(citation: Citation) {
+	void revealCitation(citation, () => {
+		if (firstShown.value === 0) return false;
+		showEarlier();
+		return true;
+	});
+}
+
 const busy = computed(() => status.value === "submitted" || status.value === "streaming");
 const lastMessage = computed(() => messages.value[messages.value.length - 1]);
 // The copy of the thread on this device follows the chat: written when a reply ends, or when
@@ -285,29 +369,36 @@ const queueEditing = queue.editing;
 /** While a reply streams, the message is queued; otherwise it goes out now. */
 async function send(text: string, files: File[] = []) {
 	const chosen = takeSkills();
-	// What did not go out comes back to the field: the text, and the chosen skills.
+	const quoted = citeChips.value;
+	if (editingCite.value !== null) closeComment();
+	citeChips.value = [];
+	// What did not go out comes back to the field: the text, the chosen skills and the quotes.
 	const giveBack = () => {
 		if (!input.value) input.value = text;
 		if (!skillChips.value.length) skillChips.value = chosen;
+		if (!citeChips.value.length) citeChips.value = quoted;
 	};
-	if ((!text.trim() && !files.length && !chosen.length) || uploading.value || outOfCredits.value) {
+	if ((!text.trim() && !files.length && !chosen.length && !quoted.length) || uploading.value || outOfCredits.value) {
 		if (outOfCredits.value) giveBack();
 		return;
 	}
 	const attached = await upload(files);
 	// The field cleared on submit; give the text back so only the files need attaching again.
 	if (!attached) return giveBack();
-	await queue.send({ id: crypto.randomUUID(), text, files: attached, skills: chosen });
+	await queue.send({ id: crypto.randomUUID(), text, files: attached, skills: chosen, citations: quoted });
 }
 
-function sendNow({ text, files, skills: chosen }: Queued) {
+function sendNow({ text, files, skills: chosen, citations: quoted }: Queued) {
 	const closed = closeOpenCalls(messages.value);
 	if (closed) messages.value = closed;
 	// The first message: the thread shows in the list now, not once the reply ends.
-	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", "));
-	if (!chosen.length) return sendMessage(files.length ? { text, files } : { text });
+	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", ") || citationLabel(quoted[0]!));
+	if (!chosen.length && !quoted.length) return sendMessage(files.length ? { text, files } : { text });
 	// The skills go first in the message, so their instructions come before the person's text (server/workflow/skills.ts).
-	sendMessage({ parts: [...files, ...chosen.map(skillPart), ...(text ? [{ type: "text" as const, text }] : [])] });
+	// The quotes come next, so the text that follows can refer to them (server/workflow/citations.ts).
+	sendMessage({
+		parts: [...files, ...chosen.map(skillPart), ...quoted.map(citationPart), ...(text ? [{ type: "text" as const, text }] : [])],
+	});
 }
 
 /** The run outlives the request, so Stop tells the server, then drops the stream here. */
@@ -389,8 +480,9 @@ function replyModelId(message: UIMessage) {
 				>
 					<Message :from="message.role">
 						<MessageContent :bare="message.role === 'user'">
-							<div v-if="chosenSkills(message).length" data-slot="message-skills" class="flex flex-wrap justify-end gap-1.5 self-end">
+							<div v-if="chosenSkills(message).length || chosenCitations(message).length" data-slot="message-skills" class="flex max-w-full flex-wrap justify-end gap-1.5 self-end">
 								<SkillChip v-for="name in chosenSkills(message)" :key="name" :name="name" />
+								<CitationChip v-for="(citation, index) in chosenCitations(message)" :key="`quote-${index}`" :citation="citation" @reveal="revealQuote(citation)" />
 							</div>
 							<p
 								v-for="name in askedSkills(message)"
@@ -401,12 +493,15 @@ function replyModelId(message: UIMessage) {
 								<span class="lucide-sparkles size-3.5 shrink-0" aria-hidden="true" />
 								<span>Used skill <span class="text-ink-gray-7">{{ skillTitle(name) }}</span> · You asked for it</span>
 							</p>
+							<!-- The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). -->
+							<div class="contents" :data-cite-source="message.role === 'assistant' && !isStreaming(message) ? message.id : undefined">
 							<MessageParts
 								:message="message"
 								:streaming="isStreaming(message)"
 								@approve="answerApproval($event, true)"
 								@deny="answerApproval($event, false)"
 							/>
+							</div>
 							<MessageActions
 								v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
 								data-reply-actions
@@ -497,18 +592,36 @@ function replyModelId(message: UIMessage) {
 			/>
 			<PromptInputQueue v-model:editing="queueEditing" :items="queue.items.value" @steer="queue.steer" @remove="queue.remove" @update="queue.update" @reorder="queue.reorder" />
 			<PromptInput
+				ref="promptInput"
 				v-model="input"
 				queue
 				:status="status"
 				:disabled="uploading || outOfCredits"
 				:accept="ACCEPT"
-				:ready="skillChips.length > 0"
+				:ready="skillChips.length > 0 || citeChips.length > 0"
 				@submit="send($event.text, $event.files)"
 				@stop="queue.stop"
 			>
 				<PromptInputHeader />
-				<div v-if="skillChips.length" data-slot="prompt-input-skills" class="flex flex-wrap gap-1.5 px-3 pt-3 [@media(pointer:coarse)]:gap-y-5">
+				<div v-if="skillChips.length || citeChips.length" data-slot="prompt-input-skills" class="flex flex-wrap gap-1.5 px-3 pt-3 [@media(pointer:coarse)]:gap-y-5">
 					<SkillChip v-for="name in skillChips" :key="name" :name="name" removable @remove="removeSkill(name)" />
+					<CitationChip
+						v-for="(citation, index) in citeChips"
+						:key="`${citation.messageId}:${citation.start}:${citation.end}`"
+						:citation="citation"
+						composer
+						:editing="editingCite === index"
+						:anchor="editingCite === index ? citeAnchor : null"
+						@reveal="revealQuote(citation)"
+						@edit="editComment(index)"
+						@remove="removeCite(index)"
+						@save="saveComment(index, $event)"
+						@send="
+							saveComment(index, $event);
+							promptInput?.submit();
+						"
+						@cancel="closeComment"
+					/>
 				</div>
 				<PromptInputTextarea :placeholder="placeholder" autofocus />
 				<PromptInputFooter>
@@ -522,6 +635,7 @@ function replyModelId(message: UIMessage) {
 			</PromptInput>
 		</div>
 	</footer>
+	<CiteButton v-if="pendingCite" :pending="pendingCite" @cite="cite" />
 	<!-- As tall as the space above, so the greeting and the field sit in the middle. -->
 	<div v-if="landing" class="hidden flex-1 sm:block" aria-hidden="true" />
 </template>
