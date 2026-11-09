@@ -1,7 +1,6 @@
 import { sql } from "./db.ts";
 import { currentRequest, extraCredits, migrateExtraCredits, type CreditRequest } from "./extra-credits.ts";
 import { getSettings, migrateSettings } from "./settings.ts";
-import { TITLE_FUNCTION_ID } from "./thread-title.ts";
 
 /**
  * Daily credits. Each person may spend a number of credits a day, and the count starts
@@ -9,9 +8,8 @@ import { TITLE_FUNCTION_ID } from "./thread-title.ts";
  * 1000 credits per US dollar, one credit is $0.001. So a cheap model costs a fraction
  * of a credit per message and Claude Opus several credits.
  *
- * Spending is read from the `runs` table (telemetry), which records OpenRouter's cost
- * for every model call. Thread titles are recorded there too, but are not charged: the
- * app names threads, the person did not ask for it. Nothing is reserved up front: a person
+ * Spending is read from `charged_runs` (telemetry/store.ts): the `runs` that OpenRouter
+ * charged for, except thread titles, which the app makes and the person did not ask for. Nothing is reserved up front: a person
  * with credits left can start a reply, and that one reply may take them past the limit.
  * The next one is refused. Replies have no length cap of their own: going over by one
  * reply is accepted.
@@ -51,9 +49,8 @@ export async function creditStatus(user: string, now = new Date()): Promise<Cred
 	const [settings, [spent], [own], extra, request] = await Promise.all([
 		getSettings(),
 		sql<{ usd: number }[]>`
-			select coalesce(sum(cost_usd), 0)::float8 as usd from runs
-			where "user" = ${user} and created_at >= ${start}
-				and function_id is distinct from ${TITLE_FUNCTION_ID}`,
+			select coalesce(sum(cost_usd), 0)::float8 as usd from charged_runs
+			where "user" = ${user} and created_at >= ${start}`,
 		sql<{ daily_credits: number }[]>`select daily_credits from credit_limits where user_id = ${user}`,
 		extraCredits(user, day),
 		currentRequest(user, start),

@@ -4,39 +4,34 @@ import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
-import { getRun, start } from "workflow/api";
 import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import { displayName } from "./admin/people.ts";
 import { roleOf } from "./admins.ts";
-import { appOrigin, auth, type SignedIn } from "./auth.ts";
+import { appOrigin, auth, type SignedInEnv } from "./auth.ts";
 import { creditStatus } from "./credits.ts";
 import { askForCredits } from "./extra-credits.ts";
-import { deleteThread, listThreads, renameThread, saveThread, sql, threadOwner } from "./db.ts";
+import { listThreads, renameThread, sql } from "./db.ts";
 import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
-import { memory, memoryEnabled, memoryScope, memoryStore, readExtractPrompt } from "./memory.ts";
-import { availableModels, pickModel } from "./models.ts";
+import { memoryFor } from "./memory.ts";
+import { memoryApi } from "./memory/routes.ts";
+import { availableModels } from "./models.ts";
 import { notifyAdmins } from "./notify.ts";
 import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
 import { activeSkills } from "./skills.ts";
 import { searchThreads } from "./thread-search.ts";
-import { forgetPythonState } from "./python/state.ts";
 import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
-import { forgetThread, threadResponse } from "./thread-cache.ts";
+import { threadResponse } from "./thread-cache.ts";
 import { usageReport } from "./telemetry.ts";
-import { chatTurn } from "./workflow/chat.ts";
-import { replyStream, saveReply } from "./workflow/reply.ts";
-import { activeRun, finishRun, forgetRuns, latestRun, setActiveRun, withThreadLock, type ThreadRun } from "./workflow/runs.ts";
+import { deleteChat, followReply, startReply, stopReply, whenReplyFinished } from "./workflow/replies.ts";
 
 /**
  * The HTTP API, served by Nitro (nitro.config.ts), which also compiles the chat workflow
  * ("use workflow", "use step") and serves the workflow's internal flow route. Start-up
  * work (migrations, the Postgres World's worker) is in server/plugins/startup.ts.
  */
-const MAX_STEPS = Number(process.env.CHAT_MAX_STEPS ?? 10);
-
-type Env = { Variables: { user: SignedIn } };
+type Env = SignedInEnv;
 const app = new Hono<Env>();
 
 // For the uptime checks: the server answers and its database does. 503 otherwise.
@@ -63,8 +58,6 @@ app.use("/api/*", async (c, next) => {
 const userOf = (c: Context<Env>) => c.get("user").id;
 /** At most so many uses per person (rate-limit.ts). */
 const perPerson = (limit: RateLimit, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
-/** A thread id the person may use: theirs, or not taken yet. */
-const mayUseThread = async (c: Context<Env>, id: string) => ((await threadOwner(id)) ?? userOf(c)) === userOf(c);
 
 // Who is signed in, their role (read from the database, not the cookie), and their credits for today.
 app.get("/api/me", async (c) => {
@@ -119,23 +112,10 @@ app.patch("/api/threads/:id", async (c) => {
 	return renamed ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
 });
 
-// A reply still running stops first. What it writes after this is not saved (reply.ts).
-app.delete("/api/threads/:id", async (c) => {
-	const id = c.req.param("id");
-	const deleted = await withThreadLock(id, async () => {
-		if ((await threadOwner(id)) !== userOf(c)) return false;
-		const run = await activeRun(id);
-		if (run) await cancelRun(id, userOf(c), run);
-		if (!(await deleteThread(id, userOf(c)))) return false;
-		await forgetRuns(id);
-		return true;
-	});
-	if (deleted) {
-		forgetThread(id);
-		await forgetPythonState(id, userOf(c));
-	}
-	return deleted ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
-});
+// A reply still running stops first (workflow/replies.ts).
+app.delete("/api/threads/:id", async (c) =>
+	(await deleteChat(c.req.param("id"), userOf(c))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404),
+);
 
 app.get("/api/threads/:id", (c) => threadResponse(c, c.req.param("id"), userOf(c)));
 
@@ -143,60 +123,15 @@ app.post("/api/chat", perPerson(chatLimit, { plain: true }), async (c) => {
 	const body = await c.req.json<{ id: string; messages: UIMessage[]; model?: string }>();
 	// A run with no messages fails before it writes, and its stream would never close.
 	if (typeof body.id !== "string" || !Array.isArray(body.messages) || !body.messages.length) return c.text("Nothing to send.", 400);
-	if (!(await mayUseThread(c, body.id))) return c.json({ error: "Not found" }, 404);
 	// The chat transport shows the response text as the error, so this one is plain text.
 	const credits = await creditStatus(userOf(c));
 	if (credits.remaining <= 0) return c.text(outOfCredits(credits.resetsAt), 402);
-
-	// One request at a time for a thread starts and stops its runs, so a double submit or a
-	// second tab never leaves a run running that nobody tracks and Stop can't reach.
-	const model = await pickModel(body.model);
-	const python = await pythonReady;
-	// After an approval the page sends the thread again with no new message: the run carries on its last assistant message.
-	const last = body.messages.at(-1);
-	const continued = last?.role === "assistant" ? { messageId: last.id, baseParts: last.parts.length } : null;
-	const started = await withThreadLock(body.id, async () => {
-		const previous = await activeRun(body.id);
-		// The same approval sent twice: follow the run that carries it out, instead of running the approved calls again.
-		const sameApproval = continued && previous?.continued?.messageId === continued.messageId && previous.continued.baseParts === continued.baseParts;
-		if (previous && sameApproval) return { runId: previous.runId, model: previous.model, again: true };
-		// A reply still running in this thread (Steer, another tab) stops, and keeps what it wrote.
-		if (previous) await cancelRun(body.id, userOf(c), previous);
-		// The run reads the thread from the database, so it is saved first.
-		await saveThread(body.id, userOf(c), body.messages);
-		const run = await start(chatTurn, [
-			{
-				threadId: body.id,
-				owner: userOf(c),
-				model: { id: model.id, name: model.name },
-				python,
-				today: new Date().toDateString(),
-				maxSteps: MAX_STEPS,
-				continued,
-			},
-		]);
-		await setActiveRun(body.id, run.runId, model.id, continued);
-		return { runId: run.runId, model: model.id, again: false };
-	});
+	const reply = await startReply({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model });
+	if (!reply) return c.json({ error: "Not found" }, 404);
 	// A new thread gets a name from a cheap model while the reply is written (thread-title.ts).
-	if (!started.again && isFirstMessage(body.messages)) void nameThread({ threadId: body.id, user: userOf(c) }, body.messages);
-
-	// The run goes on if this request closes; the page reconnects with GET /api/chat/:id/stream.
-	return createUIMessageStreamResponse({ stream: await replyStream(started.runId, started.model, { continued }), headers: { "x-workflow-run-id": started.runId } });
+	if (!reply.followed && isFirstMessage(body.messages)) void nameThread({ threadId: body.id, user: userOf(c) }, body.messages);
+	return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
 });
-
-/** Cancels a run and saves what it wrote so far. */
-async function cancelRun(threadId: string, owner: string, run: ThreadRun) {
-	await getRun(run.runId).cancel({ cancelReason: "Stopped by the person, or replaced by a newer message." }).catch(() => undefined);
-	// The step in flight writes on for a moment after a cancel, and the stream is never
-	// closed, so the saved reply is what the run had written when it was stopped.
-	// Finished even when the save fails, so the thread does not look busy forever.
-	try {
-		await saveReply(threadId, owner, run.runId, run.model, { untilTail: true, continued: run.continued });
-	} finally {
-		await finishRun(threadId, run.runId, run.model, { cancelled: true, continued: run.continued });
-	}
-}
 
 function outOfCredits(resetsAt: string) {
 	const hours = Math.max(1, Math.ceil((new Date(resetsAt).getTime() - Date.now()) / 3_600_000));
@@ -205,72 +140,27 @@ function outOfCredits(resetsAt: string) {
 
 // A reply, from its start or from `startIndex` (the UI chunks the page already has).
 // :id is the thread (a reloaded page) or the run (WorkflowChatTransport after a dropped
-// connection). A finished run replays to its end; 204 when the thread has no run.
+// connection). 204 when the thread has no run.
 app.get("/api/chat/:id/stream", async (c) => {
-	const run = await latestRun(c.req.param("id"));
-	if (!run || !(await mayUseThread(c, run.threadId))) return c.body(null, 204);
 	const startIndex = Number(c.req.query("startIndex") ?? 0);
-	const uiStartIndex = Number.isSafeInteger(startIndex) && startIndex > 0 ? startIndex : 0;
-	const stream = await replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled, continued: run.continued });
-	return createUIMessageStreamResponse({ stream, headers: { "x-workflow-run-id": run.runId } });
+	const reply = await followReply(c.req.param("id"), userOf(c), Number.isSafeInteger(startIndex) && startIndex > 0 ? startIndex : 0);
+	if (!reply) return c.body(null, 204);
+	return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
 });
 
 // Stop: closing the request does not end a run; this does.
-app.post("/api/chat/:id/stop", async (c) => {
-	if (!(await mayUseThread(c, c.req.param("id")))) return c.json({ stopped: false });
-	const run = await withThreadLock(c.req.param("id"), async () => {
-		const active = await activeRun(c.req.param("id"));
-		if (active) await cancelRun(c.req.param("id"), userOf(c), active);
-		return active;
-	});
-	return c.json({ stopped: Boolean(run) });
-});
+app.post("/api/chat/:id/stop", async (c) => c.json({ stopped: await stopReply(c.req.param("id"), userOf(c)) }));
 
-// Memory (server/memory.ts): what Ponder remembers about the person, and the decisions behind it.
-const scopeOf = (c: Context<Env>, threadId = "") => memoryScope({ threadId, user: userOf(c) });
-
-app.get("/api/memory", async (c) =>
-	c.json({
-		enabled: memoryEnabled,
-		adapter: memoryStore.name,
-		memories: await memoryStore.list(scopeOf(c)),
-		saves: await memoryStore.saves(scopeOf(c), { limit: 30 }),
-		prompt: await readExtractPrompt(),
-	}),
-);
-
-app.patch("/api/memory/:id", async (c) => {
-	const text = String((await c.req.json<{ text?: string }>()).text ?? "").trim().slice(0, 1000);
-	if (!text) return c.json({ error: "A memory needs some text." }, 400);
-	return (await memoryStore.update(scopeOf(c), c.req.param("id"), text)) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
-});
-
-app.delete("/api/memory/:id", async (c) =>
-	(await memoryStore.forget(scopeOf(c), c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404),
-);
-
-app.post("/api/memory/saves/:id/undo", async (c) => {
-	const saveId = Number(c.req.param("id"));
-	if (!Number.isSafeInteger(saveId)) return c.json({ error: "Not found" }, 404);
-	const undone = await memoryStore.undo(scopeOf(c), saveId);
-	return undone ? c.json({ ok: true, operations: undone }) : c.json({ error: "Not found, or undone already." }, 404);
-});
+// Memory (server/memory/routes.ts): what Ponder remembers about the person, and the decisions behind it.
+app.route("/api/memory", memoryApi);
 
 // A chat's memory decisions. With ?wait=1, first waits for the reply to be saved and its memory save to end.
 app.get("/api/threads/:id/memory", async (c) => {
 	const threadId = c.req.param("id");
-	if (c.req.query("wait")) {
-		await replyFinished(threadId);
-		await memory.settled(threadId);
-	}
-	return c.json({ saves: await memoryStore.saves(scopeOf(c, threadId), { threadId }) });
+	const wait = Boolean(c.req.query("wait"));
+	if (wait) await whenReplyFinished(threadId);
+	return c.json({ saves: await memoryFor(userOf(c)).threadSaves(threadId, { settle: wait }) });
 });
-
-/** The page sees the stream end a moment before the run's last step saves the reply and starts the memory save. */
-async function replyFinished(threadId: string, timeoutMs = 10_000) {
-	const deadline = Date.now() + timeoutMs;
-	while ((await activeRun(threadId)) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
-}
 
 // Files attached in the chat. Each person sees only their own.
 const uploadLimit = bodyLimit({

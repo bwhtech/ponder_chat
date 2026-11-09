@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { StepResult, Telemetry, ToolSet } from "ai";
+import { callCost } from "./cost.ts";
 import { insertRun, type RunRow, type ToolCallRecord } from "./store.ts";
 
 type Step = StepResult<ToolSet>;
@@ -90,7 +91,7 @@ export class RunRecorder implements Telemetry {
 
 function toRow(id: string, run: RunState, finishReason: string): RunRow {
 	const sum = (pick: (step: Step) => number | undefined) => run.steps.reduce((total, step) => total + (pick(step) ?? 0), 0);
-	const costs = run.steps.map(stepCost).filter((cost) => cost != null);
+	const costs = run.steps.map(callCost).filter((cost) => cost != null);
 	return {
 		id,
 		parentId: run.parentId,
@@ -107,13 +108,6 @@ function toRow(id: string, run: RunState, finishReason: string): RunRow {
 		toolCalls: toolCalls(run),
 		finishReason,
 	};
-}
-
-/** OpenRouter reports the cost of each call in USD, in provider metadata and in the raw usage. */
-function stepCost(step: Step): number | undefined {
-	const metadata = step.providerMetadata?.openrouter as { usage?: { cost?: number } } | undefined;
-	const raw = step.usage.raw as { cost?: number } | undefined;
-	return metadata?.usage?.cost ?? raw?.cost;
 }
 
 /**

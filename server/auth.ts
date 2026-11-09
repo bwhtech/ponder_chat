@@ -120,6 +120,8 @@ export const auth = betterAuth({
 });
 
 export type SignedIn = typeof auth.$Infer.Session.user;
+/** For Hono apps behind the session check in app.ts: `c.get("user")` is the signed-in person. */
+export type SignedInEnv = { Variables: { user: SignedIn } };
 
 export async function migrateAuth() {
 	const { runMigrations } = await getMigrations(auth.options);

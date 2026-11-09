@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { OAuthAuthorizationServerInformation, OAuthClientInformation, OAuthTokens } from "@ai-sdk/mcp";
 import { sql } from "../db.ts";
 import { seal, unseal, UnreadableSecret } from "../secrets.ts";
+import type { AuthKind, ConnectorStatus as Status, Rule, Transport } from "../../shared/connectors.ts";
 
 /**
  * Connectors: the MCP servers each person connected, in Postgres. Every query is here.
@@ -14,10 +15,7 @@ import { seal, unseal, UnreadableSecret } from "../secrets.ts";
  *
  * Deleting a person deletes their connections and sign-ins.
  */
-export type Transport = "http" | "sse";
-export type AuthKind = "none" | "headers" | "oauth";
-export type Status = "connected" | "needs_sign_in" | "error";
-export type Rule = "allow" | "ask" | "off";
+export type { AuthKind, Rule, Status, Transport };
 
 /** A tool as the server listed it, kept as plain data. */
 export type ToolInfo = {

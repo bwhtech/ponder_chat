@@ -1,3 +1,5 @@
+import { request } from "./api";
+
 /** The memory API: what Ponder remembers about the person, the decisions behind it, and the prompt that makes them. */
 export type Memory = {
 	id: string;
@@ -41,35 +43,27 @@ export type MemorySave = {
 export type MemoryOverview = { enabled: boolean; adapter: string; memories: Memory[]; saves: MemorySave[]; prompt: string };
 
 export async function fetchMemory(): Promise<MemoryOverview> {
-	const response = await fetch("/api/memory");
-	if (!response.ok) throw new Error("Memory could not be loaded.");
-	return response.json();
+	return request("/api/memory", { failure: "Memory could not be loaded." });
 }
 
 /** A thread's save decisions. With `wait`, the server first waits for a save still running. */
 export async function fetchThreadSaves(threadId: string, { wait = false } = {}): Promise<MemorySave[]> {
-	const response = await fetch(`/api/threads/${encodeURIComponent(threadId)}/memory${wait ? "?wait=1" : ""}`);
-	return response.ok ? (await response.json()).saves : [];
+	// The notes under the replies are extra: without them the chat still works.
+	const url = `/api/threads/${encodeURIComponent(threadId)}/memory${wait ? "?wait=1" : ""}`;
+	return (await request<{ saves: MemorySave[] }>(url).catch(() => ({ saves: [] }))).saves;
 }
 
 export async function updateMemory(id: string, text: string) {
-	const response = await fetch(`/api/memory/${encodeURIComponent(id)}`, {
-		method: "PATCH",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ text }),
-	});
-	if (!response.ok) throw new Error("The memory could not be changed.");
+	await request(`/api/memory/${encodeURIComponent(id)}`, { method: "PATCH", body: { text }, failure: "The memory could not be changed." });
 }
 
 export async function forgetMemory(id: string) {
-	const response = await fetch(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE" });
-	if (!response.ok) throw new Error("The memory could not be forgotten.");
+	await request(`/api/memory/${encodeURIComponent(id)}`, { method: "DELETE", failure: "The memory could not be forgotten." });
 }
 
 /** Reverses a save: what it remembered is forgotten, what it changed or forgot comes back. */
 export async function undoSave(id: number) {
-	const response = await fetch(`/api/memory/saves/${id}/undo`, { method: "POST" });
-	if (!response.ok) throw new Error("This could not be undone.");
+	await request(`/api/memory/saves/${id}/undo`, { method: "POST", failure: "This could not be undone." });
 }
 
 /** Whether a save changed anything that can still be undone. */

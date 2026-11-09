@@ -26,6 +26,7 @@ import {
 	type Transport,
 } from "./store.ts";
 import { modelToolName, resultText, ruleOf, slugFor } from "./tools.ts";
+import type { ConnectorView } from "../../shared/connectors.ts";
 
 /**
  * What Ponder does with connectors, for the routes (routes.ts) and the chat workflow
@@ -33,25 +34,8 @@ import { modelToolName, resultText, ruleOf, slugFor } from "./tools.ts";
  * their connections.
  */
 
-/** A connection as the page sees it. Never the credentials: header names, not values. */
-export type ConnectorView = {
-	id: string;
-	name: string;
-	url: string;
-	host: string;
-	transport: Transport;
-	auth: AuthKind;
-	status: Connection["status"];
-	enabled: boolean;
-	headerNames: string[];
-	oauthClientId: string | null;
-	serverName: string | null;
-	lastError: string | null;
-	toolsCheckedAt: string | null;
-	lastUsedAt: string | null;
-	createdAt: string;
-	tools: { name: string; title: string | null; description: string | null; readOnly: boolean; rule: Rule; modelName: string }[];
-};
+/** A connection as the page sees it (shared/connectors.ts). */
+export type { ConnectorView };
 
 export function view(connection: Connection): ConnectorView {
 	return {

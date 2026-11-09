@@ -3,7 +3,7 @@ import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import { requireAdmin } from "../admins.ts";
-import { appOrigin, auth, type SignedIn } from "../auth.ts";
+import { appOrigin, auth, type SignedInEnv } from "../auth.ts";
 import { setDailyCredits } from "../credits.ts";
 import { sql } from "../db.ts";
 import { creditAnswerEmail, inviteEmail, sendEmail } from "../email.ts";
@@ -23,7 +23,7 @@ import { overview, requestsReport } from "./reports.ts";
  * Role, ban and sign-out go through Better Auth's admin plugin (auth.api), which checks
  * the admin's session again and ends a banned person's sessions.
  */
-type Env = { Variables: { user: SignedIn } };
+type Env = SignedInEnv;
 
 export const adminApi = new Hono<Env>();
 adminApi.use("*", requireAdmin);

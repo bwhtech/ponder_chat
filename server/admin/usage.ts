@@ -2,21 +2,12 @@ import { toCredits, utcDay } from "../credits.ts";
 import { sql } from "../db.ts";
 import { MODELS } from "../models.ts";
 import { getSettings } from "../settings.ts";
-import { TITLE_FUNCTION_ID } from "../thread-title.ts";
 
 /**
- * Usage for /admin, read from `runs`: cost, model and time only, never chat content.
- * Credits are counted as credits.ts counts them: every run except thread titles, at
- * today's credits per dollar.
- *
- * A reply is a run with function_id "chat" and no parent_id that ended the turn. The chat
- * workflow writes one "chat" run for each model call (workflow/steps.ts), so a reply that
- * used tools has a run per step. The steps before the last one end in "tool-calls", so
- * only the last step counts. A reply stopped in the middle of a tool call is not counted.
- * Web searches, memory and titles have their own function_id and are not replies.
+ * Usage for /admin, read from `charged_runs` (telemetry/store.ts): cost, model and time
+ * only, never chat content. So credits and replies are counted as credits.ts counts them,
+ * at today's credits per dollar.
  */
-const isReply = () => sql`function_id = 'chat' and parent_id is null and finish_reason <> 'tool-calls'`;
-
 export type DayUsage = { credits: number; replies: number };
 
 /** Each person's credits and replies per UTC day, over the last `days` days (today is the last). */
@@ -32,10 +23,9 @@ export class Usage {
 		const { creditsPerUsd } = await getSettings();
 		const rows = await sql<{ user: string; day: string; usd: number; replies: number }[]>`
 			select "user", to_char((created_at at time zone 'utc')::date, 'YYYY-MM-DD') as day,
-				coalesce(sum(cost_usd), 0)::float8 as usd, (count(*) filter (where ${isReply()}))::int as replies
-			from runs
-			where created_at >= ${new Date(`${dates[0]}T00:00:00Z`)} and "user" is not null
-				and function_id is distinct from ${TITLE_FUNCTION_ID} ${user ? sql`and "user" = ${user}` : sql``}
+				coalesce(sum(cost_usd), 0)::float8 as usd, (count(*) filter (where is_reply))::int as replies
+			from charged_runs
+			where created_at >= ${new Date(`${dates[0]}T00:00:00Z`)} and "user" is not null ${user ? sql`and "user" = ${user}` : sql``}
 			group by 1, 2`;
 		const byUser = new Map<string, Map<string, DayUsage>>();
 		for (const row of rows) {
@@ -91,9 +81,8 @@ export class Usage {
 export async function creditsByModel(days: number, user?: string) {
 	const { creditsPerUsd } = await getSettings();
 	const rows = await sql<{ model: string; usd: number }[]>`
-		select model, coalesce(sum(cost_usd), 0)::float8 as usd from runs
-		where created_at >= ${new Date(`${lastDays(days)[0]}T00:00:00Z`)}
-			and function_id is distinct from ${TITLE_FUNCTION_ID} ${user ? sql`and "user" = ${user}` : sql``}
+		select model, coalesce(sum(cost_usd), 0)::float8 as usd from charged_runs
+		where created_at >= ${new Date(`${lastDays(days)[0]}T00:00:00Z`)} ${user ? sql`and "user" = ${user}` : sql``}
 		group by 1`;
 	const totals = new Map<string, number>();
 	for (const row of rows) totals.set(modelName(row.model), (totals.get(modelName(row.model)) ?? 0) + row.usd);

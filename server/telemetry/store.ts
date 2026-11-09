@@ -1,5 +1,8 @@
 import { sql } from "../db.ts";
 
+/** The `function_id` of the calls that name threads. The app makes them, not the person, so they cost no credits. */
+export const TITLE_FUNCTION_ID = "thread-title";
+
 /** One agent run: one generateText/streamText call, such as one /api/chat request or one subagent call. */
 export type RunRow = {
 	id: string;
@@ -49,6 +52,28 @@ export async function migrateRuns() {
 	await sql`create index if not exists runs_user_idx on runs ("user", created_at)`;
 	// Everyone's runs over a range of days: the /admin overview, people and requests, and deploy/sentinel.sh.
 	await sql`create index if not exists runs_created_idx on runs (created_at)`;
+	await migrateChargedRuns();
+}
+
+/**
+ * `charged_runs`: the runs that cost the person credits, with `is_reply` on the run that
+ * ended a reply. The one place for these two rules: credits.ts, the /admin usage and
+ * deploy/sentinel.sh all read this view.
+ *
+ * A reply writes one "chat" run per model call; the calls before the last end in
+ * "tool-calls", so only the last one is the reply. Web searches, memory and titles have
+ * their own function_id. The view is made again at each start, because `runs.*` changes
+ * when `runs` gets a column.
+ */
+async function migrateChargedRuns() {
+	await sql.begin(async (tx) => {
+		await tx`drop view if exists charged_runs`;
+		// A view's query can't take parameters, so the constant goes in as text.
+		await tx.unsafe(`
+			create view charged_runs as
+			select runs.*, (function_id = 'chat' and parent_id is null and finish_reason <> 'tool-calls') as is_reply
+			from runs where function_id is distinct from '${TITLE_FUNCTION_ID}'`);
+	});
 }
 
 export async function insertRun(run: RunRow) {

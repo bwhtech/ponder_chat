@@ -3,7 +3,7 @@ import { z } from "zod";
 import { sql } from "./db.ts";
 import { privateRouting } from "./openrouter.ts";
 import { openRouter } from "./openrouter-key.ts";
-import { runTelemetry, type RunContext } from "./telemetry.ts";
+import { runTelemetry, TITLE_FUNCTION_ID, type RunContext } from "./telemetry.ts";
 
 /**
  * Names a new thread from the person's first message, with a cheap model, so the list
@@ -12,8 +12,6 @@ import { runTelemetry, type RunContext } from "./telemetry.ts";
  * person gave meanwhile is never replaced. Adapted from T3 Code's title prompt.
  */
 const MODEL = process.env.PONDER_TITLE_MODEL ?? "z-ai/glm-5.3-flash";
-/** The `function_id` of title calls in `runs`. Credits leave them out (credits.ts). */
-export const TITLE_FUNCTION_ID = "thread-title";
 const MAX_LENGTH = 60;
 const MAX_MESSAGE = 4_000;
 
