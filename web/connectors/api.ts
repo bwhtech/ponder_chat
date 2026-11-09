@@ -1,35 +1,16 @@
 import { ref } from "vue";
+import { request } from "../api";
+import type { ConnectorTool, ConnectorView, Rule } from "../../shared/connectors";
 
 /**
  * The person's connectors (server/mcp/): the MCP servers they connected, as the server
  * describes them. Never their credentials: header names, not values.
  */
-export type Rule = "allow" | "ask" | "off";
-export type ConnectorTool = { name: string; title: string | null; description: string | null; readOnly: boolean; rule: Rule; modelName: string };
-export type Connector = {
-	id: string;
-	name: string;
-	url: string;
-	host: string;
-	transport: "http" | "sse";
-	auth: "none" | "headers" | "oauth";
-	status: "connected" | "needs_sign_in" | "error";
-	enabled: boolean;
-	headerNames: string[];
-	oauthClientId: string | null;
-	serverName: string | null;
-	lastError: string | null;
-	toolsCheckedAt: string | null;
-	lastUsedAt: string | null;
-	createdAt: string;
-	tools: ConnectorTool[];
-};
+export type { ConnectorTool, Rule, SignInMessage } from "../../shared/connectors";
+export type Connector = ConnectorView;
 export type Probe = { ok: true; transport: "http" | "sse"; auth: Connector["auth"]; name?: string; message: string } | { ok: false; message: string };
 export type Header = { name: string; value: string };
 export type NewConnector = { name: string; url: string; transport: Connector["transport"]; auth: Connector["auth"]; headers: Header[]; clientId?: string; clientSecret?: string };
-
-/** What the OAuth callback page says when a sign-in ends (server/mcp/routes.ts). */
-export type SignInMessage = { type: "ponder:connector-sign-in"; ok: boolean; id?: string; error?: string; state?: string };
 
 /** What each rule means, for the pickers. */
 export const RULES = [
@@ -54,17 +35,8 @@ const touch = (id: string) => {
 let newestLoad = 0;
 let appliedLoad = 0;
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-	const response = await fetch(`/api/connectors${path}`, {
-		...init,
-		headers: init?.body ? { "Content-Type": "application/json" } : undefined,
-	});
-	const body = await response.json().catch(() => ({}));
-	if (!response.ok) throw new Error(body.error ?? `The server answered ${response.status}.`);
-	return body as T;
-}
-
-const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
+const call = <T>(path: string, options?: { method?: string; body?: unknown }) => request<T>(`/api/connectors${path}`, options);
+const json = (method: string, body: unknown) => ({ method, body });
 
 export async function loadConnectors() {
 	const load = ++newestLoad;
@@ -72,7 +44,7 @@ export async function loadConnectors() {
 	connectorsError.value = "";
 	let fresh: Connector[];
 	try {
-		fresh = (await request<{ connectors: Connector[] }>("")).connectors;
+		fresh = (await call<{ connectors: Connector[] }>("")).connectors;
 	} catch (error) {
 		if (load === newestLoad) connectorsError.value = error instanceof Error ? error.message : "The connectors could not load.";
 		throw error;
@@ -97,19 +69,19 @@ function keep(connector: Connector) {
 	return connector;
 }
 
-export const probeServer = (url: string) => request<Probe>("/probe", json("POST", { url }));
+export const probeServer = (url: string) => call<Probe>("/probe", json("POST", { url }));
 
 /** A connector with no sign-in or a key is added at once; OAuth returns the URL where the person signs in. */
 export async function addConnector(input: NewConnector) {
-	const result = await request<{ connector: Connector } | { authorizeUrl: string }>("", json("POST", input));
+	const result = await call<{ connector: Connector } | { authorizeUrl: string }>("", json("POST", input));
 	if ("connector" in result) keep(result.connector);
 	return result;
 }
 
-export const startSignIn = (id: string) => request<{ authorizeUrl: string }>(`/${id}/sign-in`, { method: "POST" });
+export const startSignIn = (id: string) => call<{ authorizeUrl: string }>(`/${id}/sign-in`, { method: "POST" });
 
 export async function refreshConnector(id: string) {
-	return keep((await request<{ connector: Connector }>(`/${id}/refresh`, { method: "POST" })).connector);
+	return keep((await call<{ connector: Connector }>(`/${id}/refresh`, { method: "POST" })).connector);
 }
 
 export type ConnectorChange = { name?: string; enabled?: boolean; rules?: Record<string, Rule | null>; headers?: Header[] };
@@ -126,7 +98,7 @@ export async function changeConnector(id: string, change: ConnectorChange) {
 	newestChange.set(id, mine);
 	const newest = () => newestChange.get(id) === mine;
 	try {
-		const { connector } = await request<{ connector: Connector }>(`/${id}`, json("PATCH", change));
+		const { connector } = await call<{ connector: Connector }>(`/${id}`, json("PATCH", change));
 		if (newest()) {
 			endedChange.set(id, mine);
 			olderAnswer.delete(id);
@@ -148,7 +120,7 @@ export async function changeConnector(id: string, change: ConnectorChange) {
 }
 
 export async function removeConnector(id: string) {
-	await request(`/${id}`, { method: "DELETE" });
+	await call(`/${id}`, { method: "DELETE" });
 	touch(id);
 	connectors.value = connectors.value?.filter((each) => each.id !== id);
 }

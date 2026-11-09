@@ -1,3 +1,7 @@
+import { request } from "../api";
+
+export { ApiError } from "../api";
+
 /**
  * The admin API (server/admin/routes.ts), and the shapes it answers with. Usage numbers
  * only: the API never returns chats.
@@ -95,28 +99,7 @@ export type SkillDetail = SkillSummary & { body: string; source: string };
 export type Viewer = { user: { id: string; email: string; name: string; role: "admin" | "user" } };
 
 /** Calls /api/admin/<path>. Throws the server's message, which the pages show in a toast or a dialog. */
-export async function api<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-	const response = await fetch(`/api/admin${path}`, {
-		method: options.method ?? (options.body === undefined ? "GET" : "POST"),
-		headers: options.body === undefined ? undefined : { "Content-Type": "application/json" },
-		body: options.body === undefined ? undefined : JSON.stringify(options.body),
-	});
-	const data = await response.json().catch(() => ({}));
-	if (!response.ok) throw new ApiError(data.error ?? `Something went wrong (${response.status}).`, response.status, data.errors);
-	return data as T;
-}
-
-/** The server's message, with its HTTP status, so a page can tell "not found" from a failure. */
-export class ApiError extends Error {
-	readonly status: number;
-	/** The problems behind a refusal, one per line, when the server lists them (a skill file). */
-	readonly errors: string[];
-	constructor(message: string, status: number, errors: unknown = []) {
-		super(message);
-		this.status = status;
-		this.errors = Array.isArray(errors) ? errors.map(String) : [];
-	}
-}
+export const api = <T>(path: string, options: { method?: string; body?: unknown } = {}) => request<T>(`/api/admin${path}`, options);
 
 /** Who opened /admin. null when signed out (401 or 403). Throws when the server can't be reached or fails. */
 export async function loadViewer(): Promise<Viewer | null> {

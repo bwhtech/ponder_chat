@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 import { computed, ref, shallowRef } from "vue";
 import { nameFromFirstMessage } from "../shared/thread-name";
+import { request } from "./api";
 import { forgetThread, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
 
 /**
@@ -202,18 +203,12 @@ async function waitForTitle(id: string, untitled: string) {
 }
 
 async function rename(id: string, title: string) {
-	const response = await fetch(`/api/threads/${encodeURIComponent(id)}`, {
-		method: "PATCH",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify({ title }),
-	});
-	if (!response.ok) throw new Error("The thread could not be renamed.");
+	await request(`/api/threads/${encodeURIComponent(id)}`, { method: "PATCH", body: { title }, failure: "The thread could not be renamed." });
 	await refresh();
 }
 
 async function remove(id: string) {
-	const response = await fetch(`/api/threads/${encodeURIComponent(id)}`, { method: "DELETE" });
-	if (!response.ok) throw new Error("The thread could not be deleted.");
+	await request(`/api/threads/${encodeURIComponent(id)}`, { method: "DELETE", failure: "The thread could not be deleted." });
 	forgetThread(id);
 	pending.delete(id);
 	await refresh();
