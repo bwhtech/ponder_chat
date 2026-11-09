@@ -293,6 +293,23 @@
   min-width: 6rem;
 }
 
+/* Links in a reply, as frappe-ui's prose draws them: the text's own colour with a thin
+   gray line under it, which darkens on hover. Citation chips (below) have no line. */
+[data-slot='response'] a:not([data-citation]) {
+  color: var(--ink-gray-9);
+  text-decoration: none;
+  border-bottom: 1px solid var(--ink-gray-4);
+  transition: border-color 80ms ease;
+}
+[data-slot='response'] a:not([data-citation]):hover {
+  border-bottom-color: var(--ink-gray-6);
+}
+[data-slot='response'] a:not([data-citation]):focus-visible {
+  outline: none;
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px var(--outline-gray-3);
+}
+
 /* Citations: a link to a page that a search or a page read returned (Response) shows as a chip. */
 [data-slot='response'] a[data-citation] {
   display: inline-block;
