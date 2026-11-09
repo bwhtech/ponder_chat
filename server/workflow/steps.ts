@@ -2,6 +2,7 @@ import type { ModelMessage } from "ai";
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 import type { ActiveSkill } from "../skills.ts";
+import type { Continued } from "./runs.ts";
 
 /**
  * The chat workflow's steps. Each is recorded in Postgres when it finishes; after a
@@ -65,7 +66,7 @@ export async function saveReplyStep(
 	runId: string,
 	model: string,
 	failed = false,
-	continued: { messageId: string; baseParts: number } | null = null,
+	continued: Continued | null = null,
 ) {
 	"use step";
 	const { saveReply } = await import("./reply.ts");
@@ -73,7 +74,7 @@ export async function saveReplyStep(
 }
 
 /** Marks the run finished when saving its reply failed, so the thread does not look busy forever. */
-export async function finishRunStep(threadId: string, runId: string, model: string, continued: { messageId: string; baseParts: number } | null = null) {
+export async function finishRunStep(threadId: string, runId: string, model: string, continued: Continued | null = null) {
 	"use step";
 	const { finishRun } = await import("./runs.ts");
 	await finishRun(threadId, runId, model, { cancelled: true, continued });

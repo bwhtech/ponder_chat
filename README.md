@@ -30,7 +30,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - Both settings are in the `settings` table (one row), and admins change them on `/admin`, Settings. The first start fills the row from `CHAT_DAILY_CREDITS` (default 1000) and `CHAT_CREDITS_PER_USD` (default 1000). After that, the app does not read these two variables.
 
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`).
-- The calls that write chat names are recorded in `runs` but are not charged to credits.
+- The calls that write chat names are recorded in `runs` but are not charged to credits. The view `charged_runs` (`server/telemetry/store.ts`) holds this rule, and which run ends a reply (`is_reply`). Credits, `/admin` and `deploy/sentinel.sh` all read it.
 - Each web search is a `runs` row (`function_id` `web-search`) and is charged: about $0.007, so 7 credits.
 - The count starts again at midnight UTC.
 - Before each reply, the server adds up today's cost. When nothing is left, it answers 402 and the page shows when credits refill.

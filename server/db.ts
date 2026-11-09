@@ -1,5 +1,6 @@
 import postgres from "postgres";
 import type { UIMessage } from "ai";
+import { nameFromFirstMessage } from "../shared/thread-name.ts";
 
 // Notices are "already exists, skipping" from the migrations.
 export const sql = postgres(process.env.DATABASE_URL!, { onnotice: () => {} });
@@ -77,7 +78,7 @@ export async function listThreads(owner: string): Promise<ThreadSummary[]> {
 		order by updated_at desc limit 200`;
 	return rows.map((row) => ({
 		id: row.id,
-		title: row.title || nameFrom(row.first),
+		title: row.title || nameFromFirstMessage(row.first),
 		updatedAt: row.updated_at.toISOString(),
 		messages: row.messages,
 	}));
@@ -91,13 +92,4 @@ export async function renameThread(id: string, owner: string, title: string) {
 export async function deleteThread(id: string, owner: string) {
 	const rows = await sql`delete from threads where id = ${id} and owner = ${owner} returning id`;
 	return rows.length > 0;
-}
-
-/** The first line of the first message, cut at a word near 60 characters. */
-function nameFrom(text: string | null) {
-	const line = (text ?? "").split("\n")[0].trim();
-	if (!line) return "New chat";
-	if (line.length <= 60) return line;
-	const cut = line.slice(0, 60);
-	return `${cut.slice(0, cut.lastIndexOf(" ") > 30 ? cut.lastIndexOf(" ") : 60)}…`;
 }

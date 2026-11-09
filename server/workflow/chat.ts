@@ -3,9 +3,11 @@ import { isStepCount, tool } from "ai";
 import { getWorkflowMetadata, getWritable } from "workflow";
 import { RUN_PYTHON, RUN_PYTHON_DESCRIPTION, runPythonInput } from "../python/schema.ts";
 import { WEB_FETCH, WEB_FETCH_DESCRIPTION, WEB_SEARCH, WEB_SEARCH_DESCRIPTION, webFetchInput, webSearchInput } from "../search/schema.ts";
+import { callCost } from "../telemetry/cost.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
 import { connectorTools, connectorToolsStep } from "./connectors.ts";
 import { ChatModel } from "./model.ts";
+import type { Continued } from "./runs.ts";
 import { skillsGuidance, skillsStep, skillTools } from "./skills.ts";
 import { finishRunStep, loadModelMessages, recallMemoryStep, recordUsageStep, runPythonStep, saveReplyStep, webFetchStep, webSearchStep } from "./steps.ts";
 
@@ -18,7 +20,7 @@ export type ChatTurn = {
 	today: string;
 	maxSteps: number;
 	/** The assistant message this run carries on, after the person answered an approval (runs.ts). */
-	continued: { messageId: string; baseParts: number } | null;
+	continued: Continued | null;
 };
 
 /**
@@ -73,8 +75,6 @@ export async function chatTurn(turn: ChatTurn) {
 			},
 			// Credits are charged from what each model call cost (steps.ts).
 			onStepEnd: async (step) => {
-				const metadata = step.providerMetadata?.openrouter as { usage?: { cost?: number } } | undefined;
-				const raw = step.usage.raw as { cost?: number } | undefined;
 				await recordUsageStep({
 					threadId: turn.threadId,
 					user: turn.owner,
@@ -82,7 +82,7 @@ export async function chatTurn(turn: ChatTurn) {
 					inputTokens: step.usage.inputTokens ?? 0,
 					outputTokens: step.usage.outputTokens ?? 0,
 					cachedTokens: step.usage.inputTokenDetails?.cacheReadTokens ?? 0,
-					costUsd: metadata?.usage?.cost ?? raw?.cost ?? null,
+					costUsd: callCost(step),
 					finishReason: step.finishReason,
 					toolCalls: step.toolCalls.map((call) => call.toolName),
 				});

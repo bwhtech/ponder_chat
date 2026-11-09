@@ -45,9 +45,10 @@ if [ "${1:-}" = "--daily" ]; then
 	COST=$(sql "select to_char(coalesce(sum(cost_usd), 0), 'FM990.00') from runs where created_at > now() - interval '1 day'")
 	TOP=$(sql "select string_agg(format('%s \$%s', coalesce(u.email, r.\"user\"), to_char(r.cost, 'FM990.000')), ', ') from (select \"user\", sum(cost_usd) cost from runs where created_at > now() - interval '1 day' group by 1 order by 2 desc nulls last limit 3) r left join users u on u.id = r.\"user\"")
 	# The limits are in the app's tables (server/settings.ts, server/credits.ts): the default, each person's own, and today's extra credits.
+	# charged_runs (server/telemetry/store.ts) holds the rule for what costs credits.
 	OUT_OF_CREDITS=$(sql "with s as (select default_daily_credits, credits_per_usd from settings where id = 1),
-		spent as (select \"user\", sum(cost_usd) * (select credits_per_usd from s) credits from runs
-			where created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc' and function_id is distinct from 'thread-title' group by 1),
+		spent as (select \"user\", sum(cost_usd) * (select credits_per_usd from s) credits from charged_runs
+			where created_at >= date_trunc('day', now() at time zone 'utc') at time zone 'utc' group by 1),
 		extra as (select user_id, sum(credits) credits from credit_grants where day = (now() at time zone 'utc')::date group by 1)
 		select count(*) from spent left join credit_limits l on l.user_id = spent.\"user\" left join extra e on e.user_id = spent.\"user\"
 		where spent.credits >= coalesce(l.daily_credits, (select default_daily_credits from s)) + coalesce(e.credits, 0)")
