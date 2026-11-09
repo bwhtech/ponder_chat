@@ -8,12 +8,13 @@ import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import { displayName } from "./admin/people.ts";
 import { roleOf } from "./admins.ts";
-import { appOrigin, auth, type SignedIn } from "./auth.ts";
+import { appOrigin, auth, type SignedInEnv } from "./auth.ts";
 import { creditStatus } from "./credits.ts";
 import { askForCredits } from "./extra-credits.ts";
 import { listThreads, renameThread, sql } from "./db.ts";
 import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
-import { memory, memoryEnabled, memoryScope, memoryStore, readExtractPrompt } from "./memory.ts";
+import { memoryFor } from "./memory.ts";
+import { memoryApi } from "./memory/routes.ts";
 import { availableModels } from "./models.ts";
 import { notifyAdmins } from "./notify.ts";
 import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
@@ -30,7 +31,7 @@ import { deleteChat, followReply, startReply, stopReply, whenReplyFinished } fro
  * ("use workflow", "use step") and serves the workflow's internal flow route. Start-up
  * work (migrations, the Postgres World's worker) is in server/plugins/startup.ts.
  */
-type Env = { Variables: { user: SignedIn } };
+type Env = SignedInEnv;
 const app = new Hono<Env>();
 
 // For the uptime checks: the server answers and its database does. 503 otherwise.
@@ -150,44 +151,15 @@ app.get("/api/chat/:id/stream", async (c) => {
 // Stop: closing the request does not end a run; this does.
 app.post("/api/chat/:id/stop", async (c) => c.json({ stopped: await stopReply(c.req.param("id"), userOf(c)) }));
 
-// Memory (server/memory.ts): what Ponder remembers about the person, and the decisions behind it.
-const scopeOf = (c: Context<Env>, threadId = "") => memoryScope({ threadId, user: userOf(c) });
-
-app.get("/api/memory", async (c) =>
-	c.json({
-		enabled: memoryEnabled,
-		adapter: memoryStore.name,
-		memories: await memoryStore.list(scopeOf(c)),
-		saves: await memoryStore.saves(scopeOf(c), { limit: 30 }),
-		prompt: await readExtractPrompt(),
-	}),
-);
-
-app.patch("/api/memory/:id", async (c) => {
-	const text = String((await c.req.json<{ text?: string }>()).text ?? "").trim().slice(0, 1000);
-	if (!text) return c.json({ error: "A memory needs some text." }, 400);
-	return (await memoryStore.update(scopeOf(c), c.req.param("id"), text)) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
-});
-
-app.delete("/api/memory/:id", async (c) =>
-	(await memoryStore.forget(scopeOf(c), c.req.param("id"))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404),
-);
-
-app.post("/api/memory/saves/:id/undo", async (c) => {
-	const saveId = Number(c.req.param("id"));
-	if (!Number.isSafeInteger(saveId)) return c.json({ error: "Not found" }, 404);
-	const undone = await memoryStore.undo(scopeOf(c), saveId);
-	return undone ? c.json({ ok: true, operations: undone }) : c.json({ error: "Not found, or undone already." }, 404);
-});
+// Memory (server/memory/routes.ts): what Ponder remembers about the person, and the decisions behind it.
+app.route("/api/memory", memoryApi);
 
 // A chat's memory decisions. With ?wait=1, first waits for the reply to be saved and its memory save to end.
 app.get("/api/threads/:id/memory", async (c) => {
 	const threadId = c.req.param("id");
-	if (c.req.query("wait")) {
-		await whenReplyFinished(threadId);
-		await memory.settled(threadId);
-	}
-	return c.json({ saves: await memoryStore.saves(scopeOf(c, threadId), { threadId }) });
+	const wait = Boolean(c.req.query("wait"));
+	if (wait) await whenReplyFinished(threadId);
+	return c.json({ saves: await memoryFor(userOf(c)).threadSaves(threadId, { settle: wait }) });
 });
 
 // Files attached in the chat. Each person sees only their own.

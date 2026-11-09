@@ -1,6 +1,6 @@
 import { type Context, Hono } from "hono";
 import { z } from "zod";
-import { appOrigin, auth, type SignedIn } from "../auth.ts";
+import { appOrigin, auth, type SignedInEnv } from "../auth.ts";
 import { connectorLimit, limitPerPerson } from "../rate-limit.ts";
 import {
 	addConnector,
@@ -21,7 +21,7 @@ import type { SignInMessage } from "../../shared/connectors.ts";
  * check). The OAuth callback is outside /api, at /oauth/mcp/callback, because the
  * person's browser lands there from the server's sign-in page.
  */
-type Env = { Variables: { user: SignedIn } };
+type Env = SignedInEnv;
 export const connectorsApi = new Hono<Env>();
 
 const userOf = (c: Context<Env>) => c.get("user").id;
