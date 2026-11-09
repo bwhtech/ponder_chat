@@ -39,6 +39,22 @@
   }
 }
 
+/* Each step of an artifact being written rises in as it starts; with reduced motion it fades in. */
+@keyframes artifact-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+[data-slot='artifact-step'] {
+  animation: artifact-step-in 150ms var(--ease-out-strong);
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-slot='artifact-step'] {
+    animation-name: fade-in;
+  }
+}
+
 /* A reply that arrives in this visit rises in; the ones already there on load do not, and your own
    message shows at once.
    A reply's copy and model row fades in when the reply ends. */

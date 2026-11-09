@@ -3,6 +3,7 @@ import { computed, watch } from "vue";
 import Shimmer from "../ai-elements/shimmer/Shimmer.vue";
 import { getToolPhase, type ToolMessagePart } from "../ai-elements/tool";
 import { slideCount } from "./slides";
+import { artifactSteps, currentStepText } from "./steps";
 import { panelItem, viewArtifact, type Artifact } from "../side-panel/panel";
 
 /**
@@ -11,6 +12,9 @@ import { panelItem, viewArtifact, type Artifact } from "../side-panel/panel";
  *
  * A reply that starts writing one opens it in the panel on a wide screen. A panel that
  * already shows an artifact moves to the new one; a file the person opened stays.
+ *
+ * While the reply writes it, the card lists the steps so far under it: a deck's look,
+ * then each slide by its heading, or a document's sections. They go when it is written.
  */
 type Input = Partial<{ id: string; kind: "document" | "slides"; title: string; content: string }>;
 
@@ -38,6 +42,9 @@ const detail = computed(() => {
 	return slides.value ? `${kind} · ${slideCount(artifact.value.content)} slides` : kind;
 });
 
+const steps = computed(() => (artifact.value.writing ? artifactSteps(artifact.value.kind, artifact.value.content, false) : []));
+const writingText = computed(() => currentStepText(artifact.value.kind, steps.value));
+
 function open() {
 	if (!failed.value) viewArtifact(key.value, artifact);
 }
@@ -55,13 +62,14 @@ watch(
 </script>
 
 <template>
+	<div class="my-1.5 flex max-w-sm flex-col gap-1.5">
 	<button
 		type="button"
 		data-slot="artifact-card"
 		:data-open="isOpen || undefined"
 		:disabled="failed"
 		:aria-label="`Open ${artifact.title}`"
-		class="group/artifact my-1.5 flex w-full max-w-sm items-center gap-3 rounded-7 border border-outline-gray-2 bg-surface-base p-2 pr-3 text-left transition-[background-color,border-color,transform] duration-150 ease-out-strong hover:bg-surface-gray-1 active:scale-[0.99] disabled:cursor-default disabled:hover:bg-surface-base data-[open]:border-outline-gray-3 data-[open]:bg-surface-gray-1 motion-reduce:active:scale-100"
+		class="group/artifact flex w-full items-center gap-3 rounded-7 border border-outline-gray-2 bg-surface-base p-2 pr-3 text-left transition-[background-color,border-color,transform] duration-150 ease-out-strong hover:bg-surface-gray-1 active:scale-[0.99] disabled:cursor-default disabled:hover:bg-surface-base data-[open]:border-outline-gray-3 data-[open]:bg-surface-gray-1 motion-reduce:active:scale-100"
 		@click="open"
 	>
 		<span class="flex size-10 shrink-0 items-center justify-center rounded-5 bg-surface-gray-2" aria-hidden="true">
@@ -70,7 +78,7 @@ watch(
 		<span class="flex min-w-0 flex-1 flex-col gap-1">
 			<span class="truncate text-base-medium text-ink-gray-9">{{ artifact.title }}</span>
 			<span class="truncate text-sm text-ink-gray-5" :class="{ 'text-ink-red-6': failed }">
-				<Shimmer v-if="artifact.writing">Writing {{ slides ? "slides" : "document" }}…</Shimmer>
+				<Shimmer v-if="artifact.writing">{{ writingText }}</Shimmer>
 				<template v-else>{{ detail }}</template>
 			</span>
 		</span>
@@ -80,4 +88,24 @@ watch(
 			aria-hidden="true"
 		/>
 	</button>
+	<!-- The icons sit under the card's icon and the labels under its title. -->
+	<ol v-if="steps.length" data-slot="artifact-steps" :aria-label="`Steps for ${artifact.title}`" class="flex flex-col">
+		<li
+			v-for="step in steps"
+			:key="step.key"
+			data-slot="artifact-step"
+			class="grid grid-cols-[40px_minmax(0,1fr)] items-center gap-3 py-0.5 pl-[9px] text-p-sm"
+		>
+			<span
+				:class="[step.done ? 'lucide-check text-ink-gray-5' : 'lucide-loader-circle animate-spin text-ink-gray-5 motion-reduce:animate-none', 'size-3.5 justify-self-center']"
+				aria-hidden="true"
+			/>
+			<span class="truncate" :class="step.done ? 'text-ink-gray-6' : 'text-ink-gray-7'">
+				<Shimmer v-if="!step.done">{{ step.label }}</Shimmer>
+				<template v-else>{{ step.label }}</template>
+				<span class="sr-only">{{ step.done ? ", done" : ", writing" }}</span>
+			</span>
+		</li>
+	</ol>
+	</div>
 </template>
