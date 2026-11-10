@@ -1,27 +1,135 @@
-# Ponder Chat
+<p align="center">
+  <img src="web/public/logo.png" alt="" width="64" height="64">
+</p>
 
-A proof of concept: a general chat app on OpenRouter models, with a daily credit limit for each person. It started as a copy of the Seva platform (`~/.t3/projects/seva-studio/platform`) with the Frappe parts removed (sites, MCP, skills, plans, Studio, generated UI). Python and memory came back later, adapted.
+<h1 align="center">Ponder Chat</h1>
 
-## What it does
+<p align="center">
+  A private chat app for a small group of people. It runs on the models of OpenRouter, and each person gets a daily credit limit.<br>
+  Answers cite their sources. You can quote any part of a reply. Ponder writes documents and slide decks, runs Python on your files, uses your connected apps and remembers what matters.
+</p>
 
-- Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link; either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes; a code takes 3 wrong tries. Without email settings, the email is printed in the server log.
+<p align="center">
+  <a href="#run-it">Run it</a> ·
+  <a href="#a-tour">A tour</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="scripts/demo/README.md">Demo data</a>
+</p>
+
+![Ponder Chat with a chat about heat pumps open. The sidebar lists recent chats and the credits left today. The reply cites its sources with small chips, and a note under it says what Ponder remembered.](docs/images/hero.webp)
+
+Ponder is invite-only. An admin invites people by email, and each person signs in with a code or a link. Every call to a model asks for a Zero Data Retention endpoint, so no model provider keeps or trains on what people write. Replies are durable: a reload, a lost connection or a deploy does not stop a reply. The page reconnects, and the reply finishes.
+
+## A tour
+
+The images show the real app with made-up data from [`scripts/demo/`](scripts/demo/README.md).
+
+### Answers with sources
+
+Ponder searches the web and reads pages when a question needs current facts. Each fact in the reply links to its page. The link shows as a small chip, and a card with the page's title and an excerpt opens on hover. The steps above the reply show what Ponder searched and read.
+
+![A reply about heat pumps. The search steps are unfolded: a search and one page read. The pointer is on the Energy.gov chip, and a card shows the page's title, its address and an excerpt.](docs/images/citations.webp)
+
+### Cite a reply
+
+Select any text in a reply, and a **Cite** button opens under it. The quote goes into the message box as a chip, with an optional comment. The quote stays marked in the reply while you write, so the follow-up question is exact. In a sent message, the chip opens the quote and goes back to its source.
+
+![A three-day Lisbon plan. The words "Take tram 28 early, before 9 am" are selected, and a Cite button sits under the selection.](docs/images/cite.webp)
+
+![After Cite: the quote is marked in the reply, a comment box under it reads "We have a stroller. Is the tram still a good idea?", and the quote is a chip in the message box.](docs/images/cite-comment.webp)
+
+### Documents, slide decks and web pages
+
+Ask for something to keep, send or present, and Ponder writes it as an artifact: a Markdown document, a slide deck or a web page. The artifact opens in a panel beside the chat, where you can read it, copy it or download it. A deck downloads as HTML that prints one slide to a page. Present shows the deck full screen. Artifacts run in a sandboxed frame.
+
+![A chat that asked for a board-meeting deck. The reply has a card for the deck, and the side panel shows its first two slides.](docs/images/slides.webp)
+
+![Present mode: the slide "Q3 at a glance" fills the screen, with 412 active volunteers, 6,180 hours given and 38,500 meals packed.](docs/images/present.webp)
+
+### Python on your files
+
+Attach a CSV or Excel file and ask a question. Ponder writes Python (pandas, matplotlib and more) and runs it in a sandbox with no network. The charts and files it makes come back into the chat. The code and its output are one click away.
+
+![A chat with cafe-sales.csv attached. Under "Ran Python", a bar chart shows average pastries sold for each weekday, with Saturday and Sunday highest. A short answer and three suggestions follow.](docs/images/python.webp)
+
+### Connectors that ask first
+
+Connect any remote MCP server, such as Linear, Notion or a Frappe site, and Ponder can use its tools. A tool that only reads runs at once. A tool that changes something waits for you: Deny, Always allow or Allow once. You can show the exact input before you allow it.
+
+![Ponder asks "Allow Ponder to use Linear: Create issue?" with Deny, Always allow and Allow once. Below, the details show the issue's team, title, priority and description.](docs/images/approval.webp)
+
+Settings, Connectors lists each server and its tools. You set each tool to Always allow, Ask first or Off. Sign-in uses OAuth or an API key, and credentials are kept encrypted.
+
+![The Linear connector in Settings. Three read-only tools are on Always allow, Create issue and Update issue are on Ask first, and Create comment is Off.](docs/images/connectors.webp)
+
+### Memory you can see
+
+After a reply, Ponder decides if you said something about yourself worth keeping. A note under the reply shows what it kept, with Undo. The Memory page lists every memory and the chat it came from. Ponder never keeps passwords, contact details, ID numbers, health details or what you say about other people.
+
+![The Memory page: seven memories, each with its kind (About you or Preference), the chat it came from and when.](docs/images/memory.webp)
+
+### Pick the model for each chat
+
+The model menu in the message box lists a short set of models from DeepSeek, Anthropic, OpenAI, Google and others. Only models with a Zero Data Retention endpoint show. Each reply names the model that wrote it. Bigger models use more of the day's credits.
+
+![The model menu opened from the message box, with DeepSeek V4.1 Flash selected and Claude Haiku, Sonnet and Opus listed below.](docs/images/models.webp)
+
+### Credits and admin
+
+Each person has a daily credit limit, charged from what OpenRouter reports for each call. When the credits run out, a person can ask the admins for more. The admin pages show usage only, never chats: today's numbers, credits per day, active people and credits by model. Admins also invite people, set limits, answer requests and manage skills.
+
+![The admin overview: a notice of one request for more credits, today's numbers (7 active people, 29 replies, 302 credits, $0.30) and a bar chart of credits used per day.](docs/images/admin.webp)
+
+### Also in Ponder
+
+- **Skills.** An admin writes instructions for a kind of task, such as Word documents. Ponder loads a skill when a message needs it. You can also start one with `$name` in a message. See [`docs/skills.md`](docs/skills.md).
+- **Files in a side panel.** Attached PDFs, images and CSV files open beside the chat. A PDF draws each page as it comes near the screen. A CSV shows as a table.
+- **Search and export.** The search box above the chat list finds chats by the words in their titles and messages. Each chat's menu exports it as a Markdown file.
+- **A queue.** Messages that you send during a reply wait in a queue and go out in order.
+
+## Run it
+
+Ponder needs Node, PostgreSQL with the `vector` extension, and an OpenRouter key. Python needs Deno and uv.
+
+Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY` (until an admin saves a key in `/admin`, Settings), `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings. Optional: `PONDER_ENCRYPTION_KEY` for connector credentials (see "Connectors").
+
+```bash
+npm install
+npm run sandbox:setup                                  # once: Pyodide and its packages
+set -a; . ~/.config/ponder-chat/.env; set +a
+WORKFLOW_POSTGRES_URL=$DATABASE_URL npx --no-install bootstrap   # once, and after upgrades
+npm run build
+./start.sh        # http://127.0.0.1:3500
+```
+
+Then, with the app's environment:
+
+1. Invite yourself: `npx tsx scripts/invite.ts add you@example.org`.
+2. Sign in at http://127.0.0.1:3500. Without email settings, the sign-in email is printed in the server log.
+3. Make yourself an admin: `npx tsx scripts/admin.ts grant you@example.org`.
+
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+
+To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
+
+To try Ponder with demo data, or to make the images above again after a UI change, see [`scripts/demo/README.md`](scripts/demo/README.md).
+
+## How it works
+
+Ponder started as a copy of the Seva platform with its Frappe parts removed. Python and memory came back later, adapted. The sections below describe each part and where its code is.
+
+### People, models and chats
+
+- Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link. Either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes. A code takes 3 wrong tries.
 - Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
-- Admin pages at `/admin` (see "Admin" below): usage, people, invites, requests for more credits, and the settings (credits and the OpenRouter key).
-- Chats in a sidebar, with names that a cheap model writes. A search box above the list finds chats by the words in their names and messages (Postgres full-text search, `server/thread-search.ts`). Each chat's menu can export it as a Markdown file, made in the browser (`web/export-markdown.ts`).
-- A model selector in the message field. The list is in `server/models.ts`, and it is also the allowlist: a request for any other model gets the default.
-- Each reply shows the model that wrote it.
-- Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter.ts`), so no provider keeps or trains on what people write. The selector shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
-- Attached images, PDFs and text files go to the model. Each file is private to the person who attached it: the download link, the model and Python read only the owner's files. See "Files" below.
-- A click on an attached PDF, image or CSV file opens it in a side panel at the right of the chat (`web/side-panel/`); on a narrow screen the panel covers the page. pdf.js loads only the first time a PDF opens, and each page draws when it comes near the screen. A CSV or TSV file shows as a plain table, up to 2,000 rows. Cmd- or Ctrl-click still opens the file in a new tab.
-- Artifacts: the model can write a document (Markdown) or a slide deck (HTML, one `<section>` per 1280×720 slide) with `write_artifact` (`server/artifacts/schema.ts`). A card in the reply opens it in the side panel, to read, copy or download (`.md`, or `.html` that prints one slide to a page). Present shows a deck full screen, one slide at a time: arrow keys, Space or a click move, and Escape leaves. The content is the tool call's input, so it is saved with the message. Writing the same id again makes a new version. Slides draw in a sandboxed frame: no scripts, and nothing loads from other addresses (`web/artifacts/`). While a reply writes an artifact, the card lists its steps: a deck's look, then each slide or section by its heading (`web/artifacts/steps.ts`). Replies skip OpenRouter providers that send a tool call only when it is complete (Wafer), so the artifact shows as it is written (`server/workflow/model.ts`).
-- Each reply is a durable workflow run (Workflow SDK, Postgres World). A reload, a dropped connection, a deploy or a crash does not end it: the page reconnects and the reply finishes. Messages sent during a reply wait in a queue.
-- Python: the model can run Python (pandas, matplotlib and more) in a Pyodide sandbox. Attached CSV and Excel files go in as inputs; charts and files come back into the chat.
-- Web search: the model can search the web (`web_search`) and read a page (`web_fetch`). See "Web search" below.
-- Connectors: each person can connect remote MCP servers (Linear, Notion, a Frappe site, any MCP server), and the model can use their tools. Tools that change something ask first. See "Connectors" below.
-- Memory across chats: after each reply, Ponder decides whether the person said something about themselves worth keeping. A note under the reply shows what it kept, with Undo, and the Memory page lists every memory and decision. See `docs/memory.md`.
-- Daily credits (see below).
+- Models: the list is in `server/models.ts`, and it is also the allowlist. A request for any other model gets the default.
+- Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter.ts`). The model menu shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
+- Chat names: a cheap model writes them. Search uses Postgres full-text search (`server/thread-search.ts`). Export to Markdown runs in the browser (`web/export-markdown.ts`).
+- Side panel (`web/side-panel/`): on a narrow screen the panel covers the page. pdf.js loads only the first time a PDF opens. A CSV or TSV file shows up to 2,000 rows. Cmd- or Ctrl-click still opens the file in a new tab.
+- Artifacts (`server/artifacts/schema.ts`, `web/artifacts/`): a deck is HTML, one `<section>` per 1280×720 slide. The content is the tool call's input, so it is saved with the message. Writing the same id again makes a new version. Slides run no scripts and load nothing from other addresses. While a reply writes an artifact, the card lists its steps (`web/artifacts/steps.ts`). Replies skip OpenRouter providers that send a tool call only when it is complete (Wafer), so the artifact shows as it is written (`server/workflow/model.ts`).
+- Memory: see `docs/memory.md`.
 
-## Credits
+### Credits
 
 | Setting | Meaning |
 | --- | --- |
@@ -40,7 +148,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - A person who has used today's credits can ask the admins for more. The admins get a message on `NOTIFY_URL`, and answer on `/admin`, Requests. An approval adds extra credits to that day's limit only (`credit_grants`). The person gets an email either way. One request can wait at a time, and after an answer they can ask again. An admin can also give extra credits from a person's page, without a request.
 - PDFs: see "Files" below.
 
-## Admin
+### Admin
 
 `/admin` is a second Vite page (`web/admin.html`, `web/admin/`) with its own routes under `/admin/`. The server sends `dist/admin.html` for `/admin` and `/admin/*`. Its API is under `/api/admin/*` (`server/admin/routes.ts`), and every route there needs the admin role (`requireAdmin`, which reads the role from the database). A person who is signed out goes to `/` to sign in. A person without the role sees "This page is for admins".
 
@@ -57,7 +165,7 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - The OpenRouter key: an admin pastes it in Settings. The server checks it with OpenRouter, then saves it encrypted in the `secrets` table (AES-256-GCM, with a key derived from `BETTER_AUTH_SECRET`), so a copy of the database alone does not give it away. The key is never sent back to the page; Settings shows its last four characters. Until a key is saved there, `OPENROUTER_API_KEY` from the environment is used. A new `BETTER_AUTH_SECRET` makes the saved key unreadable: the server then uses `OPENROUTER_API_KEY` if it is set, and Settings asks for the key again.
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
 
-## Durable replies
+### Durable replies
 
 | Part | Where |
 | --- | --- |
@@ -73,11 +181,11 @@ A proof of concept: a general chat app on OpenRouter models, with a daily credit
 - The flow route `/.well-known/workflow/v1/flow` has no authentication. The server listens on 127.0.0.1; in production the proxy must refuse that path.
 - Stop cancels the run and saves what it wrote. The model call in flight still runs to its end on OpenRouter; that cost is not charged to credits.
 
-## Python
+### Python
 
 `sandbox/pyodide/` is adapted from LangChain's pyodide-sandbox (MIT): each run is a new Deno process with no permissions except reading Pyodide and the vendored packages. No network, no environment, no writes, no subprocesses. Variables, imports and files in `/work` are kept per chat in Postgres (`python_state`). Set up once with `npm run sandbox:setup` (needs Deno and uv). Limits: `PYTHON_MAX_RUNS` (3 at once), `PYTHON_MEMORY_MB` (1536), 60 seconds a run.
 
-## Web search
+### Web search
 
 The model sees two tools of our own (`server/search/schema.ts`), whatever runs them behind:
 
@@ -85,7 +193,7 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 - `web_fetch`: reads the page on our own server (`server/search/fetch-page.ts`), so no other company sees it. It refuses every address on this machine, the tailnet and private networks, checked when each connection opens and on each redirect. Only ports 80 and 443; at most 3 MB and 20,000 characters of text.
 - Citations: the model cites with a Markdown link right after each fact. In the page, a link to a page that a search returned or `web_fetch` read shows as a small chip; hovering or focusing it shows the page's title and an excerpt.
 
-## Connectors
+### Connectors
 
 Settings, Connectors (from the account menu) lists the MCP servers the person connected. The code is in `server/mcp/` and `server/workflow/connectors.ts`; the page is in `web/connectors/` and `web/settings/`. The plan and its reasons are in `docs/connectors-plan.md`.
 
@@ -99,7 +207,7 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 - A token that expires within a minute is refreshed before a call, one refresh at a time for each connection. When the server refuses the sign-in, the connector shows "Sign in again", and the model is told to ask the person.
 - Limits: 30 probes, adds, sign-ins and refreshes in 10 minutes per person (`connectorLimit`); at most 120 connector tools go to the model.
 
-## Files
+### Files
 
 `server/files.ts` stores uploads; `server/file-context.ts` turns them into what the model reads before each call.
 
@@ -108,7 +216,7 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 - Text files: up to 200,000 characters each.
 - All file text in one model call: at most 300,000 characters, newest files first. A file that does not fit is named, and the model is told to ask for it again in a new chat.
 
-## What the model reads
+### What the model reads
 
 `server/workflow/context.ts` and `server/workflow/cache.ts` keep each call small, and its start the same from one call to the next, so that providers can cache it.
 
@@ -116,29 +224,12 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 - What memory recalls goes with the person's latest message, not in the instructions, because it changes with every message.
 - Anthropic's models cache only what a request marks, at most four places. Ponder marks the instructions, the history before the two whole turns, the history before the latest turn, and the last message. A cached read costs a tenth of the price. Each call reads from the cache everything before the latest turn, or before the turn before it when that turn's long tool output was just trimmed. Other providers cache the start of a prompt by themselves.
 
-## Limits
+### Limits
 
 - Per person, in memory (`server/rate-limit.ts`): 12 messages a minute and 200 an hour; 30 uploads in 10 minutes and 150 a day; 3 requests for credits an hour; 60 chat searches a minute. Over a limit, the answer is 429 with `Retry-After`. A restart clears the counts.
 - Sign-in (Better Auth, `server/auth.ts`), per address: 5 sign-in emails in 10 minutes, 10 code tries and 10 link opens in 10 minutes, 100 other requests a minute. The address comes from `cf-connecting-ip` (Cloudflare), else `x-forwarded-for`.
 
-## Run it
-
-Secrets are in `~/.config/ponder-chat/.env` (mode 600): `DATABASE_URL` (database `ponder_chat`), `OPENROUTER_API_KEY` (until an admin saves a key in `/admin`, Settings), `BETTER_AUTH_SECRET`, `PONDER_HOSTS`, and the credit settings. Optional: `PONDER_ENCRYPTION_KEY` for connector credentials (see "Connectors").
-
-```bash
-npm install
-npm run sandbox:setup                                  # once: Pyodide and its packages
-set -a; . ~/.config/ponder-chat/.env; set +a
-WORKFLOW_POSTGRES_URL=$DATABASE_URL npx --no-install bootstrap   # once, and after upgrades
-npm run build
-./start.sh        # http://127.0.0.1:3500
-```
-
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
-
-To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
-
-## Code
+### Code
 
 | Part | Where |
 | --- | --- |
