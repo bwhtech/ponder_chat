@@ -1,11 +1,11 @@
 import { gzipSync } from "node:zlib";
 import type { Context } from "hono";
 import { loadThread, threadUpdatedAt } from "./db.ts";
-import { activeRun } from "./workflow/runs.ts";
+import { latestRun } from "./workflow/runs.ts";
 
 /**
  * GET /api/threads/:id, cached. A thread's version is its updated_at plus whether a
- * reply is running, so the page revalidates with If-None-Match and gets a 304 when
+ * reply is running or its last reply failed, so the page revalidates with If-None-Match and gets a 304 when
  * nothing changed. Otherwise the response body, and its gzip, come from memory while
  * the version holds: a long thread is close to 1 MB of JSON and about a tenth of
  * that gzipped.
@@ -18,15 +18,18 @@ let bytes = 0;
 
 export async function threadResponse(c: Context, id: string, owner: string) {
 	const updatedAt = await threadUpdatedAt(id, owner);
-	const running = Boolean(await activeRun(id));
+	const run = await latestRun(id);
+	const running = Boolean(run && !run.finished);
+	// The model kept erroring: the page offers Retry (workflow/chat.ts).
+	const failed = Boolean(run?.finished && run.failed);
 	// A thread not saved yet (or someone else's) has no version: always fresh, never cached.
 	if (!updatedAt) return c.json({ messages: [], running: false }, 200, { "Cache-Control": "no-store" });
 
-	const etag = `"${updatedAt.getTime()}${running ? "-running" : ""}"`;
+	const etag = `"${updatedAt.getTime()}${running ? "-running" : ""}${failed ? "-failed" : ""}"`;
 	const headers = { ETag: etag, "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
 	if (c.req.header("If-None-Match")?.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) return c.body(null, 304, headers);
 
-	const entry = cached(id, etag) ?? remember(id, etag, JSON.stringify({ messages: await loadThread(id), running }));
+	const entry = cached(id, etag) ?? remember(id, etag, JSON.stringify({ messages: await loadThread(id), running, failed }));
 	if (/\bgzip\b/.test(c.req.header("Accept-Encoding") ?? "")) {
 		return c.body(new Uint8Array(entry.gzip), 200, { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" });
 	}

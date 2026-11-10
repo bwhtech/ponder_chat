@@ -61,7 +61,7 @@ To roll back by hand: `ln -sfn /srv/ponder-chat/releases/<old> /srv/ponder-chat/
 | The server crashes | systemd starts it again in 2 seconds. It releases the jobs that the crashed process held, and the cut-off step runs again. The page drops the partial text of that step. |
 | The VM reboots (security updates at 04:30 when needed) | The same as a crash, after the boot. |
 | The browser's connection drops | The page reconnects and keeps the reply. Reconnects wait up to 30 seconds for the server. |
-| The model fails 3 times | The reply ends with what it wrote so far. The run is marked finished, and the person can retry. |
+| The model fails 3 times | The reply ends with what it wrote so far, and an error with Retry. The run is marked failed, so the error and Retry also show when the thread is opened later. |
 | PostgreSQL stops | `/health` answers 503 and an alert goes out. systemd restarts PostgreSQL if it crashes. |
 | The disk fails, or the VM is lost | Restore the latest off-site backup on a new VM (below). Everything since that backup is lost. |
 

@@ -1,4 +1,4 @@
-import type { ModelMessage, ToolResultPart } from "ai";
+import type { ModelMessage, ToolResultPart, UIMessage } from "ai";
 
 /**
  * What the model reads of a thread, shaped to keep each call small and its start the
@@ -22,6 +22,21 @@ export function trimOldToolResults(messages: ModelMessage[]): ModelMessage[] {
 	return messages.map((message, index) => {
 		if (index >= keptFrom || message.role !== "tool") return message;
 		return { ...message, content: message.content.map((part) => (part.type === "tool-result" ? trimResult(part) : part)) };
+	});
+}
+
+/**
+ * Drops the reasoning of replies that another model wrote. Its signature is of no use to
+ * this model, and OpenRouter sends a call that carries it to the provider that signed it:
+ * after a switch from Claude, DeepSeek went only to Google, so when Google failed there
+ * was no other provider to try. A reply with no model in its metadata keeps its reasoning.
+ */
+export function dropOtherModelsReasoning(messages: UIMessage[], modelId: string): UIMessage[] {
+	return messages.map((message) => {
+		const writer = (message.metadata as { model?: unknown } | undefined)?.model;
+		if (message.role !== "assistant" || typeof writer !== "string" || writer === modelId) return message;
+		if (!message.parts.some((part) => part.type === "reasoning")) return message;
+		return { ...message, parts: message.parts.filter((part) => part.type !== "reasoning") };
 	});
 }
 
