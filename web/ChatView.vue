@@ -57,7 +57,7 @@ import {
 } from "./ai-elements";
 
 /** One chat: the conversation and the message field. The shell mounts a new one per thread. */
-const props = defineProps<{ threadId: string; initialMessages: UIMessage[]; running?: boolean }>();
+const props = defineProps<{ threadId: string; initialMessages: UIMessage[]; running?: boolean; failed?: boolean }>();
 const emit = defineEmits<{
 	/** A reply finished and the thread was saved: its place in the list and the credits left changed. */
 	saved: [];
@@ -353,6 +353,9 @@ function revealQuote(citation: Citation) {
 
 const busy = computed(() => status.value === "submitted" || status.value === "streaming");
 const lastMessage = computed(() => messages.value[messages.value.length - 1]);
+// The thread's last reply failed before this page opened it (the model kept erroring). Retry
+// stays until the next reply starts; a reply that fails while the page is open sets `error`.
+const failedBefore = ref(Boolean(props.failed && !props.running));
 // The copy of the thread on this device follows the chat: written when a reply ends, or when
 // the chat closes mid-reply (it reconnects on the way back).
 const { chatBusy, remember, added } = useThreads();
@@ -360,7 +363,8 @@ watch(
 	busy,
 	(now, before) => {
 		chatBusy.value = now;
-		if (before && !now) remember(props.threadId, { messages: messages.value, running: false });
+		if (now) failedBefore.value = false;
+		if (before && !now) remember(props.threadId, { messages: messages.value, running: false, failed: Boolean(error.value) });
 	},
 	{ immediate: true },
 );
@@ -580,11 +584,11 @@ function replyModelId(message: UIMessage) {
 						<MessageContent><Loader :text="thinkingText" /></MessageContent>
 					</Message>
 				</ConversationItem>
-				<ConversationItem v-if="error && !outOfCredits">
+				<ConversationItem v-if="(error || failedBefore) && !outOfCredits">
 					<Alert
 						theme="red"
 						title="Something went wrong"
-						:description="error.message"
+						:description="error?.message ?? 'The last reply did not finish. Retry, or choose another model.'"
 						:primary-action="{ label: 'Retry', onClick: () => regenerate() }"
 					/>
 				</ConversationItem>

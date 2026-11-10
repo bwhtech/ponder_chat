@@ -20,7 +20,7 @@ import { useThreads } from "./threads";
  * The signed-in shell: chats in a sidebar (a bottom sheet on phones) and the open chat, or
  * the Memory page. The header at the top of the sidebar opens the account menu, as on /admin.
  */
-const { current, currentThread, messages, running, loading, revision, refresh, open, start } = useThreads();
+const { current, currentThread, messages, running, failed, loading, revision, refresh, open, start } = useThreads();
 const sheetOpen = ref(false);
 // A request for more credits that waits for an answer: the page checks on it.
 useCreditRequestWatch();
@@ -138,6 +138,7 @@ function onSaved() {
 					:thread-id="current"
 					:initial-messages="messages"
 					:running="running"
+					:failed="failed"
 					@saved="onSaved"
 					@refused="refreshCredits"
 					@open-memory="showMemory"

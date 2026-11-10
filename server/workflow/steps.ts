@@ -1,3 +1,4 @@
+import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { ModelMessage } from "ai";
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
@@ -14,7 +15,8 @@ import type { Continued } from "./runs.ts";
 /**
  * The thread as the model reads it: the owner's attached files swapped for their content
  * (file-context.ts), the skills they chose with $name swapped for their instructions (skills.ts),
- * the reply text they cited marked as a quote (citations.ts),
+ * the reply text they cited marked as a quote (citations.ts), the reasoning of replies
+ * another model wrote left out,
  * tool results of earlier turns trimmed, and what memory recalled added to the person's
  * latest message (context.ts).
  */
@@ -25,12 +27,13 @@ export async function loadModelMessages(threadId: string, owner: string, modelId
 	const { resolveFileParts } = await import("../file-context.ts");
 	const { MODELS } = await import("../models.ts");
 	const { getSettings } = await import("../settings.ts");
-	const { addRecalledMemory, trimOldToolResults } = await import("./context.ts");
+	const { addRecalledMemory, dropOtherModelsReasoning, trimOldToolResults } = await import("./context.ts");
 	const { skillPartText } = await import("./skills.ts");
 	const { citationPartText } = await import("./citations.ts");
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
-	const messages = await convertToModelMessages(await resolveFileParts(await loadThread(threadId), owner, { pdfAsText }), {
+	const thread = dropOtherModelsReasoning(await loadThread(threadId), modelId);
+	const messages = await convertToModelMessages(await resolveFileParts(thread, owner, { pdfAsText }), {
 		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 	});
 	return addRecalledMemory(trimOldToolResults(messages), recalled);
@@ -72,14 +75,30 @@ export async function saveReplyStep(
 ) {
 	"use step";
 	const { saveReply } = await import("./reply.ts");
-	await saveReply(threadId, owner, runId, model, { untilTail: failed, continued });
+	await saveReply(threadId, owner, runId, model, { failed, continued });
 }
 
-/** Marks the run finished when saving its reply failed, so the thread does not look busy forever. */
+/** Marks the run finished, and failed, when saving its reply failed, so the thread does not look busy forever. */
 export async function finishRunStep(threadId: string, runId: string, model: string, continued: Continued | null = null) {
 	"use step";
 	const { finishRun } = await import("./runs.ts");
-	await finishRun(threadId, runId, model, { cancelled: true, continued });
+	await finishRun(threadId, runId, model, { failed: true, continued });
+}
+
+/**
+ * Ends the reply's stream. The agent leaves it open (chat.ts), so that a run whose model
+ * kept erroring can say so first: the page then shows the error and Retry, instead of
+ * an empty reply.
+ */
+export async function endReplyStream(writable: WritableStream<ModelCallStreamPart>, error?: string) {
+	"use step";
+	const writer = writable.getWriter();
+	try {
+		if (error) await writer.write({ type: "error", error });
+	} finally {
+		writer.releaseLock();
+	}
+	await writable.close();
 }
 
 export type StepUsage = {

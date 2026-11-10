@@ -25,6 +25,8 @@ const messages = shallowRef<UIMessage[]>([]);
 const loading = ref(false);
 /** The open thread had a reply still being written when it was loaded; the chat reconnects to it. */
 const running = ref(false);
+/** The open thread's last reply failed (the model kept erroring); the chat offers Retry. */
+const failed = ref(false);
 /** Goes up when a newer copy of the open thread replaces the one shown, so the chat remounts with it. */
 const revision = ref(0);
 /**
@@ -48,6 +50,7 @@ export function useThreads() {
 		currentThread,
 		messages,
 		running,
+		failed,
 		loading,
 		revision,
 		chatBusy,
@@ -143,7 +146,7 @@ function fetchThread(id: string, etag: string | null) {
 			if (response.status === 304) return "same" as const;
 			if (!response.ok) return undefined;
 			const body = await response.json();
-			const thread: CachedThread = { messages: body.messages, running: !!body.running, etag: response.headers.get("ETag") };
+			const thread: CachedThread = { messages: body.messages, running: !!body.running, failed: !!body.failed, etag: response.headers.get("ETag") };
 			// Not saved yet (a new thread in the URL): nothing to keep.
 			if (thread.etag) writeThread(id, thread);
 			return thread;
@@ -161,10 +164,11 @@ function show(thread: CachedThread) {
 	loading.value = false;
 	messages.value = thread.messages;
 	running.value = thread.running;
+	failed.value = !!thread.failed;
 }
 
 function sameThread(a: CachedThread, b: CachedThread) {
-	return a.running === b.running && JSON.stringify(a.messages) === JSON.stringify(b.messages);
+	return a.running === b.running && !!a.failed === !!b.failed && JSON.stringify(a.messages) === JSON.stringify(b.messages);
 }
 
 /** A new, empty thread. It joins the list when its first message goes out (added). */
@@ -173,6 +177,7 @@ function start({ push = true } = {}) {
 	const id = crypto.randomUUID().slice(0, 8);
 	messages.value = [];
 	running.value = false;
+	failed.value = false;
 	loading.value = false;
 	current.value = id;
 	setUrl(id, push);

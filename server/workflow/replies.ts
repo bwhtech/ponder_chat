@@ -64,7 +64,7 @@ export async function startReply(input: { threadId: string; owner: string; messa
 export async function followReply(id: string, owner: string, uiStartIndex = 0): Promise<Reply | null> {
 	const run = await latestRun(id);
 	if (!run || !(await mayUse(run.threadId, owner))) return null;
-	const stream = await replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled, continued: run.continued });
+	const stream = await replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled || run.failed, continued: run.continued });
 	return { runId: run.runId, stream };
 }
 
@@ -111,7 +111,7 @@ async function cancel(run: ThreadRun, owner: string) {
 	// closed, so the saved reply is what the run had written when it was stopped.
 	// Finished even when the save fails, so the thread does not look busy forever.
 	try {
-		await saveReply(run.threadId, owner, run.runId, run.model, { untilTail: true, continued: run.continued });
+		await saveReply(run.threadId, owner, run.runId, run.model, { cancelled: true, continued: run.continued });
 	} finally {
 		await finishRun(run.threadId, run.runId, run.model, { cancelled: true, continued: run.continued });
 	}

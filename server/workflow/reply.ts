@@ -53,10 +53,19 @@ function withMessage(messageId: string, model: string) {
  * Saves what the run wrote as the thread's last message. WorkflowAgent returns model
  * messages, with no conversion back to UI messages, so this replays the run's own
  * stream into a UI message, as the browser did. Used by the run's last step, and by Stop
- * for a run cut short (`untilTail`: what it wrote up to the moment it was stopped). The reply replaces a message with the same id, so saving twice is safe.
+ * for a run cut short (`cancelled`: what it wrote up to the moment it was stopped). A
+ * `failed` run is saved the same way, and marked so the page offers Retry (runs.ts).
+ * The reply replaces a message with the same id, so saving twice is safe.
  * Memory then decides, in the background, what the turn adds (server/memory.ts).
  */
-export async function saveReply(threadId: string, owner: string, runId: string, model: string, { untilTail = false, continued = null as Continued | null } = {}) {
+export async function saveReply(
+	threadId: string,
+	owner: string,
+	runId: string,
+	model: string,
+	{ cancelled = false, failed = false, continued = null as Continued | null } = {},
+) {
+	const untilTail = cancelled || failed;
 	const messages = await loadThread(threadId);
 	// After the person answers an approval, the run carries on the thread's last assistant
 	// message, as the browser does: its stream starts with the results of the approved
@@ -73,5 +82,5 @@ export async function saveReply(threadId: string, owner: string, runId: string, 
 		// Only into the thread as it is: a thread deleted while the reply was written stays deleted.
 		if (await updateThread(threadId, owner, messages)) rememberTurn({ threadId, user: owner }, messages);
 	}
-	await finishRun(threadId, runId, model, { cancelled: untilTail, continued });
+	await finishRun(threadId, runId, model, { cancelled, failed, continued });
 }

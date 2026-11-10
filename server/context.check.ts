@@ -5,10 +5,10 @@
  */
 import assert from "node:assert/strict";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
-import type { ModelMessage } from "ai";
+import type { ModelMessage, UIMessage } from "ai";
 import { RateLimit } from "./rate-limit.ts";
 import { withCacheMarks } from "./workflow/cache.ts";
-import { addRecalledMemory, trimOldToolResults } from "./workflow/context.ts";
+import { addRecalledMemory, dropOtherModelsReasoning, trimOldToolResults } from "./workflow/context.ts";
 
 const long = "x".repeat(5_000);
 const toolTurn = (id: string): ModelMessage[] => [
@@ -76,6 +76,25 @@ assert.deepEqual(withCacheMarks(prompt)[9].content.map((part) => isMarked(part a
 // Two turns: nothing is trimmed yet, so only the end of the first turn is marked.
 assert.deepEqual(marksOf(prompt.slice(0, 6)), [0, 3, 5]);
 assert.deepEqual(marksOf([prompt[1]]), [0]);
+
+// Reasoning: kept for the model that wrote it, dropped after a switch, kept when the writer is unknown.
+const reasoned = (id: string, model?: string): UIMessage => ({
+	id,
+	role: "assistant",
+	...(model && { metadata: { model } }),
+	parts: [
+		{ type: "reasoning", text: "", providerMetadata: { openrouter: { reasoning_details: [] } } },
+		{ type: "text", text: "answer" },
+	],
+});
+const switched = dropOtherModelsReasoning(
+	[{ id: "u", role: "user", parts: [{ type: "text", text: "hi" }] }, reasoned("a", "anthropic/claude-haiku-5.5"), reasoned("b", "deepseek/deepseek-v4.1-flash"), reasoned("c")],
+	"deepseek/deepseek-v4.1-flash",
+);
+assert.deepEqual(
+	switched.map((message) => message.parts.map((part) => part.type)),
+	[["text"], ["text"], ["reasoning", "text"], ["reasoning", "text"]],
+);
 
 // Rate limits: the windows, the wait, and other people unaffected.
 const limit = new RateLimit([{ max: 2, ms: 60_000 }]);

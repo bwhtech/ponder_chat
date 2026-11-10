@@ -10,7 +10,17 @@ import { connectorTools, connectorToolsStep } from "./connectors.ts";
 import { ChatModel } from "./model.ts";
 import type { Continued } from "./runs.ts";
 import { skillsGuidance, skillsStep, skillTools } from "./skills.ts";
-import { finishRunStep, loadModelMessages, recallMemoryStep, recordUsageStep, runPythonStep, saveReplyStep, webFetchStep, webSearchStep } from "./steps.ts";
+import {
+	endReplyStream,
+	finishRunStep,
+	loadModelMessages,
+	recallMemoryStep,
+	recordUsageStep,
+	runPythonStep,
+	saveReplyStep,
+	webFetchStep,
+	webSearchStep,
+} from "./steps.ts";
 
 export type ChatTurn = {
 	threadId: string;
@@ -38,9 +48,10 @@ export async function chatTurn(turn: ChatTurn) {
 
 	// The reply is saved and the run marked finished on every way out: a model that keeps
 	// erroring, memory or connectors that fail, or a save that fails. So the thread never
-	// looks busy forever. A failed run does not close its stream, so then only what it
-	// wrote is saved.
+	// looks busy forever. A failed run ends its stream with an error, so the page shows
+	// it with Retry, and is marked failed, so a page that loads the thread later does too.
 	const { workflowRunId } = getWorkflowMetadata();
+	const writable = getWritable<ModelCallStreamPart>();
 	let failure: unknown;
 	try {
 		// What the person told Ponder in earlier chats (server/memory.ts). The turn is saved to memory with the reply (reply.ts).
@@ -92,14 +103,23 @@ export async function chatTurn(turn: ChatTurn) {
 		});
 		await agent.stream({
 			messages: await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled, skills),
-			writable: getWritable<ModelCallStreamPart>(),
+			writable,
 			stopWhen: isStepCount(turn.maxSteps),
+			// The agent would end the stream as a finished reply even when the model failed; endReplyStream ends it.
+			sendFinish: false,
+			preventClose: true,
 		});
 	} catch (error) {
 		failure = error;
 	}
+	const message = failure ? `${turn.model.name} could not finish this reply. Retry, or choose another model.` : undefined;
+	// A stream left open would keep the save below waiting, so then the save reads only what the run wrote.
+	const ended = await endReplyStream(writable, message).then(
+		() => true,
+		() => false,
+	);
 	try {
-		await saveReplyStep(turn.threadId, turn.owner, workflowRunId, turn.model.id, Boolean(failure), turn.continued);
+		await saveReplyStep(turn.threadId, turn.owner, workflowRunId, turn.model.id, Boolean(failure) || !ended, turn.continued);
 	} catch (error) {
 		await finishRunStep(turn.threadId, workflowRunId, turn.model.id, turn.continued);
 		throw failure ?? error;
