@@ -242,11 +242,11 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 | Trimming, memory placement and prompt caching | `server/workflow/context.ts`, `server/workflow/cache.ts` |
 | Rate limits | `server/rate-limit.ts` |
 | Search in chats, Markdown export | `server/thread-search.ts`, `web/thread-search.ts`, `web/export-markdown.ts` |
-| Citation chips | `web/ai-elements/inline-citation/collect.ts`, `CitationCard.vue`, `web/ai-elements/response/Response.vue` |
+| Citation chips | `inline-citation/collect.ts`, `CitationCard.vue` and `response/Response.vue` in [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) |
 | Models | `server/models.ts`, `web/models.ts` |
 | OpenRouter key and other secrets | `server/openrouter-key.ts`, `server/secrets.ts` |
 | Credits | `server/credits.ts`, `server/settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
 | Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net-guard.ts`, `web/connectors/`, `web/settings/` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
-| Components | `web/ai-elements/` (copy of the platform's) |
+| Components | The [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) package. `web/side-panel/panel.ts` is its file viewer (`provideFileViewer` in `web/Workspace.vue`). |

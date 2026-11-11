@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
-import Shimmer from "../ai-elements/shimmer/Shimmer.vue";
-import { getToolPhase, type ToolMessagePart } from "../ai-elements/tool";
+import { getToolPhase, Shimmer, type ToolMessagePart } from "frappe-ui-ai-elements";
 import { slideCount } from "./slides";
 import { artifactSteps, currentStepText } from "./steps";
 import { ARTIFACT_LOOK } from "../side-panel/header";

@@ -1,15 +1,10 @@
 import preset, { content } from "frappe-ui/tailwind";
+import { content as aiElements } from "frappe-ui-ai-elements/tailwind";
 
 const here = new URL(".", import.meta.url).pathname;
 
 /** @type {import('tailwindcss').Config} */
 export default {
 	presets: [preset],
-	content: [...content, `${here}web/**/*.{html,vue,ts}`],
-	theme: {
-		extend: {
-			// `ease-out-strong`: the curve for things that enter, leave or open. Defined in base.css.
-			transitionTimingFunction: { "out-strong": "var(--ease-out-strong)" },
-		},
-	},
+	content: [...content, ...aiElements, `${here}web/**/*.{html,vue,ts}`],
 };

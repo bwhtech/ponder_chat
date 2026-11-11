@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Source } from "./ai-elements/sources";
-import { getToolName, getToolPhase, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "./ai-elements/tool";
+import { getToolName, getToolPhase, Source, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "frappe-ui-ai-elements";
 
 /**
  * A web_search or web_fetch call (server/search/tool.ts) as one Tool line: what was

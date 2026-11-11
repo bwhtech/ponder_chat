@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import CodeBlockContent from "../ai-elements/code-block/CodeBlockContent.vue";
+import { CodeBlockContent } from "frappe-ui-ai-elements";
 import type { Artifact } from "../side-panel/panel";
 import { framedPage, HTML_SANDBOX } from "./html";
 

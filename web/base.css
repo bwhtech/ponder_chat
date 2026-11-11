@@ -1,9 +1,6 @@
 /* Rules shared by the chat (style.css) and /admin (admin/style.css). One owner, so the two apps cannot drift apart. */
 
-:root {
-  /* A strong ease-out: fast at the start, where the eye is. Tailwind: `ease-out-strong`. */
-  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
-}
+/* --ease-out-strong, .ease-out-strong and .touch-target come from frappe-ui-ai-elements/styles.css. */
 
 /* A page header's hairline, drawn in as content scrolls under it. */
 @keyframes header-edge {
@@ -20,13 +17,13 @@
   }
 }
 
-/* Touch: small controls reach about 44px to a finger with an invisible hit area, so what you see does not
-   move. `.touch-target` opts a control in; phone admin headers and segmented tabs get it everywhere. */
+/* Touch: phone admin headers and segmented tabs get the package's 44px hit area (.touch-target) everywhere.
+   Tabs sit side by side, so their area grows only up and down. */
 @media (pointer: coarse) {
-  :is(.touch-target, [data-slot='mobile-shell'] header :is(button, a[href]), [data-slot='tab-button']) {
+  :is([data-slot='mobile-shell'] header :is(button, a[href]), [data-slot='tab-button']) {
     position: relative;
   }
-  :is(.touch-target, [data-slot='mobile-shell'] header :is(button, a[href]))::after {
+  [data-slot='mobile-shell'] header :is(button, a[href])::after {
     content: '';
     position: absolute;
     top: 50%;
@@ -35,15 +32,7 @@
     height: max(100% + 16px, 44px);
     transform: translate(-50%, -50%);
   }
-  /* Step rows stacked in an open fold or a run of steps sit 12px apart on touch. Their areas fill that gap
-     and stop there, so a tap never lands on the neighbour: 32px a row, where 44px rows would push them apart.
-     A step line on its own keeps the 44px area. Tool and reasoning rows rename the trigger's data-slot,
-     so the rule finds it by data-trace-trigger. */
-  :is([data-slot='trace'], [data-slot='message-steps']:has(> :nth-child(2))) [data-trace-trigger]::after {
-    height: calc(100% + 12px);
-  }
-  [data-slot='tab-button']::after,
-  a[data-slot='attachment']::after {
+  [data-slot='tab-button']::after {
     content: '';
     position: absolute;
     inset: -8px 0;

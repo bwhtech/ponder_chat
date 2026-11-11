@@ -1,5 +1,0 @@
-<template>
-	<div data-slot="trace" class="flex w-full min-w-0 flex-col gap-1.5 [@media(pointer:coarse)]:gap-3">
-		<slot />
-	</div>
-</template>

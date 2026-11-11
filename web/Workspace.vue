@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { BottomSheet, Button, Sidebar, SidebarHeader, Skeleton, toast } from "frappe-ui";
+import { provideFileViewer } from "frappe-ui-ai-elements";
 import { computed, ref, watch } from "vue";
 import { me, refreshCredits, signOut } from "./account";
 import { loadConnectors } from "./connectors/api";
@@ -11,7 +12,7 @@ import { useCreditRequestWatch } from "./credit-request";
 import MemoryView from "./MemoryView.vue";
 import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
-import { closePanel } from "./side-panel/panel";
+import { closePanel, viewInPanel } from "./side-panel/panel";
 import SidePanel from "./side-panel/SidePanel.vue";
 import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
@@ -24,6 +25,8 @@ const { current, currentThread, messages, running, failed, loading, revision, re
 const sheetOpen = ref(false);
 // A request for more credits that waits for an answer: the page checks on it.
 useCreditRequestWatch();
+// Files in the chat (attachments, images from Python) open in the side panel.
+provideFileViewer(viewInPanel);
 // The main area shows the open chat, or the Memory page (?view=memory).
 const view = ref<"chat" | "memory">(viewInUrl());
 addEventListener("popstate", () => (view.value = viewInUrl()));

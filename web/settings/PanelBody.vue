@@ -4,7 +4,7 @@ import { ScrollArea } from "frappe-ui";
 /**
  * frappe-ui's SettingsBody, with 1rem side padding on phones (PanelHeader.vue), and the
  * edges fading while content scrolls under the header or past the bottom (scroll-fade-y,
- * in ai-elements/styles.css). SettingsBody has no way to add a class to its viewport.
+ * in frappe-ui-ai-elements/styles.css). SettingsBody has no way to add a class to its viewport.
  */
 </script>
 
