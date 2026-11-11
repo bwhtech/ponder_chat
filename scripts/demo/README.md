@@ -33,7 +33,7 @@ You need Docker and Node. The images use the `clean-ui-shot` skill's scripts (`~
      pgvector/pgvector:pg18
    ```
 
-2. Write the demo environment to a file, such as `/tmp/ponder-demo.env`. The key is not a real key: no reply runs while the images are taken.
+2. Write the demo environment to a file, such as `/tmp/ponder-demo.env`. The key is not a real key: no reply runs while the images are taken. The queue image needs a reply on its way, so `shots.mjs` answers that message itself and keeps the reply open.
 
    ```bash
    DATABASE_URL=postgres://ponder:ponder@127.0.0.1:55432/ponder_demo

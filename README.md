@@ -78,6 +78,12 @@ The model menu in the message box lists a short set of models from DeepSeek, Ant
 
 ![The model menu opened from the message box, with DeepSeek V4.1 Flash selected and Claude Haiku, Sonnet and Opus listed below.](docs/images/models.webp)
 
+### A queue
+
+Messages that you send during a reply wait in a queue above the message box. They go out in order, one after each reply. You can edit a queued message, drag it to a new place, or remove it. Steer stops the reply and sends that message now.
+
+![A reply that is still being written, and under it two queued messages, each with Edit, Steer and Remove: "Add a line about parking at the back entrance" and "Then translate both emails into Spanish".](docs/images/queue.webp)
+
 ### Credits and admin
 
 Each person has a daily credit limit, charged from what OpenRouter reports for each call. When the credits run out, a person can ask the admins for more. The admin pages show usage only, never chats: today's numbers, credits per day, active people and credits by model. Admins also invite people, set limits, answer requests and manage skills.
@@ -107,7 +113,6 @@ A person's page shows their numbers for 30 days and the devices they are signed 
 - **Skills.** An admin writes instructions for a kind of task, such as Word documents. Ponder loads a skill when a message needs it. You can also start one with `$name` in a message. See [`docs/skills.md`](docs/skills.md).
 - **Files in a side panel.** Attached PDFs, images and CSV files open beside the chat. A PDF draws each page as it comes near the screen. A CSV shows as a table.
 - **Search and export.** The search box above the chat list finds chats by the words in their titles and messages. Each chat's menu exports it as a Markdown file.
-- **A queue.** Messages that you send during a reply wait in a queue and go out in order.
 
 ## Run it
 

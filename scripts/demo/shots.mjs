@@ -73,6 +73,40 @@ async function scrollToTop(page) {
 
 const item = (page, text) => page.locator('li', { hasText: text });
 
+/** The part of a reply that the queue shot shows on its way: it stops mid-sentence. */
+const THANK_YOU = `Here is a short thank-you to send the day after a first shift. It names the shift, thanks them for one thing they did, and asks how it went.
+
+**Subject:** Thank you for Saturday
+
+Hi Priya,
+
+Thank you for coming in on Saturday. The forty boxes you packed went out to families the same afternoon, and`;
+
+/**
+ * Answers the next message with `text` and then holds the reply open, so the chat stays
+ * busy and the messages sent after it wait in the queue. The demo server has no real
+ * OpenRouter key, so a reply cannot run. The POST gets the start of the reply with no
+ * finish, and the transport's reconnect (a GET) never gets an answer.
+ */
+async function holdReply(context, text) {
+  const chunks = [
+    { type: 'start', messageId: 'demo-on-its-way', messageMetadata: { model: 'deepseek/deepseek-v4.1-flash' } },
+    { type: 'start-step' },
+    { type: 'text-start', id: 't1' },
+    { type: 'text-delta', id: 't1', delta: text },
+  ];
+  await context.route('**/api/chat', (route) =>
+    route.request().method() !== 'POST'
+      ? route.continue()
+      : route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1', 'x-workflow-run-id': 'demo-on-its-way' },
+          body: chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(''),
+        }),
+  );
+  await context.route('**/api/chat/demo-on-its-way/stream**', () => {});
+}
+
 // The admin pages. The sidebar is 16rem wide: a crop that starts at MAIN_X bleeds left
 // through the margin of the main area, not through the sidebar's labels.
 const MAIN_X = 256;
@@ -209,6 +243,35 @@ export default [
       await openChat(page, 'sells the most');
       await scrollToTop(page);
       this.crop = await columnCrop(page, await under(page.locator('[data-slot="memory-saved"]')));
+    },
+  },
+  {
+    // Bottom-right corner: a reply still on its way, and two messages queued behind it.
+    name: 'queue',
+    path: '/?t=demo-email',
+    viewport: HD,
+    async routes(context) {
+      await signIn(context);
+      await holdReply(context, THANK_YOU);
+    },
+    async setup({ page }) {
+      await openChat(page, 'keeps the one link');
+      const field = page.locator('footer [data-slot="prompt-input"] textarea');
+      const ask = 'Now write the thank-you email for after their first shift.';
+      for (const text of [ask, 'Add a line about parking at the back entrance', 'Then translate both emails into Spanish']) {
+        await field.fill(text);
+        await field.press('Enter');
+        await page.waitForTimeout(400);
+      }
+      await page.locator('[data-slot="prompt-input-queue-item"]').nth(1).waitFor();
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(800);
+      const question = await boxOf(page.getByText(ask, { exact: true }).last());
+      const composer = await boxOf(page.locator('footer [data-slot="prompt-input"]'));
+      const { width, height } = page.viewportSize();
+      const x = Math.round(composer.x - 140);
+      const y = Math.round(question.y - 32);
+      this.crop = { x, y, w: width - x, h: height - y };
     },
   },
   {
