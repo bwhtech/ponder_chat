@@ -51,7 +51,8 @@ const env = {
 	CLOUDFLARE_EMAIL_TOKEN: "fake",
 	PONDER_EMAIL_FROM: "Ponder Chat <ponder@example.com>",
 	// Python needs Deno and Pyodide (npm run sandbox:setup). Off, unless E2E_PYTHON=1.
-	PONDER_DENO: process.env.E2E_PYTHON === "1" ? (process.env.PONDER_DENO ?? "deno") : "/nonexistent/deno",
+	PONDER_PYTHON: process.env.E2E_PYTHON === "1" ? "on" : "off",
+	...(process.env.PONDER_DENO && { PONDER_DENO: process.env.PONDER_DENO }),
 	...(process.env.PONDER_DENO_DIR && { PONDER_DENO_DIR: process.env.PONDER_DENO_DIR }),
 };
 

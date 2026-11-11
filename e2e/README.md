@@ -58,7 +58,7 @@ Each test gets a new person, so tests can run in parallel and in any order.
 
 ### Script a reply
 
-A message that no script matches gets the reply "You said: <the message>". For another reply, send a script before the message. The fake uses the newest script whose `match` is in the person's latest message, so a test can replace a script by sending another:
+A message that no script matches gets the reply "You said: <the message>". For another reply, send a script before the message. The fake uses the newest script whose `match` is in the person's latest message, so a test can replace a script by sending another. Make each `match` unique to its test: a script stays in the fake until it stops, and a `match` that is part of another test's message would answer that message too. For example:
 
 ```ts
 await fake.chat({ match: "planets", steps: [{ text: "| Planet | Moons |\n| --- | --- |\n| Mars | 2 |" }] });

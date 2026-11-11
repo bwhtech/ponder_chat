@@ -3,7 +3,9 @@ import { chat, expect, randomIp, signIn, test, uniqueEmail } from "../fixtures.t
 
 test("an admin sees the people page", async ({ page, admin }) => {
 	await page.goto("/admin/people");
+	await expect(page.getByRole("heading", { name: "People", exact: true })).toBeVisible();
 	await expect(page.getByText(admin.email).first()).toBeVisible();
+	await expect(page.getByText("This page is for admins")).toHaveCount(0);
 });
 
 test("a person without the admin role can't open the admin pages", async ({ page, person }) => {
