@@ -8,15 +8,17 @@ These scripts fill a scratch database with made-up data and take the images in t
 | `shots.mjs` | The list of images: which chat to open, what to click, and where to crop. |
 | `assets/cafe-sales.csv` | The file that the Python chat reads. |
 | `assets/pastries-by-weekday.png` | The chart that the Python chat shows. `assets/make_chart.py` draws it. |
+| `assets/students.csv` | The sample data for 100 made-up students that the sheet chat shows as a table. `assets/make_students.py` writes it. |
 
 ## What the seed writes
 
 Everything is made up. The web pages that the search chat cites are real public pages, with short excerpts in our own words.
 
-- Alex Rivera (`alex@example.com`), an admin, with 12 chats. Five of them show a feature: web search with citations, a quote to cite, a slide deck, a Python chart and a connector that waits for approval.
+- Alex Rivera (`alex@example.com`), an admin, with 13 chats. Eight of them show a feature: web search with citations, a quote to cite, a slide deck, a Python chart, a CSV that opens as a table, a connector that waits for approval, a skill that Ponder picked, and a skill that Alex chose.
 - Seven memories, each with a note under the reply it came from.
+- Four skills that admins wrote, next to the two that come with Ponder. Two are automatic, and two run only when someone asks for them.
 - Two connectors: Linear (OAuth) and a docs server (API key). Neither one is called: their tool lists are written to the database.
-- Seven more people, 30 days of usage, a request for more credits and two open invites, for the admin pages.
+- Seven more people, 30 days of usage, a request for more credits and two open invites, for the admin pages. Each person also has some empty chats (admins see only how many) and one or two devices they signed in on.
 
 The seed refuses a database whose name does not contain `demo`, because it deletes data. It deletes what an earlier run wrote, so it can run again.
 
@@ -32,7 +34,7 @@ You need Docker and Node. The images use the `clean-ui-shot` skill's scripts (`~
      pgvector/pgvector:pg18
    ```
 
-2. Write the demo environment to a file, such as `/tmp/ponder-demo.env`. The key is not a real key: no reply runs while the images are taken.
+2. Write the demo environment to a file, such as `/tmp/ponder-demo.env`. The key is not a real key: no reply runs while the images are taken. The queue image needs a reply on its way, so `shots.mjs` answers that message itself and keeps the reply open.
 
    ```bash
    DATABASE_URL=postgres://ponder:ponder@127.0.0.1:55432/ponder_demo

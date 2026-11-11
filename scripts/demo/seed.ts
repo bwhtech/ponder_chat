@@ -49,6 +49,15 @@ const OTHERS = [
 ] as const;
 const INVITES = ["maria@example.org", "kofi@example.net"];
 
+// The browsers that people signed in from, for "Signed in on" on a person's admin page.
+const DEVICES = {
+	macChrome: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+	iPhone: "Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Mobile/15E148 Safari/604.1",
+	android: "Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
+	windowsEdge: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+	macFirefox: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15.1; rv:144.0) Gecko/20100101 Firefox/144.0",
+};
+
 async function reset() {
 	const emails = [DEMO_EMAIL, ...OTHERS.map(([, email]) => email)];
 	const users = await sql<{ id: string }[]>`select id from users where email in ${sql(emails)}`;
@@ -64,12 +73,13 @@ async function reset() {
 		await sql`delete from users where id in ${sql(ids)}`;
 	}
 	await sql`delete from allowed_emails where email in ${sql([...emails, ...INVITES])}`;
+	await sql`delete from skills where name in ${sql(SKILLS.map((skill) => skill.name))}`;
 }
 
 /** Signs the demo person in through Better Auth, as the sign-in page would, and returns the cookies. */
 async function signIn() {
 	await sql`insert into allowed_emails (email, note) values (${DEMO_EMAIL}, 'Demo') on conflict do nothing`;
-	const headers = new Headers({ host, "x-forwarded-for": "127.0.0.1" });
+	const headers = new Headers({ host, "x-forwarded-for": "127.0.0.1", "user-agent": DEVICES.macChrome });
 	const otp = await auth.api.createVerificationOTP({ body: { email: DEMO_EMAIL, type: "sign-in" }, headers });
 	const signed = await auth.api.signInEmailOTP({ body: { email: DEMO_EMAIL, otp }, headers, returnHeaders: true });
 	const [user] = await sql<{ id: string }[]>`update users set name = 'Alex Rivera', role = 'admin' where email = ${DEMO_EMAIL} returning id`;
@@ -95,9 +105,31 @@ async function addOthers() {
 			insert into users (id, name, email, "emailVerified", "createdAt", "updatedAt", role)
 			values (${id}, ${name}, ${email}, true, ${joined}, ${joined}, ${index === 0 ? "admin" : "user"})`;
 		ids.push(id);
+		await addSessions(id, index);
+		await addChatCount(id, 6 + index * 5);
 	}
 	await sql`insert into allowed_emails (email, note, daily_credits) values ('maria@example.org', 'Board member', 1500), ('kofi@example.net', 'Volunteer lead', null)`;
 	return ids;
+}
+
+/** One or two signed-in devices for each person: a phone, and for some a computer too. */
+async function addSessions(userId: string, index: number) {
+	const phone = index % 2 ? DEVICES.android : DEVICES.iPhone;
+	const computers = [DEVICES.macChrome, DEVICES.windowsEdge, DEVICES.macFirefox];
+	const devices = index % 3 === 2 ? [phone] : [phone, computers[index % computers.length]];
+	for (const [n, agent] of devices.entries()) {
+		const used = ago(minutes(15 + index * 7) + hours(n * 20));
+		await sql`
+			insert into sessions (id, "expiresAt", token, "createdAt", "updatedAt", "userAgent", "userId")
+			values (${randomUUID()}, ${new Date(now + DAY * 7)}, ${randomUUID()}, ${ago(DAY * 3)}, ${used}, ${agent}, ${userId})`;
+	}
+}
+
+/** Empty chats, so the admin pages count some for each person. Admins never see what is in them. */
+async function addChatCount(owner: string, count: number) {
+	for (let n = 0; n < count; n += 1) {
+		await sql`insert into threads (id, owner, title, updated_at) values (${randomUUID().slice(0, 8)}, ${owner}, ${`Chat ${n + 1}`}, ${ago(hours(n * 9 + 1))})`;
+	}
 }
 
 // --- Files --------------------------------------------------------------------
@@ -290,6 +322,63 @@ Weekend share of pastries: 43.4%`;
 	];
 }
 
+/** Sample data made with Python: 100 students in a CSV, which opens in the side panel as a table. */
+function students(csv: { url: string; size: number }): Message[] {
+	const code = `import random
+import pandas as pd
+
+random.seed(12)
+first = ["Aarav", "Abena", "Amara", "Anika", "Ben", "Carlos", "Chloe", "Daniel", "Dara", "Elif",
+         "Ethan", "Fatima", "Felix", "Grace", "Hana", "Hugo", "Isaac", "Ines", "Jaya", "Jonas",
+         "Kai", "Kemi", "Layla", "Leo", "Lucia", "Mateo", "Maya", "Mei", "Nadia", "Noah",
+         "Olivia", "Omar", "Oscar", "Priya", "Rafael", "Rosa", "Ruby", "Sami", "Sofia", "Tariq",
+         "Theo", "Uma", "Victor", "Yara", "Yusuf", "Zara", "Zoe", "Arjun", "Ella", "Mila"]
+last = ["Adeyemi", "Alvarez", "Bauer", "Brooks", "Chen", "Costa", "Dubois", "Eriksen", "Evans", "Farah",
+        "Fernandes", "Garcia", "Haddad", "Hughes", "Ito", "Jensen", "Johansson", "Kaur", "Kim", "Kowalski",
+        "Lindqvist", "Lopez", "Mensah", "Moreau", "Murphy", "Nakamura", "Nguyen", "Novak", "Okafor", "Owusu",
+        "Park", "Patel", "Petrov", "Quinn", "Reyes", "Rossi", "Sato", "Santos", "Schmidt", "Shah",
+        "Silva", "Sousa", "Tanaka", "Torres", "Varga", "Walsh", "Weber", "Wong", "Yilmaz", "Zhang"]
+
+def score(base):
+    return max(35, min(100, round(random.gauss(base, 11))))
+
+rows = []
+for surname in last:
+    for name in random.sample(first, 2):
+        ability = random.gauss(72, 8)
+        rows.append({"Student": f"{name} {surname}", "Class": random.choice(["7A", "7B", "8A", "8B"]),
+                     "Maths": score(ability), "Science": score(ability - 2), "English": score(ability + 2)})
+
+df = pd.DataFrame(rows).sort_values(["Class", "Student"])
+df.to_csv("/work/outputs/students.csv", index=False)
+print(f"{len(df)} students in {df.Class.nunique()} classes\\n")
+print(df[["Maths", "Science", "English"]].agg(["mean", "min", "max"]).round(1))`;
+	const stdout = `100 students in 4 classes
+
+      Maths  Science  English
+mean   70.0     67.4     72.4
+min    39.0     36.0     48.0
+max   100.0    100.0    100.0`;
+	return [
+		user(
+			"demo-students-1",
+			"Make sample data for 100 students: name, class, and marks in maths, science and English. I need it to test our report-card template.",
+		),
+		reply(
+			"demo-students-2",
+			SONNET,
+			tool("run_python", { code }, { ok: true, stdout, stderr: "", files: [{ url: csv.url, name: "students.csv", size: csv.size, media_type: "text/csv" }] }),
+			[
+				"Here is **students.csv**: 100 made-up students in classes 7A to 8B, with a mark out of 100 for maths, science and English.",
+				"",
+				"- Averages are about 70 in maths, 67 in science and 72 in English.",
+				"- A few students in each subject are under 50, so the template's \"needs support\" rows get tested too.",
+				"- Marks go with each student's overall level, so a strong student is strong in most subjects, as in a real class.",
+			].join("\n"),
+		),
+	];
+}
+
 const DECK = `<style>
 section { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; color: #1c2a22; background: #fbfaf5; padding: 80px 96px; box-sizing: border-box; }
 h1 { font-size: 76px; line-height: 1.05; letter-spacing: -0.02em; color: #14532d; margin: 0 0 20px; }
@@ -392,34 +481,148 @@ function linearBug(): Message[] {
 	];
 }
 
-/** Short chats to fill the list. */
-const OTHER_CHATS: { id: string; title: string; ago: number; model: string; ask: string; answer: string }[] = [
+/** Short chats to fill the list. `skill` is one that the person chose with $name. */
+const OTHER_CHATS: { id: string; title: string; ago: number; model: string; ask: string; answer: string; skill?: string }[] = [
 	{ id: "demo-email", title: "Rewrite the volunteer welcome email", ago: hours(26), model: FLASH, ask: "Make this welcome email warmer and half as long.", answer: "Here is a shorter version that leads with the thank-you and keeps the one link they need." },
 	{ id: "demo-sourdough", title: "Sourdough starter feeding schedule", ago: DAY * 2 + hours(3), model: FLASH, ask: "How often should I feed a starter that lives in the fridge?", answer: "Once a week is enough. Take it out the night before you bake, feed it 1:1:1, and use it when it has doubled." },
 	{ id: "demo-postgres", title: "Postgres or SQLite for a side project", ago: DAY * 3, model: TERRA, ask: "Postgres or SQLite for a small app with one server?", answer: "SQLite, unless you need several servers to write at once. It is one file, it backs up with a copy, and it is fast for this size." },
 	{ id: "demo-meals", title: "Vegetarian meal plan for the week", ago: DAY * 4, model: GEMINI, ask: "A vegetarian dinner plan for 5 nights, 30 minutes each, kid friendly.", answer: "Monday: black bean tacos. Tuesday: pasta with roasted tomatoes. Wednesday: vegetable fried rice. Thursday: halloumi wraps. Friday: homemade pizza." },
 	{ id: "demo-index-funds", title: "Explain index funds simply", ago: DAY * 6, model: SONNET, ask: "Explain index funds like I'm new to investing.", answer: "An index fund buys a little of every company in a list, such as the 500 largest in the US, so you own the market instead of guessing which company wins." },
-	{ id: "demo-board-notes", title: "Board meeting notes, September", ago: DAY * 12, model: OPUS, ask: "Turn these notes into minutes with actions and owners.", answer: "Here are the minutes, with four actions and an owner for each." },
-	{ id: "demo-grant", title: "Grant application outline", ago: DAY * 18, model: OPUS, ask: "Outline a grant application for a new refrigerated van.", answer: "A six-part outline: need, plan, budget, impact, partners and how you will report back." },
+	{ id: "demo-board-notes", title: "Board meeting notes, September", ago: DAY * 12, model: OPUS, skill: "meeting-minutes", ask: "Here are my notes from Tuesday. Same format as last month, please.", answer: "Here are the minutes, with four actions and an owner for each." },
 ];
+
+/** Ponder picks the grant-writing skill on its own, and follows it. */
+function grant(): Message[] {
+	return [
+		user("demo-grant-1", "Outline a grant application to the Riverside Community Fund for a refrigerated van. The van costs $62,000 and we have raised $48,000."),
+		reply(
+			"demo-grant-2",
+			OPUS,
+			tool("use_skill", { name: "grant-writing" }, GRANT_WRITING),
+			`Here is an outline in the order that the Riverside Community Fund asks for. Each part says what to write and which numbers to bring.
+
+### 1. The need
+
+Each week we turn away fresh food that we cannot keep cold: about 1,200 lb in September. Say who misses out: 340 households a week, and a third of them have children.
+
+### 2. The plan
+
+One refrigerated van for the Tuesday and Friday routes to our four partner pantries. Say who drives it, and where it parks at night.
+
+### 3. The budget
+
+| Item | Cost |
+| --- | --- |
+| Refrigerated van, used, 2023 | $54,500 |
+| Insurance for the first year | $3,800 |
+| Signs on the van | $2,500 |
+| Driver training and food safety | $1,200 |
+| **Total** | **$62,000** |
+| Raised already | $48,000 |
+| **Asked of the fund** | **$14,000** |
+
+### 4. The impact
+
+In 12 months: 60,000 lb more fresh food delivered, and 4 pantries that can take milk and meat for the first time. [check] the pounds with the warehouse log.
+
+### 5. Partners
+
+Name the four pantries, and what each one does: storage, volunteers, or the families it serves.
+
+### 6. Reporting
+
+A short report at 6 and 12 months: pounds delivered, households served, and the van's costs.`,
+		),
+	];
+}
+
+// --- Skills --------------------------------------------------------------------
+
+const GRANT_WRITING = `# Grant writing
+
+Write for a reviewer who reads forty applications in a week.
+
+## Before you start
+
+- Ask for the funder's name and its questions, if the person did not give them. Use the funder's headings, in its order.
+- Ask for the amount, the total cost, and what is raised already.
+
+## Each section
+
+1. **Need.** One number that shows the problem, and who it affects.
+2. **Plan.** What we will do, where, how often and who does it.
+3. **Budget.** A table. Every line has a cost. The total matches the ask.
+4. **Impact.** What changes in 12 months, as numbers that we can count.
+5. **Partners.** Name them, and what each one does.
+6. **Reporting.** What we will report, and when.
+
+## Style
+
+- Plain words and short sentences. Write "we", not "the organization".
+- No claim that we cannot prove. Mark a guess with [check].
+- Keep each section under 200 words, unless the funder allows more.
+`;
+
+/** Skills an admin wrote, next to the two standard skills that the server adds when it starts. */
+const SKILLS = [
+	{ name: "grant-writing", automatic: true, ago: DAY * 9, by: 0, description: "Draft a grant application in the funder's own headings: need, plan, budget, impact, partners and reporting.", body: GRANT_WRITING },
+	{
+		name: "meeting-minutes",
+		automatic: false,
+		ago: DAY * 15,
+		by: 1,
+		description: "Turn meeting notes into minutes: decisions, actions with an owner and a date, and open questions.",
+		body: "# Meeting minutes\n\n1. Start with the date, who came and who sent apologies.\n2. List each decision in one sentence.\n3. Make a table of actions: the action, the owner and the date.\n4. End with the open questions for the next meeting.\n",
+	},
+	{
+		name: "volunteer-newsletter",
+		automatic: true,
+		ago: DAY * 3,
+		by: 2,
+		description: "Write the monthly volunteer newsletter in our warm, plain voice, in under 300 words.",
+		body: "# Volunteer newsletter\n\n- Open with one number from the month and thank the people behind it.\n- Then: dates for next month, one volunteer story, and one ask.\n- Under 300 words. No exclamation marks.\n",
+	},
+	{
+		name: "donor-thank-you",
+		automatic: false,
+		ago: DAY * 21,
+		by: 0,
+		description: "A thank-you letter to a donor that names the gift and what it paid for.",
+		body: "# Donor thank-you\n\n- Name the gift and the date in the first line.\n- Say what it paid for, as one thing that the donor can picture.\n- One page or less. Sign it from the director.\n",
+	},
+];
+
+async function addSkills(admins: string[]) {
+	const { saveSkill } = await import("../../server/skills.ts");
+	for (const skill of SKILLS) {
+		const saved = await saveSkill({ name: skill.name, description: skill.description, automatic: skill.automatic, body: skill.body, enabled: true }, admins[skill.by]!);
+		if (!saved.ok) throw new Error(`${skill.name}: ${saved.error}`);
+		await sql`update skills set created_at = ${ago(skill.ago)}, updated_at = ${ago(skill.ago)} where name = ${skill.name} and deleted_at is null`;
+	}
+	// The standard skills came with the server, a month ago.
+	await sql`update skills set created_at = ${ago(DAY * 30)}, updated_at = ${ago(DAY * 30)} where name in ('docx', 'technical-writing') and deleted_at is null`;
+}
 
 async function addThreads(owner: string) {
 	const csvBytes = asset("cafe-sales.csv");
 	const csv = await addFile(owner, "cafe-sales.csv", "text/csv", csvBytes);
 	await sql`update files set text = ${csvBytes.toString("utf8")} where id = ${csv.id}`;
 	const chart = await addFile(owner, "pastries-by-weekday.png", "image/png", asset("pastries-by-weekday.png"));
+	const studentsCsv = await addFile(owner, "students.csv", "text/csv", asset("students.csv"));
 
 	const chats: { id: string; title: string; updated: Date; messages: Message[] }[] = [
 		{ id: "demo-heat-pumps", title: "Heat pumps in a Minnesota winter", updated: ago(minutes(4)), messages: heatPumps() },
 		{ id: "demo-cafe", title: "Café pastry sales by weekday", updated: ago(minutes(48)), messages: cafeSales(csv, chart) },
+		{ id: "demo-students", title: "Sample data: 100 students", updated: ago(hours(1)), messages: students(studentsCsv) },
 		{ id: "demo-deck", title: "Q3 volunteer report deck", updated: ago(hours(2)), messages: deck() },
 		{ id: "demo-linear", title: "Linear bug: date picker skips Sundays", updated: ago(hours(3)), messages: linearBug() },
 		{ id: "demo-lisbon", title: "Lisbon in three days with kids", updated: ago(hours(22)), messages: lisbon() },
+		{ id: "demo-grant", title: "Grant application outline", updated: ago(DAY * 18), messages: grant() },
 		...OTHER_CHATS.map((chat) => ({
 			id: chat.id,
 			title: chat.title,
 			updated: ago(chat.ago),
-			messages: [user(`${chat.id}-1`, chat.ask), reply(`${chat.id}-2`, chat.model, chat.answer)],
+			messages: [user(`${chat.id}-1`, ...(chat.skill ? [{ type: "data-skill", data: { name: chat.skill } }] : []), chat.ask), reply(`${chat.id}-2`, chat.model, chat.answer)],
 		})),
 	];
 	for (const chat of chats) {
@@ -539,6 +742,7 @@ const others = await addOthers();
 await addThreads(userId);
 await addMemories(userId);
 await addConnector(userId);
+await addSkills([userId, others[0]!, userId]);
 await addUsage(userId, others);
 if (cookieFile) writeFileSync(cookieFile, JSON.stringify(cookies, null, 2));
 console.log(`Seeded ${DEMO_EMAIL} (${userId}) and ${others.length} other people.${cookieFile ? ` Cookies: ${cookieFile}` : ""}`);

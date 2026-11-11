@@ -73,6 +73,55 @@ async function scrollToTop(page) {
 
 const item = (page, text) => page.locator('li', { hasText: text });
 
+/** The part of a reply that the queue shot shows on its way: it stops mid-sentence. */
+const THANK_YOU = `Here is a short thank-you to send the day after a first shift. It names the shift, thanks them for one thing they did, and asks how it went.
+
+**Subject:** Thank you for Saturday
+
+Hi Priya,
+
+Thank you for coming in on Saturday. The forty boxes you packed went out to families the same afternoon, and`;
+
+/**
+ * Answers the next message with `text` and then holds the reply open, so the chat stays
+ * busy and the messages sent after it wait in the queue. The demo server has no real
+ * OpenRouter key, so a reply cannot run. The POST gets the start of the reply with no
+ * finish, and the transport's reconnect (a GET) never gets an answer.
+ */
+async function holdReply(context, text) {
+  const chunks = [
+    { type: 'start', messageId: 'demo-on-its-way', messageMetadata: { model: 'deepseek/deepseek-v4.1-flash' } },
+    { type: 'start-step' },
+    { type: 'text-start', id: 't1' },
+    { type: 'text-delta', id: 't1', delta: text },
+  ];
+  await context.route('**/api/chat', (route) =>
+    route.request().method() !== 'POST'
+      ? route.continue()
+      : route.fulfill({
+          status: 200,
+          headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1', 'x-workflow-run-id': 'demo-on-its-way' },
+          body: chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join(''),
+        }),
+  );
+  await context.route('**/api/chat/demo-on-its-way/stream**', () => {});
+}
+
+// The admin pages. The sidebar is 16rem wide: a crop that starts at MAIN_X bleeds left
+// through the margin of the main area, not through the sidebar's labels.
+const MAIN_X = 256;
+const ADMIN = { width: 1280, height: 800 };
+
+/** Waits for an admin page and its charts. */
+async function settleAdmin(page) {
+  await page.waitForLoadState('networkidle');
+  await page.addStyleTag({ content: '* { scrollbar-width: none !important; }' });
+  await page.waitForTimeout(1200);
+}
+
+/** The card (rounded box) that holds `text`. */
+const cardOf = (page, text) => page.getByText(text, { exact: true }).locator('xpath=ancestor::div[contains(@class, "rounded")][1]');
+
 export default [
   {
     // The whole window, all four edges: chats, a reply with sources, a memory note, credits.
@@ -149,6 +198,24 @@ export default [
     },
   },
   {
+    // Top-right corner: a CSV that Python wrote, open in the side panel as a table. Starts at
+    // the sidebar's edge and bleeds down through the rows.
+    name: 'table',
+    path: '/?t=demo-students',
+    viewport: HD,
+    routes: signIn,
+    async setup({ page }) {
+      await openChat(page, 'report-card template');
+      await page.locator('[data-slot="attachment"]', { hasText: 'students.csv' }).click();
+      await page.getByText('100 rows').waitFor();
+      await page.waitForTimeout(600);
+      const sidebar = await boxOf(page.locator('[data-slot="sidebar"]'));
+      const composer = await boxOf(page.locator('footer [data-slot="prompt-input"]'));
+      const x = Math.round(sidebar.x + sidebar.width);
+      this.crop = { x, y: 0, w: HD.width - x, h: Math.round(composer.y - 20) };
+    },
+  },
+  {
     // The whole window: present mode, one slide full screen.
     name: 'present',
     path: '/?t=demo-deck',
@@ -176,6 +243,35 @@ export default [
       await openChat(page, 'sells the most');
       await scrollToTop(page);
       this.crop = await columnCrop(page, await under(page.locator('[data-slot="memory-saved"]')));
+    },
+  },
+  {
+    // Bottom-right corner: a reply still on its way, and two messages queued behind it.
+    name: 'queue',
+    path: '/?t=demo-email',
+    viewport: HD,
+    async routes(context) {
+      await signIn(context);
+      await holdReply(context, THANK_YOU);
+    },
+    async setup({ page }) {
+      await openChat(page, 'keeps the one link');
+      const field = page.locator('footer [data-slot="prompt-input"] textarea');
+      const ask = 'Now write the thank-you email for after their first shift.';
+      for (const text of [ask, 'Add a line about parking at the back entrance', 'Then translate both emails into Spanish']) {
+        await field.fill(text);
+        await field.press('Enter');
+        await page.waitForTimeout(400);
+      }
+      await page.locator('[data-slot="prompt-input-queue-item"]').nth(1).waitFor();
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(800);
+      const question = await boxOf(page.getByText(ask, { exact: true }).last());
+      const composer = await boxOf(page.locator('footer [data-slot="prompt-input"]'));
+      const { width, height } = page.viewportSize();
+      const x = Math.round(composer.x - 140);
+      const y = Math.round(question.y - 32);
+      this.crop = { x, y, w: width - x, h: height - y };
     },
   },
   {
@@ -237,6 +333,55 @@ export default [
     },
   },
   {
+    // Bottom-right corner: the $ menu over the message box, under a message that chose a skill.
+    name: 'skills-menu',
+    path: '/?t=demo-board-notes',
+    viewport: { width: 1280, height: 800 },
+    routes: signIn,
+    async setup({ page }) {
+      await openChat(page, 'four actions');
+      await page.locator('footer [data-slot="prompt-input"] textarea').fill('$');
+      await page.locator('[data-slot="skill-menu"]').waitFor();
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(600);
+      const chip = await boxOf(page.locator('[data-slot="skill-chip"]'));
+      const crop = await columnCrop(page, 800);
+      const y = Math.round(chip.y - 28);
+      this.crop = { ...crop, y, h: 800 - y };
+    },
+  },
+  {
+    // Top-right corner: Ponder picked a skill on its own, and the reply follows it.
+    name: 'skills-picked',
+    path: '/?t=demo-grant',
+    viewport: { width: 1280, height: 800 },
+    routes: signIn,
+    async setup({ page }) {
+      await openChat(page, 'Asked of the fund');
+      await scrollToTop(page);
+      await page.getByText(/^Picked skill/).click();
+      await page.waitForTimeout(500);
+      // It ends halfway between the plan and the next heading.
+      const plan = await under(page.getByText('One refrigerated van'), 0);
+      const next = await boxOf(page.getByRole('heading', { name: '3. The budget' }));
+      this.crop = await columnCrop(page, (plan + next.y) / 2);
+    },
+  },
+  {
+    // Top and right edges: an admin's skill in the editor, with its switches.
+    name: 'skills-admin',
+    path: '/admin/skills',
+    viewport: ADMIN,
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      await page.getByRole('link', { name: 'Edit Grant writing' }).click();
+      await page.getByText('What Ponder sees first').waitFor();
+      await page.waitForTimeout(800);
+      this.crop = { x: MAIN_X, y: 0, w: ADMIN.width - MAIN_X, h: ADMIN.height };
+    },
+  },
+  {
     // Top edge and both sides: the admin overview, bleeding down through the charts.
     name: 'admin',
     path: '/admin',
@@ -247,6 +392,83 @@ export default [
       await page.waitForTimeout(1500);
       const chart = await boxOf(page.getByText('Credits used per day'));
       this.crop = { x: 0, y: 0, w: 1280, h: Math.round(chart.y + 230) };
+    },
+  },
+  {
+    // Top-right corner: everyone with an account and the open invites. Bleeds left and down.
+    name: 'admin-people',
+    path: '/admin/people',
+    // Tall enough that the list does not scroll, so no scrollbar shows.
+    viewport: { width: 1280, height: 900 },
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      const last = await boxOf(page.getByText('kofi@example.net'));
+      const x = MAIN_X;
+      this.crop = { x, y: 0, w: 1280 - x, h: Math.round(last.y + last.height + 26) };
+    },
+  },
+  {
+    // Top-right corner: one person's numbers, credits per day, details and devices. Bleeds left and down.
+    name: 'admin-person',
+    path: '/admin/people',
+    viewport: { width: 1280, height: 900 },
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      await page.getByRole('link', { name: 'Sam Okafor', exact: true }).click();
+      await settleAdmin(page);
+      const daily = await boxOf(cardOf(page, 'Credits used per day'));
+      this.crop = { x: MAIN_X, y: 0, w: 1280 - MAIN_X, h: Math.round(daily.y + daily.height + 14) };
+    },
+  },
+  {
+    // Bottom-left corner: the foot of the sidebar, credits and active people over time. Bleeds up and right.
+    name: 'admin-usage',
+    path: '/admin',
+    viewport: { width: 1280, height: 960 },
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      const daily = await boxOf(cardOf(page, 'Credits used per day'));
+      const active = await boxOf(cardOf(page, 'Active people per day'));
+      const y = Math.round(daily.y - 52);
+      this.crop = { x: 0, y, w: Math.round(active.x + active.width + 10), h: 960 - y };
+    },
+  },
+  {
+    // Bottom-right corner: credits by model.
+    name: 'admin-models',
+    path: '/admin',
+    viewport: { width: 1280, height: 960 },
+    routes: signIn,
+    stageW: 600,
+    async setup({ page }) {
+      await settleAdmin(page);
+      const active = await boxOf(cardOf(page, 'Active people per day'));
+      const models = await boxOf(cardOf(page, 'Credits by model'));
+      const x = Math.round(active.x + active.width + 10);
+      const y = Math.round(models.y - 10);
+      this.crop = { x, y, w: 1280 - x, h: 960 - y };
+    },
+  },
+  {
+    // Right edge: a person's actions, from the row's menu.
+    name: 'admin-actions',
+    path: '/admin/people',
+    viewport: ADMIN,
+    routes: signIn,
+    stageW: 680,
+    async setup({ page }) {
+      await settleAdmin(page);
+      await page.getByRole('button', { name: 'Actions for Sam Okafor' }).click();
+      await page.getByRole('menuitem', { name: 'Ban' }).waitFor();
+      const menu = await boxOf(page.getByRole('menu'));
+      const row = await boxOf(page.getByText('noah@example.net'));
+      const credits = await boxOf(page.getByText('Credits today', { exact: true }));
+      const x = Math.round(credits.x - 120);
+      const y = Math.round(row.y - 24);
+      this.crop = { x, y, w: ADMIN.width - x, h: Math.round(menu.y + menu.height + 64 - y) };
     },
   },
 ];

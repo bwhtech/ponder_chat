@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { privateRoutingBody } from "../openrouter.ts";
+import { openRouterUrl, privateRoutingBody } from "../openrouter.ts";
 import { openRouterKey } from "../openrouter-key.ts";
 import { insertRun } from "../telemetry/store.ts";
 import type { Gate } from "./extract.ts";
@@ -14,7 +14,7 @@ import type { Gate } from "./extract.ts";
  */
 export const GATE_MODEL = process.env.PONDER_MEMORY_GATE_MODEL ?? "perplexity/pplx-decider-v1.2";
 const QUESTIONS_PATH = new URL("./gate.json", import.meta.url);
-const ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
+const ENDPOINT = openRouterUrl("alpha/decisions");
 const THRESHOLD = 0.5;
 
 export function readGateQuestions() {

@@ -8,6 +8,9 @@
     "typecheck": "node scripts/vue-tsc.cjs --noEmit -p tsconfig.json",
     "start": "./start.sh",
     "typecheck:server": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --allowImportingTsExtensions server/app.ts server/plugins/startup.ts",
+    "typecheck:e2e": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2023 --strict --skipLibCheck --allowImportingTsExtensions --types node playwright.config.ts e2e/*.ts e2e/fake/*.ts e2e/tests/*.ts",
+    "e2e": "npm run build && playwright test",
+    "e2e:server": "tsx e2e/start.ts",
     "sandbox:setup": "sandbox/pyodide/setup.sh",
     "build:web": "vite build",
     "build:server": "nitro build",
@@ -50,6 +53,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.65.0",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "@vitejs/plugin-vue": "^6.0.10",

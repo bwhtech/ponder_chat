@@ -46,6 +46,10 @@ Ask for something to keep, send or present, and Ponder writes it as an artifact:
 
 ![Present mode: the slide "Q3 at a glance" fills the screen, with 412 active volunteers, 6,180 hours given and 38,500 meals packed.](docs/images/present.webp)
 
+Sheets open in the same panel. Ask for data, and Ponder makes a CSV file with Python. A click on the file shows it as a table, with the header kept in view. CSV files that you attach open the same way.
+
+![A chat that asked for sample data for 100 students. Python made students.csv, and the side panel shows it as a table with Student, Class, Maths, Science and English columns and 100 rows.](docs/images/table.webp)
+
 ### Python on your files
 
 Attach a CSV or Excel file and ask a question. Ponder writes Python (pandas, matplotlib and more) and runs it in a sandbox with no network. The charts and files it makes come back into the chat. The code and its output are one click away.
@@ -62,6 +66,20 @@ Settings, Connectors lists each server and its tools. You set each tool to Alway
 
 ![The Linear connector in Settings. Three read-only tools are on Always allow, Create issue and Update issue are on Ask first, and Create comment is Off.](docs/images/connectors.webp)
 
+### Skills
+
+A skill is a set of instructions for one kind of task, such as a grant application or meeting minutes. Ponder knows the name and the description of each skill. When a message fits a description, Ponder loads that skill and follows it.
+
+![Ponder answers a request for a grant outline. A line above the reply says Picked skill “Grant writing”, with the skill's description, and the outline follows the skill's headings: the need, the plan.](docs/images/skills-picked.webp)
+
+To choose a skill yourself, type `$` in the message box. The skill then shows as a chip on your message. Some skills run only when someone asks for them.
+
+![The skills menu over the message box after "$": Docx, Donor thank you, Grant writing, Meeting minutes, Technical writing and Volunteer newsletter, each with its description. Above it, an earlier message has the chip "Meeting minutes".](docs/images/skills-menu.webp)
+
+Admins write skills in `/admin`, in a Markdown editor. Two switches set whether a skill is on for everyone, and whether Ponder can use it on its own. Ponder comes with two skills, for Word documents and for technical writing. See [`docs/skills.md`](docs/skills.md).
+
+![The Grant writing skill in the admin editor: Markdown instructions on the left, and on the right its name, description, the switches "On for everyone" and "Ponder can use it on its own", and what Ponder sees first.](docs/images/skills-admin.webp)
+
 ### Memory you can see
 
 After a reply, Ponder decides if you said something about yourself worth keeping. A note under the reply shows what it kept, with Undo. The Memory page lists every memory and the chat it came from. Ponder never keeps passwords, contact details, ID numbers, health details or what you say about other people.
@@ -74,18 +92,40 @@ The model menu in the message box lists a short set of models from DeepSeek, Ant
 
 ![The model menu opened from the message box, with DeepSeek V4.1 Flash selected and Claude Haiku, Sonnet and Opus listed below.](docs/images/models.webp)
 
+### A queue
+
+Messages that you send during a reply wait in a queue above the message box. They go out in order, one after each reply. You can edit a queued message, drag it to a new place, or remove it. Steer stops the reply and sends that message now.
+
+![A reply that is still being written, and under it two queued messages, each with Edit, Steer and Remove: "Add a line about parking at the back entrance" and "Then translate both emails into Spanish".](docs/images/queue.webp)
+
 ### Credits and admin
 
 Each person has a daily credit limit, charged from what OpenRouter reports for each call. When the credits run out, a person can ask the admins for more. The admin pages show usage only, never chats: today's numbers, credits per day, active people and credits by model. Admins also invite people, set limits, answer requests and manage skills.
 
 ![The admin overview: a notice of one request for more credits, today's numbers (7 active people, 29 replies, 302 credits, $0.30) and a bar chart of credits used per day.](docs/images/admin.webp)
 
+Over time, the overview shows credits per day, active people per day, and which models used the credits.
+
+![The lower half of the admin overview: credits used per day and active people per day over the last 14 days, with "Back to chat" at the foot of the sidebar.](docs/images/admin-usage.webp)
+
+![Credits by model for the last 14 days: a ring chart of 5,926 credits, with Claude Opus 5.5 at 40% and Claude Sonnet 5.5 at 22%.](docs/images/admin-models.webp)
+
+People lists everyone with an account and the invites that wait, with each person's credits today, the last 7 days and when they were last active.
+
+![The People page: eight people with an account and two invites, each with a status, credits used today against their limit, credits in the last 7 days and when they were last active.](docs/images/admin-people.webp)
+
+Each row has a menu to set a person's daily credits, make them an admin, sign them out everywhere, or ban them.
+
+![The actions menu of Sam Okafor's row: Set daily credits, Make admin, Sign out everywhere and Ban.](docs/images/admin-actions.webp)
+
+A person's page shows their numbers for 30 days and the devices they are signed in on. It never shows their chats, only how many there are.
+
+![Sam Okafor's page: 151 of 2,500 credits today, 629 credits and 57 replies in the last 7 days, 11 chats, a chart of credits used per day, their details, and two devices they are signed in on.](docs/images/admin-person.webp)
+
 ### Also in Ponder
 
-- **Skills.** An admin writes instructions for a kind of task, such as Word documents. Ponder loads a skill when a message needs it. You can also start one with `$name` in a message. See [`docs/skills.md`](docs/skills.md).
 - **Files in a side panel.** Attached PDFs, images and CSV files open beside the chat. A PDF draws each page as it comes near the screen. A CSV shows as a table.
 - **Search and export.** The search box above the chat list finds chats by the words in their titles and messages. Each chat's menu exports it as a Markdown file.
-- **A queue.** Messages that you send during a reply wait in a queue and go out in order.
 
 ## Run it
 
@@ -108,7 +148,11 @@ Then, with the app's environment:
 2. Sign in at http://127.0.0.1:3500. Without email settings, the sign-in email is printed in the server log.
 3. Make yourself an admin: `npx tsx scripts/admin.ts grant you@example.org`.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL` (every OpenRouter call; default `https://openrouter.ai/api`) and `CLOUDFLARE_API_URL` (the email API). Production sets neither.
+
+Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, and the type checks, on every pull request.
+
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -250,3 +294,4 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 | Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net-guard.ts`, `web/connectors/`, `web/settings/` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
 | Components | The [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) package. `web/side-panel/panel.ts` is its file viewer (`provideFileViewer` in `web/Workspace.vue`). |
+| End-to-end tests and the fake OpenRouter | `e2e/`, `playwright.config.ts` |

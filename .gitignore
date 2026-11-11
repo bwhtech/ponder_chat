@@ -13,3 +13,5 @@ sandbox/pyodide/.deno
 /.swc
 .output
 .nitro
+/test-results
+/playwright-report

@@ -29,7 +29,10 @@ const description = computed(() => skillDescription(name.value));
 			:approved="part.approval?.approved"
 		/>
 		<ToolContent>
-			<p class="text-p-sm text-ink-gray-6">Ponder chose this skill for the question.<template v-if="description"> {{ description }}</template></p>
+			<p class="text-p-sm text-ink-gray-6">
+				<!-- One text node: Vue drops the space at the start of a <template> block. -->
+				Ponder chose this skill for the question. {{ description ?? "" }}
+			</p>
 			<ToolOutput v-if="part.state === 'output-error'" :output="undefined" :error-text="part.errorText" />
 		</ToolContent>
 	</Tool>
