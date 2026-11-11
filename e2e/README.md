@@ -37,7 +37,8 @@ To use another Postgres, set `E2E_DATABASE_URL`. The database's name must end in
 1. Drops the test database and makes it again.
 2. Creates the workflow's tables (`npx bootstrap`).
 3. Starts the fake OpenRouter (`e2e/fake/server.ts`) on port 3598.
-4. Starts Ponder's build on port 3597. Ponder sends every OpenRouter call and every email to the fake, through `OPENROUTER_BASE_URL` and `CLOUDFLARE_API_URL`.
+4. Starts the test MCP servers (`e2e/mcp/server.ts`) on ports 3599 and 3600.
+5. Starts Ponder's build on port 3597. Ponder sends every OpenRouter call and every email to the fake, through `OPENROUTER_BASE_URL` and `CLOUDFLARE_API_URL`. `MCP_ALLOW_PRIVATE_NETWORKS=1` lets connectors reach the test MCP servers on 127.0.0.1.
 
 Python is off, because it needs Deno and Pyodide. To include it, run `npm run sandbox:setup` and set `E2E_PYTHON=1`.
 
@@ -95,6 +96,26 @@ A step can also have:
 const [call] = await fake.calls("attachment test");
 expect(JSON.stringify(call.messages)).toContain("pear,7");
 ```
+
+### Test a connector
+
+`e2e/mcp/server.ts` has MCP servers made with the official MCP SDK (`@modelcontextprotocol/sdk`). Each one has the tools `find_order`, which only reads, and `add_note`, which changes something, so Ponder asks before it runs `add_note`.
+
+| Address | Sign-in |
+| --- | --- |
+| `http://127.0.0.1:3599/open/mcp` | None. |
+| `http://127.0.0.1:3599/key/mcp` | The header `Authorization: Bearer shop-key`. |
+| `http://127.0.0.1:3600/mcp` | OAuth, with dynamic client registration. Its sign-in page says yes at once. |
+
+The model calls a connector's tool by the name `<slug>__<tool>`, where the slug comes from the connector's name. For a connector named "Shop":
+
+```ts
+await fake.chat({ match: order, steps: [{ toolCalls: [{ name: "shop__find_order", input: { order } }] }, { text: "It shipped." }] });
+```
+
+`GET http://127.0.0.1:3599/__mcp/calls?match=<text>` lists the tool calls that the servers ran, with their arguments. All tests share the servers, so put a value that is unique to the test in the arguments, such as an order number, and match on it. `e2e/tests/connectors.spec.ts` has examples.
+
+CI also runs `server/mcp.check.ts`, which checks what the browser can't reach, such as token refresh and the private-network guard.
 
 ### Choose good selectors
 
