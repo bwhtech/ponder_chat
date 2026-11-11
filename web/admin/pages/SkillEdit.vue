@@ -3,7 +3,7 @@ import { Alert, Breadcrumbs, Button, Dropdown, FormControl, PageHeader, PageHead
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
 import { checkSkill, MAX_DESCRIPTION, parseSkillFile, skillTitle, toSkillName, type SkillFields } from "../../../shared/skill-file";
-import Response from "../../ai-elements/response/Response.vue";
+import { Response } from "frappe-ui-ai-elements";
 import { api, ApiError, type SkillDetail } from "../api";
 import NewSkillDialog from "../components/NewSkillDialog.vue";
 import SkillInstructionsEditor from "../components/SkillInstructionsEditor.vue";

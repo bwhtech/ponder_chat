@@ -1,9 +1,21 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Attachment } from "./ai-elements/attachment";
-import { viewOnClick } from "./side-panel/panel";
-import { CodeBlock, CodeBlockActions, CodeBlockContent, CodeBlockCopyButton, CodeBlockHeader, CodeBlockTitle } from "./ai-elements/code-block";
-import { getToolPhase, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "./ai-elements/tool";
+import {
+	Attachment,
+	CodeBlock,
+	CodeBlockActions,
+	CodeBlockContent,
+	CodeBlockCopyButton,
+	CodeBlockHeader,
+	CodeBlockTitle,
+	getToolPhase,
+	Tool,
+	ToolContent,
+	ToolHeader,
+	ToolOutput,
+	useViewOnClick,
+	type ToolMessagePart,
+} from "frappe-ui-ai-elements";
 
 /**
  * A run_python call (server/python/tool.ts): the code and what it printed, folded under a
@@ -15,6 +27,7 @@ type OutputFile = { name: string; url: string; media_type: string; size: number 
 type Output = { ok?: boolean; stdout?: string; stderr?: string; files?: OutputFile[]; error?: string };
 
 const props = defineProps<{ part: ToolMessagePart; streaming?: boolean }>();
+const viewOnClick = useViewOnClick();
 const input = computed(() => (props.part.input ?? {}) as Input);
 const output = computed(() => (props.part.state === "output-available" ? (props.part.output as Output) : undefined));
 // The output can report a failure itself; the header's badge and the content both read it.

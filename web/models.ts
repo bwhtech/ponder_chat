@@ -1,5 +1,5 @@
 import { ref, watch } from "vue";
-import type { ModelOption } from "./ai-elements";
+import type { ModelOption } from "frappe-ui-ai-elements";
 
 /**
  * The models a person can pick (server/models.ts), and the one they picked last. The

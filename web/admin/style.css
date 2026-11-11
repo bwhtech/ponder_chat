@@ -1,5 +1,6 @@
 @import "frappe-ui/style.css";
-@import "../ai-elements/styles.css";
+/* Imported here, where Tailwind reads it, so that its utilities, such as ease-out-strong, also work with variants. */
+@import "frappe-ui-ai-elements/styles.css";
 @import "../base.css";
 
 /* Page headers show their hairline once the page scrolls under them, as the chat's header does. */

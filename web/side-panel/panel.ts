@@ -1,10 +1,11 @@
+import type { ViewedFile } from "frappe-ui-ai-elements";
 import { computed, shallowRef, type Ref } from "vue";
 
 /**
  * The side panel at the right of the chat: one for the whole app. It shows a file (a PDF,
  * an image, a CSV) or an artifact that a reply wrote (web/artifacts/).
  */
-export type ViewedFile = { name: string; url: string; mediaType: string };
+export type { ViewedFile };
 
 /** document: Markdown. slides: HTML sections. html: one web page that runs (web/artifacts/html.ts). */
 export type ArtifactKind = "document" | "slides" | "html";
@@ -47,12 +48,11 @@ export function fileKind(mediaType: string, name = ""): "pdf" | "image" | "table
 }
 
 /**
- * For a link to a file: opens the panel on a plain click. A click with a modifier key,
- * or with the middle button, still opens the link as the browser would.
+ * The chat's file viewer (frappe-ui-ai-elements' FileViewer, given in Workspace.vue): a file the
+ * panel can show opens there. Other files return false and open as a link.
  */
-export function viewOnClick(event: MouseEvent, file: ViewedFile) {
-	if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-	if (!canView(file.mediaType, file.name)) return;
-	event.preventDefault();
+export function viewInPanel(file: ViewedFile) {
+	if (!canView(file.mediaType, file.name)) return false;
 	viewFile(file);
+	return true;
 }

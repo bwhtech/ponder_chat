@@ -38,7 +38,7 @@ Sandbox capacity: at most 6 sandboxes at a time, 512 MB and 1 CPU each. A sandbo
    - 10 replies at the same time.
    If any item fails and cannot be fixed in the spike, switch to Temporal.
 2. **Durable chat.** Replace `live-runs.ts` with workflow runs. Credits are checked when a run starts.
-3. **Web search.** Add the tool, and show the sources under the reply (`web/ai-elements/sources`). Check that its cost appears in `runs`.
+3. **Web search.** Add the tool, and show the sources under the reply (`Sources` from frappe-ui-ai-elements). Check that its cost appears in `runs`.
 4. **Memory.** Port it, with personal scope only. Bring back the Memory page and the notes under replies.
 5. **Python: done.** Pyodide sandbox, run as a workflow step; state kept in Postgres, so it survives restarts.
 6. **Generated UI cards.** Port them without site queries.

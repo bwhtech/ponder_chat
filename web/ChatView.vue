@@ -54,7 +54,7 @@ import {
 	provideToolRenderers,
 	Suggestion,
 	Suggestions,
-} from "./ai-elements";
+} from "frappe-ui-ai-elements";
 
 /** One chat: the conversation and the message field. The shell mounts a new one per thread. */
 const props = defineProps<{ threadId: string; initialMessages: UIMessage[]; running?: boolean; failed?: boolean }>();

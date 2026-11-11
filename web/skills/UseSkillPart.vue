@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { getToolName, getToolPhase, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "../ai-elements/tool";
+import { getToolName, getToolPhase, Tool, ToolContent, ToolHeader, ToolOutput, type ToolMessagePart } from "frappe-ui-ai-elements";
 import { skillDescription, skillTitle } from "./skills";
 
 /** A use_skill call (server/workflow/skills.ts): Ponder chose a skill on its own. One line, with what the skill is for below. */

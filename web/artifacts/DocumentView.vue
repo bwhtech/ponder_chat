@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import Response from "../ai-elements/response/Response.vue";
+import { Response } from "frappe-ui-ai-elements";
 import type { Artifact } from "../side-panel/panel";
 
 /** A Markdown document in the panel, drawn as replies are, in a column that reads like a page. */
