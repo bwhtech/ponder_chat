@@ -8,13 +8,15 @@ type Email = { to: string; subject: string; text: string; html: string };
 const from = process.env.PONDER_EMAIL_FROM;
 const account = process.env.CLOUDFLARE_ACCOUNT_ID;
 const token = process.env.CLOUDFLARE_EMAIL_TOKEN;
+/** Another server in place of Cloudflare's API, such as the end-to-end tests' fake (e2e/fake/). */
+const api = (process.env.CLOUDFLARE_API_URL ?? "https://api.cloudflare.com/client/v4").replace(/\/$/, "");
 
 export async function sendEmail(email: Email) {
 	if (!from || !account || !token) {
 		console.log(`email (not sent, no sender set up) to ${email.to}: ${email.subject}\n${email.text}`);
 		return;
 	}
-	const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/email/sending/send`, {
+	const response = await fetch(`${api}/accounts/${account}/email/sending/send`, {
 		method: "POST",
 		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
 		body: JSON.stringify({ from, ...email }),

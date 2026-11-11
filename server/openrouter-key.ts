@@ -1,4 +1,5 @@
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { openRouterUrl } from "./openrouter.ts";
 import { readSecret, saveSecret, secretInfo, UnreadableSecret } from "./secrets.ts";
 
 /**
@@ -11,7 +12,7 @@ import { readSecret, saveSecret, secretInfo, UnreadableSecret } from "./secrets.
  */
 const NAME = "openrouter_api_key";
 const CACHE_MS = 60_000;
-const CHECK_URL = "https://openrouter.ai/api/v1/key";
+const CHECK_URL = openRouterUrl("v1/key");
 let cached: { key: string; at: number } | undefined;
 
 export async function openRouterKey(): Promise<string> {
@@ -24,7 +25,7 @@ export async function openRouterKey(): Promise<string> {
 
 /** An OpenRouter provider with the current key. Make one for each call, because the key can change. */
 export async function openRouter() {
-	return createOpenRouter({ apiKey: await openRouterKey() });
+	return createOpenRouter({ apiKey: await openRouterKey(), baseURL: openRouterUrl("v1") });
 }
 
 export type KeyStatus = {

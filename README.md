@@ -135,7 +135,9 @@ Then, with the app's environment:
 2. Sign in at http://127.0.0.1:3500. Without email settings, the sign-in email is printed in the server log.
 3. Make yourself an admin: `npx tsx scripts/admin.ts grant you@example.org`.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, and the type checks, on every pull request.
+
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -277,3 +279,4 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 | Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net-guard.ts`, `web/connectors/`, `web/settings/` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
 | Components | `web/ai-elements/` (copy of the platform's) |
+| End-to-end tests and the fake OpenRouter | `e2e/`, `playwright.config.ts` |

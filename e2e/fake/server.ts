@@ -1,0 +1,241 @@
+import { serve } from "@hono/node-server";
+import { Hono } from "hono";
+import { MODELS } from "../../server/models.ts";
+import type { ChatScript, MemoryScript, ReceivedCall, SearchScript, SentEmail, Step } from "./script.ts";
+
+/**
+ * A fake OpenRouter, and a fake Cloudflare email API, for the end-to-end tests. Ponder
+ * reaches it through OPENROUTER_BASE_URL and CLOUDFLARE_API_URL (server/openrouter.ts,
+ * server/email.ts), so the tests need no API key and spend nothing.
+ *
+ * It answers each kind of call Ponder makes:
+ * - chat replies, streamed in OpenRouter's format, with tool calls (`ChatScript`);
+ * - thread titles: the first words of the person's message;
+ * - web search: url_citation annotations (`SearchScript`);
+ * - memory: the decision gate and the writer (`MemoryScript`), and embeddings;
+ * - the list of models with private (ZDR) endpoints: every model Ponder lists.
+ *
+ * Tests send scripts and read what Ponder sent over HTTP, at /__fake/* (fixtures.ts),
+ * because they run in other processes. A message that no script matches gets
+ * "You said: <message>", so a test that only needs a reply needs no script.
+ */
+export function fakeApp() {
+	const chats: ChatScript[] = [];
+	const searches: SearchScript[] = [];
+	const memories: MemoryScript[] = [];
+	const emails: SentEmail[] = [];
+	const calls: ReceivedCall[] = [];
+	const app = new Hono();
+
+	// --- Control, for the tests. The newest script wins, so a test can replace one.
+	app.get("/__fake/health", (c) => c.text("ok"));
+	app.post("/__fake/chat", async (c) => (chats.unshift(await c.req.json()), c.json({ ok: true })));
+	app.post("/__fake/search", async (c) => (searches.unshift(await c.req.json()), c.json({ ok: true })));
+	app.post("/__fake/memory", async (c) => (memories.unshift(await c.req.json()), c.json({ ok: true })));
+	const since = (query: string | undefined) => Number(query ?? 0);
+	app.get("/__fake/emails", (c) => c.json(emails.filter((email) => email.to === c.req.query("to") && email.at >= since(c.req.query("since")))));
+	app.get("/__fake/calls", (c) =>
+		c.json(calls.filter((call) => call.at >= since(c.req.query("since")) && latestUserText(call.messages as Message[]).includes(c.req.query("match") ?? ""))),
+	);
+
+	// --- OpenRouter.
+	app.get("/api/v1/endpoints/zdr", (c) => c.json({ data: MODELS.map((model) => ({ model_id: model.id })) }));
+	app.get("/api/v1/key", (c) => c.json({ data: { label: "fake" } }));
+
+	app.post("/api/v1/chat/completions", async (c) => {
+		const body = (await c.req.json()) as Completion;
+		const messages = body.messages ?? [];
+		if (body.tools?.some((tool) => tool.type === "openrouter:web_search")) return c.json(searchReply(body.model, latestUserText(messages), searches));
+		const schema = body.response_format?.json_schema?.schema?.properties ?? {};
+		if ("title" in schema) return c.json(jsonReply(body.model, { title: titleOf(latestUserText(messages)) }));
+		if ("operations" in schema) return c.json(jsonReply(body.model, writerReply(latestUserText(messages), memories)));
+
+		calls.push({
+			model: body.model,
+			system: messages.filter((m) => m.role === "system").map((m) => textOf(m.content)).join("\n\n"),
+			messages,
+			tools: (body.tools ?? []).map((tool) => tool.function?.name ?? tool.type),
+			at: Date.now(),
+		});
+		const step = chatStep(messages, chats);
+		if (step.error) return c.json({ error: { code: step.error.status, message: step.error.message } }, step.error.status as 400);
+		if (!body.stream) return c.json(textReply(body.model, step));
+		return streamReply(body.model, step, c.req.raw.signal);
+	});
+
+	app.post("/api/v1/embeddings", async (c) => {
+		const body = (await c.req.json()) as { model: string; input: string | string[] };
+		const inputs = Array.isArray(body.input) ? body.input : [body.input];
+		return c.json({
+			object: "list",
+			model: body.model,
+			data: inputs.map((text, index) => ({ object: "embedding", index, embedding: embedding(text) })),
+			usage: { prompt_tokens: inputs.join(" ").length, total_tokens: inputs.join(" ").length, cost: 0 },
+		});
+	});
+
+	app.post("/api/alpha/decisions", async (c) => {
+		const body = (await c.req.json()) as { state?: { person_said?: string } };
+		const script = memories.find((memory) => (body.state?.person_said ?? "").includes(memory.match));
+		return c.json({ answers: { save: { noul: script?.save ?? 0.05 }, refuse: { noul: 0.01 } }, usage: { cost: 0, input_tokens: 100, output_tokens: 0 } });
+	});
+
+	// --- Cloudflare Email Service.
+	app.post("/client/v4/accounts/:account/email/sending/send", async (c) => {
+		emails.push({ ...((await c.req.json()) as Omit<SentEmail, "at">), at: Date.now() });
+		return c.json({ success: true });
+	});
+
+	app.all("*", (c) => {
+		console.warn(`fake: no route for ${c.req.method} ${c.req.path}`);
+		return c.json({ error: { message: `The fake has no route for ${c.req.method} ${c.req.path}.` } }, 404);
+	});
+	return app;
+}
+
+export function startFake(port: number) {
+	return serve({ fetch: fakeApp().fetch, port, hostname: "127.0.0.1" });
+}
+
+// --- Chat replies -------------------------------------------------------------
+
+type Message = { role: string; content: string | { type: string; text?: string }[] | null };
+type Completion = {
+	model: string;
+	stream?: boolean;
+	messages?: Message[];
+	tools?: { type: string; function?: { name: string } }[];
+	response_format?: { json_schema?: { schema?: { properties?: Record<string, unknown> } } };
+};
+
+const DEFAULT_COST = 0.0002;
+
+/** The step for this call: the turn's script, at the number of model calls made since the person's message. */
+function chatStep(messages: Message[], scripts: ChatScript[]): Step {
+	const said = latestUserText(messages);
+	const script = scripts.find((candidate) => said.includes(candidate.match));
+	if (!script) return { text: `You said: ${said}` };
+	const lastUser = messages.findLastIndex((message) => message.role === "user");
+	const callsSince = messages.slice(lastUser + 1).filter((message) => message.role === "assistant").length;
+	return script.steps[Math.min(callsSince, script.steps.length - 1)];
+}
+
+/** The reply as OpenRouter streams it: server-sent chat completion chunks, then the usage. */
+function streamReply(model: string, step: Step, signal: AbortSignal) {
+	const id = `gen-fake-${Date.now()}`;
+	const chunk = (delta: object, finish: string | null = null, usage?: object) =>
+		`data: ${JSON.stringify({ id, model, provider: "Fake", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), choices: [{ index: 0, delta, finish_reason: finish }], ...(usage && { usage }) })}\n\n`;
+	const parts: string[] = [chunk({ role: "assistant", content: "" })];
+	for (const piece of pieces(step.reasoning)) parts.push(chunk({ reasoning: piece }));
+	for (const piece of pieces(step.text)) parts.push(chunk({ content: piece }));
+	for (const [index, call] of (step.toolCalls ?? []).entries()) {
+		const args = JSON.stringify(call.input);
+		parts.push(chunk({ tool_calls: [{ index, id: `call_${id}_${index}`, type: "function", function: { name: call.name, arguments: "" } }] }));
+		for (let at = 0; at < args.length; at += 40) parts.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(at, at + 40) } }] }));
+	}
+	parts.push(chunk({}, step.toolCalls?.length ? "tool_calls" : "stop", usage(step)));
+	parts.push("data: [DONE]\n\n");
+
+	const encoder = new TextEncoder();
+	const delay = step.delayMs ?? 5;
+	return new Response(
+		new ReadableStream({
+			async start(controller) {
+				for (const part of parts) {
+					if (signal.aborted) return;
+					controller.enqueue(encoder.encode(part));
+					if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
+				}
+				controller.close();
+			},
+		}),
+		{ headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } },
+	);
+}
+
+/** A few words at a time, as a model streams. */
+function pieces(text: string | undefined) {
+	return text?.match(/(\S+\s*){1,3}|\s+/g) ?? [];
+}
+
+function usage(step: Step) {
+	const completion = Math.ceil(((step.text ?? "").length + JSON.stringify(step.toolCalls ?? []).length) / 4);
+	return { prompt_tokens: 500, completion_tokens: completion, total_tokens: 500 + completion, cost: step.cost ?? DEFAULT_COST };
+}
+
+function textReply(model: string, step: Step) {
+	const toolCalls = step.toolCalls?.map((call, index) => ({ id: `call_${index}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } }));
+	return {
+		id: `gen-fake-${Date.now()}`,
+		model,
+		choices: [{ index: 0, message: { role: "assistant", content: step.text ?? "", tool_calls: toolCalls }, finish_reason: toolCalls?.length ? "tool_calls" : "stop" }],
+		usage: usage(step),
+	};
+}
+
+function jsonReply(model: string, value: unknown) {
+	return textReply(model, { text: JSON.stringify(value), cost: 0.00001 });
+}
+
+// --- Titles, search and memory ------------------------------------------------
+
+/** The first five words of the person's message, which thread-title.ts quotes after its first line. */
+function titleOf(prompt: string) {
+	const message = prompt.slice(prompt.indexOf("\n") + 1);
+	return message.split(/\s+/).filter(Boolean).slice(0, 5).join(" ");
+}
+
+function searchReply(model: string, query: string, scripts: SearchScript[]) {
+	const results = scripts.find((script) => query.includes(script.match))?.results ?? [
+		{ url: "https://example.com/first", title: "First result", content: `A page about ${query}.` },
+		{ url: "https://example.org/second", title: "Second result", content: `Another page about ${query}.` },
+	];
+	return {
+		...textReply(model, { text: "done", cost: 0.007 }),
+		choices: [
+			{
+				index: 0,
+				finish_reason: "stop",
+				message: { role: "assistant", content: "done", annotations: results.map((result) => ({ type: "url_citation", url_citation: result })) },
+			},
+		],
+	};
+}
+
+/** What the memory writer answers: the script's operations, with every field it requires. */
+function writerReply(prompt: string, scripts: MemoryScript[]) {
+	const said = prompt.match(/The person said:\n(.*)/)?.[1] ?? "";
+	const script = scripts.find((memory) => said.includes(memory.match));
+	const operations = (script?.operations ?? []).map((o) => ({ id: "", kind: "fact", text: "", quote: "", reason: "The test said so.", ...o }));
+	return { summary: operations.length ? "Saved what the test asked." : "Nothing to save.", operations };
+}
+
+/**
+ * A small vector from the words of the text, so texts that share words are near each
+ * other, as memory search (memory/pgvector-index.ts) expects.
+ */
+function embedding(text: string) {
+	const vector = new Array<number>(32).fill(0);
+	for (const word of text.toLowerCase().match(/\p{L}+/gu) ?? []) {
+		let hash = 0;
+		for (const char of word) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+		vector[hash % vector.length] += 1;
+	}
+	// Never all zeros: pgvector's cosine distance has no answer for a zero vector.
+	vector[vector.length - 1] += 0.01;
+	const length = Math.hypot(...vector);
+	return vector.map((value) => value / length);
+}
+
+// --- Messages -----------------------------------------------------------------
+
+function textOf(content: Message["content"]) {
+	if (typeof content === "string") return content;
+	return (content ?? []).map((part) => (part.type === "text" ? (part.text ?? "") : "")).join("\n");
+}
+
+/** The text of the person's latest message. */
+function latestUserText(messages: Message[]) {
+	const message = messages.findLast((candidate) => candidate.role === "user");
+	return message ? textOf(message.content) : "";
+}
