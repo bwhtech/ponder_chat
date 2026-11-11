@@ -44,6 +44,9 @@ jobs:
       - name: Check the tests' types
         run: npm run typecheck:e2e
 
+      - name: Check which pages web_fetch reads without asking
+        run: npx tsx server/trusted-pages.check.ts
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

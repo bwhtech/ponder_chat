@@ -72,7 +72,7 @@ thread_runs.message_id, thread_runs.base_parts                          -- the m
 
 ## Risks
 
-- **Prompt injection and data leaks.** A tool result, such as an email or an issue, can tell the model to send private data to a URL with `web_fetch`. Approvals stop changes to the person's apps, but not `web_fetch`. Later: in a turn that read connector data, ask before a `web_fetch` to a page that no search returned.
+- **Prompt injection and data leaks.** A tool result, such as an email or an issue, can tell the model to send private data out in an address. `web_fetch` now asks first for an address that the person did not give and no search returned, and the page policy stops images from other sites in replies (README, "Prompt injection"). A link that the person clicks can still carry data.
 - **A write can run twice.** When the server crashes during a call, the call step runs again after the restart. `maxRetries = 0` stops retries after an error, not after a crash.
 - **Many tools cost tokens on every call.** Three servers with 40 tools each add about 15,000 input tokens to each model call. "Off" and the connector switch help now; tool search is in "Later".
 - **A new `BETTER_AUTH_SECRET`** makes credentials sealed with it unreadable, and those connectors ask for a new sign-in or key. Set `PONDER_ENCRYPTION_KEY` before many people connect, to separate the two.

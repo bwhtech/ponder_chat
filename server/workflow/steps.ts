@@ -59,6 +59,14 @@ export async function webSearchStep(input: WebSearchInput, threadId: string, own
 	return executeWebSearch(input, { threadId, owner });
 }
 
+/** The pages web_fetch may read in this thread without asking the person (search/trusted-pages.ts). */
+export async function trustedPagesStep(threadId: string): Promise<string[]> {
+	"use step";
+	const { loadThread } = await import("../db.ts");
+	const { trustedPageKeys } = await import("../search/trusted-pages.ts");
+	return trustedPageKeys(await loadThread(threadId));
+}
+
 export async function webFetchStep(input: WebFetchInput) {
 	"use step";
 	const { executeWebFetch } = await import("../search/tool.ts");

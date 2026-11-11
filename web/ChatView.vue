@@ -9,6 +9,7 @@ import { useAttention } from "./attention";
 import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
 import { changeConnector, connectors, findTool, loadConnectors, toolTitle } from "./connectors/api";
 import { useDraft } from "./drafts";
+import { fetchApprovalQuestion } from "./fetch-approval";
 import { canUndo } from "./memory";
 import { MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { useThinking } from "./thinking";
@@ -186,6 +187,7 @@ function askedSkills(message: UIMessage) {
 // for approval, "Always allow" saves its rule, then approves.
 if (!connectors.value) void loadConnectors().catch(() => undefined);
 provideToolLabels((name) => {
+	if (name === "web_fetch") return { title: "Read a page", question: fetchApprovalQuestion(messages.value) };
 	const found = findTool(name);
 	if (!found) return undefined;
 	const { connector, tool } = found;
