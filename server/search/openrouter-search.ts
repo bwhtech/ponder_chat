@@ -1,4 +1,4 @@
-import { privateRoutingBody } from "../openrouter.ts";
+import { openRouterUrl, privateRoutingBody } from "../openrouter.ts";
 import { openRouterKey } from "../openrouter-key.ts";
 import type { SearchBackend, SearchReply, SearchResult } from "./backend.ts";
 
@@ -10,7 +10,7 @@ import type { SearchBackend, SearchReply, SearchResult } from "./backend.ts";
  *
  * Calls Chat Completions directly, so the annotations come back as OpenRouter sends them.
  */
-const URL = "https://openrouter.ai/api/v1/chat/completions";
+const URL = openRouterUrl("v1/chat/completions");
 const MODEL = process.env.PONDER_SEARCH_MODEL ?? "z-ai/glm-5.3-flash";
 const MAX_RESULTS = 6;
 const MAX_TEXT = 3_000;

@@ -9,13 +9,25 @@
  */
 const PRIVATE = { zdr: true, data_collection: "deny" } as const;
 
+/**
+ * Where OpenRouter's API is. OPENROUTER_BASE_URL points every call at another server,
+ * such as the fake OpenRouter that the end-to-end tests run (e2e/fake/), so they need
+ * no key and spend nothing.
+ */
+const BASE_URL = (process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api").replace(/\/$/, "");
+
+/** An OpenRouter API address, such as openRouterUrl("v1/chat/completions"). */
+export function openRouterUrl(path: string) {
+	return `${BASE_URL}/${path}`;
+}
+
 /** The `provider` setting for @openrouter/ai-sdk-provider, whose types do not list `zdr` yet. */
 export const privateRouting = PRIVATE as unknown as { data_collection: "deny" };
 
 /** The same, for requests sent to OpenRouter's API directly. */
 export const privateRoutingBody = PRIVATE;
 
-const ZDR_ENDPOINTS = "https://openrouter.ai/api/v1/endpoints/zdr";
+const ZDR_ENDPOINTS = openRouterUrl("v1/endpoints/zdr");
 const REFRESH_MS = 60 * 60 * 1000;
 let zdrModels: { ids: Set<string>; at: number } | undefined;
 
