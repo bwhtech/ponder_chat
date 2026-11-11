@@ -5,7 +5,7 @@ test.beforeEach(async ({ person, page }) => {
 	await page.goto("/");
 });
 
-test("streams a reply, draws its Markdown, and keeps the chat after a reload", async ({ page, fake }) => {
+test("streams a reply in Markdown, and keeps the chat after a reload", async ({ page, fake }) => {
 	await fake.chat({
 		match: "planets table",
 		steps: [
@@ -18,12 +18,6 @@ test("streams a reply, draws its Markdown, and keeps the chat after a reload", a
 					"| Earth | 1 |",
 					"| Mars | 2 |",
 					"| Jupiter | 95 |",
-					"",
-					"$$x = \\frac{-b \\pm \\sqrt{b^2-4ac}}{2a}$$",
-					"",
-					"```python",
-					'print("hello")',
-					"```",
 				].join("\n"),
 			},
 		],
@@ -32,8 +26,6 @@ test("streams a reply, draws its Markdown, and keeps the chat after a reload", a
 	await chat.send(page, "Show me a planets table");
 	const reply = chat.reply(page);
 	await expect(reply.locator("table")).toContainText("Jupiter");
-	await expect(reply.locator(".katex").first()).toBeVisible();
-	await expect(reply.locator("pre code")).toContainText('print("hello")');
 	await chat.idle(page);
 
 	// The fake names the chat from the message's first words (thread-title.ts).

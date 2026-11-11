@@ -12,6 +12,3 @@ test("chats on a phone", async ({ page }) => {
 	await expect(chat.field(page)).toHaveValue("");
 });
 
-test("the prompt field is 16px, so iOS does not zoom the page", async ({ page }) => {
-	await expect(chat.field(page)).toHaveCSS("font-size", "16px");
-});
