@@ -1,4 +1,5 @@
 @import "frappe-ui/style.css";
+/* Imported here, where Tailwind reads it, so that its utilities, such as ease-out-strong, also work with variants. */
 @import "frappe-ui-ai-elements/styles.css";
 /* The chart colour ramp, for Mermaid diagrams. frappe-ui does not export this file, so it is imported by path. */
 @import "../node_modules/frappe-ui/src/charts/style.css";
