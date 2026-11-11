@@ -38,7 +38,12 @@ export function fakeApp() {
 		c.json(calls.filter((call) => call.at >= since(c.req.query("since")) && latestUserText(call.messages as Message[]).includes(c.req.query("match") ?? ""))),
 	);
 
-	// --- OpenRouter.
+	// --- OpenRouter. Like OpenRouter, it refuses a call without the key Ponder was given
+	// (start.ts). The list of ZDR endpoints is public.
+	app.use("/api/*", async (c, next) => {
+		if (c.req.path === "/api/v1/endpoints/zdr" || c.req.header("authorization") === `Bearer ${FAKE_KEY}`) return next();
+		return c.json({ error: { code: 401, message: "No auth credentials found" } }, 401);
+	});
 	app.get("/api/v1/endpoints/zdr", (c) => c.json({ data: MODELS.map((model) => ({ model_id: model.id })) }));
 	app.get("/api/v1/key", (c) => c.json({ data: { label: "fake" } }));
 
@@ -55,6 +60,7 @@ export function fakeApp() {
 			system: messages.filter((m) => m.role === "system").map((m) => textOf(m.content)).join("\n\n"),
 			messages,
 			tools: (body.tools ?? []).map((tool) => tool.function?.name ?? tool.type),
+			provider: body.provider,
 			at: Date.now(),
 		});
 		const step = chatStep(messages, chats);
@@ -93,6 +99,9 @@ export function fakeApp() {
 	return app;
 }
 
+/** The API key that start.ts gives Ponder. */
+export const FAKE_KEY = "sk-or-fake";
+
 export function startFake(port: number) {
 	return serve({ fetch: fakeApp().fetch, port, hostname: "127.0.0.1" });
 }
@@ -103,6 +112,7 @@ type Message = { role: string; content: string | { type: string; text?: string }
 type Completion = {
 	model: string;
 	stream?: boolean;
+	provider?: unknown;
 	messages?: Message[];
 	tools?: { type: string; function?: { name: string } }[];
 	response_format?: { json_schema?: { schema?: { properties?: Record<string, unknown> } } };

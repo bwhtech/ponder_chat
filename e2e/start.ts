@@ -10,7 +10,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import postgres from "postgres";
-import { startFake } from "./fake/server.ts";
+import { FAKE_KEY, startFake } from "./fake/server.ts";
 import { e2e } from "./env.ts";
 
 const database = new URL(e2e.databaseUrl).pathname.slice(1);
@@ -31,8 +31,11 @@ await admin.unsafe(`drop database if exists "${database}" with (force)`);
 await admin.unsafe(`create database "${database}"`);
 await admin.end();
 
+// Only what Node and npm need from this shell. A shell with Ponder's own settings, such
+// as an S3 bucket or another default model, must not reach the server under test.
+const shell = Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(PATH|HOME|USER|TMPDIR|LANG|LC_\w+|TZ|CI|NODE_\w+|npm_\w+)$/i.test(name)));
 const env = {
-	...process.env,
+	...shell,
 	DATABASE_URL: e2e.databaseUrl,
 	WORKFLOW_TARGET_WORLD: "@workflow/world-postgres",
 	WORKFLOW_POSTGRES_URL: e2e.databaseUrl,
@@ -41,7 +44,7 @@ const env = {
 	PORT: String(e2e.port),
 	HOST: "127.0.0.1",
 	// Every OpenRouter call and every email goes to the fake.
-	OPENROUTER_API_KEY: "sk-or-fake",
+	OPENROUTER_API_KEY: FAKE_KEY,
 	OPENROUTER_BASE_URL: `${e2e.fakeUrl}/api`,
 	CLOUDFLARE_API_URL: `${e2e.fakeUrl}/client/v4`,
 	CLOUDFLARE_ACCOUNT_ID: "fake",
@@ -49,6 +52,7 @@ const env = {
 	PONDER_EMAIL_FROM: "Ponder Chat <ponder@example.com>",
 	// Python needs Deno and Pyodide (npm run sandbox:setup). Off, unless E2E_PYTHON=1.
 	PONDER_DENO: process.env.E2E_PYTHON === "1" ? (process.env.PONDER_DENO ?? "deno") : "/nonexistent/deno",
+	...(process.env.PONDER_DENO_DIR && { PONDER_DENO_DIR: process.env.PONDER_DENO_DIR }),
 };
 
 // The workflow's tables. Ponder creates its own when it starts.

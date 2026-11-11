@@ -133,10 +133,11 @@ export const chat = {
 	submit: (page: Page) => page.locator('[data-slot="prompt-input-submit"]'),
 	stop: (page: Page) => page.locator('[data-slot="prompt-input-submit"][aria-label="Stop"]'),
 
-	/** Types the message and sends it with Enter. */
+	/** Types the message, sends it with Enter, and waits until it shows in the chat. */
 	async send(page: Page, text: string) {
 		await chat.field(page).fill(text);
 		await chat.field(page).press("Enter");
+		await expect(chat.messages(page).filter({ hasText: text }).first()).toBeVisible();
 	},
 
 	/** Waits until no reply is being written. */

@@ -54,6 +54,8 @@ test("asks the model the person picked", async ({ page, fake }) => {
 	const [call] = await fake.calls("picker test");
 	expect(call.model).toBe("anthropic/claude-haiku-5.5");
 	expect(call.system).toContain("You run on Claude Haiku 5.5");
+	// Only to endpoints that keep no data (server/openrouter.ts).
+	expect(call.provider).toMatchObject({ zdr: true, data_collection: "deny" });
 });
 
 test("sends the earlier turns with a follow-up", async ({ page, fake }) => {

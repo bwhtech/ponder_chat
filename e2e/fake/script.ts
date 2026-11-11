@@ -44,4 +44,4 @@ export type MemoryScript = {
 export type SentEmail = { from: string; to: string; subject: string; text: string; html: string; at: number };
 
 /** A chat call as the fake received it, for tests that check what the model was sent. */
-export type ReceivedCall = { model: string; system: string; messages: unknown[]; tools: string[]; at: number };
+export type ReceivedCall = { model: string; system: string; messages: unknown[]; tools: string[]; provider: unknown; at: number };
