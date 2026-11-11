@@ -80,6 +80,24 @@ Each person has a daily credit limit, charged from what OpenRouter reports for e
 
 ![The admin overview: a notice of one request for more credits, today's numbers (7 active people, 29 replies, 302 credits, $0.30) and a bar chart of credits used per day.](docs/images/admin.webp)
 
+Over time, the overview shows credits per day, active people per day, and which models used the credits.
+
+![The lower half of the admin overview: credits used per day and active people per day over the last 14 days, with "Back to chat" at the foot of the sidebar.](docs/images/admin-usage.webp)
+
+![Credits by model for the last 14 days: a ring chart of 5,926 credits, with Claude Opus 5.5 at 40% and Claude Sonnet 5.5 at 22%.](docs/images/admin-models.webp)
+
+People lists everyone with an account and the invites that wait, with each person's credits today, the last 7 days and when they were last active.
+
+![The People page: eight people with an account and two invites, each with a status, credits used today against their limit, credits in the last 7 days and when they were last active.](docs/images/admin-people.webp)
+
+Each row has a menu to set a person's daily credits, make them an admin, sign them out everywhere, or ban them.
+
+![The actions menu of Sam Okafor's row: Set daily credits, Make admin, Sign out everywhere and Ban.](docs/images/admin-actions.webp)
+
+A person's page shows their numbers for 30 days and the devices they are signed in on. It never shows their chats, only how many there are.
+
+![Sam Okafor's page: 151 of 2,500 credits today, 629 credits and 57 replies in the last 7 days, 11 chats, a chart of credits used per day, their details, and two devices they are signed in on.](docs/images/admin-person.webp)
+
 ### Also in Ponder
 
 - **Skills.** An admin writes instructions for a kind of task, such as Word documents. Ponder loads a skill when a message needs it. You can also start one with `$name` in a message. See [`docs/skills.md`](docs/skills.md).

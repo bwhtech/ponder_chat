@@ -73,6 +73,21 @@ async function scrollToTop(page) {
 
 const item = (page, text) => page.locator('li', { hasText: text });
 
+// The admin pages. The sidebar is 16rem wide: a crop that starts at MAIN_X bleeds left
+// through the margin of the main area, not through the sidebar's labels.
+const MAIN_X = 256;
+const ADMIN = { width: 1280, height: 800 };
+
+/** Waits for an admin page and its charts. */
+async function settleAdmin(page) {
+  await page.waitForLoadState('networkidle');
+  await page.addStyleTag({ content: '* { scrollbar-width: none !important; }' });
+  await page.waitForTimeout(1200);
+}
+
+/** The card (rounded box) that holds `text`. */
+const cardOf = (page, text) => page.getByText(text, { exact: true }).locator('xpath=ancestor::div[contains(@class, "rounded")][1]');
+
 export default [
   {
     // The whole window, all four edges: chats, a reply with sources, a memory note, credits.
@@ -247,6 +262,83 @@ export default [
       await page.waitForTimeout(1500);
       const chart = await boxOf(page.getByText('Credits used per day'));
       this.crop = { x: 0, y: 0, w: 1280, h: Math.round(chart.y + 230) };
+    },
+  },
+  {
+    // Top-right corner: everyone with an account and the open invites. Bleeds left and down.
+    name: 'admin-people',
+    path: '/admin/people',
+    // Tall enough that the list does not scroll, so no scrollbar shows.
+    viewport: { width: 1280, height: 900 },
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      const last = await boxOf(page.getByText('kofi@example.net'));
+      const x = MAIN_X;
+      this.crop = { x, y: 0, w: 1280 - x, h: Math.round(last.y + last.height + 26) };
+    },
+  },
+  {
+    // Top-right corner: one person's numbers, credits per day, details and devices. Bleeds left and down.
+    name: 'admin-person',
+    path: '/admin/people',
+    viewport: { width: 1280, height: 900 },
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      await page.getByRole('link', { name: 'Sam Okafor', exact: true }).click();
+      await settleAdmin(page);
+      const daily = await boxOf(cardOf(page, 'Credits used per day'));
+      this.crop = { x: MAIN_X, y: 0, w: 1280 - MAIN_X, h: Math.round(daily.y + daily.height + 14) };
+    },
+  },
+  {
+    // Bottom-left corner: the foot of the sidebar, credits and active people over time. Bleeds up and right.
+    name: 'admin-usage',
+    path: '/admin',
+    viewport: { width: 1280, height: 960 },
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      const daily = await boxOf(cardOf(page, 'Credits used per day'));
+      const active = await boxOf(cardOf(page, 'Active people per day'));
+      const y = Math.round(daily.y - 52);
+      this.crop = { x: 0, y, w: Math.round(active.x + active.width + 10), h: 960 - y };
+    },
+  },
+  {
+    // Bottom-right corner: credits by model.
+    name: 'admin-models',
+    path: '/admin',
+    viewport: { width: 1280, height: 960 },
+    routes: signIn,
+    stageW: 600,
+    async setup({ page }) {
+      await settleAdmin(page);
+      const active = await boxOf(cardOf(page, 'Active people per day'));
+      const models = await boxOf(cardOf(page, 'Credits by model'));
+      const x = Math.round(active.x + active.width + 10);
+      const y = Math.round(models.y - 10);
+      this.crop = { x, y, w: 1280 - x, h: 960 - y };
+    },
+  },
+  {
+    // Right edge: a person's actions, from the row's menu.
+    name: 'admin-actions',
+    path: '/admin/people',
+    viewport: ADMIN,
+    routes: signIn,
+    stageW: 680,
+    async setup({ page }) {
+      await settleAdmin(page);
+      await page.getByRole('button', { name: 'Actions for Sam Okafor' }).click();
+      await page.getByRole('menuitem', { name: 'Ban' }).waitFor();
+      const menu = await boxOf(page.getByRole('menu'));
+      const row = await boxOf(page.getByText('noah@example.net'));
+      const credits = await boxOf(page.getByText('Credits today', { exact: true }));
+      const x = Math.round(credits.x - 120);
+      const y = Math.round(row.y - 24);
+      this.crop = { x, y, w: ADMIN.width - x, h: Math.round(menu.y + menu.height + 64 - y) };
     },
   },
 ];

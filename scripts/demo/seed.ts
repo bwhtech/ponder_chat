@@ -49,6 +49,15 @@ const OTHERS = [
 ] as const;
 const INVITES = ["maria@example.org", "kofi@example.net"];
 
+// The browsers that people signed in from, for "Signed in on" on a person's admin page.
+const DEVICES = {
+	macChrome: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36",
+	iPhone: "Mozilla/5.0 (iPhone; CPU iPhone OS 19_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.1 Mobile/15E148 Safari/604.1",
+	android: "Mozilla/5.0 (Linux; Android 16; Pixel 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Mobile Safari/537.36",
+	windowsEdge: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0",
+	macFirefox: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15.1; rv:144.0) Gecko/20100101 Firefox/144.0",
+};
+
 async function reset() {
 	const emails = [DEMO_EMAIL, ...OTHERS.map(([, email]) => email)];
 	const users = await sql<{ id: string }[]>`select id from users where email in ${sql(emails)}`;
@@ -69,7 +78,7 @@ async function reset() {
 /** Signs the demo person in through Better Auth, as the sign-in page would, and returns the cookies. */
 async function signIn() {
 	await sql`insert into allowed_emails (email, note) values (${DEMO_EMAIL}, 'Demo') on conflict do nothing`;
-	const headers = new Headers({ host, "x-forwarded-for": "127.0.0.1" });
+	const headers = new Headers({ host, "x-forwarded-for": "127.0.0.1", "user-agent": DEVICES.macChrome });
 	const otp = await auth.api.createVerificationOTP({ body: { email: DEMO_EMAIL, type: "sign-in" }, headers });
 	const signed = await auth.api.signInEmailOTP({ body: { email: DEMO_EMAIL, otp }, headers, returnHeaders: true });
 	const [user] = await sql<{ id: string }[]>`update users set name = 'Alex Rivera', role = 'admin' where email = ${DEMO_EMAIL} returning id`;
@@ -95,9 +104,31 @@ async function addOthers() {
 			insert into users (id, name, email, "emailVerified", "createdAt", "updatedAt", role)
 			values (${id}, ${name}, ${email}, true, ${joined}, ${joined}, ${index === 0 ? "admin" : "user"})`;
 		ids.push(id);
+		await addSessions(id, index);
+		await addChatCount(id, 6 + index * 5);
 	}
 	await sql`insert into allowed_emails (email, note, daily_credits) values ('maria@example.org', 'Board member', 1500), ('kofi@example.net', 'Volunteer lead', null)`;
 	return ids;
+}
+
+/** One or two signed-in devices for each person: a phone, and for some a computer too. */
+async function addSessions(userId: string, index: number) {
+	const phone = index % 2 ? DEVICES.android : DEVICES.iPhone;
+	const computers = [DEVICES.macChrome, DEVICES.windowsEdge, DEVICES.macFirefox];
+	const devices = index % 3 === 2 ? [phone] : [phone, computers[index % computers.length]];
+	for (const [n, agent] of devices.entries()) {
+		const used = ago(minutes(15 + index * 7) + hours(n * 20));
+		await sql`
+			insert into sessions (id, "expiresAt", token, "createdAt", "updatedAt", "userAgent", "userId")
+			values (${randomUUID()}, ${new Date(now + DAY * 7)}, ${randomUUID()}, ${ago(DAY * 3)}, ${used}, ${agent}, ${userId})`;
+	}
+}
+
+/** Empty chats, so the admin pages count some for each person. Admins never see what is in them. */
+async function addChatCount(owner: string, count: number) {
+	for (let n = 0; n < count; n += 1) {
+		await sql`insert into threads (id, owner, title, updated_at) values (${randomUUID().slice(0, 8)}, ${owner}, ${`Chat ${n + 1}`}, ${ago(hours(n * 9 + 1))})`;
+	}
 }
 
 // --- Files --------------------------------------------------------------------
