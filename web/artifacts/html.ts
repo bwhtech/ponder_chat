@@ -1,3 +1,5 @@
+import { ARTIFACT_CDNS } from "../../shared/cdns";
+
 /**
  * An HTML artifact is one web page that a reply wrote: its HTML, CSS and JavaScript in one
  * file. The panel runs it in a sandboxed frame with no `allow-same-origin`, so the page has
@@ -7,7 +9,7 @@
  * public CDNs below, and the page can send nothing to other addresses: no images, no
  * fetch, no forms. A policy that the page adds itself can only make this one stricter.
  */
-const CDNS = ["https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com", "https://esm.sh"].join(" ");
+const CDNS = ARTIFACT_CDNS.join(" ");
 const TAILWIND = "https://cdn.tailwindcss.com";
 const GOOGLE_FONTS = { css: "https://fonts.googleapis.com", files: "https://fonts.gstatic.com" };
 
