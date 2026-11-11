@@ -333,6 +333,55 @@ export default [
     },
   },
   {
+    // Bottom-right corner: the $ menu over the message box, under a message that chose a skill.
+    name: 'skills-menu',
+    path: '/?t=demo-board-notes',
+    viewport: { width: 1280, height: 800 },
+    routes: signIn,
+    async setup({ page }) {
+      await openChat(page, 'four actions');
+      await page.locator('footer [data-slot="prompt-input"] textarea').fill('$');
+      await page.locator('[data-slot="skill-menu"]').waitFor();
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(600);
+      const chip = await boxOf(page.locator('[data-slot="skill-chip"]'));
+      const crop = await columnCrop(page, 800);
+      const y = Math.round(chip.y - 28);
+      this.crop = { ...crop, y, h: 800 - y };
+    },
+  },
+  {
+    // Top-right corner: Ponder picked a skill on its own, and the reply follows it.
+    name: 'skills-picked',
+    path: '/?t=demo-grant',
+    viewport: { width: 1280, height: 800 },
+    routes: signIn,
+    async setup({ page }) {
+      await openChat(page, 'Asked of the fund');
+      await scrollToTop(page);
+      await page.getByText(/^Picked skill/).click();
+      await page.waitForTimeout(500);
+      // It ends halfway between the plan and the next heading.
+      const plan = await under(page.getByText('One refrigerated van'), 0);
+      const next = await boxOf(page.getByRole('heading', { name: '3. The budget' }));
+      this.crop = await columnCrop(page, (plan + next.y) / 2);
+    },
+  },
+  {
+    // Top and right edges: an admin's skill in the editor, with its switches.
+    name: 'skills-admin',
+    path: '/admin/skills',
+    viewport: ADMIN,
+    routes: signIn,
+    async setup({ page }) {
+      await settleAdmin(page);
+      await page.getByRole('link', { name: 'Edit Grant writing' }).click();
+      await page.getByText('What Ponder sees first').waitFor();
+      await page.waitForTimeout(800);
+      this.crop = { x: MAIN_X, y: 0, w: ADMIN.width - MAIN_X, h: ADMIN.height };
+    },
+  },
+  {
     // Top edge and both sides: the admin overview, bleeding down through the charts.
     name: 'admin',
     path: '/admin',

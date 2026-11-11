@@ -66,6 +66,20 @@ Settings, Connectors lists each server and its tools. You set each tool to Alway
 
 ![The Linear connector in Settings. Three read-only tools are on Always allow, Create issue and Update issue are on Ask first, and Create comment is Off.](docs/images/connectors.webp)
 
+### Skills
+
+A skill is a set of instructions for one kind of task, such as a grant application or meeting minutes. Ponder knows the name and the description of each skill. When a message fits a description, Ponder loads that skill and follows it.
+
+![Ponder answers a request for a grant outline. A line above the reply says Picked skill “Grant writing”, with the skill's description, and the outline follows the skill's headings: the need, the plan.](docs/images/skills-picked.webp)
+
+To choose a skill yourself, type `$` in the message box. The skill then shows as a chip on your message. Some skills run only when someone asks for them.
+
+![The skills menu over the message box after "$": Docx, Donor thank you, Grant writing, Meeting minutes, Technical writing and Volunteer newsletter, each with its description. Above it, an earlier message has the chip "Meeting minutes".](docs/images/skills-menu.webp)
+
+Admins write skills in `/admin`, in a Markdown editor. Two switches set whether a skill is on for everyone, and whether Ponder can use it on its own. Ponder comes with two skills, for Word documents and for technical writing. See [`docs/skills.md`](docs/skills.md).
+
+![The Grant writing skill in the admin editor: Markdown instructions on the left, and on the right its name, description, the switches "On for everyone" and "Ponder can use it on its own", and what Ponder sees first.](docs/images/skills-admin.webp)
+
 ### Memory you can see
 
 After a reply, Ponder decides if you said something about yourself worth keeping. A note under the reply shows what it kept, with Undo. The Memory page lists every memory and the chat it came from. Ponder never keeps passwords, contact details, ID numbers, health details or what you say about other people.
@@ -110,7 +124,6 @@ A person's page shows their numbers for 30 days and the devices they are signed 
 
 ### Also in Ponder
 
-- **Skills.** An admin writes instructions for a kind of task, such as Word documents. Ponder loads a skill when a message needs it. You can also start one with `$name` in a message. See [`docs/skills.md`](docs/skills.md).
 - **Files in a side panel.** Attached PDFs, images and CSV files open beside the chat. A PDF draws each page as it comes near the screen. A CSV shows as a table.
 - **Search and export.** The search box above the chat list finds chats by the words in their titles and messages. Each chat's menu exports it as a Markdown file.
 
