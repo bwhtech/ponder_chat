@@ -20,7 +20,7 @@ export type Step = {
 };
 
 /**
- * A reply to the chat. `match` picks the script: the first script whose text is in the
+ * A reply to the chat. `match` picks the script: the newest script whose text is in the
  * person's latest message. Each model call in the turn takes the next step, so a script
  * with a tool call has two steps: the call, then the answer after the tool ran.
  */
