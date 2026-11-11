@@ -8,12 +8,13 @@ These scripts fill a scratch database with made-up data and take the images in t
 | `shots.mjs` | The list of images: which chat to open, what to click, and where to crop. |
 | `assets/cafe-sales.csv` | The file that the Python chat reads. |
 | `assets/pastries-by-weekday.png` | The chart that the Python chat shows. `assets/make_chart.py` draws it. |
+| `assets/students.csv` | The sample data for 100 made-up students that the sheet chat shows as a table. `assets/make_students.py` writes it. |
 
 ## What the seed writes
 
 Everything is made up. The web pages that the search chat cites are real public pages, with short excerpts in our own words.
 
-- Alex Rivera (`alex@example.com`), an admin, with 12 chats. Five of them show a feature: web search with citations, a quote to cite, a slide deck, a Python chart and a connector that waits for approval.
+- Alex Rivera (`alex@example.com`), an admin, with 13 chats. Six of them show a feature: web search with citations, a quote to cite, a slide deck, a Python chart, a CSV that opens as a table, and a connector that waits for approval.
 - Seven memories, each with a note under the reply it came from.
 - Two connectors: Linear (OAuth) and a docs server (API key). Neither one is called: their tool lists are written to the database.
 - Seven more people, 30 days of usage, a request for more credits and two open invites, for the admin pages. Each person also has some empty chats (admins see only how many) and one or two devices they signed in on.

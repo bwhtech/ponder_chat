@@ -164,6 +164,24 @@ export default [
     },
   },
   {
+    // Top-right corner: a CSV that Python wrote, open in the side panel as a table. Starts at
+    // the sidebar's edge and bleeds down through the rows.
+    name: 'table',
+    path: '/?t=demo-students',
+    viewport: HD,
+    routes: signIn,
+    async setup({ page }) {
+      await openChat(page, 'report-card template');
+      await page.locator('[data-slot="attachment"]', { hasText: 'students.csv' }).click();
+      await page.getByText('100 rows').waitFor();
+      await page.waitForTimeout(600);
+      const sidebar = await boxOf(page.locator('[data-slot="sidebar"]'));
+      const composer = await boxOf(page.locator('footer [data-slot="prompt-input"]'));
+      const x = Math.round(sidebar.x + sidebar.width);
+      this.crop = { x, y: 0, w: HD.width - x, h: Math.round(composer.y - 20) };
+    },
+  },
+  {
     // The whole window: present mode, one slide full screen.
     name: 'present',
     path: '/?t=demo-deck',

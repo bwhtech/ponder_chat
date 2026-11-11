@@ -321,6 +321,63 @@ Weekend share of pastries: 43.4%`;
 	];
 }
 
+/** Sample data made with Python: 100 students in a CSV, which opens in the side panel as a table. */
+function students(csv: { url: string; size: number }): Message[] {
+	const code = `import random
+import pandas as pd
+
+random.seed(12)
+first = ["Aarav", "Abena", "Amara", "Anika", "Ben", "Carlos", "Chloe", "Daniel", "Dara", "Elif",
+         "Ethan", "Fatima", "Felix", "Grace", "Hana", "Hugo", "Isaac", "Ines", "Jaya", "Jonas",
+         "Kai", "Kemi", "Layla", "Leo", "Lucia", "Mateo", "Maya", "Mei", "Nadia", "Noah",
+         "Olivia", "Omar", "Oscar", "Priya", "Rafael", "Rosa", "Ruby", "Sami", "Sofia", "Tariq",
+         "Theo", "Uma", "Victor", "Yara", "Yusuf", "Zara", "Zoe", "Arjun", "Ella", "Mila"]
+last = ["Adeyemi", "Alvarez", "Bauer", "Brooks", "Chen", "Costa", "Dubois", "Eriksen", "Evans", "Farah",
+        "Fernandes", "Garcia", "Haddad", "Hughes", "Ito", "Jensen", "Johansson", "Kaur", "Kim", "Kowalski",
+        "Lindqvist", "Lopez", "Mensah", "Moreau", "Murphy", "Nakamura", "Nguyen", "Novak", "Okafor", "Owusu",
+        "Park", "Patel", "Petrov", "Quinn", "Reyes", "Rossi", "Sato", "Santos", "Schmidt", "Shah",
+        "Silva", "Sousa", "Tanaka", "Torres", "Varga", "Walsh", "Weber", "Wong", "Yilmaz", "Zhang"]
+
+def score(base):
+    return max(35, min(100, round(random.gauss(base, 11))))
+
+rows = []
+for surname in last:
+    for name in random.sample(first, 2):
+        ability = random.gauss(72, 8)
+        rows.append({"Student": f"{name} {surname}", "Class": random.choice(["7A", "7B", "8A", "8B"]),
+                     "Maths": score(ability), "Science": score(ability - 2), "English": score(ability + 2)})
+
+df = pd.DataFrame(rows).sort_values(["Class", "Student"])
+df.to_csv("/work/outputs/students.csv", index=False)
+print(f"{len(df)} students in {df.Class.nunique()} classes\\n")
+print(df[["Maths", "Science", "English"]].agg(["mean", "min", "max"]).round(1))`;
+	const stdout = `100 students in 4 classes
+
+      Maths  Science  English
+mean   70.0     67.4     72.4
+min    39.0     36.0     48.0
+max   100.0    100.0    100.0`;
+	return [
+		user(
+			"demo-students-1",
+			"Make sample data for 100 students: name, class, and marks in maths, science and English. I need it to test our report-card template.",
+		),
+		reply(
+			"demo-students-2",
+			SONNET,
+			tool("run_python", { code }, { ok: true, stdout, stderr: "", files: [{ url: csv.url, name: "students.csv", size: csv.size, media_type: "text/csv" }] }),
+			[
+				"Here is **students.csv**: 100 made-up students in classes 7A to 8B, with a mark out of 100 for maths, science and English.",
+				"",
+				"- Averages are about 70 in maths, 67 in science and 72 in English.",
+				"- A few students in each subject are under 50, so the template's \"needs support\" rows get tested too.",
+				"- Marks go with each student's overall level, so a strong student is strong in most subjects, as in a real class.",
+			].join("\n"),
+		),
+	];
+}
+
 const DECK = `<style>
 section { font-family: "Inter", "Helvetica Neue", Arial, sans-serif; color: #1c2a22; background: #fbfaf5; padding: 80px 96px; box-sizing: border-box; }
 h1 { font-size: 76px; line-height: 1.05; letter-spacing: -0.02em; color: #14532d; margin: 0 0 20px; }
@@ -439,10 +496,12 @@ async function addThreads(owner: string) {
 	const csv = await addFile(owner, "cafe-sales.csv", "text/csv", csvBytes);
 	await sql`update files set text = ${csvBytes.toString("utf8")} where id = ${csv.id}`;
 	const chart = await addFile(owner, "pastries-by-weekday.png", "image/png", asset("pastries-by-weekday.png"));
+	const studentsCsv = await addFile(owner, "students.csv", "text/csv", asset("students.csv"));
 
 	const chats: { id: string; title: string; updated: Date; messages: Message[] }[] = [
 		{ id: "demo-heat-pumps", title: "Heat pumps in a Minnesota winter", updated: ago(minutes(4)), messages: heatPumps() },
 		{ id: "demo-cafe", title: "Café pastry sales by weekday", updated: ago(minutes(48)), messages: cafeSales(csv, chart) },
+		{ id: "demo-students", title: "Sample data: 100 students", updated: ago(hours(1)), messages: students(studentsCsv) },
 		{ id: "demo-deck", title: "Q3 volunteer report deck", updated: ago(hours(2)), messages: deck() },
 		{ id: "demo-linear", title: "Linear bug: date picker skips Sundays", updated: ago(hours(3)), messages: linearBug() },
 		{ id: "demo-lisbon", title: "Lisbon in three days with kids", updated: ago(hours(22)), messages: lisbon() },

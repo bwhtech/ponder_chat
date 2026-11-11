@@ -46,6 +46,10 @@ Ask for something to keep, send or present, and Ponder writes it as an artifact:
 
 ![Present mode: the slide "Q3 at a glance" fills the screen, with 412 active volunteers, 6,180 hours given and 38,500 meals packed.](docs/images/present.webp)
 
+Sheets open in the same panel. Ask for data, and Ponder makes a CSV file with Python. A click on the file shows it as a table, with the header kept in view. CSV files that you attach open the same way.
+
+![A chat that asked for sample data for 100 students. Python made students.csv, and the side panel shows it as a table with Student, Class, Maths, Science and English columns and 100 rows.](docs/images/table.webp)
+
 ### Python on your files
 
 Attach a CSV or Excel file and ask a question. Ponder writes Python (pandas, matplotlib and more) and runs it in a sandbox with no network. The charts and files it makes come back into the chat. The code and its output are one click away.
