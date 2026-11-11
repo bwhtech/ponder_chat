@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "vite build && nitro build",
+    "build:astryx": "vite build && npm --prefix chat-astryx run build -- --outDir ../dist --emptyOutDir false && nitro build",
     "typecheck": "node scripts/vue-tsc.cjs --noEmit -p tsconfig.json",
     "start": "./start.sh",
     "typecheck:server": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --allowImportingTsExtensions server/app.ts server/plugins/startup.ts",

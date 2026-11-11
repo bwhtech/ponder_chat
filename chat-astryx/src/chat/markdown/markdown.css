@@ -1,0 +1,25 @@
+/* Mermaid diagrams, drawn by Pele (mermaid.tsx). Pele colours everything through these
+   variables, so diagrams follow light and dark without a redraw. `.pele` is on the SVG
+   and on the error line and zoom bar beside it. */
+:where(.pele) {
+	--pele-bg: var(--color-background-body);
+	--pele-fg: var(--color-text-primary);
+	--pele-muted: var(--color-text-secondary);
+	--pele-line: var(--color-text-secondary);
+	--pele-surface: var(--color-background-muted);
+	--pele-surface-alt: var(--color-background-gray);
+	--pele-border: var(--color-border-emphasized);
+	/* Blue tokens give unreadable text on Gantt bars in dark mode. */
+	--pele-accent: var(--color-text-secondary);
+	--pele-critical: var(--color-text-red);
+	--pele-error: var(--color-error);
+	/* A strong and a pale member of each hue, in turn. */
+	--pele-series-1: var(--color-icon-blue);
+	--pele-series-2: var(--color-background-blue);
+	--pele-series-3: var(--color-icon-green);
+	--pele-series-4: var(--color-background-green);
+	--pele-series-5: var(--color-icon-purple);
+	--pele-series-6: var(--color-background-purple);
+	--pele-series-7: var(--color-icon-orange);
+	--pele-series-8: var(--color-background-orange);
+}
