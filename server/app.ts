@@ -42,11 +42,18 @@ const app = new Hono<Env>();
  * browser would send the data out with nobody clicking. So images and media load only
  * from this server, data and blob URLs, and the CDNs an HTML artifact may use (its frame
  * is held to this policy too). Scripts, styles and fetch are left as they are.
+ *
+ * No frame may load an address. An HTML artifact runs script in its frame, and could
+ * send the frame itself to https://evil.example/?d=<something private>. Its own policy
+ * (web/artifacts/html.ts) cannot stop that, but this one can: a browser checks where a
+ * frame goes against the page that holds it. Every frame in the app is a srcdoc frame,
+ * which loads no address, so they all still show.
  */
 const PAGE_POLICY = [
 	`img-src 'self' data: blob: ${ARTIFACT_CDNS.join(" ")}`,
 	"media-src 'self' data: blob:",
 	"object-src 'none'",
+	"frame-src 'none'",
 	"form-action 'self'",
 	"base-uri 'self'",
 ].join("; ");

