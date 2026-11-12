@@ -1,4 +1,6 @@
-import { expect, invite, signIn, test, uniqueEmail } from "../fixtures.ts";
+import type { Page } from "@playwright/test";
+import { e2e } from "../env.ts";
+import { expect, invite, randomIp, signIn, test, uniqueEmail } from "../fixtures.ts";
 
 test("signs in with the code from the email", async ({ page, db, fake }) => {
 	const email = uniqueEmail("code");
@@ -72,3 +74,39 @@ test("a blocked person can't sign in", async ({ page, db, fake }) => {
 	await expect(page.getByText("This account is blocked. Ask the person who invited you.")).toBeVisible();
 	await expect(page.getByText("What's on your mind?")).toHaveCount(0);
 });
+
+test("a code is checked only by signing in with it", async ({ page, db, fake }) => {
+	const email = uniqueEmail("check route");
+	await invite(db, email);
+	expect((await post(page, "/email-otp/send-verification-otp", { email, type: "sign-in" })).ok()).toBe(true);
+	const code = await fake.signInCode(email);
+
+	// Better Auth's route to check a code lost count of wrong codes that came together. It is off, for the right code too.
+	const guesses = [...Array.from({ length: 40 }, (_, guess) => String(guess).padStart(6, "0")), code];
+	const answers = await Promise.all(guesses.map((otp) => post(page, "/email-otp/check-verification-otp", { email, type: "sign-in", otp })));
+	expect([...new Set(answers.map((answer) => answer.status()))]).toEqual([404]);
+
+	expect((await post(page, "/sign-in/email-otp", { email, otp: code })).ok()).toBe(true);
+});
+
+test("stores no code of a type other than sign-in", async ({ page, db, fake }) => {
+	const { email } = await signIn(page, db, fake, uniqueEmail("code types"));
+	const stored = async () => (await db`select identifier from verifications where identifier like ${`%${email}`}`).map((row) => row.identifier);
+
+	// A stored code would show, by how wrong guesses are answered, that the email has an account.
+	for (const type of ["email-verification", "forget-password"]) {
+		const answer = await post(page, "/email-otp/send-verification-otp", { email, type });
+		expect(answer.status()).toBe(200);
+		expect(await answer.json()).toEqual({ success: true });
+	}
+	expect(await stored()).toEqual([]);
+
+	expect((await post(page, "/email-otp/send-verification-otp", { email, type: "sign-in" })).ok()).toBe(true);
+	expect(await stored()).toEqual([`sign-in-otp-${email}`]);
+	expect(await fake.emails(email)).toHaveLength(2);
+});
+
+/** A request to the sign-in API from an address of its own, so the limits per address do not answer. */
+function post(page: Page, path: string, data: unknown) {
+	return page.request.post(`/api/auth${path}`, { data, headers: { origin: e2e.baseUrl, "cf-connecting-ip": randomIp() } });
+}
