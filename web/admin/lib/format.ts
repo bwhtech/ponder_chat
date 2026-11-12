@@ -12,8 +12,10 @@ export function money(value: number) {
 	return usd.format(value);
 }
 
+/** US dollars for a credit count. Amounts under a cent keep their digits, such as "$0.0004", not "$0.00". */
 export function dollars(creditsUsed: number) {
-	return money(creditsUsed / settings.creditsPerUsd);
+	const value = creditsUsed / settings.creditsPerUsd;
+	return value > 0 && value < 0.01 ? usdExact.format(value) : money(value);
 }
 
 /** What one credit is worth, such as "$0.001". */
