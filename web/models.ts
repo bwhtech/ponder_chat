@@ -1,5 +1,6 @@
 import { ref, watch } from "vue";
 import type { ModelOption } from "frappe-ui-ai-elements";
+import { client } from "./api";
 
 /**
  * The models a person can pick (server/models.ts), and the one they picked last. The
@@ -17,8 +18,8 @@ watch(model, (id) => id && localStorage.setItem(KEY, id));
 export const features = ref({ python: false });
 
 export async function loadModels() {
-	void fetch("/api/features").then(async (response) => response.ok && (features.value = await response.json()));
-	const response = await fetch("/api/models");
+	void loadFeatures();
+	const response = await client.api.models.$get();
 	if (!response.ok) return;
 	const body: { models: ModelOption[]; defaultModel: string } = await response.json();
 	models.value = body.models;
@@ -28,4 +29,9 @@ export async function loadModels() {
 
 export function modelName(id: unknown) {
 	return models.value.find((option) => option.id === id)?.name;
+}
+
+async function loadFeatures() {
+	const response = await client.api.features.$get();
+	if (response.ok) features.value = await response.json();
 }

@@ -3,7 +3,7 @@ import { Avatar, Breadcrumbs, Button, PageHeader, PageHeaderBackButton, PageHead
 import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "frappe-ui/list";
 import { computed, ref, watch } from "vue";
 import { useRoute } from "vue-router";
-import { api, type Activity, type ActivityPage } from "../api";
+import { admin, unwrap, type Activity, type ActivityPage } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import ListSkeleton from "../components/ListSkeleton.vue";
 import EmptyState from "../../EmptyState.vue";
@@ -67,10 +67,7 @@ async function loadMore() {
 }
 
 function fetchPage(before?: number | null) {
-	const query = new URLSearchParams();
-	if (person.value) query.set("person", person.value);
-	if (before) query.set("before", String(before));
-	return api<ActivityPage>(`/activity${query.size ? `?${query}` : ""}`);
+	return unwrap(admin.activity.$get({ query: { person: person.value || undefined, before: before ? String(before) : undefined } }));
 }
 
 function toRow(event: Activity): Row {

@@ -1,6 +1,7 @@
 import { createAuthClient } from "better-auth/vue";
 import { adminClient, emailOTPClient, magicLinkClient } from "better-auth/client/plugins";
 import { ref } from "vue";
+import { client, type Answer } from "./api";
 import { model } from "./models";
 
 /**
@@ -8,10 +9,9 @@ import { model } from "./models";
  * the person types their email, then types the code from the email, or opens its link
  * and lands back here. Either way they get a session cookie.
  */
-export type CreditRequest = { status: "pending" | "approved" | "declined"; createdAt: string; credits: number | null };
-/** `limit` includes `extra`, the credits admins gave for today. `request` is the one waiting, or answered today. */
-export type Credits = { limit: number; used: number; remaining: number; resetsAt: string; extra: number; request: CreditRequest | null };
-export type Me = { user: { id: string; email: string; name: string; role: "admin" | "user" }; credits: Credits };
+export type Me = Answer<typeof client.api.me.$get>;
+/** Today's credits (CreditStatus in server/credits.ts). */
+export type Credits = Me["credits"];
 
 export const authClient = createAuthClient({ plugins: [magicLinkClient(), emailOTPClient(), adminClient()] });
 
@@ -26,8 +26,9 @@ export const meError = ref("");
  */
 export async function loadMe() {
 	try {
-		const response = await fetch("/api/me");
-		if (response.status === 401 || response.status === 403) me.value = null;
+		const response = await client.api.me.$get();
+		// The route's type has only its 200: the 401 comes from the session check before it.
+		if ([401, 403].includes(response.status)) me.value = null;
 		else if (!response.ok) throw new Error(`The server answered ${response.status}.`);
 		else me.value = await response.json();
 		meError.value = "";
@@ -40,7 +41,7 @@ export async function loadMe() {
 
 /** Asks again how many credits are left: after each reply, and when a reply is refused. */
 export async function refreshCredits() {
-	const response = await fetch("/api/credits");
+	const response = await client.api.credits.$get();
 	if (response.ok && me.value) me.value = { ...me.value, credits: await response.json() };
 }
 

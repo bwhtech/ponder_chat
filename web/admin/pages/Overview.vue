@@ -4,7 +4,7 @@ import { BarChart, DonutChart, NumberCard } from "frappe-ui/charts";
 import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "frappe-ui/list";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { api, type Overview } from "../api";
+import { admin, unwrap, type Overview } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import CreditBar from "../components/CreditBar.vue";
 import ListSkeleton from "../components/ListSkeleton.vue";
@@ -40,7 +40,8 @@ async function load() {
 	const mine = ++asked;
 	loadError.value = "";
 	try {
-		const overview = await api<Overview>(`/overview?days=${range.value}`);
+		// The tabs hold one of the three ranges.
+		const overview = await unwrap(admin.overview.$get({ query: { days: range.value as "7" | "14" | "30" } }));
 		if (mine !== asked) return;
 		settings.creditsPerUsd = overview.creditsPerUsd;
 		data.value = overview;

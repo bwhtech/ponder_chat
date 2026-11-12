@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button, Dialog, Password, toast } from "frappe-ui";
 import { ref, watch } from "vue";
-import { api, type KeyStatus } from "../api";
+import { admin, unwrap, type KeyStatus } from "../api";
 
 /**
  * Add or change the OpenRouter key. The server checks the key with OpenRouter before it
@@ -26,7 +26,7 @@ async function save() {
 	if (!key.value.trim() || saving.value) return;
 	saving.value = true;
 	try {
-		emit("saved", await api<KeyStatus>("/settings/openrouter-key", { method: "PUT", body: { key: key.value.trim() } }));
+		emit("saved", await unwrap(admin.settings["openrouter-key"].$put({ json: { key: key.value.trim() } })));
 		open.value = false;
 		toast.success("OpenRouter key saved");
 	} catch (e) {

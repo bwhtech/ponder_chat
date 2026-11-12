@@ -11,6 +11,11 @@ const PAGE = 50;
 
 type Named = { id: string; name: string; email: string };
 
+/**
+ * One change an admin made. `action` is the endpoint's name, such as "update-user" or
+ * "grant-credits"; `before` and `after` hold what changed. `target` is the person it was
+ * done to, if any.
+ */
 export type Activity = {
 	id: number;
 	at: string;

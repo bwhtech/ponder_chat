@@ -1,5 +1,5 @@
 import { dialog, toast } from "frappe-ui";
-import { api, type Person } from "../api";
+import { admin, unwrap, type Person } from "../api";
 import { refreshCounts } from "../store";
 
 /**
@@ -50,14 +50,14 @@ export function personActions(person: Person, handlers: Handlers) {
 	];
 }
 
-/** Calls the admin API for one person. */
-function act(person: Person, action: string, body: unknown = {}, method = "POST") {
-	return api(`/people/${encodeURIComponent(person.id)}/${action}`, { method, body });
-}
+/** The admin API for one person, and its address. */
+const one = admin.people[":id"];
+const byId = (person: Person) => ({ param: { id: encodeURIComponent(person.id) } });
+const byEmail = (person: Person) => ({ param: { email: encodeURIComponent(person.email) } });
 
 async function emailInvite(person: Person) {
 	try {
-		await api(`/invites/${encodeURIComponent(person.email)}/send`, { body: {} });
+		await unwrap(admin.invites[":email"].send.$post(byEmail(person)));
 		toast.success(`Sent to ${person.email}`);
 	} catch (e) {
 		toast.error((e as Error).message);
@@ -71,7 +71,7 @@ function cancelInvite(person: Person, handlers: Handlers) {
 		confirmLabel: "Cancel invite",
 		cancelLabel: "Keep",
 		onConfirm: async () => {
-			await api(`/invites/${encodeURIComponent(person.email)}`, { method: "DELETE" });
+			await unwrap(admin.invites[":email"].$delete(byEmail(person)));
 			toast.success("Invite cancelled");
 			void refreshCounts();
 			if (handlers.removed) handlers.removed();
@@ -89,7 +89,7 @@ function setRole(person: Person, role: "admin" | "user", handlers: Handlers) {
 				: "They keep using the chat, but can no longer open this page.",
 		confirmLabel: role === "admin" ? "Make admin" : "Remove admin role",
 		onConfirm: async () => {
-			await act(person, "role", { role }, "PUT");
+			await unwrap(one.role.$put({ ...byId(person), json: { role } }));
 			toast.success(role === "admin" ? `${person.name} is now an admin` : `${person.name} is no longer an admin`);
 			handlers.changed();
 		},
@@ -104,7 +104,7 @@ function signOutEverywhere(person: Person, handlers: Handlers) {
 		message: `This ends ${what}. They can sign in again with a new link or code.`,
 		confirmLabel: "Sign out",
 		onConfirm: async () => {
-			await act(person, "sign-out");
+			await unwrap(one["sign-out"].$post(byId(person)));
 			toast.success(`${person.name} is signed out`);
 			handlers.changed();
 		},
@@ -134,7 +134,7 @@ function ban(person: Person, handlers: Handlers) {
 		],
 		onConfirm: async ({ values }) => {
 			const days = values.until === "forever" ? null : Number(values.until);
-			await act(person, "ban", { reason: String(values.reason ?? ""), days });
+			await unwrap(one.ban.$post({ ...byId(person), json: { reason: String(values.reason ?? ""), days } }));
 			toast.success(`${person.name} is banned`);
 			handlers.changed();
 		},
@@ -143,7 +143,7 @@ function ban(person: Person, handlers: Handlers) {
 
 async function unban(person: Person, handlers: Handlers) {
 	try {
-		await act(person, "unban");
+		await unwrap(one.unban.$post(byId(person)));
 		toast.success(`${person.name} can sign in again`);
 		handlers.changed();
 	} catch (e) {

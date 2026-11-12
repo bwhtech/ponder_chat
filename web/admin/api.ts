@@ -1,63 +1,30 @@
-import { request } from "../api";
+import { client, type Answer } from "../api";
 
-export { ApiError } from "../api";
+export { ApiError, unwrap } from "../api";
 
 /**
- * The admin API (server/admin/routes.ts), and the shapes it answers with. Usage numbers
- * only: the API never returns chats.
+ * The admin API (server/admin/routes.ts), and the shapes it answers with, as the typed
+ * client reads them from the routes. Usage numbers only: the API never returns chats.
+ * The pages read each answer with unwrap(), which throws the server's message for a toast
+ * or a dialog.
  */
-export type Status = "active" | "invited" | "banned";
+export const admin = client.api.admin;
 
-export type Settings = {
-	defaultDailyCredits: number;
-	creditsPerUsd: number;
-	/** Models that can't read PDFs get the text the server read from them; off, OpenRouter parses each PDF. */
-	pdfTextOnServer: boolean;
-};
-
+export type SettingsData = Answer<typeof admin.settings.$get>;
+export type Settings = Answer<typeof admin.settings.$put>;
 /** The OpenRouter key in use, without the key itself (server/openrouter-key.ts). */
-export type KeyStatus = {
-	source: "settings" | "environment" | "none";
-	/** The key's last characters, such as "…3f9a". */
-	hint: string | null;
-	/** The saved key can't be decrypted, because BETTER_AUTH_SECRET changed. */
-	unreadable: boolean;
-	updatedAt: string | null;
-	updatedBy: string | null;
-};
+export type KeyStatus = SettingsData["openRouterKey"];
+export type Admin = SettingsData["admins"][number];
 
-export type Admin = { id: string; name: string; email: string };
+export type Person = Answer<typeof admin.people.$get>["people"][number];
+export type PersonDetail = Answer<(typeof admin.people)[":id"]["$get"]>;
 
-export type SettingsData = Settings & { admins: Admin[]; openRouterKey: KeyStatus };
-
-export type Person = {
-	/** The user id, or the email for an invite without an account. */
-	id: string;
-	name: string;
-	email: string;
-	role: "admin" | "user";
-	status: Status;
-	note: string;
-	invitedAt: string | null;
-	invitedBy: string | null;
-	joinedAt: string | null;
-	lastActive: string | null;
-	/** null means the default from settings. */
-	dailyCredits: number | null;
-	banReason: string | null;
-	banExpires: string | null;
-	/** `limit` includes `extra`, the credits admins gave for today. */
-	today: { used: number; limit: number; extra: number };
-	/** Credits over the last 7 days. */
-	week: number;
-};
-
+// Written out, not read from the routes: the pages compute with their fields, which the
+// check without the server (tsconfig.no-node.json) would see as `any`. Where a page keeps
+// an answer in one of them, the full check confirms that the answer fits.
+export type Status = "active" | "invited" | "banned";
 export type Day = { date: string; credits: number; replies: number };
 export type ModelShare = { model: string; credits: number };
-export type Session = { device: string; lastUsed: string };
-
-export type PersonDetail = { person: Person; days: Day[]; models: ModelShare[]; sessions: Session[]; chats: number; settings: Settings };
-
 export type Overview = {
 	today: { active: number; replies: number; credits: number; outOfCredits: number };
 	yesterday: { active: number; replies: number };
@@ -68,61 +35,24 @@ export type Overview = {
 	creditsPerUsd: number;
 };
 
-type Named = { id: string; name: string; email: string };
+type Requests = Answer<typeof admin.requests.$get>;
+export type PendingRequest = Requests["pending"][number];
+export type DecidedRequest = Requests["decided"][number];
 
-export type PendingRequest = { id: number; createdAt: string; person: Named; today: { used: number; limit: number }; dailyLimit: number; week: number };
-export type DecidedRequest = {
-	id: number;
-	createdAt: string;
-	status: "approved" | "declined";
-	credits: number | null;
-	decidedAt: string;
-	person: Named;
-	decidedBy: string;
-};
+/** A page of the log (server/admin/activity.ts). */
+export type ActivityPage = Answer<typeof admin.activity.$get>;
+export type Activity = ActivityPage["events"][number];
 
-/**
- * One change an admin made (server/admin/activity.ts). `action` is the endpoint's name,
- * such as "update-user" or "grant-credits"; `before` and `after` hold what changed.
- * `target` is the person it was done to, if any.
- */
-export type Activity = {
-	id: number;
-	at: string;
-	actor: Named;
-	action: string;
-	target: Named | null;
-	before: Record<string, unknown> | null;
-	after: Record<string, unknown> | null;
-};
+export type SkillSummary = Answer<typeof admin.skills.$get>["skills"][number];
+export type SkillDetail = Answer<(typeof admin.skills)[":id"]["$get"]>;
 
-/** A page of the log. `next` is the id to load the page after from, or null on the last page. `person` is the filter, if any. */
-export type ActivityPage = { events: Activity[]; next: number | null; person: Named | null };
-
-/** A skill in the list (server/skills.ts). */
-export type SkillSummary = {
-	id: number;
-	name: string;
-	description: string;
-	/** Ponder can load it on its own. False: only when someone types $name. */
-	automatic: boolean;
-	enabled: boolean;
-	updatedAt: string;
-	updatedBy: string | null;
-};
-
-/** `body` is the instructions; `source` the whole SKILL.md the server keeps, for a download. */
-export type SkillDetail = SkillSummary & { body: string; source: string };
-
-export type Viewer = { user: { id: string; email: string; name: string; role: "admin" | "user" } };
-
-/** Calls /api/admin/<path>. Throws the server's message, which the pages show in a toast or a dialog. */
-export const api = <T>(path: string, options: { method?: string; body?: unknown } = {}) => request<T>(`/api/admin${path}`, options);
+export type Viewer = Answer<typeof client.api.me.$get>;
 
 /** Who opened /admin. null when signed out (401 or 403). Throws when the server can't be reached or fails. */
 export async function loadViewer(): Promise<Viewer | null> {
-	const response = await fetch("/api/me");
-	if (response.status === 401 || response.status === 403) return null;
+	const response = await client.api.me.$get();
+	// The route's type has only its 200: the 401 comes from the session check before it.
+	if ([401, 403].includes(response.status)) return null;
 	if (!response.ok) throw new Error(`The server answered ${response.status}.`);
 	return response.json();
 }

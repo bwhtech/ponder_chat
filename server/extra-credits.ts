@@ -100,7 +100,7 @@ export async function pendingRequests() {
 }
 
 export async function decidedRequests(days = 30) {
-	return sql<{ id: number; user_id: string; created_at: Date; status: RequestStatus; credits: number | null; decided_by: string; decided_at: Date }[]>`
+	return sql<{ id: number; user_id: string; created_at: Date; status: Decision["status"]; credits: number | null; decided_by: string; decided_at: Date }[]>`
 		select id, user_id, created_at, status, credits, decided_by, decided_at from credit_requests
 		where status <> 'pending' and decided_at > now() - make_interval(days => ${days})
 		order by decided_at desc`;

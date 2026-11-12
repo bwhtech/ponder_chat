@@ -5,6 +5,7 @@ import { lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart, t
 import { Alert, Button, toast } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me } from "./account";
+import { client } from "./api";
 import { useAttention } from "./attention";
 import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
 import { changeConnector, connectors, findTool, loadConnectors, toolTitle } from "./connectors/api";
@@ -435,7 +436,7 @@ function sendNow({ text, files, skills: chosen, citations: quoted }: Queued) {
 
 /** The run outlives the request, so Stop tells the server, then drops the stream here. */
 async function stopRun() {
-	await fetch(`/api/chat/${encodeURIComponent(props.threadId)}/stop`, { method: "POST" }).catch(() => undefined);
+	await client.api.chat[":id"].stop.$post({ param: { id: encodeURIComponent(props.threadId) } }).catch(() => undefined);
 	await stop();
 }
 

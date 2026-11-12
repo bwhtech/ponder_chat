@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { request } from "../api";
+import { client, unwrap } from "../api";
 import type { ConnectorTool, ConnectorView, Rule } from "../../shared/connectors";
 
 /**
@@ -35,8 +35,8 @@ const touch = (id: string) => {
 let newestLoad = 0;
 let appliedLoad = 0;
 
-const call = <T>(path: string, options?: { method?: string; body?: unknown }) => request<T>(`/api/connectors${path}`, options);
-const json = (method: string, body: unknown) => ({ method, body });
+const api = client.api.connectors;
+const one = (id: string) => ({ param: { id } });
 
 export async function loadConnectors() {
 	const load = ++newestLoad;
@@ -44,7 +44,7 @@ export async function loadConnectors() {
 	connectorsError.value = "";
 	let fresh: Connector[];
 	try {
-		fresh = (await call<{ connectors: Connector[] }>("")).connectors;
+		fresh = (await unwrap(api.$get())).connectors;
 	} catch (error) {
 		if (load === newestLoad) connectorsError.value = error instanceof Error ? error.message : "The connectors could not load.";
 		throw error;
@@ -69,19 +69,20 @@ function keep(connector: Connector) {
 	return connector;
 }
 
-export const probeServer = (url: string) => call<Probe>("/probe", json("POST", { url }));
+// Probe is written out: the dialog indexes with its `auth`, which the check without the server would see as `any`.
+export const probeServer = (url: string): Promise<Probe> => unwrap(api.probe.$post({ json: { url } }));
 
 /** A connector with no sign-in or a key is added at once; OAuth returns the URL where the person signs in. */
 export async function addConnector(input: NewConnector) {
-	const result = await call<{ connector: Connector } | { authorizeUrl: string }>("", json("POST", input));
+	const result = await unwrap(api.$post({ json: input }));
 	if ("connector" in result) keep(result.connector);
 	return result;
 }
 
-export const startSignIn = (id: string) => call<{ authorizeUrl: string }>(`/${id}/sign-in`, { method: "POST" });
+export const startSignIn = (id: string) => unwrap(api[":id"]["sign-in"].$post(one(id)));
 
 export async function refreshConnector(id: string) {
-	return keep((await call<{ connector: Connector }>(`/${id}/refresh`, { method: "POST" })).connector);
+	return keep((await unwrap(api[":id"].refresh.$post(one(id)))).connector);
 }
 
 export type ConnectorChange = { name?: string; enabled?: boolean; rules?: Record<string, Rule | null>; headers?: Header[] };
@@ -98,7 +99,7 @@ export async function changeConnector(id: string, change: ConnectorChange) {
 	newestChange.set(id, mine);
 	const newest = () => newestChange.get(id) === mine;
 	try {
-		const { connector } = await call<{ connector: Connector }>(`/${id}`, json("PATCH", change));
+		const { connector } = await unwrap(api[":id"].$patch({ ...one(id), json: change }));
 		if (newest()) {
 			endedChange.set(id, mine);
 			olderAnswer.delete(id);
@@ -120,7 +121,7 @@ export async function changeConnector(id: string, change: ConnectorChange) {
 }
 
 export async function removeConnector(id: string) {
-	await call(`/${id}`, { method: "DELETE" });
+	await unwrap(api[":id"].$delete(one(id)));
 	touch(id);
 	connectors.value = connectors.value?.filter((each) => each.id !== id);
 }

@@ -1,7 +1,7 @@
 import type { UIMessage } from "ai";
 import { computed, ref, shallowRef } from "vue";
 import { nameFromFirstMessage } from "../shared/thread-name";
-import { request } from "./api";
+import { client, unwrap, type Answer } from "./api";
 import { forgetThread, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
 
 /**
@@ -13,7 +13,7 @@ import { forgetThread, peekThread, readThread, writeThread, type CachedThread } 
  * asked afterwards: a 304 when nothing changed, or the newer thread, which replaces
  * the chat unless a reply is on its way. The list is kept in localStorage the same way.
  */
-export type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number };
+export type ThreadSummary = Answer<typeof client.api.threads.$get>["threads"][number];
 
 const LIST_KEY = "ponder-chat:threads";
 const threads = ref<ThreadSummary[]>([]);
@@ -82,7 +82,7 @@ async function init() {
 
 async function refresh() {
 	try {
-		const response = await fetch("/api/threads");
+		const response = await client.api.threads.$get();
 		if (!response.ok) return;
 		const fresh: ThreadSummary[] = (await response.json()).threads;
 		for (const id of pending.keys()) if (fresh.some((thread) => thread.id === id)) pending.delete(id);
@@ -208,12 +208,12 @@ async function waitForTitle(id: string, untitled: string) {
 }
 
 async function rename(id: string, title: string) {
-	await request(`/api/threads/${encodeURIComponent(id)}`, { method: "PATCH", body: { title }, failure: "The thread could not be renamed." });
+	await unwrap(client.api.threads[":id"].$patch({ param: { id: encodeURIComponent(id) }, json: { title } }), "The thread could not be renamed.");
 	await refresh();
 }
 
 async function remove(id: string) {
-	await request(`/api/threads/${encodeURIComponent(id)}`, { method: "DELETE", failure: "The thread could not be deleted." });
+	await unwrap(client.api.threads[":id"].$delete({ param: { id: encodeURIComponent(id) } }), "The thread could not be deleted.");
 	forgetThread(id);
 	pending.delete(id);
 	await refresh();

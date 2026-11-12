@@ -1,5 +1,5 @@
 import { reactive, ref } from "vue";
-import { api, type Settings, type Viewer } from "./api";
+import { admin, unwrap, type Settings, type Viewer } from "./api";
 
 /**
  * What the admin pages share: who is signed in, the credit settings (for credits in
@@ -13,5 +13,5 @@ export const counts = reactive({ pendingRequests: 0, invited: 0 });
 export const settingsOpen = ref(false);
 
 export async function refreshCounts() {
-	Object.assign(counts, await api<typeof counts>("/summary"));
+	Object.assign(counts, await unwrap(admin.summary.$get()));
 }

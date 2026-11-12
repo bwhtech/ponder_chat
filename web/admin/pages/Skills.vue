@@ -4,7 +4,7 @@ import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "f
 import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { skillTitle } from "../../../shared/skill-file";
-import { api, type SkillDetail, type SkillSummary } from "../api";
+import { admin, unwrap, type SkillDetail, type SkillSummary } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import ListSkeleton from "../components/ListSkeleton.vue";
 import NewSkillDialog from "../components/NewSkillDialog.vue";
@@ -25,7 +25,7 @@ let asked = 0;
 async function load() {
 	const mine = ++asked;
 	try {
-		const data = await api<{ skills: SkillSummary[] }>("/skills");
+		const data = await unwrap(admin.skills.$get());
 		if (mine !== asked) return;
 		skills.value = data.skills;
 		status.value = { kind: "loaded" };
@@ -76,7 +76,7 @@ const emptyText = computed(() =>
 async function setEnabled(skill: SkillSummary, enabled: boolean) {
 	skill.enabled = enabled;
 	try {
-		await api(`/skills/${skill.id}/enabled`, { method: "PUT", body: { enabled } });
+		await unwrap(admin.skills[":id"].enabled.$put({ param: { id: String(skill.id) }, json: { enabled } }));
 		toast.success(enabled ? `${skillTitle(skill.name)} is on for everyone` : `${skillTitle(skill.name)} is off`);
 	} catch (e) {
 		skill.enabled = !enabled;
@@ -91,7 +91,7 @@ function remove(skill: SkillSummary) {
 		message: "No one can use it after this. Chats that used it keep their replies.",
 		confirmLabel: "Delete",
 		onConfirm: async () => {
-			await api(`/skills/${skill.id}`, { method: "DELETE" });
+			await unwrap(admin.skills[":id"].$delete({ param: { id: String(skill.id) } }));
 			toast.success(`Deleted ${skillTitle(skill.name)}`);
 			await load();
 		},
@@ -107,7 +107,7 @@ function newSkill() {
 }
 async function duplicate(skill: SkillSummary) {
 	try {
-		copyOf.value = await api<SkillDetail>(`/skills/${skill.id}`);
+		copyOf.value = await unwrap(admin.skills[":id"].$get({ param: { id: String(skill.id) } }));
 		creating.value = true;
 	} catch (e) {
 		toast.error((e as Error).message);
