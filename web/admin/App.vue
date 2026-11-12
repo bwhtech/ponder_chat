@@ -106,12 +106,13 @@ onBeforeUnmount(() => clearInterval(timer));
 												size="sm"
 												:label="String(counts.pendingRequests)"
 												:aria-label="`${counts.pendingRequests} waiting`"
+												class="mr-1.5"
 											/>
 										</template>
 									</SidebarItem>
 									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')">
 										<template #suffix>
-											<span v-if="counts.invited" class="text-xs tabular-nums text-ink-gray-5">{{ counts.invited }} invited</span>
+											<span v-if="counts.invited" class="mr-2 text-xs tabular-nums text-ink-gray-5">{{ counts.invited }} invited</span>
 										</template>
 									</SidebarItem>
 									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
