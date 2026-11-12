@@ -66,11 +66,15 @@ export const connectorsApi = new Hono<Env>()
 		}),
 	);
 
-/** Runs a request: a problem the person can fix is a 400 with its message. */
+/**
+ * Runs a request: a problem the person can fix is a 400 with its message. The MCP SDK
+ * checks a server's replies with zod, and its message says what the server got wrong.
+ */
 async function answer<T extends object>(c: Context<Env>, run: () => Promise<T>) {
 	try {
 		return c.json(await run());
 	} catch (error) {
+		if (error instanceof z.ZodError) return c.json({ error: error.issues[0]?.message ?? "That request is not valid." }, 400);
 		if (error instanceof ConnectorProblem || error instanceof NeedsSignIn) return c.json({ error: error.message }, 400);
 		console.warn("connectors:", error);
 		return c.json({ error: describeError(error) }, 502);

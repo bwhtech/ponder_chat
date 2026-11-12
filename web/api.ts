@@ -14,11 +14,14 @@ export const client: ApiClient = hc<AppType>("/");
 /**
  * The JSON of a typed client call's successful answer. On a refusal it throws the server's
  * own message (`{ error }`), or `failure` when the server sent none, so the page can show it.
+ * A 500 is an unexpected error, and its message only says so (onError in server/app.ts),
+ * so there `failure`, which names what failed, comes first.
  */
 export async function unwrap<R extends ClientResponse<unknown>>(call: R | Promise<R>, failure?: string): Promise<Success<R>> {
 	const response = await call;
 	const data = (await response.json().catch(() => ({}))) as { error?: string; errors?: unknown };
-	if (!response.ok) throw new ApiError(data.error ?? failure ?? `Something went wrong (${response.status}).`, response.status, data.errors);
+	const message = response.status === 500 ? (failure ?? data.error) : (data.error ?? failure);
+	if (!response.ok) throw new ApiError(message ?? `Something went wrong (${response.status}).`, response.status, data.errors);
 	return data as Success<R>;
 }
 

@@ -26,12 +26,18 @@ export function validate<Target extends "json" | "query", Schema extends z.ZodTy
 	if (target === "query") return check;
 	const checkJson: typeof check = async (c, next) => {
 		// Not JSON is a 400 that says so, as `{ error }`: the validator's own refusal is plain text.
-		// Hono keeps the body it read, so the validator reads it again for free.
+		// Without a JSON Content-Type the validator would check `{}` in place of the body, so
+		// a rename, for example, would clear the title. Hono keeps the body it read, so the
+		// validator reads it again for free.
+		if (!JSON_TYPE.test(c.req.header("Content-Type") ?? "")) refuse(c, "Send the request body as JSON.", options.plain);
 		if (!(await c.req.json().then(() => true, () => false))) refuse(c, "The request body is not valid JSON.", options.plain);
 		return check(c, next);
 	};
 	return checkJson;
 }
+
+/** What Hono's validator reads as JSON. */
+const JSON_TYPE = /^application\/([a-z-\.]+\+)?json(;\s*[a-zA-Z0-9\-]+=([^;]+))*$/i;
 
 function refuse(c: Context, error: string, plain = false): never {
 	throw new HTTPException(400, { res: plain ? c.text(error, 400) : c.json({ error }, 400) });
