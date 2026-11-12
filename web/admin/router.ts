@@ -1,4 +1,5 @@
 import type { RouteRecordRaw } from "vue-router";
+import Activity from "./pages/Activity.vue";
 import Overview from "./pages/Overview.vue";
 import People from "./pages/People.vue";
 import Person from "./pages/Person.vue";
@@ -16,6 +17,7 @@ export const routes: RouteRecordRaw[] = [
 	{ path: "/people/:id", component: Person, props: true },
 	{ path: "/skills", component: Skills },
 	{ path: "/skills/:id(\\d+)", component: SkillEdit, props: true },
+	{ path: "/activity", component: Activity },
 	// A page on phones. Wider screens open the settings dialog instead: over the page they
 	// are on, or over the overview when /admin/settings is the first page opened.
 	{
