@@ -1,3 +1,4 @@
+import { dirname, resolve } from "node:path";
 import { defineConfig } from "nitro";
 
 /**
@@ -14,4 +15,25 @@ export default defineConfig({
 	modules: ["workflow/nitro"],
 	plugins: ["./server/plugins/startup.ts"],
 	routes: { "/**": "./server/app.ts" },
+	buildPlugins: [workerFiles()],
 });
+
+/**
+ * A worker thread starts from a file of its own, which the bundle would not have: nothing
+ * imports it. For each `new URL("./<name>-worker.ts", import.meta.url)` in the server's
+ * code, this builds that file into the output and points the address at it.
+ */
+function workerFiles() {
+	const WORKER_URL = /new URL\("(\.\/([\w-]+-worker)\.ts)", import\.meta\.url\)/g;
+	type Build = { emitFile(file: { type: "chunk"; id: string; fileName: string }): string };
+	return {
+		name: "ponder:worker-files",
+		transform(this: Build, code: string, id: string) {
+			if (!code.includes("-worker.ts")) return;
+			return code.replace(WORKER_URL, (_, path: string, name: string) => {
+				const reference = this.emitFile({ type: "chunk", id: resolve(dirname(id), path), fileName: `_workers/${name}.mjs` });
+				return `new URL(import.meta.ROLLUP_FILE_URL_${reference})`;
+			});
+		},
+	};
+}
