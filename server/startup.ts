@@ -1,4 +1,5 @@
 import { hkdfSync } from "node:crypto";
+import { migrateAdminEvents } from "./admin-events.ts";
 import { migrateAuth } from "./auth.ts";
 import { migrateCredits } from "./credits.ts";
 import { migrate, sql } from "./db.ts";
@@ -49,6 +50,7 @@ async function migrateAll() {
 	await migrateFiles();
 	await migrateCredits();
 	await migrateInvites();
+	await migrateAdminEvents();
 	await migrateSecrets();
 	await migrateConnectors();
 	await migrateSkills();

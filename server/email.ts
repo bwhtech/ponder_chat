@@ -1,5 +1,6 @@
 /**
- * Email from Ponder: sign-in codes, invites, and answers to requests for more credits. Sent with Cloudflare Email Service's REST
+ * Email from Ponder: sign-in codes, invites, answers to requests for more credits, and the
+ * notice of an email change. Sent with Cloudflare Email Service's REST
  * API when it is set up (PONDER_EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_EMAIL_TOKEN);
  * otherwise, as on a laptop, the message is printed to the server log.
  */
@@ -72,4 +73,25 @@ export function creditAnswerEmail(to: string, url: string, credits: number | nul
 		text: `${answer} ${refill}\n\nOpen Ponder Chat: ${url}`,
 		html: `<p>${answer}</p><p>${refill}</p><p><a href="${url}">Open Ponder Chat</a></p>`,
 	};
+}
+
+/**
+ * An admin changed the account's email (admin-auth-events.ts). Sent to the old address,
+ * which no longer signs in, so the person can object if they did not expect it.
+ */
+export function emailChangedEmail(to: string, newEmail: string, admin: string): Email {
+	const changed = `An admin, ${admin}, changed the email of your Ponder Chat account from ${to} to ${newEmail}.`;
+	const after = `You can no longer sign in with ${to}. Sign-in codes now go to ${newEmail}.`;
+	const contact = "If you did not expect this, contact the admin.";
+	return {
+		to,
+		subject: "The email of your Ponder Chat account changed",
+		text: `${changed}\n\n${after}\n\n${contact}`,
+		html: `<p>${escapeHtml(changed)}</p><p>${escapeHtml(after)}</p><p style="color:#666">${contact}</p>`,
+	};
+}
+
+/** For text that a person can choose, such as an admin's name. */
+function escapeHtml(text: string) {
+	return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
