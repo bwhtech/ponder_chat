@@ -106,7 +106,10 @@ export async function whenReplyFinished(threadId: string, timeoutMs = 10_000) {
 
 /** Cancels a run and saves what it wrote so far. */
 async function cancel(run: ThreadRun, owner: string) {
-	await getRun(run.runId).cancel({ cancelReason: "Stopped by the person, or replaced by a newer message." }).catch(() => undefined);
+	// A failed cancel still saves the reply below, but the run may write on, so it is logged.
+	await getRun(run.runId)
+		.cancel({ cancelReason: "Stopped by the person, or replaced by a newer message." })
+		.catch((error) => console.warn(`replies: could not cancel run ${run.runId}:`, error instanceof Error ? error.message : error));
 	// The step in flight writes on for a moment after a cancel, and the stream is never
 	// closed, so the saved reply is what the run had written when it was stopped.
 	// Finished even when the save fails, so the thread does not look busy forever.

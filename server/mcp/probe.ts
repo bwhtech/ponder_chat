@@ -1,5 +1,5 @@
 import { guardedFetch, mcpUrlProblem } from "../net-guard.ts";
-import { describeError } from "./errors.ts";
+import { ConnectorProblem, describeError } from "./errors.ts";
 import type { AuthKind, Transport } from "./store.ts";
 
 /**
@@ -100,14 +100,27 @@ async function authKind(url: URL, headers: Headers): Promise<AuthKind> {
 		"/.well-known/oauth-protected-resource",
 		"/.well-known/oauth-authorization-server",
 	];
+	let failure: unknown;
+	let answered = false;
 	for (const candidate of candidates) {
-		const response = await guardedFetch(new URL(candidate, url.origin), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch(() => undefined);
-		if (!response?.ok) {
-			await response?.body?.cancel();
+		const response = await guardedFetch(new URL(candidate, url.origin), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(TIMEOUT_MS) }).catch((error) => {
+			failure = error;
+			return undefined;
+		});
+		if (!response) continue;
+		answered = true;
+		if (!response.ok) {
+			await response.body?.cancel();
 			continue;
 		}
 		const metadata = (await response.json().catch(() => ({}))) as { authorization_servers?: unknown[]; authorization_endpoint?: string };
 		if (metadata.authorization_servers?.length || metadata.authorization_endpoint) return "oauth";
+	}
+	// No metadata address answered at all (a timeout, the network): that says nothing about
+	// the sign-in. "A key" would send the person to the wrong form for an OAuth server.
+	if (!answered) {
+		console.warn(`connectors: no OAuth metadata address of ${url.host} answered:`, describeError(failure));
+		throw new ConnectorProblem("Could not reach the server to check how it signs in. Try again.");
 	}
 	return "headers";
 }

@@ -89,7 +89,12 @@ async function becomeTheOnlyWorker() {
  */
 async function releaseDeadWorkers() {
 	const [row] = await sql<{ workers: string[] | null }[]>`
-		select array_agg(distinct locked_by) as workers from graphile_worker._private_jobs where locked_by is not null`.catch(() => [{ workers: null }]);
+		select array_agg(distinct locked_by) as workers from graphile_worker._private_jobs where locked_by is not null`.catch((error) => {
+		// On the first start the worker has not made its schema yet, so there is nothing to release.
+		// Any other failure leaves a stopped worker's jobs locked, and their replies wait: logged.
+		if (!["42P01", "3F000"].includes((error as { code?: string }).code ?? "")) console.error("workflow: could not look for the jobs of stopped workers:", error instanceof Error ? error.message : error);
+		return [{ workers: null }];
+	});
 	if (!row?.workers?.length) return;
 	await sql`select graphile_worker.force_unlock_workers(${row.workers})`;
 	console.log(`workflow: released the jobs of ${row.workers.length} stopped worker(s)`);

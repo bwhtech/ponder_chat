@@ -1,5 +1,6 @@
 import { jsonSchema, tool, type JSONSchema7, type ToolSet } from "ai";
 import type { ConnectorToolSpec } from "../mcp/connectors.ts";
+import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
 
 /**
  * The person's connector tools in a reply. A live MCP client can't cross a step boundary
@@ -10,9 +11,12 @@ import type { ConnectorToolSpec } from "../mcp/connectors.ts";
 /** The tools of the person's connectors that are on, and a section for the instructions. */
 export async function connectorToolsStep(owner: string): Promise<{ specs: ConnectorToolSpec[]; guidance: string }> {
 	"use step";
-	const { connectorToolsFor } = await import("../mcp/connectors.ts");
-	return connectorToolsFor(owner);
+	return contextStep("connectors", `person ${owner}`, async () => {
+		const { connectorToolsFor } = await import("../mcp/connectors.ts");
+		return connectorToolsFor(owner);
+	});
 }
+connectorToolsStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 /**
  * AI SDK tools from the specs. A tool on "Ask first" waits for the person (needsApproval).

@@ -80,6 +80,9 @@ FAILED=$(sql "select count(*) from workflow.workflow_runs where status = 'failed
 check failed-replies "[ \"${FAILED:-0}\" -eq 0 ]" "$FAILED replies failed in the last 15 minutes. npx workflow inspect runs --backend @workflow/world-postgres"
 STUCK=$(sql "select count(*) from thread_runs where finished_at is null and started_at < now() - interval '15 minutes'")
 check stuck-replies "[ \"${STUCK:-0}\" -eq 0 ]" "$STUCK replies have been running for over 15 minutes."
+# A reply written without memory, connectors, skills or trusted pages (server/workflow/context-step.ts).
+DEGRADED=$(journalctl -u ponder-chat --since "-15min" --no-pager -q 2>/dev/null | grep -c "reply degraded:")
+check degraded-replies "[ \"${DEGRADED:-0}\" -eq 0 ]" "$DEGRADED replies were written without memory, connectors, skills or trusted pages in the last 15 minutes. sudo journalctl -u ponder-chat --since -15min | grep 'reply degraded'"
 QUEUE=$(sql "select count(*) from graphile_worker._private_jobs where attempts >= 3 and last_error is not null")
 check queue-errors "[ \"${QUEUE:-0}\" -eq 0 ]" "$QUEUE workflow jobs failed 3 times or more."
 SPENT=$(sql "select coalesce(sum(cost_usd), 0)::numeric(10,2) from runs where created_at >= date_trunc('day', now() at time zone 'utc')")
