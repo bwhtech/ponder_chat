@@ -27,8 +27,17 @@ const READ_ONLY = new Set(["/admin/get-user", "/admin/list-users", "/admin/list-
 /** The user fields an event shows. Better Auth's users have no secrets, but a new field must be added here on purpose. */
 const SHOWN = ["email", "name", "role", "banned", "banReason", "banExpires", "emailVerified", "image"] as const;
 
-type UserRow = { id: string } & Record<(typeof SHOWN)[number], unknown>;
+/** Fields an event always shows for these actions, changed or not, so a reader can tell what was asked. */
+const ALWAYS: Record<string, readonly Field[]> = { "/admin/update-user": ["email", "name"], "/admin/set-role": ["role"] };
 
+type Field = (typeof SHOWN)[number];
+type UserRow = { id: string } & Record<Field, unknown>;
+
+/**
+ * The person's row from the before hook, for the after hook of the same call. Keyed by
+ * `ctx.context`: Better Auth passes the same object to both hooks of one call (in 1.7, its
+ * admin middleware puts the session on it). The e2e test fails if that stops being true.
+ */
 const targets = new WeakMap<object, UserRow | null>();
 
 export async function beforeAdminCall(ctx: HookContext) {
@@ -37,16 +46,29 @@ export async function beforeAdminCall(ctx: HookContext) {
 	targets.set(ctx.context, userId ? await userRow(userId) : null);
 }
 
+/** Never throws: the change is made already, so a failure here must not fail the admin's request. */
 export async function afterAdminCall(ctx: HookContext) {
+	try {
+		await recordCall(ctx);
+	} catch (error) {
+		console.error(`admin-events: could not record ${ctx.path}:`, error instanceof Error ? error.message : error);
+	}
+}
+
+async function recordCall(ctx: HookContext) {
 	const actor = ctx.context.session?.user;
 	if (!isLogged(ctx.path) || isAPIError(ctx.context.returned) || !actor) return;
 	const before = targets.get(ctx.context) ?? null;
 	const after = before ? await userRow(before.id) : null;
+	const action = ctx.path.slice("/admin/".length);
+	// A call that names a person but whose person was not found is still recorded, and said loudly.
+	const lost = !before && ctx.path !== "/admin/revoke-user-session" && ctx.path !== "/admin/stop-impersonating";
+	if (lost) console.error(`admin-events: ${action} by ${actor.email} succeeded, but its person was not found`);
 	await recordAdminEvent({
 		actor: { id: actor.id, email: actor.email },
-		action: ctx.path.slice("/admin/".length),
-		target: before?.id ?? null,
-		...changes(before, after, ctx.path === "/admin/update-user"),
+		action,
+		target: before?.id ?? returnedUserId(ctx.context.returned),
+		...(lost ? { after: { targetNotFound: true } } : changes(before, after, ALWAYS[ctx.path] ?? [])),
 	});
 	if (before && after && before.email !== after.email) await noticeToOldEmail(String(before.email), String(after.email), actor);
 }
@@ -62,8 +84,16 @@ async function targetId(ctx: HookContext) {
 		const [row] = token ? await sql<{ user_id: string }[]>`select "userId" as user_id from sessions where token = ${token}` : [];
 		return row?.user_id ?? null;
 	}
+	// The same as Better Auth's own check (z.coerce.string()), so ["abc"] names the person "abc" here too.
 	const id = ctx.body?.userId;
-	return typeof id === "string" || typeof id === "number" ? String(id) : null;
+	return id === undefined || id === null ? null : String(id);
+}
+
+/** update-user returns the user, and set-role, ban-user and unban-user return { user }. */
+function returnedUserId(returned: unknown) {
+	const value = returned as { id?: unknown; user?: { id?: unknown } } | null | undefined;
+	const id = value?.user?.id ?? value?.id;
+	return typeof id === "string" ? id : null;
 }
 
 async function userRow(id: string) {
@@ -72,15 +102,15 @@ async function userRow(id: string) {
 	return row ?? null;
 }
 
-/** The fields that changed. An update-user event always shows the email and name, so a later reader can tell who it was. */
-function changes(before: UserRow | null, after: UserRow | null, always: boolean) {
+/** The fields that changed, and the `always` fields (ALWAYS) even when they did not. */
+function changes(before: UserRow | null, after: UserRow | null, always: readonly Field[]) {
 	if (!before || !after) return {};
-	const fields = SHOWN.filter((field) => (always && (field === "email" || field === "name")) || !same(before[field], after[field]));
+	const fields = SHOWN.filter((field) => always.includes(field) || !same(before[field], after[field]));
 	if (!fields.length) return {};
 	return { before: pick(before, fields), after: pick(after, fields) };
 }
 
-function pick(row: UserRow, fields: readonly (typeof SHOWN)[number][]) {
+function pick(row: UserRow, fields: readonly Field[]) {
 	return Object.fromEntries(fields.map((field) => [field, row[field] ?? null]));
 }
 

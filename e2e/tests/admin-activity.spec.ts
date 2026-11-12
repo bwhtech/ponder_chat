@@ -40,6 +40,31 @@ test("an email change through Better Auth is logged, and the old address is told
 	await expect(page.getByText(`${person.email} → ${newEmail}`).first()).toBeVisible();
 });
 
+// Better Auth reads userId with z.coerce.string(), so ["<id>"] names the same person, and must be logged as that person.
+test("an email change with the user id in an array is logged, and the old address is told", async ({ page, admin, browser, db, fake }) => {
+	const person = await otherPerson(browser, db, fake, "array id");
+	const newEmail = uniqueEmail("array new address");
+	const headers = { origin: e2e.baseUrl };
+
+	const changed = await page.request.post("/api/auth/admin/update-user", { data: { userId: [person.id], data: { email: newEmail } }, headers });
+	expect(changed.ok(), await changed.text()).toBe(true);
+
+	const events = await db<{ actor_id: string; target: string; before: { email: string }; after: { email: string } }[]>`
+		select actor_id, target, before, after from admin_events where action = 'update-user' and actor_id = ${admin.id}`;
+	expect(events).toHaveLength(1);
+	expect(events[0]).toMatchObject({ target: person.id, before: { email: person.email }, after: { email: newEmail } });
+	expect((await fake.email(person.email)).text).toContain(newEmail);
+
+	// A role set to what it was keeps the role, so the page can say there was no change.
+	const role = await page.request.post("/api/auth/admin/set-role", { data: { userId: [person.id], role: "user" }, headers });
+	expect(role.ok(), await role.text()).toBe(true);
+	const [setRole] = await db<{ target: string; before: unknown; after: unknown }[]>`
+		select target, before, after from admin_events where action = 'set-role' and actor_id = ${admin.id}`;
+	expect(setRole).toEqual({ target: person.id, before: { role: "user" }, after: { role: "user" } });
+	await page.goto(`/admin/activity?person=${encodeURIComponent(person.id)}`);
+	await expect(page.getByText("Set the role to user, no change")).toBeVisible();
+});
+
 test("a change made on /admin is logged once", async ({ page, admin, browser, db, fake }) => {
 	const person = await otherPerson(browser, db, fake, "role change");
 
