@@ -14,13 +14,15 @@ export function describe(event: Activity): Described {
 	const before = event.before ?? {};
 	const after = event.after ?? {};
 	const describer = DESCRIBERS[event.action];
+	// The server could not find the person (admin-auth-events.ts): say so, not "no change".
+	if (after.targetNotFound) return { text: skillTitle(event.action), details: ["The server could not tell who this was"] };
 	// An action with no words here yet, such as "stop-impersonating", reads "Stop impersonating".
 	return describer ? describer(before, after) : { text: skillTitle(event.action), details: [] };
 }
 
 const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> = {
 	"update-user": (before, after) => ({ text: updateText(before, after), details: userChanges(before, after) }),
-	"set-role": (_, after) => ({ text: isAdminRole(after.role) ? "Made them an admin" : "Removed the admin role", details: [] }),
+	"set-role": (before, after) => ({ text: roleText(before, after), details: [] }),
 	"ban-user": (_, after) => ({ text: "Banned", details: banDetails(after) }),
 	"unban-user": () => ({ text: "Unbanned", details: [] }),
 	"revoke-user-sessions": () => ({ text: "Signed them out everywhere", details: [] }),
@@ -107,6 +109,14 @@ function value(raw: unknown) {
 
 function limit(raw: unknown) {
 	return raw === null || raw === undefined ? "Default" : credits(Number(raw));
+}
+
+/** An older event of a role set to what it was has no role at all. */
+function roleText(before: Fields, after: Fields) {
+	if (!("role" in after)) return "Set the role, no change";
+	const admin = isAdminRole(after.role);
+	if ("role" in before && isAdminRole(before.role) === admin) return admin ? "Set the role to admin, no change" : "Set the role to user, no change";
+	return admin ? "Made them an admin" : "Removed the admin role";
 }
 
 function isAdminRole(role: unknown) {

@@ -33,8 +33,11 @@ let asked = 0;
 
 async function load() {
 	const mine = ++asked;
+	// Start empty: a load for another person must not show the last person's rows, or page on with their cursor.
 	status.value = { kind: "loading" };
 	filtered.value = null;
+	rows.value = [];
+	next.value = null;
 	try {
 		const page = await fetchPage();
 		if (mine !== asked) return;
