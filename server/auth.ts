@@ -5,6 +5,7 @@ import { admin } from "better-auth/plugins/admin";
 import { emailOTP } from "better-auth/plugins/email-otp";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { Pool } from "pg";
+import { afterAdminCall, beforeAdminCall } from "./admin-auth-events.ts";
 import { sql } from "./db.ts";
 import { sendEmail, signInEmail } from "./email.ts";
 import { hosts, isLocalHost } from "./hosts.ts";
@@ -71,11 +72,15 @@ export const auth = betterAuth({
 			},
 		},
 	},
+	// Admin endpoints that change something go to the admin activity log (admin-auth-events.ts).
+	//
 	// A link refused after its check, such as for a banned person, would show the error as
 	// JSON. Send them back to the sign-in page with its code instead. (Success is a 302,
 	// also an APIError.) A Response, not ctx.redirect: that would keep the 403 status.
 	hooks: {
+		before: createAuthMiddleware(async (ctx) => beforeAdminCall(ctx)),
 		after: createAuthMiddleware(async (ctx) => {
+			await afterAdminCall(ctx);
 			const returned = ctx.context.returned;
 			if (ctx.path !== "/magic-link/verify" || !isAPIError(returned) || returned.statusCode < 400) return;
 			const code = encodeURIComponent(String(returned.body?.code ?? "failed"));
@@ -90,8 +95,10 @@ export const auth = betterAuth({
 		"/email-otp/request-email-change",
 		"/email-otp/change-email",
 		"/email-otp/verify-email",
-		// Admins see usage, not chats, so they cannot sign in as someone else. People join by
-		// invite and are banned rather than deleted, and there are no passwords to set.
+		// Admins see usage, not chats, so impersonation is off. But an admin can change a person's
+		// email (update-user), and then sign in with the new address. Each change is recorded in
+		// the admin activity log and emailed to the old address (admin-auth-events.ts). People
+		// join by invite and are banned rather than deleted, and there are no passwords to set.
 		"/admin/impersonate-user",
 		"/admin/create-user",
 		"/admin/remove-user",
