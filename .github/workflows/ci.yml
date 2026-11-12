@@ -47,6 +47,12 @@ jobs:
       - name: Check which pages web_fetch reads without asking
         run: npx tsx server/trusted-pages.check.ts
 
+      - name: Check that web_fetch tidies a page in linear time
+        run: npx tsx server/fetch-page.check.ts
+
+      - name: Check that a PDF's text is read off the server's thread
+        run: npx tsx server/pdf-text.check.ts
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

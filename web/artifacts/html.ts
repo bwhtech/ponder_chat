@@ -8,6 +8,10 @@ import { ARTIFACT_CDNS } from "../../shared/cdns";
  * A content policy goes first in the page. Scripts, styles and fonts load only from the
  * public CDNs below, and the page can send nothing to other addresses: no images, no
  * fetch, no forms. A policy that the page adds itself can only make this one stricter.
+ *
+ * This policy cannot stop the page from sending its own frame to another address, by
+ * script or by a meta refresh. The policy of the page that holds the frame stops that:
+ * `frame-src 'none'` in server/app.ts.
  */
 const CDNS = ARTIFACT_CDNS.join(" ");
 const TAILWIND = "https://cdn.tailwindcss.com";

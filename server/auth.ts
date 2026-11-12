@@ -78,7 +78,12 @@ export const auth = betterAuth({
 	// JSON. Send them back to the sign-in page with its code instead. (Success is a 302,
 	// also an APIError.) A Response, not ctx.redirect: that would keep the 403 status.
 	hooks: {
-		before: createAuthMiddleware(async (ctx) => beforeAdminCall(ctx)),
+		// Ponder uses codes only to sign in. A code of another type gets the usual answer, but
+		// none is stored: a stored one would show, when it is checked, that the email has an account.
+		before: createAuthMiddleware(async (ctx) => {
+			if (ctx.path === "/email-otp/send-verification-otp" && ctx.body?.type !== "sign-in") return ctx.json({ success: true });
+			await beforeAdminCall(ctx);
+		}),
 		after: createAuthMiddleware(async (ctx) => {
 			await afterAdminCall(ctx);
 			const returned = ctx.context.returned;
@@ -89,6 +94,9 @@ export const auth = betterAuth({
 	},
 	// There are no passwords, so the email-OTP routes for passwords and email changes stay off.
 	disabledPaths: [
+		// The page checks a code only by signing in with it. This route counts wrong codes
+		// from a stale read, so parallel requests could guess far more than three times.
+		"/email-otp/check-verification-otp",
 		"/email-otp/request-password-reset",
 		"/email-otp/reset-password",
 		"/forget-password/email-otp",

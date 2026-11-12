@@ -7,7 +7,7 @@
     "build": "vite build && nitro build",
     "typecheck": "node scripts/vue-tsc.cjs --noEmit -p tsconfig.json",
     "start": "./start.sh",
-    "typecheck:server": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --allowImportingTsExtensions server/app.ts server/plugins/startup.ts",
+    "typecheck:server": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --allowImportingTsExtensions server/app.ts server/plugins/startup.ts server/pdf-text-worker.ts",
     "typecheck:e2e": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2023 --strict --skipLibCheck --allowImportingTsExtensions --types node playwright.config.ts e2e/*.ts e2e/fake/*.ts e2e/mcp/*.ts e2e/tests/*.ts",
     "e2e": "npm run build && playwright test",
     "e2e:server": "tsx e2e/start.ts",
