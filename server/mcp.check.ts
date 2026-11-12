@@ -15,11 +15,14 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { Hono } from "hono";
+import type { SignedInEnv } from "./auth.ts";
 import { sql } from "./db.ts";
 import { forgetClient } from "./mcp/client.ts";
 import { addConnector, callConnectorTool, changeConnector, completeSignIn, connectorToolsFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
 import { freshCredentials } from "./mcp/oauth.ts";
 import { probe } from "./mcp/probe.ts";
+import { connectorsApi } from "./mcp/routes.ts";
 import { getConnection, migrateConnectors, readCredentials } from "./mcp/store.ts";
 import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor } from "./mcp/tools.ts";
 import { guardedFetch, mcpUrlProblem } from "./net-guard.ts";
@@ -236,6 +239,34 @@ try {
 		assert.ok(oauth.ok && oauth.auth === "oauth", JSON.stringify(oauth));
 		const missing = await probe(`${base}/nothing`);
 		assert.equal(missing.ok, false);
+	});
+
+	await check("probe says it could not check the sign-in when no metadata address answers", async () => {
+		// A server that asks for a sign-in, then drops the connection on every other request:
+		// that is a server it could not check, not a server that wants a key.
+		const flaky = createServer((request, response) => {
+			if (request.method === "POST" && request.url === "/mcp") return send(response, 401, { error: "unauthorized" });
+			request.socket.destroy();
+		});
+		await new Promise<void>((resolve) => flaky.listen(0, "127.0.0.1", resolve));
+		try {
+			const probed = await probe(`http://127.0.0.1:${(flaky.address() as AddressInfo).port}/mcp`);
+			assert.deepEqual(probed, { ok: false, message: "Could not reach the server to check how it signs in. Try again." });
+		} finally {
+			flaky.close();
+		}
+	});
+
+	await check("a connectors request whose body is not JSON is a 400 that says so", async () => {
+		const app = new Hono<SignedInEnv>()
+			.use(async (c, next) => {
+				c.set("user", { id: alice } as SignedInEnv["Variables"]["user"]);
+				await next();
+			})
+			.route("/", connectorsApi);
+		const response = await app.request("/probe", { method: "POST", headers: { "content-type": "application/json" }, body: "{not json" });
+		assert.equal(response.status, 400);
+		assert.deepEqual(await response.json(), { error: "The request body is not valid JSON." });
 	});
 
 	let openId = "";

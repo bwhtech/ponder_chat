@@ -3,6 +3,7 @@ import type { ModelMessage } from "ai";
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 import type { ActiveSkill } from "../skills.ts";
+import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
 import type { Continued } from "./runs.ts";
 
 /**
@@ -42,10 +43,13 @@ export async function loadModelMessages(threadId: string, owner: string, modelId
 /** Memory's guidance for the instructions, and what it recalls for the person's latest message. */
 export async function recallMemoryStep(threadId: string, owner: string): Promise<{ guidance: string; recalled: string }> {
 	"use step";
-	const { loadThread } = await import("../db.ts");
-	const { memoryForRun } = await import("../memory.ts");
-	return memoryForRun({ threadId, user: owner }, await loadThread(threadId));
+	return contextStep("memory", `thread ${threadId}`, async () => {
+		const { loadThread } = await import("../db.ts");
+		const { memoryForRun } = await import("../memory.ts");
+		return memoryForRun({ threadId, user: owner }, await loadThread(threadId));
+	});
 }
+recallMemoryStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function runPythonStep(input: RunPythonInput, threadId: string, owner: string) {
 	"use step";
@@ -62,10 +66,13 @@ export async function webSearchStep(input: WebSearchInput, threadId: string, own
 /** The pages web_fetch may read in this thread without asking the person (search/trusted-pages.ts). */
 export async function trustedPagesStep(threadId: string): Promise<string[]> {
 	"use step";
-	const { loadThread } = await import("../db.ts");
-	const { trustedPageKeys } = await import("../search/trusted-pages.ts");
-	return trustedPageKeys(await loadThread(threadId));
+	return contextStep("trusted pages", `thread ${threadId}`, async () => {
+		const { loadThread } = await import("../db.ts");
+		const { trustedPageKeys } = await import("../search/trusted-pages.ts");
+		return trustedPageKeys(await loadThread(threadId));
+	});
 }
+trustedPagesStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function webFetchStep(input: WebFetchInput) {
 	"use step";

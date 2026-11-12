@@ -57,7 +57,8 @@ export async function chatTurn(turn: ChatTurn) {
 	let failure: unknown;
 	try {
 		// What the person told Ponder in earlier chats (server/memory.ts). The turn is saved to memory with the reply (reply.ts).
-		// Without it, or without connectors, the reply is still written.
+		// Without it, or without connectors, the reply is still written. Each of these steps
+		// logs its own failure as "reply degraded" (context-step.ts), so the catches stay quiet.
 		const memory = await recallMemoryStep(turn.threadId, turn.owner).catch(() => ({ guidance: "", recalled: "" }));
 		// The tools of the apps the person connected (server/mcp/), recorded by the step.
 		const connectors = await connectorToolsStep(turn.owner).catch(() => ({ specs: [], guidance: "" }));

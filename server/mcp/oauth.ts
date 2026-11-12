@@ -9,7 +9,7 @@ import {
 } from "@ai-sdk/mcp";
 import { hosts, originOf } from "../hosts.ts";
 import { assertPublicHost, guardedFetch, privateNetworksAllowed } from "../net-guard.ts";
-import { ConnectorProblem, NeedsSignIn } from "./errors.ts";
+import { ConnectorProblem, describeError, NeedsSignIn } from "./errors.ts";
 import { saveCredentials, saveSignIn, takeSignIn, tokenExpiry, type Connection, type Credentials, type SignInSecret } from "./store.ts";
 
 /**
@@ -147,15 +147,27 @@ async function discoverAuthorizationServer(server: URL): Promise<OAuthAuthorizat
 		`/.well-known/openid-configuration${path}`,
 		...(path ? [`${path}/.well-known/openid-configuration`] : []),
 	];
+	let failure: unknown;
+	let answered = false;
 	for (const candidate of candidates) {
-		const response = await guardedFetch(new URL(candidate, server.origin), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }).catch(() => undefined);
-		if (!response?.ok) {
-			await response?.body?.cancel();
+		const response = await guardedFetch(new URL(candidate, server.origin), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }).catch((error) => {
+			failure = error;
+			return undefined;
+		});
+		if (!response) continue;
+		answered = true;
+		if (!response.ok) {
+			await response.body?.cancel();
 			continue;
 		}
 		const metadata = (await response.json().catch(() => undefined)) as { issuer?: string; token_endpoint?: string } | undefined;
 		if (!metadata?.issuer || !metadata.token_endpoint) continue;
 		return { issuer: metadata.issuer, authorizationServerUrl: server.toString(), tokenEndpoint: metadata.token_endpoint };
+	}
+	// Nothing answered (a timeout, the network): not the same as a server with no metadata.
+	if (!answered) {
+		console.warn(`connectors: no metadata address of the authorization server ${server.host} answered:`, describeError(failure));
+		throw new ConnectorProblem("Could not reach the server's sign-in. Try again.");
 	}
 	return undefined;
 }

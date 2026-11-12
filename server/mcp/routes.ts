@@ -57,7 +57,11 @@ async function answer(c: Context<Env>, run: () => Promise<unknown>) {
 	}
 }
 
-const body = async (c: Context<Env>) => c.req.json().catch(() => ({}));
+/** The request's JSON. Not JSON is a 400 that says so, not an empty object that fails the schema with a puzzling message. */
+const body = async (c: Context<Env>): Promise<unknown> =>
+	c.req.json().catch(() => {
+		throw new ConnectorProblem("The request body is not valid JSON.");
+	});
 
 connectorsApi.get("/", (c) => answer(c, async () => ({ connectors: await listConnectors(userOf(c)) })));
 
