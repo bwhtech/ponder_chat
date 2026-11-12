@@ -2,7 +2,7 @@ import { dialog, toast } from "frappe-ui";
 import { computed, reactive, ref } from "vue";
 import { api, type Admin, type KeyStatus, type Settings, type SettingsData } from "../api";
 import { settings } from "../store";
-import { creditValue } from "./format";
+import { creditValue, money } from "./format";
 
 /**
  * The General settings: the credit fields with their checks and Save, how PDFs are read
@@ -73,10 +73,10 @@ export function useSettingsForm() {
 		// A new credit value changes what every limit is worth, today's use included.
 		const before = creditValue(saved.value.creditsPerUsd);
 		const after = creditValue(Number(perUsd.value));
-		const budget = (Number(defaultCredits.value) / Number(perUsd.value)).toFixed(2);
+		const budget = money(Number(defaultCredits.value) / Number(perUsd.value));
 		dialog.confirm({
 			title: "Change what a credit is worth?",
-			message: `One credit goes from ${before} to ${after}. Limits keep their numbers, so a default of ${defaultCredits.value} credits becomes $${budget} a day. Today's use is counted again at the new value.`,
+			message: `One credit goes from ${before} to ${after}. Limits keep their numbers, so a default of ${defaultCredits.value} credits becomes ${budget} a day. Today's use is counted again at the new value.`,
 			confirmLabel: "Change it",
 			onConfirm: apply,
 		});

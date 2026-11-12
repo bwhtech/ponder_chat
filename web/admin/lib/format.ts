@@ -7,15 +7,14 @@ const usdExact = new Intl.NumberFormat("en-US", { style: "currency", currency: "
 
 export { credits } from "../../numbers";
 
-/** US dollars, such as "$0.05". */
+/** US dollars, such as "$0.05". Amounts under a cent keep their digits, such as "$0.0004", not "$0.00". */
 export function money(value: number) {
-	return usd.format(value);
+	return value > 0 && value < 0.01 ? usdExact.format(value) : usd.format(value);
 }
 
-/** US dollars for a credit count. Amounts under a cent keep their digits, such as "$0.0004", not "$0.00". */
+/** US dollars for a credit count. */
 export function dollars(creditsUsed: number) {
-	const value = creditsUsed / settings.creditsPerUsd;
-	return value > 0 && value < 0.01 ? usdExact.format(value) : money(value);
+	return money(creditsUsed / settings.creditsPerUsd);
 }
 
 /** What one credit is worth, such as "$0.001". */
