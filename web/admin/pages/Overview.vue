@@ -12,7 +12,7 @@ import EmptyState from "../../EmptyState.vue";
 import { shortDay } from "../../dates";
 import PrivacyNote from "../components/PrivacyNote.vue";
 import { count } from "../../numbers";
-import { credits, dollars, money } from "../lib/format";
+import { credits, dollars } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 import { counts, settings } from "../store";
 
@@ -124,7 +124,7 @@ function openRequests() {
 						delta-caption="vs yesterday"
 					/>
 					<NumberCard title="Credits used" :value="loading ? null : now.credits" :format="credits" :loading="loading" />
-					<NumberCard title="Cost" :value="loading ? null : now.credits / settings.creditsPerUsd" :format="money" :loading="loading" />
+					<NumberCard title="Cost" :value="loading ? null : now.credits" :format="dollars" :loading="loading" />
 					<NumberCard
 						title="People out of credits"
 						:loading="loading"

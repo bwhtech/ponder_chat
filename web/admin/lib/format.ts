@@ -1,25 +1,18 @@
 import { dayjs } from "frappe-ui";
 import { clockTime, fullDate, when } from "../../dates";
+import { money } from "../../numbers";
 import { settings } from "../store";
 
-const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
-const usdExact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumSignificantDigits: 3 });
+export { credits, money } from "../../numbers";
 
-export { credits } from "../../numbers";
-
-/** US dollars, such as "$0.05". Amounts under a cent keep their digits, such as "$0.0004", not "$0.00". */
-export function money(value: number) {
-	return value > 0 && value < 0.01 ? usdExact.format(value) : usd.format(value);
-}
-
-/** US dollars for a credit count. */
+/** US dollars for a credit count, at the saved credit value. */
 export function dollars(creditsUsed: number) {
 	return money(creditsUsed / settings.creditsPerUsd);
 }
 
 /** What one credit is worth, such as "$0.001". */
 export function creditValue(perUsd: number) {
-	return perUsd > 0 ? usdExact.format(1 / perUsd) : "—";
+	return perUsd > 0 ? money(1 / perUsd) : "—";
 }
 
 export function lastActive(iso: string | null) {
