@@ -2,6 +2,7 @@ import { isAPIError } from "better-auth/api";
 import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
+import { recordAdminEvent, type AdminEvent } from "../admin-events.ts";
 import { requireAdmin } from "../admins.ts";
 import { appOrigin, auth, type SignedInEnv } from "../auth.ts";
 import { setDailyCredits } from "../credits.ts";
@@ -12,7 +13,8 @@ import { allow, disallow, setInviteCredits } from "../invites.ts";
 import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
 import { getSettings, setPdfTextOnServer, updateSettings } from "../settings.ts";
 import { MAX_BODY } from "../../shared/skill-file.ts";
-import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult } from "../skills.ts";
+import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult, type SkillDetail } from "../skills.ts";
+import { activityPage } from "./activity.ts";
 import { listAdmins, listPeople, personDetail } from "./people.ts";
 import { overview, requestsReport } from "./reports.ts";
 
@@ -22,6 +24,9 @@ import { overview, requestsReport } from "./reports.ts";
  *
  * Role, ban and sign-out go through Better Auth's admin plugin (auth.api), which checks
  * the admin's session again and ends a banned person's sessions.
+ *
+ * Each change goes to the admin activity log (admin-events.ts) with `record`. The changes
+ * made through Better Auth are logged in its hooks (admin-auth-events.ts), so not here.
  */
 type Env = SignedInEnv;
 
@@ -47,6 +52,13 @@ adminApi.get("/overview", async (c) => {
 	return c.json(await overview(days));
 });
 
+// The admin activity log, newest first. `before` is the last id of the page before; `person` a user id or an invite's email.
+adminApi.get("/activity", async (c) => {
+	const before = Number(c.req.query("before"));
+	const person = c.req.query("person")?.trim();
+	return c.json(await activityPage({ olderThan: Number.isSafeInteger(before) && before > 0 ? before : undefined, person: person || undefined }));
+});
+
 // People
 
 adminApi.get("/people", async (c) => c.json({ people: await listPeople(), settings: await getSettings() }));
@@ -61,17 +73,20 @@ adminApi.put("/people/:id/daily-credits", async (c) => {
 	const input = await readBody(c, z.object({ credits: credits.nullable() }));
 	if (!input) return invalid(c);
 	const id = c.req.param("id");
-	if (id.includes("@")) return (await setInviteCredits(id, input.credits)) ? c.json({ ok: true }) : notFound(c);
-	if (!(await hasAccount(id))) return notFound(c);
-	await setDailyCredits(id, input.credits);
+	const target = id.includes("@") ? id.toLowerCase() : id;
+	const before = { dailyCredits: await ownDailyCredits(target) };
+	if (!(await saveDailyCredits(target, input.credits))) return notFound(c);
+	await record(c, "set-daily-credits", { target, before, after: { dailyCredits: input.credits } });
 	return c.json({ ok: true });
 });
 
 adminApi.post("/people/:id/grant", async (c) => {
 	const input = await readBody(c, z.object({ credits: credits.min(1) }));
 	if (!input) return invalid(c);
-	if (!(await hasAccount(c.req.param("id")))) return notFound(c);
-	await grantCredits(c.req.param("id"), input.credits, adminOf(c));
+	const id = c.req.param("id");
+	if (!(await hasAccount(id))) return notFound(c);
+	await grantCredits(id, input.credits, adminOf(c));
+	await record(c, "grant-credits", { target: id, after: { credits: input.credits } });
 	return c.json({ ok: true });
 });
 
@@ -119,6 +134,10 @@ adminApi.post("/invites", async (c) => {
 	if (taken.length) return c.json({ error: `Already invited: ${taken.map((row) => row.email).join(", ")}` }, 409);
 	for (const email of emails) await allow(email, { note: input.note, invitedBy: adminOf(c), dailyCredits: input.dailyCredits });
 	const notSent = input.sendEmail ? await emailInvites(c, emails) : [];
+	for (const email of emails) {
+		const emailed = input.sendEmail && !notSent.includes(email);
+		await record(c, "invite", { target: email, after: { note: input.note, dailyCredits: input.dailyCredits, emailed } });
+	}
 	return c.json({ invited: emails.length, notSent });
 });
 
@@ -127,13 +146,17 @@ adminApi.post("/invites/:email/send", async (c) => {
 	const [invite] = await sql`select 1 from allowed_emails where email = ${email}`;
 	if (!invite) return notFound(c);
 	const notSent = await emailInvites(c, [email]);
-	return notSent.length ? c.json({ error: "The email could not be sent." }, 502) : c.json({ ok: true });
+	if (notSent.length) return c.json({ error: "The email could not be sent." }, 502);
+	await record(c, "send-invite", { target: email });
+	return c.json({ ok: true });
 });
 
 adminApi.delete("/invites/:email", async (c) => {
 	const email = c.req.param("email").toLowerCase();
 	if (await hasAccount(email)) return c.json({ error: "They have signed in already. Ban them instead." }, 409);
-	return (await disallow(email)) ? c.json({ ok: true }) : notFound(c);
+	if (!(await disallow(email))) return notFound(c);
+	await record(c, "remove-invite", { target: email });
+	return c.json({ ok: true });
 });
 
 // Settings
@@ -145,7 +168,9 @@ adminApi.get("/settings", async (c) =>
 adminApi.put("/settings", async (c) => {
 	const input = await readBody(c, z.object({ defaultDailyCredits: credits, creditsPerUsd: z.number().int().min(1).max(1_000_000_000) }));
 	if (!input) return invalid(c);
+	const { defaultDailyCredits, creditsPerUsd } = await getSettings();
 	await updateSettings(input, adminOf(c));
+	await record(c, "update-settings", { before: { defaultDailyCredits, creditsPerUsd }, after: input });
 	return c.json(await getSettings());
 });
 
@@ -153,7 +178,9 @@ adminApi.put("/settings", async (c) => {
 adminApi.put("/settings/pdf-reading", async (c) => {
 	const input = await readBody(c, z.object({ onServer: z.boolean() }));
 	if (!input) return invalid(c);
+	const before = { pdfTextOnServer: (await getSettings()).pdfTextOnServer };
 	await setPdfTextOnServer(input.onServer, adminOf(c));
+	await record(c, "set-pdf-reading", { before, after: { pdfTextOnServer: input.onServer } });
 	return c.json(await getSettings());
 });
 
@@ -164,6 +191,8 @@ adminApi.put("/settings/openrouter-key", async (c) => {
 	const problem = await checkOpenRouterKey(input.key);
 	if (problem) return c.json({ error: problem }, 400);
 	await saveOpenRouterKey(input.key, adminOf(c));
+	// That the key changed, never the key or any part of it.
+	await record(c, "set-openrouter-key");
 	return c.json(await openRouterKeyStatus());
 });
 
@@ -193,7 +222,9 @@ adminApi.post("/skills", async (c) => {
 	const input = await readBody(c, skillBody);
 	if (!input) return invalid(c);
 	const { expectedUpdatedAt: _, ...fields } = input;
-	return savedSkill(c, await saveSkill(fields, adminOf(c)));
+	const result = await saveSkill(fields, adminOf(c));
+	if (result.ok) await record(c, "create-skill", { after: skillFields(result.skill) });
+	return savedSkill(c, result);
 });
 
 adminApi.put("/skills/:id", async (c) => {
@@ -201,21 +232,30 @@ adminApi.put("/skills/:id", async (c) => {
 	const input = await readBody(c, skillBody);
 	if (!id) return noSkill(c);
 	if (!input) return invalid(c);
-	return savedSkill(c, await saveSkill({ id, ...input }, adminOf(c)));
+	const before = await getSkill(id);
+	const result = await saveSkill({ id, ...input }, adminOf(c));
+	if (result.ok) await record(c, "update-skill", { before: before && skillFields(before), after: skillFields(result.skill, before) });
+	return savedSkill(c, result);
 });
 
 adminApi.put("/skills/:id/enabled", async (c) => {
 	const id = skillId(c);
 	const input = await readBody(c, z.object({ enabled: z.boolean() }));
 	if (!input) return invalid(c);
+	const skill = id ? await getSkill(id) : undefined;
 	const result = id ? await setSkillEnabled(id, input.enabled, adminOf(c)) : "missing";
 	if (result === "empty") return c.json({ error: "Write the instructions before you turn the skill on." }, 400);
-	return result === "ok" ? c.json({ ok: true }) : noSkill(c);
+	if (result !== "ok" || !skill) return noSkill(c);
+	await record(c, input.enabled ? "enable-skill" : "disable-skill", { after: { id: skill.id, name: skill.name, enabled: input.enabled } });
+	return c.json({ ok: true });
 });
 
 adminApi.delete("/skills/:id", async (c) => {
 	const id = skillId(c);
-	return id && (await deleteSkill(id, adminOf(c))) ? c.json({ ok: true }) : noSkill(c);
+	const skill = id ? await getSkill(id) : undefined;
+	if (!skill || !(await deleteSkill(skill.id, adminOf(c)))) return noSkill(c);
+	await record(c, "delete-skill", { before: skillFields(skill) });
+	return c.json({ ok: true });
 });
 
 function skillId(c: Context<Env>) {
@@ -229,6 +269,12 @@ function savedSkill(c: Context<Env>, result: SaveResult) {
 
 function noSkill(c: Context<Env>) {
 	return c.json({ error: "This skill was deleted." }, 404);
+}
+
+/** A skill in the activity log: its settings, and whether the instructions changed since `before`, not the instructions. */
+function skillFields(skill: SkillDetail, before?: SkillDetail) {
+	const { id, name, description, automatic, enabled } = skill;
+	return { id, name, description, automatic, enabled, ...(before && { instructionsChanged: before.body !== skill.body }) };
 }
 
 // Requests for more credits (extra-credits.ts)
@@ -248,6 +294,7 @@ async function answer(c: Context<Env>, decision: Decision) {
 	if (!Number.isSafeInteger(id)) return notFound(c);
 	const userId = await decideRequest(id, decision, adminOf(c));
 	if (!userId) return c.json({ error: "This request was answered already." }, 409);
+	await record(c, `${decision.status === "approved" ? "approve" : "decline"}-request`, { target: userId, after: { request: id, ...decision } });
 	const [person] = await sql<{ email: string }[]>`select email from users where id = ${userId}`;
 	const granted = decision.status === "approved" ? decision.credits : null;
 	if (person) await sendEmail(creditAnswerEmail(person.email, appOrigin(c.req.raw.headers), granted)).catch(logEmailError);
@@ -280,6 +327,28 @@ async function viaAuth(c: Context<Env>, call: () => Promise<unknown>) {
 async function readBody<T>(c: Context<Env>, schema: z.ZodType<T>): Promise<T | null> {
 	const parsed = schema.safeParse(await c.req.json().catch(() => null));
 	return parsed.success ? parsed.data : null;
+}
+
+/** Records the admin's change in the activity log (admin-events.ts). */
+function record(c: Context<Env>, action: string, details: Pick<AdminEvent, "target" | "before" | "after"> = {}) {
+	const { id, email } = c.get("user");
+	return recordAdminEvent({ actor: { id, email }, action, ...details });
+}
+
+/** A person's own daily limit, or an invite's (by email). null for the default. */
+async function ownDailyCredits(id: string) {
+	const [row] = id.includes("@")
+		? await sql<{ daily_credits: number | null }[]>`select daily_credits from allowed_emails where email = ${id}`
+		: await sql<{ daily_credits: number | null }[]>`select daily_credits from credit_limits where user_id = ${id}`;
+	return row?.daily_credits ?? null;
+}
+
+/** False when there is no such person or invite. */
+async function saveDailyCredits(id: string, dailyCredits: number | null) {
+	if (id.includes("@")) return setInviteCredits(id, dailyCredits);
+	if (!(await hasAccount(id))) return false;
+	await setDailyCredits(id, dailyCredits);
+	return true;
 }
 
 /** By user id, or by email. */
