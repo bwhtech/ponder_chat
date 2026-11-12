@@ -2,7 +2,7 @@ import vue from "@vitejs/plugin-vue";
 import frappeui from "frappe-ui/vite";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import * as compiler from "vue/compiler-sfc";
 
 const here = fileURLToPath(new URL(".", import.meta.url));
@@ -15,8 +15,9 @@ compiler.registerTS(() => fromFrappeUI("typescript"));
 
 export default defineConfig({
 	root: "web",
-	plugins: [frappeui({ frappeProxy: false, jinjaBootData: false, buildConfig: false }), vue({ compiler })],
+	plugins: [frappeui({ frappeProxy: false, jinjaBootData: false, buildConfig: false }), vue({ compiler }), adminPage()],
 	css: { postcss: here },
+	server: devServer(),
 	build: {
 		outDir: "../dist",
 		emptyOutDir: true,
@@ -25,3 +26,39 @@ export default defineConfig({
 		rollupOptions: { input: { main: `${here}web/index.html`, admin: `${here}web/admin.html` } },
 	},
 });
+
+/**
+ * `npm run dev` (scripts/dev.ts): Vite serves the pages and sends the server's paths to
+ * `nitro dev` on PORT. The Host header must go through as it is (Vite's shorthand changes
+ * it), because Better Auth checks it against PONDER_HOSTS. No X-Forwarded headers: Vite would
+ * add ",http" to a tunnel's X-Forwarded-Proto, and sign-in links would lose https.
+ * Loopback only, like the server (start.sh).
+ */
+function devServer() {
+	const api = `http://127.0.0.1:${process.env.PORT ?? 3501}`;
+	// A host in PONDER_HOSTS that is not this machine, such as a tunnel, may load the pages too.
+	const hosts = (process.env.PONDER_HOSTS ?? "").split(",").map((host) => host.trim().replace(/:\d+$/, ""));
+	return {
+		host: "127.0.0.1",
+		allowedHosts: hosts.filter(Boolean),
+		proxy: Object.fromEntries(["/api", "/health", "/oauth"].map((path) => [path, { target: api, changeOrigin: false }])),
+	};
+}
+
+/**
+ * The server sends admin.html for /admin and /admin/* (server/app.ts); this does the same
+ * in development. Only for a page load: the admin's own modules are under /admin/ too.
+ * admin.html loads its script by an absolute address, so it works at any depth.
+ */
+function adminPage(): Plugin {
+	return {
+		name: "ponder:admin-page",
+		apply: "serve",
+		configureServer(server) {
+			server.middlewares.use((req, _res, next) => {
+				if (/^\/admin(?:[/?]|$)/.test(req.url ?? "") && req.headers.accept?.includes("text/html")) req.url = "/admin.html";
+				next();
+			});
+		},
+	};
+}
