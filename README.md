@@ -203,11 +203,14 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 | People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
 | Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
 | Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the OpenRouter key and the list of admins. On a phone, Settings is a page in the tab bar. |
+| Activity | Each change an admin made, newest first: who did it, to whom, what changed and when. A click on a name shows that person's events only. Read only. On a phone, it is in the account menu. |
 
 - Admins see usage only. The admin API reads `runs` (cost, model, time), `sessions` (device and time) and the number of threads. It never returns messages or thread titles.
 - A "reply" is a `runs` row with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each model call, so a reply that used tools has several rows, and only the last one counts.
 - The OpenRouter key: an admin pastes it in Settings. The server checks it with OpenRouter, then saves it encrypted in the `secrets` table (AES-256-GCM, with a key derived from `BETTER_AUTH_SECRET`), so a copy of the database alone does not give it away. The key is never sent back to the page; Settings shows its last four characters. Until a key is saved there, `OPENROUTER_API_KEY` from the environment is used. A new `BETTER_AUTH_SECRET` makes the saved key unreadable: the server then uses `OPENROUTER_API_KEY` if it is set, and Settings asks for the key again.
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
+- The admin activity log is the `admin_events` table (`server/admin-events.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/admin-auth-events.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
+- An admin can change a person's email with Better Auth's `/api/auth/admin/update-user`. The admin can then sign in to that account with the new address. So each email change is logged, and the old address gets an email that names the new address and the admin.
 
 ### Durable replies
 
