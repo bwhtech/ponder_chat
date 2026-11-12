@@ -93,6 +93,19 @@ function readable(html: string) {
 	return { title: article?.title || title, text: article?.textContent || document.body?.textContent || "" };
 }
 
-function tidy(text: string) {
-	return text.replace(/[ \t\f\v]+/g, " ").replace(/\s*\n\s*(\n\s*)+/g, "\n\n").trim();
+/**
+ * Spaces and tabs become one space, and white space that holds two or more line breaks
+ * becomes one empty line. Each run of white space is matched once, so the time grows with
+ * the length of the text: a page can be 3 MB of white space that is not a plain space.
+ */
+export function tidy(text: string) {
+	return text
+		.replace(/[ \t\f\v]+/g, " ")
+		.replace(/\s+/g, (space) => (hasTwoLineBreaks(space) ? "\n\n" : space))
+		.trim();
+}
+
+function hasTwoLineBreaks(space: string) {
+	const first = space.indexOf("\n");
+	return first !== -1 && space.indexOf("\n", first + 1) !== -1;
 }
