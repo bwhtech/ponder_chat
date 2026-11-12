@@ -88,6 +88,7 @@ const actions = computed(() =>
 				changed: load,
 				removed: () => router.push("/people"),
 				sessions: detail.value?.sessions.length,
+				activity: (p) => router.push({ path: "/activity", query: { person: p.id } }),
 			})
 		: [],
 );

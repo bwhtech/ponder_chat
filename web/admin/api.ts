@@ -81,6 +81,24 @@ export type DecidedRequest = {
 	decidedBy: string;
 };
 
+/**
+ * One change an admin made (server/admin/activity.ts). `action` is the endpoint's name,
+ * such as "update-user" or "grant-credits"; `before` and `after` hold what changed.
+ * `target` is the person it was done to, if any.
+ */
+export type Activity = {
+	id: number;
+	at: string;
+	actor: Named;
+	action: string;
+	target: Named | null;
+	before: Record<string, unknown> | null;
+	after: Record<string, unknown> | null;
+};
+
+/** A page of the log. `next` is the id to load the page after from, or null on the last page. `person` is the filter, if any. */
+export type ActivityPage = { events: Activity[]; next: number | null; person: Named | null };
+
 /** A skill in the list (server/skills.ts). */
 export type SkillSummary = {
 	id: number;

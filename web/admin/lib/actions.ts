@@ -15,14 +15,19 @@ type Handlers = {
 	giveExtra?: (person: Person) => void;
 	/** Signed-in sessions, when the page knows them, for the sign-out message. */
 	sessions?: number;
+	/** Adds "Admin activity": the activity log for this person (the person page has it). */
+	activity?: (person: Person) => void;
 };
 
 export function personActions(person: Person, handlers: Handlers) {
 	const setCredits = { label: "Set daily credits", icon: "lucide-gauge", onClick: () => handlers.openCredits(person) };
+	const activity = handlers.activity;
+	const activityAction = activity ? [{ label: "Admin activity", icon: "lucide-history", onClick: () => activity(person) }] : [];
 	if (person.status === "invited") {
 		return [
 			setCredits,
 			{ label: "Email the invite again", icon: "lucide-send", onClick: () => void emailInvite(person) },
+			...activityAction,
 			{ label: "Cancel invite", icon: "lucide-x", theme: "red" as const, onClick: () => cancelInvite(person, handlers) },
 		];
 	}
@@ -40,6 +45,7 @@ export function personActions(person: Person, handlers: Handlers) {
 		...(giveExtra ? [{ label: "Give extra credits today", icon: "lucide-plus", onClick: () => giveExtra(person) }] : []),
 		roleAction,
 		{ label: "Sign out everywhere", icon: "lucide-log-out", onClick: () => signOutEverywhere(person, handlers) },
+		...activityAction,
 		banAction,
 	];
 }
