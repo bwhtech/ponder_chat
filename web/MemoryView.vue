@@ -99,7 +99,7 @@ async function undo(save: MemorySave) {
 </script>
 
 <template>
-	<div data-slot="memory-view" class="scrollbar-thin min-h-0 flex-1 overflow-y-auto sm:[scrollbar-gutter:stable_both-edges]">
+	<div data-slot="memory-view" class="scroll-fade-y scrollbar-thin [--scroll-fade-range:40px] [--scroll-fade-size:40px] min-h-0 flex-1 overflow-y-auto sm:[scrollbar-gutter:stable_both-edges]">
 		<div class="mx-auto w-full max-w-[720px] space-y-5 px-4 py-6 sm:px-5">
 			<p class="text-p-base text-ink-gray-6">
 				Ponder remembers what you tell it about yourself, your work and how you like answers, and uses it in new chats so you don't have to repeat
