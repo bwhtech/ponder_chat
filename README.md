@@ -303,8 +303,10 @@ One reply is one trace:
 
 Privacy: admins see usage, never chats (see "Admin"), and traces keep that promise. A span never has message text, prompts, tool inputs or outputs, connector results, file names, or the path and query of an address. It has names, times, status, token counts, model and provider ids, and the thread and run ids. Two parts make sure of this:
 
-1. At the source. The AI SDK's integration is told for every event not to record inputs or outputs, whatever the call asked. HTTP spans record the method, the status and the kind of peer (`ponder.peer`: `openrouter`, `mcp`, `web`). They record the host for OpenRouter only, because a subdomain can carry data. No `traceparent` header goes out, so a page or an MCP server learns nothing about the trace.
-2. At export. An allowlist (`server/tracing/privacy.ts`) keeps only known attribute keys. It drops error messages, events other than `exception` (which keeps only its type) and status messages. A span name of an unknown shape becomes `span`. A library that starts to record a new attribute sends nothing until the key is added there.
+1. At the source. The AI SDK's integration is told for every event not to record inputs or outputs, whatever the call asked. HTTP spans record the method, the status and the kind of peer (`ponder.peer`: `openrouter`, `mcp`, `web`). They record the host for OpenRouter only, because a subdomain can carry data, and a connector's host tells which apps a person uses. No `traceparent` header goes out, so a page or an MCP server learns nothing about the trace.
+2. At export. An allowlist (`server/tracing/privacy.ts`) keeps only known attribute keys. It drops error messages, events other than `exception` (which keeps only its type) and status messages. A span name of an unknown shape becomes `span`. A library that starts to record a new attribute sends nothing until the key is added there. A value that comes from outside Ponder's code, such as a tool name, a response id or an error type, must look like a name, or it is dropped.
+
+Tool names stay, as in `runs`. A connector's tool reaches the model as `<connector>__<tool>`, and the connector part is the name the person gave it. In a span it becomes `connector__<tool>`: the tool's own name, which the MCP server gives, stays, and the person's name for the connector does not. This is the same rule as for a connector's host.
 
 `server/tracing.check.ts` checks both with a marker in every place content could come from. `e2e/tests/tracing.spec.ts` checks the whole path: a reply whose message, file, address and connector input hold a marker exports no span with it.
 
@@ -314,24 +316,28 @@ Settings:
 
 | Setting | Default | What it does |
 | --- | --- | --- |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | not set: off | Where spans go, such as `http://127.0.0.1:4318` |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | not set: off | Where spans go, such as `http://127.0.0.1:4318`. It must start with `http://` or `https://`. Another value logs a warning, and Ponder starts with tracing off. |
 | `OTEL_SERVICE_NAME` | `ponder-chat` | The service name in Jaeger |
 | `OTEL_BSP_SCHEDULE_DELAY` | `2000` | Milliseconds spans wait to be sent in one batch |
 
 To see traces on your machine:
 
-1. Start Jaeger: `docker run --rm -d --name jaeger -p 127.0.0.1:16686:16686 -p 127.0.0.1:4318:4318 jaegertracing/jaeger:2.22.0`.
+1. Start Jaeger: `docker run --rm -d --name jaeger -p 127.0.0.1:16686:16686 -p 127.0.0.1:4318:4318 jaegertracing/jaeger:2.23.0`.
 2. Add `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` to `.env` (for `npm run dev`) or to the environment of `./start.sh`.
 3. Send a message, then open http://localhost:16686 and pick the service `ponder-chat`.
 
 For the end-to-end tests, set `E2E_OTEL_ENDPOINT=http://127.0.0.1:4318`. Without it, the tests send their traces to the fake OpenRouter, which `tracing.spec.ts` reads.
 
-Cost: with tracing off, the server loads only `@opentelemetry/api` (63 kB). With it on, the start-up time does not change measurably, and the server uses about 6 MB more memory. A short reply is 100 to 150 spans, most of them Workflow's.
+Cost: with tracing off, the server loads only `@opentelemetry/api` (63 kB). With it on, the start-up time does not change measurably, and the server uses about 6 MB more memory. A reply is 50 to 200 spans, median 100 in the end-to-end tests. Most are Workflow's, about 7 for each step, so the count grows with the steps, not with the length of the reply. Workflow also makes a `workflow.stream.flush` span for each write to the reply's stream, hundreds for a long reply. Ponder leaves those out.
+
+On SIGTERM, Ponder closes the database first, then sends the spans that are left for at most 2 seconds. A collector that is down or does not answer costs each batch at most 2 seconds, and never holds up the stop.
 
 Limits:
 
 - A process that is killed (`kill -9`, out of memory) loses the spans it had not finished, such as the step it was running. The spans it had sent stay in the trace, and Jaeger shows them without their parent.
 - A run that stops to ask for an approval does not send the AI SDK's `step` span of its last model call. That model call's `chat` span shows without its parent.
+- The root span is sent from the run's last step, while it saves the reply. So `reply.save`, `memory.save` and the last `workflow.execute` end a little after the root, and the root's duration is short by that much.
+- Spans wait up to 2 seconds in memory before they are sent. A crash in that time loses them, the root span too when it is among them. The trace then shows without its root.
 - `runs` stays the record of usage and credits. Traces are for finding where a reply was slow or failed, and are kept for 7 days.
 
 ### Python
