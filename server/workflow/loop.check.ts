@@ -10,6 +10,7 @@ import { APICallError, convertToModelMessages, generateText, InvalidPromptError,
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
 import { answeredApprovals, signApproval, verifyApproval, withoutApprovals } from "./approvals.ts";
+import { carriedOut, settledChunks } from "./answered-again.ts";
 import { approvedIn } from "./connector-messages.ts";
 import { classifyModelError, MODEL_CALL_ATTEMPTS, ModelStalledError } from "./model-errors.ts";
 import { storedPart, toolCallOf } from "./stream-parts.ts";
@@ -257,5 +258,32 @@ assert.equal(approvedIn(connectorMessages, "k1", connectorApproval.call.input), 
 assert.equal(approvedIn(withoutApprovals(connectorMessages), "k1", connectorApproval.call.input), false, "the loop must not drop the approval before the call");
 const justMade: ModelMessage[] = [connectorMessages[0], { role: "assistant", content: [{ type: "tool-call", toolCallId: "k2", toolName: "connector_call", input: { tool: "shop__add_note", input: {} } }] }];
 assert.equal(approvedIn(justMade, "k2", { tool: "shop__add_note", input: {} }), false);
+
+// An approval answered again after a run carried it out (a second tab, a resend) starts
+// nothing (replies.ts): the saved message went on, or the answered call has its result.
+const toolPart = (toolCallId: string, state: string, extra: object = {}) =>
+	({ type: "tool-connector_call", toolCallId, state, input: { tool: "shop__add_note", input: {} }, ...extra }) as never;
+const askedAgain: UIMessage = { id: "m1", role: "assistant", parts: [{ type: "step-start" }, toolPart("c1", "approval-responded", { approval: { id: "approval-c1", approved: true } })] };
+const asCarried = { messageId: "m1", baseParts: 2 };
+const savedLater: UIMessage = {
+	id: "m1",
+	role: "assistant",
+	parts: [{ type: "step-start" }, toolPart("c1", "output-available", { output: "Added the note." }), { type: "step-start" }, { type: "text", text: "Done." }],
+};
+assert.equal(carriedOut(savedLater, askedAgain, asCarried), true, "the run added a step");
+const savedInPlace: UIMessage = { id: "m1", role: "assistant", parts: [{ type: "step-start" }, toolPart("c1", "output-available", { output: "Added the note." })] };
+assert.equal(carriedOut(savedInPlace, askedAgain, asCarried), true, "the answered call has its result");
+assert.deepEqual(settledChunks(savedLater, askedAgain), [
+	{ type: "start", messageId: "m1" },
+	{ type: "start-step" },
+	{ type: "tool-output-available", toolCallId: "c1", output: "Added the note." },
+	{ type: "finish-step" },
+	{ type: "finish" },
+]);
+// The next question in the same message, asked by the run after the first answer, goes on.
+const askedNext: UIMessage = { id: "m1", role: "assistant", parts: [...savedLater.parts, toolPart("c2", "approval-responded", { approval: { id: "approval-c2", approved: true } })] };
+const savedNext: UIMessage = { id: "m1", role: "assistant", parts: [...savedLater.parts, toolPart("c2", "approval-requested", { approval: { id: "approval-c2" } })] };
+assert.equal(carriedOut(savedNext, askedNext, { messageId: "m1", baseParts: 5 }), false);
+assert.equal(carriedOut(undefined, askedAgain, asCarried), false, "a thread with no saved message goes on");
 
 console.log("loop.check: all checks passed");

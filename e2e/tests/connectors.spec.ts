@@ -26,6 +26,18 @@ async function serverCalls(page: Page, order: string): Promise<McpCall[]> {
 /** A model's call to a connector tool, through connector_call. */
 const call = (tool: string, input: Record<string, unknown>) => ({ name: "connector_call", input: { tool, input } });
 
+/** Waits until the chat's reply is saved and its run finished: the page goes idle a moment before. The chat's id. */
+async function replySaved(page: Page) {
+	const thread = new URL(page.url()).searchParams.get("t")!;
+	await expect
+		.poll(async () => {
+			const body = (await (await page.request.get(`/api/threads/${thread}`)).json()) as { running?: boolean };
+			return body.running;
+		})
+		.toBe(false);
+	return thread;
+}
+
 /** Adds the open server as "Shop" through the API, for tests about using it. */
 async function addShop(page: Page) {
 	const response = await page.request.post("/api/connectors", { data: { name: "Shop", url: OPEN, transport: "http", auth: "none" } });
@@ -204,6 +216,59 @@ test("runs the call the person allows, and not the one they deny, in the same re
 	await expect(chat.reply(page)).toContainText("I added one note.");
 	expect(await serverCalls(page, order)).toEqual([expect.objectContaining({ tool: "add_note", args: { order, note: "Gift wrap" } })]);
 	expect(JSON.stringify((await fake.calls(order))[1].messages)).toContain("The person denied this.");
+});
+
+test("an approval answered in two tabs runs the call once", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a gift-wrap note to order ${order}`);
+	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	// The same chat in a second tab, while the question waits.
+	const other = await page.context().newPage();
+	await other.goto(page.url());
+	await expect(other.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+
+	await page.getByRole("button", { name: "Allow once" }).click();
+	await expect(chat.reply(page)).toContainText("I added the note.");
+	await replySaved(page);
+	await other.getByRole("button", { name: "Allow once" }).click();
+	// The second tab shows what the first answer did, and sends nothing more.
+	await expect(chat.reply(other)).toContainText("I added the note.");
+	await chat.idle(other);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	// The saved reply is the one the first answer wrote.
+	await other.reload();
+	await expect(chat.reply(other)).toContainText("I added the note.");
+	expect(await serverCalls(page, order)).toHaveLength(1);
+});
+
+test("an approved chat sent again after its reply finished runs nothing again", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a gift-wrap note to order ${order}`);
+	const answer = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/chat");
+	await page.getByRole("button", { name: "Allow once" }).click();
+	const approved = (await answer).postDataJSON();
+	await expect(chat.reply(page)).toContainText("I added the note.");
+	const thread = await replySaved(page);
+
+	const again = await page.request.post("/api/chat", { data: approved });
+	expect(again.ok(), await again.text()).toBe(true);
+	// It answers with the reply that the first request started, and starts no run.
+	expect(await again.text()).toContain(`"type":"tool-output-available"`);
+	expect(await again.text()).toContain(`Added the note to order ${order}.`);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	const saved = (await (await page.request.get(`/api/threads/${thread}`)).json()) as { messages: { role: string }[]; running: boolean };
+	expect(saved.running).toBe(false);
+	expect(saved.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+	expect(JSON.stringify(saved.messages)).toContain("I added the note.");
+	expect(await fake.calls(order)).toHaveLength(2);
 });
 
 test("keeps a question after a reload, and runs the call once allowed", async ({ page, fake }) => {
