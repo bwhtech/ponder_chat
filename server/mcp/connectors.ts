@@ -374,8 +374,10 @@ const serverName = (connection: Connection) => connection.serverInfo?.title ?? c
  * One tool call, for the model. Never throws: a failure is the result, so the model can
  * tell the person, and the workflow does not retry a call that may have changed something.
  *
- * `approved` says the person approved this call. The rule is checked again here, as the
- * last guard: a tool on "Ask first" runs only with it, whatever the caller did.
+ * `approved` says the person approved this exact call: the workflow takes it from the
+ * signed approval in the reply's messages (workflow/connector-messages.ts approvedIn).
+ * The rule is read again here, as the last guard: a tool on "Ask first" runs only when
+ * the call was approved, however the call got here.
  */
 export async function callConnectorTool(connectionId: string, tool: string, input: unknown, userId: string, approved: boolean): Promise<string> {
 	const connection = await getConnection(connectionId, userId);
@@ -386,7 +388,7 @@ export async function callConnectorTool(connectionId: string, tool: string, inpu
 	if (!info) return `${connection.name} has no tool named ${tool} now.`;
 	const rule = ruleOf(connection, info);
 	if (rule === "off") return `The person turned ${info.title ?? tool} off in Settings, Connectors.`;
-	if (rule === "ask" && !approved) return `${info.title ?? tool} asks the person first, and they did not approve this call, so it did not run. Call it again to ask them.`;
+	if (rule === "ask" && !approved) return `${info.title ?? tool} asks the person first, and they did not approve this call, so it did not run. Tell the person: it will ask them on their next message.`;
 	try {
 		// The tool's name as its server gives it, never its input or result, nor the connector's name.
 		// Its HTTP requests are marked as MCP, and their host left out (tracing/http.ts).

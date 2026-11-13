@@ -32,10 +32,15 @@ export function connectorNote(catalog: CatalogData): string {
 	].join("\n");
 }
 
-/** The whole line is cleaned: the server wrote the description and every part of the signature. */
+/**
+ * The server wrote the description and every part of the signature, so the whole line
+ * is cleaned. The signature's < and > show as ‹ and ›, so an operator such as "<=" in an
+ * enum still reads as one.
+ */
 function toolLine(tool: CatalogTool) {
 	const about = firstLine(tool.title && tool.description ? `${tool.title}. ${tool.description}` : tool.title || tool.description);
-	return clean(`- ${signature(tool.name, tool.inputSchema)}${about ? `: ${about}` : ""}${tool.ask ? " (asks the person first)" : ""}`);
+	const shown = signature(tool.name, tool.inputSchema).replaceAll("<", "‹").replaceAll(">", "›");
+	return clean(`- ${shown}${about ? `: ${about}` : ""}${tool.ask ? " (asks the person first)" : ""}`);
 }
 
 function firstLine(text: string) {
