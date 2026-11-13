@@ -23,7 +23,8 @@ test("one person can't read another's chat", async ({ page, person, fake, db, br
 	await chat.send(page, "A private chat");
 	await chat.idle(page);
 	const id = new URL(page.url()).searchParams.get("t")!;
-	expect((await (await page.request.get(`/api/threads/${id}`)).json()).messages).toHaveLength(2);
+	// The page goes idle when the stream ends; the reply is saved a moment later.
+	await expect.poll(async () => (await (await page.request.get(`/api/threads/${id}`)).json()).messages.length).toBe(2);
 
 	// Signed out: refused.
 	const stranger = await browser.newContext({ baseURL: e2e.baseUrl });
