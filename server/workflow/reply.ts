@@ -1,8 +1,9 @@
-import { createModelCallToUIChunkTransform, type ModelCallStreamPart } from "@ai-sdk/workflow";
+import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
 import { loadThread, updateThread } from "../db.ts";
 import { rememberTurn } from "../memory.ts";
+import { toUIChunks } from "./reply-chunks.ts";
 import { finishRun, type Continued } from "./runs.ts";
 import { span } from "../tracing/span.ts";
 
@@ -10,7 +11,7 @@ import { span } from "../tracing/span.ts";
 export const messageIdFor = (runId: string) => `msg-${runId}`;
 
 /**
- * A run's stream as UI chunks, from the start. The durable stream holds raw model parts,
+ * A run's stream as UI chunks (reply-chunks.ts), from the start. The durable stream holds raw model parts,
  * so a reconnect replays them all and skips the UI chunks the browser already has.
  * With `untilTail`, the stream ends at what the run has written so far, instead of
  * when the run closes it: a cancelled run never closes its stream.
@@ -20,7 +21,7 @@ export async function replyStream(runId: string, model: string, { uiStartIndex =
 	const raw = untilTail ? firstChunks(readable, (await readable.getTailIndex()) + 1) : readable;
 	// A run that carries on a message keeps its id, so the page and the saved thread extend that message.
 	const messageId = continued?.messageId ?? messageIdFor(runId);
-	return raw.pipeThrough(createModelCallToUIChunkTransform({ uiStartIndex })).pipeThrough(withMessage(messageId, model));
+	return raw.pipeThrough(toUIChunks({ uiStartIndex })).pipeThrough(withMessage(messageId, model));
 }
 
 /** The first `count` chunks of a stream, then the end. */

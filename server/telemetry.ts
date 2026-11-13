@@ -3,7 +3,7 @@ import { RunRecorder } from "./telemetry/run-recorder.ts";
 import { tracingState } from "./tracing/state.ts";
 import { migrateRuns } from "./telemetry/store.ts";
 
-export { TITLE_FUNCTION_ID, usageReport } from "./telemetry/store.ts";
+export { COMPACTION_FUNCTION_ID, TITLE_FUNCTION_ID, usageReport } from "./telemetry/store.ts";
 
 /**
  * Telemetry: registers AI SDK telemetry once at server start. Usage and cost per run go

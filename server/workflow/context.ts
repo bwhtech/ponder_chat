@@ -54,7 +54,8 @@ export function addRecalledMemory(messages: ModelMessage[], recalled: string): M
 	return messages.map((each, i) => (i === index ? { ...message, content } : each));
 }
 
-function trimResult(part: ToolResultPart): ToolResultPart {
+/** A long result cut to its start, with a note. Also used for the earlier steps of a reply that grew too long (context-guard.ts). */
+export function trimResult(part: ToolResultPart): ToolResultPart {
 	const text = resultText(part.output);
 	if (text === undefined || text.length <= TRIM_OVER_CHARS) return part;
 	const note = `[Trimmed: this ${part.toolName} result is from an earlier turn and had ${text.length} characters. Run the tool again if you need the rest.]`;

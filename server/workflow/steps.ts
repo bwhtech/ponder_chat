@@ -1,10 +1,12 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import type { ModelMessage } from "ai";
+import type { CompactRequest, CompactResult } from "../compaction/compact.ts";
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 import type { ActiveSkill } from "../skills.ts";
 import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
+import { COMPACTION_MARKER } from "./reply-chunks.ts";
 import type { Continued } from "./runs.ts";
+import type { ThreadContext } from "./thread-messages.ts";
 
 /**
  * The chat workflow's steps. Each is recorded in Postgres when it finishes; after a
@@ -14,12 +16,9 @@ import type { Continued } from "./runs.ts";
  */
 
 /**
- * The thread as the model reads it: the owner's attached files swapped for their content
- * (file-context.ts), the skills they chose with $name swapped for their instructions (skills.ts),
- * the reply text they cited marked as a quote (citations.ts), the reasoning of replies
- * another model wrote left out,
- * tool results of earlier turns trimmed, and what memory recalled and the person's
- * connectors added to the person's latest message (context.ts, connector-messages.ts).
+ * The thread as the model reads it (thread-messages.ts), with its saved summary in place
+ * of the messages it covers, and what compaction decides from: the estimate, the
+ * thread's measured ratio and the model's window. A step, so a replay reads the same.
  */
 export async function loadModelMessages(
 	threadId: string,
@@ -29,25 +28,38 @@ export async function loadModelMessages(
 	skills: ActiveSkill[] = [],
 	/** The <connectors> note (mcp/catalog-note.ts). */
 	connectors = "",
-): Promise<ModelMessage[]> {
+): Promise<ThreadContext> {
 	"use step";
-	const { convertToModelMessages } = await import("ai");
-	const { loadThread } = await import("../db.ts");
-	const { resolveFileParts } = await import("../file-context.ts");
-	const { MODELS } = await import("../models.ts");
-	const { getSettings } = await import("../settings.ts");
-	const { addRecalledMemory, dropOtherModelsReasoning, trimOldToolResults } = await import("./context.ts");
-	const { skillPartText } = await import("./skills.ts");
-	const { citationPartText } = await import("./citations.ts");
-	const { addConnectorNote, connectorCallsInHistory } = await import("./connector-messages.ts");
-	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
-	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
-	const thread = dropOtherModelsReasoning(await loadThread(threadId), modelId);
-	const messages = await convertToModelMessages(await resolveFileParts(thread, owner, { pdfAsText }), {
-		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
-	});
-	return addConnectorNote(addRecalledMemory(trimOldToolResults(connectorCallsInHistory(messages)), recalled), connectors);
+	const { loadThreadContext } = await import("./thread-messages.ts");
+	return loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors });
 }
+
+/** How many times compaction runs again after it fails. On the last attempt it leaves the old messages out instead of failing. */
+export const COMPACT_RETRIES = 2;
+
+/**
+ * Summarizes the older part of a long thread (server/compaction/), and tells the page
+ * while it does: the marker becomes a `data-compaction` part (reply.ts). A step, so a
+ * replay never runs the summarizer twice.
+ */
+export async function compactStep(writable: WritableStream<ModelCallStreamPart>, request: CompactRequest): Promise<CompactResult> {
+	"use step";
+	const { getStepMetadata } = await import("workflow");
+	const { compact } = await import("../compaction/compact.ts");
+	const { attempt } = getStepMetadata();
+	return compact(request, {
+		lastAttempt: attempt > COMPACT_RETRIES,
+		status: async (state) => {
+			const writer = writable.getWriter();
+			try {
+				await writer.write({ type: "raw", rawValue: { [COMPACTION_MARKER]: state } });
+			} finally {
+				writer.releaseLock();
+			}
+		},
+	});
+}
+compactStep.maxRetries = COMPACT_RETRIES;
 
 /** Memory's guidance for the instructions, and what it recalls for the person's latest message. */
 export async function recallMemoryStep(threadId: string, owner: string): Promise<{ guidance: string; recalled: string }> {
@@ -135,18 +147,26 @@ export type StepUsage = {
 	costUsd: number | null;
 	finishReason: string;
 	toolCalls: string[];
+	/** The model asked for, and Ponder's estimate of the call's input tokens, to measure the thread's ratio. */
+	requested: string;
+	estimatedTokens: number;
 };
 
 /**
  * One `runs` row per model call: its tokens and OpenRouter's cost, which credits are
  * charged from. AI SDK telemetry records ToolLoopAgent runs; a WorkflowAgent's model
  * calls happen in steps, so the workflow records them with this step. On a replay the
- * step returns its recorded result, so a call is never counted twice.
+ * step returns its recorded result, so a call is never counted twice. It also keeps the
+ * thread's measured ratio of provider tokens to estimated ones (compaction/tokens.ts).
  */
 export async function recordUsageStep(usage: StepUsage) {
 	"use step";
 	const { randomUUID } = await import("node:crypto");
 	const { insertRun } = await import("../telemetry/store.ts");
+	const { measuredRatio } = await import("../compaction/tokens.ts");
+	const { saveTokenRatio } = await import("../compaction/store.ts");
+	const ratio = measuredRatio(usage.inputTokens, usage.estimatedTokens);
+	if (ratio) await saveTokenRatio(usage.threadId, usage.requested, ratio);
 	await insertRun({
 		id: randomUUID(),
 		parentId: null,

@@ -2,6 +2,8 @@ import { sql } from "../db.ts";
 
 /** The `function_id` of the calls that name threads. The app makes them, not the person, so they cost no credits. */
 export const TITLE_FUNCTION_ID = "thread-title";
+/** The calls that summarize a long chat (compaction/summarize.ts). The person's reply needs them, so they cost credits. */
+export const COMPACTION_FUNCTION_ID = "compaction";
 
 /** One agent run: one generateText/streamText call, such as one /api/chat request or one subagent call. */
 export type RunRow = {
