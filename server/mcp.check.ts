@@ -19,11 +19,11 @@ import { Hono } from "hono";
 import type { SignedInEnv } from "./auth.ts";
 import { sql } from "./db.ts";
 import { forgetClient } from "./mcp/client.ts";
-import { addConnector, callConnectorTool, changeConnector, completeSignIn, connectorCatalogFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
+import { addConnector, callConnectorTool, changeConnector, completeSignIn, catalogFrom, connectorCatalogFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
 import { freshCredentials } from "./mcp/oauth.ts";
 import { probe } from "./mcp/probe.ts";
 import { connectorsApi } from "./mcp/routes.ts";
-import { getConnection, migrateConnectors, readCredentials } from "./mcp/store.ts";
+import { getConnection, migrateConnectors, readCredentials, type Connection } from "./mcp/store.ts";
 import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor } from "./mcp/tools.ts";
 import { guardedFetch, mcpUrlProblem } from "./net-guard.ts";
 import { seal, unseal } from "./secrets.ts";
@@ -285,6 +285,29 @@ try {
 		await assert.rejects(addConnector(alice, ORIGIN, { name: "Again", url: `${base}/open/mcp`, transport: "http", auth: "none", headers: [] }), /already have/);
 	});
 
+	await check("the catalog stays within its limits, with the tools that are off counted", async () => {
+		const title = "T".repeat(11_000);
+		const listed = (name: string) => ({ name, title, description: "x".repeat(2_000), inputSchema: { type: "object" }, readOnly: true, destructive: false });
+		const off = Array.from({ length: 700 }, (_, i) => listed(`off_${i}`));
+		const big = {
+			id: "limits", userId: alice, name: "Big", slug: "big", url: "https://big.example/mcp", transport: "http", auth: "none", status: "connected", enabled: true,
+			headerNames: [], oauthClientId: null, expiresAt: null, serverInfo: null, toolsCheckedAt: new Date(), lastError: null, lastUsedAt: null,
+			createdAt: new Date(), updatedAt: new Date(), sealed: null,
+			tools: [...off, ...Array.from({ length: 300 }, (_, i) => listed(`on_${i}`))],
+			toolRules: Object.fromEntries(off.map((tool) => [tool.name, "off"])),
+		} as unknown as Connection;
+		const catalog = catalogFrom([big]);
+		// The tools that are off: names only, at most 500, in at most 100,000 characters.
+		assert.ok(catalog.off!.length <= 500 && JSON.stringify(catalog.off).length <= 100_000, String(JSON.stringify(catalog.off).length));
+		assert.ok(catalog.off!.every((tool) => Object.keys(tool).join() === "name"));
+		// The whole catalog, off names included, stays near 2,000,000 characters.
+		assert.ok(JSON.stringify(catalog).length < 2_010_000, String(JSON.stringify(catalog).length));
+		assert.ok(catalog.tools.length > 0 && catalog.leftOut > 0);
+		// 200 tools that are off with 11,000-character titles add little.
+		const onlyOff = catalogFrom([{ ...big, tools: off.slice(0, 200) } as Connection]);
+		assert.ok(JSON.stringify(onlyOff).length < 20_000, String(JSON.stringify(onlyOff).length));
+	});
+
 	await check("the catalog: rules decide which tools are in it and which ask first", async () => {
 		await changeConnector(alice, openId, { rules: { big: "off" } });
 		const catalog = await connectorCatalogFor(alice);
@@ -294,7 +317,7 @@ try {
 		]);
 		assert.deepEqual(catalog.connectors, [{ slug: "check_open", name: "Check Open", server: "Check Server", notes: "Use echo to repeat text.", tools: 2 }]);
 		// A tool that is off is named, so a call to it says so, but it has no schema and never runs.
-		assert.deepEqual(catalog.off, [{ name: "check_open__big", title: "big" }]);
+		assert.deepEqual(catalog.off, [{ name: "check_open__big" }]);
 		assert.match(await callConnectorTool(openId, "big", {}, alice, false), /turned .* off/);
 		// A tool on "Ask first" runs only when the call says the person approved it.
 		assert.match(await callConnectorTool(openId, "create_item", { title: "x" }, alice, false), /did not approve this call, so it did not run/);

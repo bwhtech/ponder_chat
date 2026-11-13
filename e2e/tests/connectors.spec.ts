@@ -449,7 +449,9 @@ test("does not run a call that the person allows after turning its tool off", as
 	// The model reads a short reason, not an input error or the SDK's error names.
 	const sent = JSON.stringify((await fake.calls(order))[1].messages);
 	expect(sent).not.toMatch(/AI_\w+Error|Type validation failed|Invalid input for|Closest tools/);
-	expect(sent).toContain("The person turned Add note (shop__add_note) off in Settings, Connectors, so this call did not run.");
+	expect(sent).toContain("The person turned shop__add_note off in Settings, Connectors, so this call did not run.");
+	// The page shows a call that did not run, not a change.
+	await expect(chat.reply(page)).not.toContainText("change");
 });
 
 test("checks a call's input against the tool before it asks", async ({ page, fake }) => {
@@ -515,7 +517,7 @@ test("does not run a tool that the person turned off", async ({ page, fake }) =>
 	const [first, second] = await fake.calls(order);
 	// The tool is not in the catalog: the note leaves it out, and the call says it is off.
 	expect(JSON.stringify(first.messages)).not.toContain("shop__find_order(");
-	expect(JSON.stringify(second.messages)).toContain("The person turned Find order (shop__find_order) off in Settings, Connectors, so this call did not run.");
+	expect(JSON.stringify(second.messages)).toContain("The person turned shop__find_order off in Settings, Connectors, so this call did not run.");
 });
 
 test("keeps the instructions and tools the same when the person adds a connector", async ({ page, fake }) => {

@@ -35,12 +35,15 @@ export type Rankable = {
 	connector: { slug: string; name: string; server?: string };
 };
 
-/** Only this many of a query's words count: each word is scored against every tool, in the one server process. */
+/** connector_search takes at most this many characters; a longer text is cut here too. */
+export const MAX_QUERY_CHARS = 300;
+/** Only this many distinct words of a query are scored: each is scored against every tool, in the one server process. */
 export const MAX_QUERY_WORDS = 16;
 
 export function rank<T extends Rankable>(query: string, tools: readonly T[]): T[] {
-	const terms = [...new Set(words(query.slice(0, MAX_QUERY_CHARS)))].slice(0, MAX_QUERY_WORDS);
-	const scoring = scoringTerms(terms);
+	// The tiers compare the query's words as they are, so an exact name with a repeated word still ranks first.
+	const terms = words(query.slice(0, MAX_QUERY_CHARS));
+	const scoring = [...new Set(scoringTerms(terms))].slice(0, MAX_QUERY_WORDS).map(toTerm);
 	return tools
 		.map((tool) => ({ tool, tier: tierOf(terms, prepared(tool)), score: score(scoring, prepared(tool).fields) }))
 		.filter((entry) => entry.score > 0 || entry.tier < Tier.keyword)
@@ -48,13 +51,11 @@ export function rank<T extends Rankable>(query: string, tools: readonly T[]): T[
 		.map((entry) => entry.tool);
 }
 
-/** connector_search takes at most this many characters; a longer text is cut here too. */
-export const MAX_QUERY_CHARS = 300;
-
 const MAX_SUGGESTIONS = 5;
 
 /** The names closest to a name that is not in the catalog, best first. */
-export function closestNames(name: string, tools: readonly Rankable[]): string[] {
+export function closestNames(text: string, tools: readonly Rankable[]): string[] {
+	const name = text.slice(0, MAX_QUERY_CHARS);
 	if (!words(name).length) return [];
 	return rank(name, tools)
 		.slice(0, MAX_SUGGESTIONS)
@@ -66,7 +67,8 @@ export function words(text: string): string[] {
 	return wholeWords(
 		text
 			.normalize("NFC")
-			.replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
+			// "HTTPServer": a space before the capital that starts a word. A lookahead, so a long run of capitals takes linear time.
+			.replace(/(\p{Lu})(?=\p{Lu}\p{Ll})/gu, "$1 ")
 			.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2"),
 	);
 }
@@ -118,32 +120,74 @@ function scoringTerms(terms: string[]) {
 	return meaningful.length ? meaningful : terms;
 }
 
-/** A field's words, its pairs of adjacent words joined (pairs), and its weight. */
-type Field = [words: string[], pairs: string[], weight: number];
+/**
+ * A field of a tool, indexed once: its words, unique and sorted, so the words that a
+ * query word starts are found by a binary search; the same words as a set; the pairs of
+ * a name's adjacent words joined; and the field's weight. A search then costs a few
+ * lookups for each query word and field, however many words the tool has.
+ */
+type Field = { sorted: string[]; words: Set<string>; pairs: Set<string>; weight: number; name: boolean };
+
+/** `name`: the words of a name (a tool's or a property's), where a doubled consonant counts as a form. */
+function field(list: string[], joinedPairs: string[], weight: number, name = false): Field {
+	const unique = [...new Set(list)].sort();
+	return { sorted: unique, words: new Set(unique), pairs: new Set(joinedPairs), weight, name };
+}
 
 function fields(tool: Rankable): Field[] {
 	const properties = isObject(tool.inputSchema.properties) ? Object.entries(tool.inputSchema.properties) : [];
 	const propertyDescriptions = properties.flatMap(([, schema]) => (isObject(schema) && typeof schema.description === "string" ? [schema.description] : []));
 	return [
-		[meaningful(words(tool.tool)), pairs(words(tool.tool)), 6],
-		[meaningful([...words(tool.connector.slug), ...prose(tool.connector.name)]), [], 4],
-		[meaningful(properties.flatMap(([key]) => words(key))), properties.flatMap(([key]) => pairs(words(key))), 3],
-		[meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), [], 2],
-		[meaningful(propertyDescriptions.flatMap(prose)), [], 1],
-		[meaningful(prose(tool.connector.server ?? "")), [], 1],
+		field(meaningful(words(tool.tool)), pairs(words(tool.tool)), 6, true),
+		field(meaningful([...words(tool.connector.slug), ...prose(tool.connector.name)]), [], 4),
+		field(meaningful(properties.flatMap(([key]) => words(key))), properties.flatMap(([key]) => pairs(words(key))), 3, true),
+		field(meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), [], 2),
+		field(meaningful(propertyDescriptions.flatMap(prose)), [], 1),
+		field(meaningful(prose(tool.connector.server ?? "")), [], 1),
 	];
 }
 
-function score(terms: string[], fields: Field[]) {
-	let total = 0;
-	for (const term of terms) {
-		for (const [list, joinedPairs, weight] of fields) if (list.some((word) => matches(word, term)) || joinedPairs.some((pair) => pair === term || formOf(pair, term))) total += weight;
+/**
+ * A query word, and the words it is a form of ("issues": issue), found once for every
+ * tool. `doubled` are the words it is a form of only by a doubled consonant ("shipping":
+ * ship), which count only in names: in prose, "canned" is not "can", nor "herring" "her".
+ */
+type Term = { text: string; bases: string[]; doubled: string[] };
+
+function toTerm(text: string): Term {
+	const candidates = new Set<string>();
+	// A form adds at most four letters to its word, and may turn a last "e" or "y" into "ing" or "ies".
+	for (let cut = 1; cut <= 5 && text.length - cut >= 2; cut++) {
+		const stem = text.slice(0, -cut);
+		candidates.add(stem).add(`${stem}e`).add(`${stem}y`);
 	}
+	const bases = [...candidates].filter((base) => formOf(base, text, false));
+	return { text, bases, doubled: [...candidates].filter((base) => !bases.includes(base) && formOf(base, text, true)) };
+}
+
+function score(terms: Term[], fields: Field[]) {
+	let total = 0;
+	for (const term of terms) for (const each of fields) if (matchesField(each, term)) total += each.weight;
 	return total;
 }
 
-/** The query word starts the word ("repo" finds repositories), or is the word with an ending ("issues" finds issue). */
-const matches = (word: string, term: string) => word.startsWith(term) || formOf(word, term);
+/** The query word starts a word ("repo" finds repositories), or is a word with an ending ("issues" finds issue). A joined pair matches only whole, or with an ending. */
+function matchesField({ sorted, words: set, pairs: joinedPairs, name }: Field, { text, bases, doubled }: Term) {
+	const isBase = (base: string) => set.has(base) || joinedPairs.has(base);
+	return startsOne(sorted, text) || joinedPairs.has(text) || bases.some(isBase) || (name && doubled.some(isBase));
+}
+
+/** True when a word in the sorted list starts with the text: those words come right after where the text would go. */
+function startsOne(sorted: string[], text: string) {
+	let low = 0;
+	let high = sorted.length;
+	while (low < high) {
+		const middle = (low + high) >> 1;
+		if (sorted[middle]! < text) low = middle + 1;
+		else high = middle;
+	}
+	return sorted[low]?.startsWith(text) ?? false;
+}
 
 /**
  * True when the term is a form of the word: a plural (id → ids, issue → issues, category →
@@ -152,14 +196,14 @@ const matches = (word: string, term: string) => word.startsWith(term) || formOf(
  * running). Only "s" and "es" work on two-letter words: short words with the other
  * endings are other words ("ad" and "add", "be" and "bing", "car" and "card").
  */
-function formOf(word: string, term: string) {
+function formOf(word: string, term: string, doubling: boolean) {
 	if (word.length < 2) return false;
 	if (term === `${word}s` || term === `${word}es`) return true;
 	if (word.length < 3 || STANDALONE.has(term)) return false;
-	return formsOf(word).includes(term);
+	return formsOf(word, doubling).includes(term);
 }
 
-function formsOf(word: string): string[] {
+function formsOf(word: string, doubling: boolean): string[] {
 	const last = word.at(-1)!;
 	// see → seeing, agree → agreed; but "fee" and "feed", "see" and "seed" are other words.
 	if (word.endsWith("ee")) return [`${word}ing`, ...(word.length > 3 ? [`${word}d`] : [])];
@@ -168,15 +212,15 @@ function formsOf(word: string): string[] {
 	// category → categories; copy → copied, copying.
 	if (last === "y" && !VOWELS.has(word.at(-2)!)) return [`${word.slice(0, -1)}ies`, `${word.slice(0, -1)}ied`, `${word}ing`];
 	const forms = [`${word}ed`, `${word}ing`];
-	// ship → shipped, shipping; run → running. A short word that ends in one vowel and a consonant doubles it.
-	if (word.length <= 4 && !VOWELS.has(last) && !"wxy".includes(last) && VOWELS.has(word.at(-2)!) && !VOWELS.has(word.at(-3)!)) forms.push(`${word}${last}ed`, `${word}${last}ing`);
+	// ship → shipped, shipping; commit → committed. A word of up to six letters that ends in one vowel and a consonant doubles it.
+	if (doubling && word.length <= 6 && !VOWELS.has(last) && !"wxy".includes(last) && VOWELS.has(word.at(-2)!) && !VOWELS.has(word.at(-3)!)) forms.push(`${word}${last}ed`, `${word}${last}ing`);
 	return forms;
 }
 
 const VOWELS = new Set("aeiou");
 
-/** Words that end like a form but are words of their own: "being" is not "bee", "incoming" is not "income". */
-const STANDALONE = new Set(["being", "incoming", "outgoing", "upcoming", "ongoing", "during", "nothing", "something", "anything", "everything", "evening", "morning", "string"]);
+/** Words that end like a form but are words of their own: "incoming" is not "income", "morning" is not "morn". */
+const STANDALONE = new Set(["incoming", "outgoing", "upcoming", "ongoing", "during", "evening", "morning", "string"]);
 
 /**
  * Each pair of a name's adjacent words joined, so "github" finds searchGitHub and

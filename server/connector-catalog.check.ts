@@ -74,6 +74,20 @@ assert.equal(rank("ordered", [tool(shop, "find_order", "")]).length, 1);
 assert.equal(rank("listing", [tool(shop, "list_orders", "")]).length, 1);
 assert.equal(rank("creating", [tool(shop, "create_order", "")]).length, 1);
 assert.equal(rank("added", [tool(shop, "add_note", "")]).length, 1);
+// A doubled consonant in words of up to six letters, in names only: in prose, "canned" is not "can".
+for (const [query, name] of [["committed", "commit"], ["submitted", "submit"], ["formatted", "format"], ["cancelled", "cancel"]]) {
+	assert.equal(rank(query!, [tool(shop, `${name}_it`, "")]).length, 1, `${query} → ${name}`);
+}
+for (const [query, text] of [["canned", "You can add one."], ["herring", "Shows her orders."], ["butted", "Lists them, but not all."]]) {
+	assert.deepEqual(rank(query!, [tool(shop, "other", text!)]), [], `${query} in "${text}"`);
+}
+assert.equal(rank("shipping", [tool(shop, "other", "", { type: "object", properties: { ship_to: { type: "string" } } })]).length, 1, "a property's name counts as a name");
+// An exact name with a repeated word ranks first: the tiers see the query's words as they are.
+const repeated = [tool(shop, "list_items", ""), tool(shop, "list_list_items", ""), tool(shop, "get_order_by_id", ""), tool(shop, "get_order_by_order_id", "")];
+assert.equal(names(rank("shop__list_list_items", repeated))[0], "shop__list_list_items");
+assert.equal(names(rank("get_order_by_order_id", repeated))[0], "shop__get_order_by_order_id");
+// Filler words don't use up the scored words: a long sentence still finds its last word.
+assert.deepEqual(names(rank("can you please help me to look up and find the details of the most recent one for my account and then show me the invoice", [tool(shop, "get_invoice", ""), tool(shop, "other", "")])), ["shop__get_invoice"]);
 assert.equal(rank("created", [tool(shop, "create_order", "")]).length, 1);
 // Short words with these endings are other words: "add" is not "ad", "bing" is not "be".
 for (const [query, text] of [["add", "create_ad"], ["bing", "to be updated"], ["ring", "re"], ["used", "us"], ["end", "en"], ["card", "car"], ["feed", "fe"], ["find", "fin"], ["fund", "fun"]]) {
@@ -256,6 +270,25 @@ const crowd = new Catalog({
 	tools: Array.from({ length: 500 }, (_, i) => tool(shop, `tool_number_${i}`, "Does something with the records of an order, and returns them with their fields.", bigSchema)),
 });
 crowd.search("warm up");
+// A catalog near the 2 MB limit, with dense snake_case properties, and 16 query words
+// that match nothing: the worst case for the scoring. Each tool is indexed on the first
+// search (cold); later searches only look words up (warm).
+// Every word is distinct, so no word is shared between tools or fields.
+const dense = (i: number, j: number, k: number) => Array.from({ length: 8 }, (_, n) => `w${i}x${j}y${k}n${n}`).join("_");
+const denseTools = Array.from({ length: 500 }, (_, i) =>
+	tool(shop, `dense_${i}`, "d", { type: "object", properties: Object.fromEntries(Array.from({ length: 25 }, (_, j) => [dense(i, j, 0), { type: "string", description: dense(i, j, 1).replaceAll("_", " ") }])) }),
+);
+assert.ok(JSON.stringify(denseTools).length > 1_900_000, String(JSON.stringify(denseTools).length));
+const denseCatalog = new Catalog({ ...data, tools: denseTools });
+const nothing = Array.from({ length: 16 }, (_, i) => `z${i}`).join(" ");
+let started = performance.now();
+denseCatalog.search(nothing);
+const cold = performance.now() - started;
+started = performance.now();
+for (let i = 0; i < 5; i++) denseCatalog.search(nothing);
+const warm = (performance.now() - started) / 5;
+assert.ok(cold < 500, `a cold search of a 2 MB catalog took ${Math.round(cold)} ms`);
+assert.ok(warm < 100, `a warm search of a 2 MB catalog took ${Math.round(warm)} ms`);
 for (const huge of [Array.from({ length: 2_000 }, (_, i) => `word${i}`).join(" "), "a".repeat(100_000), `${"shop_".repeat(20_000)}__x`]) {
 	const started = performance.now();
 	crowd.search(huge);
@@ -346,13 +379,26 @@ for (const [name, messages, call, expected] of cases) {
 
 // A tool the person turned off: a call to it passes the check, asks nothing, never runs,
 // and the model reads that it is off. Such as one turned off while its approval waited.
-const withOff = connectorTools({ ...data, off: [{ name: "shop__old_tool", title: "Old tool" }] }, "ana", stub);
+const withOff = connectorTools({ ...data, off: [{ name: "shop__old_tool" }] }, "ana", stub);
 const offCall = { tool: "shop__old_tool", input: { anything: 1 } };
 assert.equal((await asSchema(withOff[CONNECTOR_CALL]!.inputSchema).validate!(offCall)).success, true);
 assert.equal(await (withOff[CONNECTOR_CALL]!.needsApproval as (input: unknown, options: unknown) => boolean)(offCall, options), false);
 asked.length = 0;
-assert.match(String(await withOff[CONNECTOR_CALL]!.execute!(offCall, { toolCallId: "c9", messages: [], context: {} })), /^The person turned Old tool \(shop__old_tool\) off in Settings, Connectors, so this call did not run\./);
+// It fails, so the page shows a call that did not run, not a change. The sentence names the tool by its name only: a title is the server's text.
+await assert.rejects(Promise.resolve(withOff[CONNECTOR_CALL]!.execute!(offCall, { toolCallId: "c9", messages: [], context: {} })), /^Error: The person turned shop__old_tool off in Settings, Connectors, so this call did not run\./);
 assert.deepEqual(asked, [], "a tool that is off never reaches the call step");
+
+// A long name the model writes, such as a run of capitals, is refused or cut before it is
+// split into words, ranked or repeated: it can't hold up the server.
+const capitals = "A".repeat(100_000);
+started = performance.now();
+words(capitals);
+const checkedLong = catalog.check({ tool: capitals, input: {} });
+closestNames(capitals, tools);
+const longTook = performance.now() - started;
+assert.ok(longTook < 200, `a 100,000-capital name took ${Math.round(longTook)} ms`);
+assert.ok("problem" in checkedLong && checkedLong.problem.length < 200, "the error does not repeat the name");
+assert.ok("problem" in catalog.check({ tool: `${"A".repeat(150)}__x`, input: {} }) && !(catalog.check({ tool: `${"A".repeat(150)}__x`, input: {} }) as { problem: string }).problem.includes("A".repeat(101)));
 
 // Telemetry names the real tool.
 assert.equal(calledToolName({ toolName: "connector_call", input: good }), "shop__find_order");

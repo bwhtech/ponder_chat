@@ -276,6 +276,9 @@ export async function removeConnector(userId: string, id: string) {
 /** Safety limits on one reply's catalog: it is recorded with the reply's run. */
 const MAX_CATALOG_TOOLS = 500;
 const MAX_CATALOG_CHARS = 2_000_000;
+/** The tools that are off are named so a call to one says so; this many at most, in this much JSON, within MAX_CATALOG_CHARS. */
+const MAX_OFF_TOOLS = 500;
+const MAX_OFF_CHARS = 100_000;
 const MAX_NOTES_CHARS = 2_000;
 const STALE_TOOLS_MS = 60 * 60_000;
 const RETRY_ERROR_MS = 5 * 60_000;
@@ -304,28 +307,56 @@ async function connectorCatalogNow(userId: string): Promise<CatalogData> {
 	}
 	// A connector in "error" is tried again every few minutes, so it comes back by itself when its server does.
 	for (const connection of await connectionsToRetry(userId, RETRY_ERROR_MS)) void refreshTools(connection, { background: true }).catch(() => undefined);
+	const catalog = catalogFrom(connections);
+	if (catalog.leftOut) console.warn(`connectors: ${userId} has ${catalog.tools.length + catalog.leftOut} tools on; the catalog keeps ${catalog.tools.length}.`);
+	return catalog;
+}
+
+/**
+ * The catalog of these connections, within MAX_CATALOG_TOOLS and MAX_CATALOG_CHARS. The
+ * names of the tools that are off count toward the characters too.
+ */
+export function catalogFrom(connections: Connection[]): CatalogData {
+	const signedIn = connections.filter((connection) => connection.status === "connected");
+	const off = offTools(signedIn);
 	const perConnection = signedIn.map(catalogTools);
 	const total = perConnection.reduce((sum, list) => sum + list.length, 0);
-	const kept = fairShare(perConnection).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-	if (total > kept.length) console.warn(`connectors: ${userId} has ${total} tools on; the catalog keeps ${kept.length}.`);
+	const kept = fairShare(perConnection, MAX_CATALOG_CHARS - JSON.stringify(off).length).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
 	return {
 		tools: kept,
 		connectors: connections.map((connection) => catalogConnector(connection, kept)),
 		leftOut: total - kept.length,
-		off: signedIn.flatMap(offTools),
+		off,
 	};
 }
 
-function offTools(connection: Connection): OffTool[] {
-	return connection.tools.filter((tool) => ruleOf(connection, tool) === "off").map((tool) => ({ name: modelToolName(connection.slug, tool.name), title: tool.title ?? tool.name }));
+/**
+ * The tools the person turned off, by name, up to MAX_OFF_TOOLS and MAX_OFF_CHARS: a
+ * server can list many tools, and the catalog is recorded with every reply. A call to an
+ * off tool past the limit gets "no tool named".
+ */
+function offTools(connections: Connection[]): OffTool[] {
+	const off: OffTool[] = [];
+	let chars = 2;
+	for (const connection of connections) {
+		for (const tool of connection.tools) {
+			if (ruleOf(connection, tool) !== "off") continue;
+			const entry = { name: modelToolName(connection.slug, tool.name) };
+			chars += JSON.stringify(entry).length + 1;
+			if (off.length >= MAX_OFF_TOOLS || chars > MAX_OFF_CHARS) return off;
+			off.push(entry);
+		}
+	}
+	return off;
 }
 
 /**
  * The tools to keep when there are too many: one from each connection in turn, so a
  * cut takes from the largest connections and leaves none out entirely. Stops at
- * MAX_CATALOG_TOOLS, or when the tools' JSON reaches MAX_CATALOG_CHARS.
+ * MAX_CATALOG_TOOLS, or when the tools' JSON reaches `maxChars`: what is left of
+ * MAX_CATALOG_CHARS after the tools that are off.
  */
-function fairShare(perConnection: CatalogTool[][]): CatalogTool[] {
+function fairShare(perConnection: CatalogTool[][], maxChars: number): CatalogTool[] {
 	const kept: CatalogTool[] = [];
 	let chars = 0;
 	const longest = Math.max(0, ...perConnection.map((list) => list.length));
@@ -334,7 +365,7 @@ function fairShare(perConnection: CatalogTool[][]): CatalogTool[] {
 			const tool = list[index];
 			if (!tool) continue;
 			chars += JSON.stringify(tool).length;
-			if (kept.length >= MAX_CATALOG_TOOLS || chars > MAX_CATALOG_CHARS) return kept;
+			if (kept.length >= MAX_CATALOG_TOOLS || chars > maxChars) return kept;
 			kept.push(tool);
 		}
 	}
