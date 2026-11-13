@@ -150,9 +150,9 @@ Then, with the app's environment:
 
 Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL` (every OpenRouter call; default `https://openrouter.ai/api`) and `CLOUDFLARE_API_URL` (the email API). Production sets neither.
 
-Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts` and `server/mcp.check.ts` on every pull request.
+Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts`, `server/tracing.check.ts` and `server/mcp.check.ts` on every pull request.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, `npx tsx server/tracing.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -264,6 +264,76 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 - The flow route `/.well-known/workflow/v1/flow` has no authentication. The server listens on 127.0.0.1; in production the proxy must refuse that path.
 - Stop cancels the run and saves what it wrote. The model call in flight still runs to its end on OpenRouter; that cost is not charged to credits.
 
+### Tracing
+
+Each reply can be one OpenTelemetry trace. A trace shows where the reply's time went and where it failed. Tracing is on when `OTEL_EXPORTER_OTLP_ENDPOINT` is set. Then Ponder sends spans with OTLP over HTTP to `<endpoint>/v1/traces`. In production, that is Jaeger on the same VM (`deploy/README.md`, "Traces"). Without the setting, tracing is off and loads nothing.
+
+| Part | Where |
+| --- | --- |
+| The tracer provider, the batch and the exporter, started by a Nitro plugin | `server/tracing/setup.ts`, `server/plugins/tracing.ts` |
+| One trace per reply | `server/tracing/reply-trace.ts`, `server/tracing/flow-middleware.ts` |
+| What a span may carry | `server/tracing/privacy.ts` |
+| HTTP spans | `server/tracing/http.ts` |
+| Ponder's own spans | `span()` in `server/tracing/span.ts`, called in the modules |
+
+A reply's trace has these spans:
+
+| Span | From | What it shows |
+| --- | --- | --- |
+| `invoke_agent ponder` | Ponder | The root: the whole reply, how it ended (`ponder.outcome`), the model, the thread and run ids |
+| `credits.check`, `chat.request` | Ponder | The route, before the run starts |
+| `queue.wait` | Ponder | Each step's time in the queue |
+| `workflow.execute chatTurn`, `step.execute <step>` | Workflow | Each delivery and each step, with replays |
+| `thread.load`, `file_context.resolve`, `pdf.extract_text`, `memory.recall`, `connectors.list` | Ponder | Context building |
+| `invoke_agent <model>`, `step N`, `chat <model>` | AI SDK (`@ai-sdk/otel`) | The agent, its steps and each model call, with tokens and time to first token (`gen_ai.client.operation.time_to_first_chunk`) |
+| `execute_tool <tool>` | AI SDK | Each tool call |
+| `mcp.call_tool`, `search.query`, `web_fetch.read`, `python.run` | Ponder | The work inside a tool |
+| `GET`, `POST` | Ponder (`http.ts`) | Each HTTP request: OpenRouter, MCP servers, pages |
+| `reply.save`, `memory.save` | Ponder | Saving the reply, and memory after it |
+
+The title and memory's model calls are in the trace too. The names follow OpenTelemetry's GenAI conventions (`gen_ai.*`), so any OTel tool can read them.
+
+One reply is one trace:
+
+- A reply's trace id and root span id come from its run id (a SHA-256 of it). Every process that knows the run id gets the same ids, so nothing is stored.
+- The workflow worker sends each step to `/.well-known/workflow/v1/flow`. A Nitro middleware reads the run id in the message and runs the step under the reply's root. So Workflow's spans, Ponder's spans and the AI SDK's spans join the trace, in every job, every replay, and in the server that goes on after a crash.
+- The root span is sent last, when the run is marked finished (`finishRun` in `server/workflow/runs.ts`), with the run's start time. Every way a reply ends goes through there: saved, failed or stopped.
+- After an approval, a new run carries on the message (see "Connectors"). It is a trace of its own. Its `chat.request` span links to the root of the run it carries on, and both have the same `gen_ai.conversation.id` (the thread id).
+- Only replies are traced. A span with no reply above it, such as a page load or a queue poll, is not sampled.
+
+Privacy: admins see usage, never chats (see "Admin"), and traces keep that promise. A span never has message text, prompts, tool inputs or outputs, connector results, file names, or the path and query of an address. It has names, times, status, token counts, model and provider ids, and the thread and run ids. Two parts make sure of this:
+
+1. At the source. The AI SDK's integration is told for every event not to record inputs or outputs, whatever the call asked. HTTP spans record the method, the status and the kind of peer (`ponder.peer`: `openrouter`, `mcp`, `web`). They record the host for OpenRouter only, because a subdomain can carry data. No `traceparent` header goes out, so a page or an MCP server learns nothing about the trace.
+2. At export. An allowlist (`server/tracing/privacy.ts`) keeps only known attribute keys. It drops error messages, events other than `exception` (which keeps only its type) and status messages. A span name of an unknown shape becomes `span`. A library that starts to record a new attribute sends nothing until the key is added there.
+
+`server/tracing.check.ts` checks both with a marker in every place content could come from. `e2e/tests/tracing.spec.ts` checks the whole path: a reply whose message, file, address and connector input hold a marker exports no span with it.
+
+Errors and warnings logged inside a trace end with ` trace_id=<id>`. Paste the id in Jaeger's search to open the trace.
+
+Settings:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | not set: off | Where spans go, such as `http://127.0.0.1:4318` |
+| `OTEL_SERVICE_NAME` | `ponder-chat` | The service name in Jaeger |
+| `OTEL_BSP_SCHEDULE_DELAY` | `2000` | Milliseconds spans wait to be sent in one batch |
+
+To see traces on your machine:
+
+1. Start Jaeger: `docker run --rm -d --name jaeger -p 127.0.0.1:16686:16686 -p 127.0.0.1:4318:4318 jaegertracing/jaeger:2.22.0`.
+2. Add `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` to `.env` (for `npm run dev`) or to the environment of `./start.sh`.
+3. Send a message, then open http://localhost:16686 and pick the service `ponder-chat`.
+
+For the end-to-end tests, set `E2E_OTEL_ENDPOINT=http://127.0.0.1:4318`. Without it, the tests send their traces to the fake OpenRouter, which `tracing.spec.ts` reads.
+
+Cost: with tracing off, the server loads only `@opentelemetry/api` (63 kB). With it on, the start-up time does not change measurably, and the server uses about 6 MB more memory. A short reply is 100 to 150 spans, most of them Workflow's.
+
+Limits:
+
+- A process that is killed (`kill -9`, out of memory) loses the spans it had not finished, such as the step it was running. The spans it had sent stay in the trace, and Jaeger shows them without their parent.
+- A run that stops to ask for an approval does not send the AI SDK's `step` span of its last model call. That model call's `chat` span shows without its parent.
+- `runs` stays the record of usage and credits. Traces are for finding where a reply was slow or failed, and are kept for 7 days.
+
 ### Python
 
 `sandbox/pyodide/` is adapted from LangChain's pyodide-sandbox (MIT): each run is a new Deno process with no permissions except reading Pyodide and the vendored packages. No network, no environment, no writes, no subprocesses. Variables, imports and files in `/work` are kept per chat in Postgres (`python_state`). Set up once with `npm run sandbox:setup` (needs Deno and uv). Limits: `PYTHON_MAX_RUNS` (3 at once), `PYTHON_MEMORY_MB` (1536), 60 seconds a run.
@@ -350,6 +420,7 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 | Credits | `server/credits.ts`, `server/settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
 | Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net-guard.ts`, `web/connectors/`, `web/settings/` |
+| Tracing | `server/tracing/`, `server/plugins/tracing.ts`, `deploy/jaeger.*` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
 | Components | The [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) package. `web/side-panel/panel.ts` is its file viewer (`provideFileViewer` in `web/Workspace.vue`). |
 | End-to-end tests, the fake OpenRouter and the test MCP servers | `e2e/`, `playwright.config.ts` |
