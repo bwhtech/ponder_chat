@@ -14,9 +14,10 @@ import { registerTelemetry, stepCountIs, streamText, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
 import { withPeer } from "./tracing/http.ts";
-import { cleanSpan } from "./tracing/privacy.ts";
+import { cleanSpan, withoutConnector } from "./tracing/privacy.ts";
 import { endReplyTrace, linkToReply, recordReplySpan, replyIds, runStartTime, withReplyTrace } from "./tracing/reply-trace.ts";
-import { startTracing, withoutContent } from "./tracing/setup.ts";
+import { startTracing, tracesUrl, withoutContent } from "./tracing/setup.ts";
+import { tracingState } from "./tracing/state.ts";
 import { span } from "./tracing/span.ts";
 
 let failed = 0;
@@ -106,6 +107,10 @@ await check("a span loses every attribute, event, status message and name that i
 			"gen_ai.request.model": "test/model",
 			"workflow.run.id": RUN_ID,
 			"workflow.queue.overhead_ms": 12,
+			// Keys that are kept, with values that do not look like a name.
+			"gen_ai.response.id": `id of ${MARKER}`,
+			"error.type": `${MARKER} could not be read`,
+			"messaging.destination.name": `queue\n${MARKER}`,
 		},
 		links: [{ context: { traceId: "c".repeat(32), spanId: "d".repeat(16), traceFlags: 1 }, attributes: { note: MARKER } }],
 		events: [
@@ -128,6 +133,32 @@ await check("a span loses every attribute, event, status message and name that i
 	assert.deepEqual(clean.status, { code: SpanStatusCode.ERROR });
 	assert.equal(clean.spanContext().spanId, "b".repeat(16));
 	assert.equal(cleanSpan({ ...fake, name: "execute_tool web_fetch" } as ReadableSpan).name, "execute_tool web_fetch");
+});
+
+await check("a connector's tools are named without the connector's name, which the person chose", async () => {
+	const toolSpan = {
+		name: "execute_tool my_bank__list_payments",
+		status: { code: SpanStatusCode.OK },
+		attributes: { "gen_ai.tool.name": "my_bank__list_payments", "ai.toolCall.name": "my_bank__list_payments" },
+		links: [],
+		events: [],
+	};
+	const clean = cleanSpan(toolSpan as unknown as ReadableSpan);
+	assert.equal(clean.name, "execute_tool connector__list_payments");
+	assert.equal(clean.attributes["gen_ai.tool.name"], "connector__list_payments");
+	assert.equal(clean.attributes["ai.toolCall.name"], "connector__list_payments");
+	// Ponder's own tools have no connector part.
+	assert.equal(withoutConnector("web_fetch"), "web_fetch");
+	assert.equal(withoutConnector("run_python"), "run_python");
+});
+
+await check("an endpoint without http:// or https:// is refused before tracing starts", async () => {
+	for (const endpoint of ["127.0.0.1:4318", "localhost:4318", "ftp://127.0.0.1:4318", "not an address"]) {
+		assert.throws(() => tracesUrl(endpoint), /OTEL_EXPORTER_OTLP_ENDPOINT/, endpoint);
+		await assert.rejects(startTracing(endpoint), /OTEL_EXPORTER_OTLP_ENDPOINT/, endpoint);
+	}
+	assert.equal(tracingState(), undefined, "a refused endpoint left tracing half set up");
+	assert.equal(tracesUrl("http://127.0.0.1:4318/").href, "http://127.0.0.1:4318/v1/traces");
 });
 
 await check("the AI SDK records no inputs or outputs through Ponder's integration, even when a call asks it to", async () => {
@@ -154,17 +185,19 @@ await check("the AI SDK records no inputs or outputs through Ponder's integratio
 
 // --- The whole pipeline: Ponder's provider, the AI SDK, HTTP, the root span, the allowlist.
 
-const exported = new InMemorySpanExporter();
-const tracing = await startTracing("http://127.0.0.1:9", exported);
-assert.ok(tracing);
-registerTelemetry(tracing.integration);
-
+// A local server that is both a page and "OpenRouter" (OPENROUTER_BASE_URL), as in the e2e tests.
 const server = createServer((request, response) => {
 	response.statusCode = request.url?.includes("missing") ? 404 : 200;
 	response.end(`page with ${MARKER}`);
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const address = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+process.env.OPENROUTER_BASE_URL = `${address}/api`;
+
+const exported = new InMemorySpanExporter();
+const tracing = await startTracing("http://127.0.0.1:9", exported);
+assert.ok(tracing);
+registerTelemetry(tracing.integration);
 
 await withReplyTrace(RUN_ID, async () => {
 	recordReplySpan(RUN_ID, "chat.request", Date.now() - 50, Date.now(), { "ponder.continued": true }, [linkToReply("wrun_01M7AAXEME3MDRQZPA53SJG1W6")]);
@@ -173,6 +206,8 @@ await withReplyTrace(RUN_ID, async () => {
 	await reply.consumeStream();
 	await span("web_fetch.read", {}, () => withPeer("web", async () => (await fetch(`${address}/${MARKER}/page?q=${MARKER}`)).text()));
 	await withPeer("web", () => fetch(`${address}/missing/${MARKER}`)).then((response) => response.text());
+	await fetch(`${address}/api/v1/chat/completions?q=${MARKER}`, { method: "POST", body: MARKER }).then((response) => response.text());
+	await span("workflow.stream.flush", {}, async () => undefined);
 	await span("python.run", {}, async () => {
 		throw new Error(`the code printed ${MARKER}`);
 	}).catch(() => undefined);
@@ -231,16 +266,25 @@ await check("model calls have their model, tokens and time to first token; tools
 	assert.equal(toolCall?.attributes["gen_ai.tool.name"], "lookup");
 });
 
-await check("an HTTP span has the method, status and kind of peer, and never the host or address", async () => {
+await check("an HTTP span has the method, status and kind of peer, and never the address; the host for OpenRouter only", async () => {
 	const requests = spans.filter((each) => each.kind === SpanKind.CLIENT && !each.name.startsWith("chat "));
-	assert.equal(requests.length, 2, requests.map((each) => each.name).join(", "));
-	for (const request of requests) {
+	const pages = requests.filter((each) => each.attributes["ponder.peer"] === "web");
+	assert.equal(pages.length, 2, requests.map((each) => `${each.name} ${each.attributes["ponder.peer"]}`).join(", "));
+	for (const request of pages) {
 		assert.equal(request.name, "GET");
-		assert.equal(request.attributes["ponder.peer"], "web");
 		assert.equal(request.attributes["server.address"], undefined);
 	}
-	assert.deepEqual(requests.map((each) => each.attributes["http.response.status_code"]).sort(), [200, 404]);
-	assert.equal(requests.find((each) => each.attributes["http.response.status_code"] === 404)?.status.code, SpanStatusCode.ERROR);
+	assert.deepEqual(pages.map((each) => each.attributes["http.response.status_code"]).sort(), [200, 404]);
+	assert.equal(pages.find((each) => each.attributes["http.response.status_code"] === 404)?.status.code, SpanStatusCode.ERROR);
+	const openRouter = requests.filter((each) => each.attributes["ponder.peer"] === "openrouter");
+	assert.equal(openRouter.length, 1);
+	assert.equal(openRouter[0].name, "POST");
+	assert.equal(openRouter[0].attributes["server.address"], "127.0.0.1");
+	assert.equal(openRouter[0].attributes["http.response.status_code"], 200);
+});
+
+await check("workflow.stream.flush spans are left out", async () => {
+	assert.equal(named("workflow.stream.flush").length, 0);
 });
 
 await check("a failure keeps its kind, not its message", async () => {

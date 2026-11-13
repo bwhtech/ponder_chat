@@ -16,7 +16,7 @@ import { errorType } from "./span.ts";
  *
  * Only requests made inside a trace get a span, so a page load or a poll adds nothing.
  */
-export type Peer = "openrouter" | "mcp" | "web" | "search" | "storage" | "email";
+export type Peer = "openrouter" | "mcp" | "web";
 
 const PEER = createContextKey("ponder.http.peer");
 

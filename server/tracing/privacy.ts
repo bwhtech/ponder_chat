@@ -123,6 +123,44 @@ const NUMBER_PREFIXES = [
 	"ponder.",
 ];
 
+/**
+ * Text values that come from outside Ponder's code: a tool name the model or an MCP server
+ * chose, an id or an error name from a provider or a library. Each must look like a name,
+ * or it is dropped.
+ */
+const NAME_VALUE = /^[\w.:/@+-]{1,120}$/;
+const NAMED_KEYS = new Set([
+	"gen_ai.tool.name",
+	"gen_ai.tool.call.id",
+	"gen_ai.response.id",
+	"gen_ai.response.model",
+	"ai.toolCall.name",
+	"ai.toolCall.id",
+	"ai.response.id",
+	"ai.response.model",
+	"error.type",
+	"step.error.name",
+	"workflow.error.name",
+	"workflow.error.code",
+	"messaging.destination.name",
+]);
+
+/**
+ * A connector's tools reach the model as `<connector>__<tool>` (mcp/tools.ts), and the
+ * connector part is the name the person gave it. Like a connector's host (http.ts), it
+ * would tell which apps a person uses, so it becomes "connector". The tool's own name,
+ * which the MCP server gives, stays.
+ */
+const CONNECTOR_TOOL = /^[a-z0-9_]*?__/;
+const TOOL_NAME_KEYS = new Set(["gen_ai.tool.name", "ai.toolCall.name"]);
+export const withoutConnector = (tool: string) => tool.replace(CONNECTOR_TOOL, "connector__");
+
+/**
+ * Spans left out. Workflow makes one `workflow.stream.flush` for each write to a reply's
+ * stream: hundreds for a long reply, with nothing to learn from each one.
+ */
+const DROPPED = new Set(["workflow.stream.flush"]);
+
 /** Events kept, with the same attribute rules. An exception keeps its type only. */
 const EVENTS = new Set(["exception", "ai.stream.firstChunk", "ai.stream.finish"]);
 
@@ -142,13 +180,15 @@ const KNOWN_NAMES = [
 ];
 
 export function cleanName(name: string): string {
-	return NAME.test(name) && KNOWN_NAMES.some((pattern) => pattern.test(name)) ? name : "span";
+	if (!NAME.test(name) || !KNOWN_NAMES.some((pattern) => pattern.test(name))) return "span";
+	return name.startsWith("execute_tool ") ? `execute_tool ${withoutConnector(name.slice("execute_tool ".length))}` : name;
 }
 
 export function cleanAttributes(attributes: Attributes): Attributes {
 	const kept: Attributes = {};
 	for (const [key, value] of Object.entries(attributes)) {
-		if (allowed(key, value)) kept[key] = value;
+		if (!allowed(key, value)) continue;
+		kept[key] = TOOL_NAME_KEYS.has(key) && typeof value === "string" ? withoutConnector(value) : value;
 	}
 	return kept;
 }
@@ -158,7 +198,8 @@ function allowed(key: string, value: AttributeValue | undefined): boolean {
 	if (typeof value === "number" || typeof value === "boolean") return TEXT_KEYS.has(key) || NUMBER_PREFIXES.some((prefix) => key.startsWith(prefix));
 	if (!TEXT_KEYS.has(key)) return false;
 	const texts = Array.isArray(value) ? value : [value];
-	return texts.every((text) => text == null || (typeof text === "string" && text.length <= 200));
+	const shape = NAMED_KEYS.has(key) ? NAME_VALUE : /^[^]{0,200}$/;
+	return texts.every((text) => text == null || (typeof text === "string" && shape.test(text)));
 }
 
 function cleanEvents(events: TimedEvent[]): TimedEvent[] {
@@ -206,7 +247,7 @@ export class PrivacyExporter implements SpanExporter {
 	constructor(private next: SpanExporter) {}
 
 	export(spans: ReadableSpan[], done: (result: ExportResult) => void) {
-		this.next.export(spans.map(cleanSpan), done);
+		this.next.export(spans.filter((span) => !DROPPED.has(span.name)).map(cleanSpan), done);
 	}
 
 	shutdown() {

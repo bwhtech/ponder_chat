@@ -68,7 +68,9 @@ test("keeps the reply in one trace, and no content in any span", async ({ page, 
 		expect(names, name).toContain(name);
 	}
 	expect(names).toContain("execute_tool web_fetch");
-	expect(names).toContain("execute_tool shop__find_order");
+	// A connector's tool is named without the connector's name, which the person chose.
+	expect(names).toContain("execute_tool connector__find_order");
+	for (const body of exports) expect(body).not.toContain("shop__");
 
 	// A model call has its tokens and its time to first token.
 	const call = trace.find((span) => span.name.startsWith("chat ") && span.attributes["gen_ai.client.operation.time_to_first_chunk"] !== undefined);
