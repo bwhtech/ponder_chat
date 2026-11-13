@@ -85,7 +85,7 @@ const keyText = computed(() => {
 						:disabled="form.savingModel"
 						class="w-48"
 						aria-label="Summary model"
-						@update:model-value="(model: string) => form.setCompactionModel(model)"
+						@update:model-value="(model) => form.setCompactionModel(String(model ?? ''))"
 					/>
 				</SettingsRow>
 			</section>

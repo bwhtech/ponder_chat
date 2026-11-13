@@ -34,7 +34,7 @@ export function useSettingsForm() {
 			show(data);
 			admins.value = data.admins;
 			openRouterKey.value = data.openRouterKey;
-			models.value = data.models.map((model) => ({ label: model.name, value: model.id }));
+			models.value = data.models.map((model: { id: string; name: string }) => ({ label: model.name, value: model.id }));
 			status.value = { kind: "loaded" };
 		} catch (e) {
 			status.value = { kind: "error", message: (e as Error).message };
