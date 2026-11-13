@@ -2,34 +2,42 @@ import { fillModelCallCosts } from "../telemetry/model-calls.ts";
 import { finishEndedRuns } from "./replies.ts";
 
 /**
- * Work that waits for no reply, done at start-up and then every SWEEP_MS, by the one
- * server that runs the workflow worker (startup.ts):
+ * Work that waits for no reply, done by the one server that runs the workflow worker
+ * (startup.ts), at start-up and then every SWEEP_MS. Two jobs, each on its own timer, so
+ * a slow OpenRouter never keeps a thread looking busy:
  * - finish the runs that ended without saving their reply (replies.ts);
  * - get the cost of model calls that were cut short (telemetry/model-calls.ts).
+ * A job still running when its time comes again is not started twice.
  */
 const SWEEP_MS = Math.max(1, Number(process.env.PONDER_SWEEP_SECONDS) || 60) * 1000;
-let sweeping = false;
-let timer: ReturnType<typeof setInterval> | undefined;
+const JOBS = [
+	{ name: "finish ended runs", run: finishEndedRuns },
+	{ name: "get the cost of model calls", run: fillModelCallCosts },
+];
+const timers: ReturnType<typeof setInterval>[] = [];
 
 export function startSweeps() {
-	void sweep();
-	timer = setInterval(() => void sweep(), SWEEP_MS);
-	timer.unref();
-}
-
-/** On SIGTERM, before the database closes (startup.ts). A sweep in progress ends on its own. */
-export function stopSweeps() {
-	clearInterval(timer);
-	timer = undefined;
-}
-
-async function sweep() {
-	if (sweeping) return;
-	sweeping = true;
-	try {
-		await finishEndedRuns().catch((error) => console.error("sweep: could not finish ended runs:", error));
-		await fillModelCallCosts().catch((error) => console.error("sweep: could not get the cost of model calls:", error));
-	} finally {
-		sweeping = false;
+	for (const job of JOBS) {
+		let running = false;
+		const sweep = async () => {
+			if (running) return;
+			running = true;
+			try {
+				await job.run();
+			} catch (error) {
+				console.error(`sweep: could not ${job.name}:`, error);
+			} finally {
+				running = false;
+			}
+		};
+		void sweep();
+		const timer = setInterval(() => void sweep(), SWEEP_MS);
+		timer.unref();
+		timers.push(timer);
 	}
+}
+
+/** On SIGTERM, before the database closes (startup.ts). A job in progress ends on its own. */
+export function stopSweeps() {
+	for (const timer of timers.splice(0)) clearInterval(timer);
 }

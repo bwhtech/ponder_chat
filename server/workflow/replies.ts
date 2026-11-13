@@ -1,3 +1,4 @@
+import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { UIMessage } from "ai";
 import { getRun, start } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
@@ -147,6 +148,8 @@ async function finishEndedRun(run: ThreadRun) {
 			try {
 				if (cancelled) await stopModelCalls(run.threadId, run.runId);
 				else await settleModelCalls(run.threadId, run.runId);
+				// Before the save, as chatTurn does (endReplyStream), so the saved reply ends where the page's does.
+				await endStream(run.runId, failed ? ENDED_ERROR : undefined);
 				const owner = await threadOwner(run.threadId);
 				if (owner) await saveReply(run.threadId, owner, run.runId, run.model, { cancelled, failed, continued: run.continued });
 			} finally {
@@ -155,6 +158,30 @@ async function finishEndedRun(run: ThreadRun) {
 			}
 		}),
 	);
+}
+
+/** What a page reads at the end of a reply whose run ended without saving it. */
+const ENDED_ERROR = "This reply could not finish. Retry, or choose another model.";
+
+/**
+ * Ends the stream of a run that ended without ending it, as endReplyStream does in the
+ * run: with the error for a failed run. A page that still follows the reply, such as one
+ * open during a deploy, then stops and offers Retry without a reload. A run the runtime
+ * no longer has, or a stream it refuses, is logged: the reply is saved either way.
+ */
+async function endStream(runId: string, error?: string) {
+	try {
+		const writable = getRun(runId).getWritable<ModelCallStreamPart>();
+		const writer = writable.getWriter();
+		try {
+			if (error) await writer.write({ type: "error", error });
+		} finally {
+			writer.releaseLock();
+		}
+		await writable.close();
+	} catch (cause) {
+		console.warn(`replies: could not end the stream of run ${runId}:`, cause instanceof Error ? cause.message : cause);
+	}
 }
 
 /** The workflow run's status, or "gone" when the runtime has no such run. */

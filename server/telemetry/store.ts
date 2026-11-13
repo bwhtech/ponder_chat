@@ -64,6 +64,9 @@ export async function migrateRuns() {
 	await sql`create index if not exists runs_created_idx on runs (created_at)`;
 	// OpenRouter's id for a reply's model call, to look up the cost of a call cut short (model-calls.ts).
 	await sql`alter table runs add column if not exists generation_id text`;
+	// How often the sweep asked OpenRouter for that cost, and when it asks next (model-calls.ts).
+	await sql`alter table runs add column if not exists cost_tries integer not null default 0`;
+	await sql`alter table runs add column if not exists cost_next_at timestamptz`;
 	await migrateChargedRuns();
 }
 

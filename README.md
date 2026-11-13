@@ -302,8 +302,8 @@ Workers:
 - The page reconnects to a reply for up to 30 seconds while the server restarts (`patientFetch` in `web/ChatView.vue`).
 - The flow route `/.well-known/workflow/v1/flow` has no authentication. The server listens on 127.0.0.1. In production the proxy must refuse that path.
 - Stop cancels the run and saves what it wrote. The model call in flight still runs to its end on OpenRouter. Its row keeps its cost, as "stopped", and costs no credits.
-- The sweep (`server/workflow/sweep.ts`) runs at start-up and then every minute. It finishes the replies whose workflow run ended without saving them, and gets the cost of calls that were cut short.
-- The workflow runtime can fail a run outside `chatTurn`, which saves the reply on every other way out. An example is a reply in flight across a deploy that changed the reply loop's steps: its replay diverges. The sweep then saves what the reply wrote, marked failed, and the page offers Retry. Until the sweep runs, the thread shows the reply as running. `deploy/README.md` says when to deploy such a change.
+- The sweep (`server/workflow/sweep.ts`) runs at start-up and then every minute, as two jobs on their own timers. One finishes the replies whose workflow run ended without saving them. The other gets the cost of calls that were cut short, and asks again later and later when OpenRouter can't tell yet: 1 minute, then 2, 4 and so on, up to 3 hours apart, for a day.
+- The workflow runtime can fail a run outside `chatTurn`, which saves the reply on every other way out. An example is a reply in flight across a deploy that changed the reply loop's steps: its replay diverges. The sweep then ends the run's stream with an error and saves what the reply wrote, marked failed. A page that follows the reply stops and offers Retry, with no reload. Until the sweep runs, the thread shows the reply as running. `deploy/README.md` says when to deploy such a change.
 
 ### Tracing
 

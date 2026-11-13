@@ -179,6 +179,9 @@ test("a run that fails without saving its reply is finished, and the page offers
 	await endRun(person, { eventType: "run_failed", eventData: { error: new TextEncoder().encode("diverged"), errorCode: "REPLAY_DIVERGENCE" } });
 
 	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: true, cancelled: false });
+	// The page that follows the reply stops, and offers Retry, without a reload: the sweep ended the run's stream.
+	await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+	await expect(chat.stop(page)).toHaveCount(0);
 	await page.reload();
 	await expect(chat.reply(page)).toContainText(`${tag}-3`);
 	await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
@@ -193,6 +196,9 @@ test("a run cancelled without saving its reply is finished as stopped, with no R
 	await endRun(person, { eventType: "run_cancelled" });
 
 	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: false, cancelled: true });
+	// The page that follows the reply stops without a reload.
+	await expect(chat.stop(page)).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
 	await page.reload();
 	await expect(chat.reply(page)).toContainText(`${tag}-3`);
 	await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);

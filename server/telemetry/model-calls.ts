@@ -27,9 +27,10 @@ export type CallUsage = {
 	finishReason: string;
 };
 
-/** The most rows one sweep looks up, and how long OpenRouter keeps trying to report a cost. */
+/** The most rows one sweep looks up, how long it keeps asking, and the longest wait between two asks of one row. */
 const COST_LOOKUPS_PER_SWEEP = 50;
 const COST_LOOKUP_DAYS = 1;
+const MAX_COST_WAIT_MINUTES = 180;
 
 export class ModelCallRecord {
 	private generationId: string | undefined;
@@ -95,7 +96,7 @@ export class ModelCallRecord {
 export async function settleEarlierAttempts(threadId: string, runId: string, stepId: string, current: string) {
 	await sql`
 		update runs set finish_reason = case when finish_reason = 'started' then 'interrupted' else 'retried' end
-		where thread_id = ${threadId} and id like ${`${runId}:${stepId}:%`} and id <> ${current}
+		where thread_id = ${threadId} and starts_with(id, ${`${runId}:${stepId}:`}) and id <> ${current}
 			and finish_reason not in ('interrupted', 'retried', 'failed', 'stopped')`;
 }
 
@@ -106,35 +107,43 @@ export async function settleEarlierAttempts(threadId: string, runId: string, ste
 export async function settleModelCalls(threadId: string, runId: string) {
 	await sql`
 		update runs set finish_reason = 'interrupted'
-		where thread_id = ${threadId} and id like ${`${runId}:%`} and finish_reason = 'started'`;
+		where thread_id = ${threadId} and starts_with(id, ${`${runId}:`}) and finish_reason = 'started'`;
 }
 
 /** After Stop: the run's calls in flight are uncharged, even when they finish later. */
 export async function stopModelCalls(threadId: string, runId: string) {
 	await sql`
 		update runs set finish_reason = 'stopped'
-		where thread_id = ${threadId} and id like ${`${runId}:%`} and finish_reason = 'started'`;
+		where thread_id = ${threadId} and starts_with(id, ${`${runId}:`}) and finish_reason = 'started'`;
 }
 
 /**
  * Gets the cost of model calls that ended without it, from OpenRouter's generation API.
  * Run by the sweep (workflow/sweep.ts). OpenRouter can take a few seconds to have a
- * generation's cost, so a call it can't tell about yet is asked again by the next sweep,
- * for up to COST_LOOKUP_DAYS. Newest first: a generation that OpenRouter never reports
- * can't keep the newer ones waiting.
+ * generation's cost, so a call it can't tell about yet is asked again later: 1 minute
+ * later, then 2, 4 and so on, up to MAX_COST_WAIT_MINUTES apart, for COST_LOOKUP_DAYS.
+ * The rows whose turn came first go first, so a generation that OpenRouter never reports
+ * waits longer and longer instead of keeping the others waiting.
  */
 export async function fillModelCallCosts() {
 	const rows = await sql<{ id: string; generation_id: string }[]>`
 		select id, generation_id from runs
 		where generation_id is not null and cost_usd is null and finish_reason in ('interrupted', 'retried', 'failed', 'stopped')
 			and created_at > now() - make_interval(days => ${COST_LOOKUP_DAYS})
-		order by created_at desc limit ${COST_LOOKUPS_PER_SWEEP}`;
+			and (cost_next_at is null or cost_next_at <= now())
+		order by coalesce(cost_next_at, created_at) limit ${COST_LOOKUPS_PER_SWEEP}`;
 	for (const row of rows) {
 		const cost = await generationCost(row.generation_id);
-		if (!cost) continue;
+		if (!cost) {
+			await sql`
+				update runs set cost_tries = cost_tries + 1,
+					cost_next_at = now() + make_interval(mins => least(power(2, cost_tries), ${MAX_COST_WAIT_MINUTES})::int)
+				where id = ${row.id}`;
+			continue;
+		}
 		await sql`
 			update runs set cost_usd = ${cost.usd}, input_tokens = greatest(input_tokens, ${cost.inputTokens}),
-				output_tokens = greatest(output_tokens, ${cost.outputTokens})
+				output_tokens = greatest(output_tokens, ${cost.outputTokens}), cost_tries = cost_tries + 1
 			where id = ${row.id}`;
 	}
 }

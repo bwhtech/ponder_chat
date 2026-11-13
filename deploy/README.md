@@ -52,7 +52,7 @@ Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ ponder-chat (Nod
 5. Points `/srv/ponder-chat/current` at the release and restarts the service.
 6. Waits up to 60 seconds for `/health`. If it fails, points `current` back at the previous release and restarts that one.
 
-A deploy that changes the steps of a chat reply (`server/workflow/chat.ts`, `server/workflow/loop.ts`) fails the replies that run during it: the new code can't replay their steps. The sweep marks each one failed within a minute, and the page offers Retry (README, "Durable replies"). To avoid this, deploy when no reply is running:
+A deploy that changes any step under `server/workflow/`, or the order in which a reply calls them, fails the replies that run during it: the new code can't replay their steps. That includes a renamed step function, such as one in `model-call.ts`, `steps.ts`, `connectors.ts`, `approvals.ts` or `loop.ts`, and a change to when the compaction guard (`context-guard.ts`) summarizes. The sweep marks each such reply failed within a minute, and a page that follows it shows Retry (README, "Durable replies"). To avoid this, deploy when no reply is running:
 
 ```bash
 sudo -u postgres psql -Atd ponder_chat -c "select count(*) from thread_runs where finished_at is null"
