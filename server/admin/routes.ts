@@ -11,7 +11,8 @@ import { creditAnswerEmail, inviteEmail, sendEmail } from "../email.ts";
 import { decideRequest, grantCredits, pendingCount, type Decision } from "../extra-credits.ts";
 import { allow, disallow, setInviteCredits } from "../invites.ts";
 import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
-import { getSettings, setPdfTextOnServer, updateSettings } from "../settings.ts";
+import { availableModels } from "../models.ts";
+import { getSettings, setCompactionModel, setPdfTextOnServer, updateSettings } from "../settings.ts";
 import { MAX_BODY } from "../../shared/skill-file.ts";
 import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult, type SkillDetail } from "../skills.ts";
 import { activityPage } from "./activity.ts";
@@ -177,7 +178,13 @@ export const adminApi = new Hono<Env>()
 	// Settings
 
 	.get("/settings", async (c) =>
-		c.json({ ...(await getSettings()), admins: await listAdmins(), openRouterKey: await openRouterKeyStatus() }),
+		c.json({
+			...(await getSettings()),
+			admins: await listAdmins(),
+			openRouterKey: await openRouterKeyStatus(),
+			// Only models with a private (ZDR) endpoint: another would fall back to the chat's own model.
+			models: (await availableModels()).models.map(({ id, name }) => ({ id, name })),
+		}),
 	)
 
 	.put("/settings", body(z.object({ defaultDailyCredits: credits, creditsPerUsd: z.number().int().min(1).max(1_000_000_000) })), async (c) => {
@@ -194,6 +201,17 @@ export const adminApi = new Hono<Env>()
 		const before = { pdfTextOnServer: (await getSettings()).pdfTextOnServer };
 		await setPdfTextOnServer(input.onServer, adminOf(c));
 		await record(c, "set-pdf-reading", { before, after: { pdfTextOnServer: input.onServer } });
+		return c.json(await getSettings());
+	})
+
+	// The model that writes a chat's summary when it gets too long (compaction/summarize.ts). A model with a private (ZDR) endpoint.
+	.put("/settings/compaction-model", body(z.object({ model: z.string() })), async (c) => {
+		const input = c.req.valid("json");
+		const { models } = await availableModels();
+		if (!models.some((model) => model.id === input.model)) return c.json({ error: "That model has no private endpoint now. Choose another." }, 400);
+		const before = { compactionModel: (await getSettings()).compactionModel };
+		await setCompactionModel(input.model, adminOf(c));
+		await record(c, "set-compaction-model", { before, after: { compactionModel: input.model } });
 		return c.json(await getSettings());
 	})
 

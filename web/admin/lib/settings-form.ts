@@ -6,7 +6,7 @@ import { creditValue, money } from "./format";
 
 /**
  * The General settings: the credit fields with their checks and Save, how PDFs are read
- * (saved as soon as it is switched), the OpenRouter key's status, and the admins. The settings dialog (desktop) and the Settings page (phones)
+ * and the summary model (each saved as soon as it changes), the OpenRouter key's status, and the admins. The settings dialog (desktop) and the Settings page (phones)
  * each make one, which loads the saved values. Reactive, so a template reads
  * `form.defaultCredits` and binds `v-model` to it.
  */
@@ -18,6 +18,9 @@ export function useSettingsForm() {
 	const perUsd = ref("");
 	const pdfTextOnServer = ref(true);
 	const savingPdf = ref(false);
+	const compactionModel = ref("");
+	const savingModel = ref(false);
+	const models = ref<{ label: string; value: string }[]>([]);
 	const saving = ref(false);
 	/** Until the saved values load, no control shows: a default there would read as the setting. */
 	const status = ref<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string }>({ kind: "loading" });
@@ -31,6 +34,7 @@ export function useSettingsForm() {
 			show(data);
 			admins.value = data.admins;
 			openRouterKey.value = data.openRouterKey;
+			models.value = data.models.map((model: { id: string; name: string }) => ({ label: model.name, value: model.id }));
 			status.value = { kind: "loaded" };
 		} catch (e) {
 			status.value = { kind: "error", message: (e as Error).message };
@@ -38,9 +42,15 @@ export function useSettingsForm() {
 	}
 
 	function show(next: Settings) {
-		saved.value = { defaultDailyCredits: next.defaultDailyCredits, creditsPerUsd: next.creditsPerUsd, pdfTextOnServer: next.pdfTextOnServer };
+		saved.value = {
+			defaultDailyCredits: next.defaultDailyCredits,
+			creditsPerUsd: next.creditsPerUsd,
+			pdfTextOnServer: next.pdfTextOnServer,
+			compactionModel: next.compactionModel,
+		};
 		Object.assign(settings, saved.value);
 		pdfTextOnServer.value = next.pdfTextOnServer;
+		compactionModel.value = next.compactionModel;
 		defaultCredits.value = String(next.defaultDailyCredits);
 		perUsd.value = String(next.creditsPerUsd);
 	}
@@ -101,6 +111,26 @@ export function useSettingsForm() {
 		}
 	}
 
+	/** The select saves at once; a failure puts it back. */
+	async function setCompactionModel(model: string) {
+		if (!saved.value || !model || model === saved.value.compactionModel) return;
+		const before = saved.value.compactionModel;
+		compactionModel.value = model;
+		savingModel.value = true;
+		try {
+			const next = await unwrap(admin.settings["compaction-model"].$put({ json: { model } }));
+			if (saved.value) saved.value.compactionModel = next.compactionModel;
+			settings.compactionModel = next.compactionModel;
+			compactionModel.value = next.compactionModel;
+			toast.success("Summary model saved");
+		} catch (e) {
+			compactionModel.value = before;
+			toast.error((e as Error).message);
+		} finally {
+			savingModel.value = false;
+		}
+	}
+
 	void load();
 	return reactive({
 		saved,
@@ -110,6 +140,9 @@ export function useSettingsForm() {
 		perUsd,
 		pdfTextOnServer,
 		savingPdf,
+		compactionModel,
+		savingModel,
+		models,
 		saving,
 		loading,
 		loadError,
@@ -119,6 +152,7 @@ export function useSettingsForm() {
 		canSave,
 		save,
 		setPdfReading,
+		setCompactionModel,
 	});
 }
 

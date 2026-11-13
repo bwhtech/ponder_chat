@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MODELS } from "../../server/models.ts";
-import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, SearchScript, SentEmail, Step } from "./script.ts";
+import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
 
 /**
  * A fake OpenRouter, and a fake Cloudflare email API, for the end-to-end tests. Ponder
@@ -13,7 +13,9 @@ import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, SearchScript
  * - thread titles: the first words of the person's message;
  * - web search: url_citation annotations (`SearchScript`);
  * - memory: the decision gate and the writer (`MemoryScript`), and embeddings;
- * - the list of models with private (ZDR) endpoints: every model Ponder lists.
+ * - chat summaries, when a chat gets too long (`SummaryScript`);
+ * - the list of models with private (ZDR) endpoints: every model Ponder lists, with
+ *   a 1M-token window, except GLM 5.3's small one (SMALL_WINDOW).
  *
  * It also takes the traces that Ponder sends with OTLP over HTTP (server/tracing/), in
  * place of Jaeger, so tracing.spec.ts can read them.
@@ -31,6 +33,8 @@ export function fakeApp() {
 	const spans: ReceivedSpan[] = [];
 	// Each OTLP request as it came, so a test can look for text anywhere in it.
 	const exports: string[] = [];
+	const summaryScripts: SummaryScript[] = [];
+	const summaries: ReceivedSummary[] = [];
 	const app = new Hono();
 
 	// --- Control, for the tests. The newest script wins, so a test can replace one.
@@ -38,9 +42,13 @@ export function fakeApp() {
 	app.post("/__fake/chat", async (c) => (chats.unshift(await c.req.json()), c.json({ ok: true })));
 	app.post("/__fake/search", async (c) => (searches.unshift(await c.req.json()), c.json({ ok: true })));
 	app.post("/__fake/memory", async (c) => (memories.unshift(await c.req.json()), c.json({ ok: true })));
+	app.post("/__fake/summary", async (c) => (summaryScripts.unshift(await c.req.json()), c.json({ ok: true })));
 	const since = (query: string | undefined) => Number(query ?? 0);
 	app.get("/__fake/emails", (c) => c.json(emails.filter((email) => email.to === c.req.query("to") && email.at >= since(c.req.query("since")))));
 	app.get("/__fake/spans", (c) => c.json({ spans, exports }));
+	app.get("/__fake/summaries", (c) =>
+		c.json(summaries.filter((call) => call.at >= since(c.req.query("since")) && call.prompt.includes(c.req.query("match") ?? ""))),
+	);
 	app.get("/__fake/calls", (c) =>
 		c.json(calls.filter((call) => call.at >= since(c.req.query("since")) && latestUserText(call.messages as Message[]).includes(c.req.query("match") ?? ""))),
 	);
@@ -51,7 +59,9 @@ export function fakeApp() {
 		if (c.req.path === "/api/v1/endpoints/zdr" || c.req.header("authorization") === `Bearer ${FAKE_KEY}`) return next();
 		return c.json({ error: { code: 401, message: "No auth credentials found" } }, 401);
 	});
-	app.get("/api/v1/endpoints/zdr", (c) => c.json({ data: MODELS.map((model) => ({ model_id: model.id })) }));
+	app.get("/api/v1/endpoints/zdr", (c) =>
+		c.json({ data: MODELS.map((model) => ({ model_id: model.id, provider_name: "Fake", context_length: model.id === SMALL_WINDOW_MODEL ? SMALL_WINDOW : 1_000_000 })) }),
+	);
 	app.get("/api/v1/key", (c) => c.json({ data: { label: "fake" } }));
 
 	app.post("/api/v1/chat/completions", async (c) => {
@@ -61,10 +71,19 @@ export function fakeApp() {
 		const schema = body.response_format?.json_schema?.schema?.properties ?? {};
 		if ("title" in schema) return c.json(jsonReply(body.model, { title: titleOf(latestUserText(messages)) }));
 		if ("operations" in schema) return c.json(jsonReply(body.model, writerReply(latestUserText(messages), memories)));
+		const system = messages.filter((m) => m.role === "system").map((m) => textOf(m.content)).join("\n\n");
+		if (system.startsWith(SUMMARIZER)) {
+			const prompt = latestUserText(messages);
+			summaries.push({ model: body.model, system, prompt, at: Date.now() });
+			const script = summaryScripts.find((candidate) => prompt.includes(candidate.match));
+			if (script?.delayMs) await new Promise((resolve) => setTimeout(resolve, script.delayMs));
+			if (script?.error) return c.json({ error: { code: script.error.status, message: script.error.message } }, script.error.status as 400);
+			return c.json(textReply(body.model, { text: script?.text ?? `Summary of the chat about ${script?.match ?? "earlier things"}.`, cost: 0.00005 }, promptTokens(body)));
+		}
 
 		calls.push({
 			model: body.model,
-			system: messages.filter((m) => m.role === "system").map((m) => textOf(m.content)).join("\n\n"),
+			system,
 			messages,
 			tools: (body.tools ?? []).map((tool) => tool.function?.name ?? tool.type),
 			provider: body.provider,
@@ -72,8 +91,8 @@ export function fakeApp() {
 		});
 		const step = chatStep(messages, chats);
 		if (step.error) return c.json({ error: { code: step.error.status, message: step.error.message } }, step.error.status as 400);
-		if (!body.stream) return c.json(textReply(body.model, step));
-		return streamReply(body.model, step, c.req.raw.signal);
+		if (!body.stream) return c.json(textReply(body.model, step, promptTokens(body)));
+		return streamReply(body.model, step, c.req.raw.signal, promptTokens(body));
 	});
 
 	app.post("/api/v1/embeddings", async (c) => {
@@ -134,6 +153,13 @@ type Completion = {
 };
 
 const DEFAULT_COST = 0.0002;
+/** How the summarizer's instructions start (server/compaction/prompt.ts). */
+const SUMMARIZER = "You write the summary of a chat between a person and Ponder";
+
+/** The input tokens OpenRouter would report: about a token for 4 characters of what was sent. */
+function promptTokens(body: Completion) {
+	return Math.ceil(JSON.stringify([body.messages ?? [], body.tools ?? []]).length / 4);
+}
 
 /** The step for this call: the turn's script, at the number of model calls made since the person's message. */
 function chatStep(messages: Message[], scripts: ChatScript[]): Step {
@@ -142,11 +168,13 @@ function chatStep(messages: Message[], scripts: ChatScript[]): Step {
 	if (!script) return { text: `You said: ${said}` };
 	const lastUser = messages.findLastIndex((message) => message.role === "user");
 	const callsSince = messages.slice(lastUser + 1).filter((message) => message.role === "assistant").length;
-	return script.steps[Math.min(callsSince, script.steps.length - 1)];
+	const summarized = messages.some((message) => message.role === "user" && textOf(message.content).startsWith("<summary>"));
+	const steps = (summarized && script.summarized) || script.steps;
+	return steps[Math.min(callsSince, steps.length - 1)];
 }
 
 /** The reply as OpenRouter streams it: server-sent chat completion chunks, then the usage. */
-function streamReply(model: string, step: Step, signal: AbortSignal) {
+function streamReply(model: string, step: Step, signal: AbortSignal, prompt: number) {
 	const id = `gen-fake-${Date.now()}`;
 	const chunk = (delta: object, finish: string | null = null, usage?: object) =>
 		`data: ${JSON.stringify({ id, model, provider: "Fake", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), choices: [{ index: 0, delta, finish_reason: finish }], ...(usage && { usage }) })}\n\n`;
@@ -156,9 +184,10 @@ function streamReply(model: string, step: Step, signal: AbortSignal) {
 	for (const [index, call] of (step.toolCalls ?? []).entries()) {
 		const args = JSON.stringify(call.input);
 		parts.push(chunk({ tool_calls: [{ index, id: call.id ?? `call_${id}_${index}`, type: "function", function: { name: call.name, arguments: "" } }] }));
-		for (let at = 0; at < args.length; at += 40) parts.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(at, at + 40) } }] }));
+		const size = step.toolInputPieces ? Math.ceil(args.length / step.toolInputPieces) : 40;
+		for (let at = 0; at < args.length; at += size) parts.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(at, at + size) } }] }));
 	}
-	parts.push(chunk({}, step.toolCalls?.length ? "tool_calls" : "stop", usage(step)));
+	parts.push(chunk({}, step.toolCalls?.length ? "tool_calls" : "stop", usage(step, prompt)));
 	parts.push("data: [DONE]\n\n");
 
 	const encoder = new TextEncoder();
@@ -183,18 +212,18 @@ function pieces(text: string | undefined) {
 	return text?.match(/(\S+\s*){1,3}|\s+/g) ?? [];
 }
 
-function usage(step: Step) {
+function usage(step: Step, prompt = 500) {
 	const completion = Math.ceil(((step.text ?? "").length + JSON.stringify(step.toolCalls ?? []).length) / 4);
-	return { prompt_tokens: 500, completion_tokens: completion, total_tokens: 500 + completion, cost: step.cost ?? DEFAULT_COST };
+	return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: prompt + completion, cost: step.cost ?? DEFAULT_COST };
 }
 
-function textReply(model: string, step: Step) {
+function textReply(model: string, step: Step, prompt?: number) {
 	const toolCalls = step.toolCalls?.map((call, index) => ({ id: call.id ?? `call_${index}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } }));
 	return {
 		id: `gen-fake-${Date.now()}`,
 		model,
 		choices: [{ index: 0, message: { role: "assistant", content: step.text ?? "", tool_calls: toolCalls }, finish_reason: toolCalls?.length ? "tool_calls" : "stop" }],
-		usage: usage(step),
+		usage: usage(step, prompt),
 	};
 }
 

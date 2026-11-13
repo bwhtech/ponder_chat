@@ -30,6 +30,8 @@ import SkillMenu from "./skills/SkillMenu.vue";
 import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skills/skills";
 import UseSkillPart from "./skills/UseSkillPart.vue";
 import WebToolPart from "./WebToolPart.vue";
+import CompactionDivider from "./CompactionDivider.vue";
+import { summarizedThrough } from "./compaction";
 import { useThreads } from "./threads";
 import { clockTime } from "./dates";
 import {
@@ -371,6 +373,8 @@ useAttention(busy, computed(() => waitingOnPerson(messages.value)));
 
 const { thinking, text: thinkingText } = useThinking(busy, messages);
 /** "Thinking" sits in the reply's place before the reply exists: the turn after the person's message. */
+/** The last message the newest summary covers: a divider follows it. */
+const summarized = computed(() => summarizedThrough(messages.value));
 const thinkingAlone = computed(() => thinking.value && lastMessage.value?.role !== "assistant");
 // The reply that takes over that place is already on screen, so it does not rise in.
 watch(
@@ -572,6 +576,7 @@ function replyModelId(message: UIMessage) {
 							</div>
 						</MessageContent>
 					</Message>
+					<CompactionDivider v-if="message.id === summarized" />
 				</ConversationItem>
 				<ConversationItem v-if="thinkingAlone">
 					<Message from="assistant">

@@ -42,7 +42,7 @@ export class ChatModel implements LanguageModelV4 {
 
 	private async openrouter(): Promise<LanguageModelV4> {
 		const { MODELS } = await import("../models.ts");
-		const { privateRouting } = await import("../openrouter.ts");
+		const { HELD_BACK_TOOL_CALLS, privateRouting } = await import("../openrouter.ts");
 		// A PDF is parsed again on every call. For a model that can't read PDFs, OpenRouter's
 		// default parser is Mistral OCR at $2 per 1,000 pages, so a chat with a few PDFs cost
 		// more in parsing than in tokens. cloudflare-ai turns the PDF into markdown for free.
@@ -55,14 +55,6 @@ export class ChatModel implements LanguageModelV4 {
 		}) as unknown as LanguageModelV4;
 	}
 }
-
-/**
- * Providers that hold back a tool call and send it whole at the end; replies skip them.
- * Wafer sent nothing for 17 seconds while it wrote a slide deck, then all of it in 1.5
- * seconds, so the page could not show the deck as it was written. Each model on our list
- * has other private endpoints, so none is left without one.
- */
-const HELD_BACK_TOOL_CALLS = ["wafer"];
 
 /**
  * OpenRouter with the key admins set (openrouter-key.ts), which reads Postgres. A step

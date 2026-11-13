@@ -18,7 +18,12 @@ export type Settings = {
 	 * Off: every PDF goes to the model, and OpenRouter parses it for those that can't.
 	 */
 	pdfTextOnServer: boolean;
+	/** The model that writes the summary when a chat gets too long (compaction/summarize.ts). */
+	compactionModel: string;
 };
+
+/** Cheap, with a 1M-token window on every private (ZDR) endpoint. */
+export const DEFAULT_COMPACTION_MODEL = "deepseek/deepseek-v4.1-flash";
 
 export type CreditSettings = Pick<Settings, "defaultDailyCredits" | "creditsPerUsd">;
 
@@ -39,13 +44,19 @@ export async function migrateSettings() {
 		values (1, ${fromEnv("CHAT_DAILY_CREDITS", 1000)}, ${fromEnv("CHAT_CREDITS_PER_USD", 1000)})
 		on conflict (id) do nothing`;
 	await sql`alter table settings add column if not exists pdf_text_on_server boolean not null default true`;
+	await sql`alter table settings add column if not exists compaction_model text`;
 }
 
 export async function getSettings(): Promise<Settings> {
 	if (cached && Date.now() - cached.at < CACHE_MS) return cached.settings;
-	const [row] = await sql<{ default_daily_credits: number; credits_per_usd: number; pdf_text_on_server: boolean }[]>`
-		select default_daily_credits, credits_per_usd, pdf_text_on_server from settings where id = 1`;
-	const settings = { defaultDailyCredits: row.default_daily_credits, creditsPerUsd: row.credits_per_usd, pdfTextOnServer: row.pdf_text_on_server };
+	const [row] = await sql<{ default_daily_credits: number; credits_per_usd: number; pdf_text_on_server: boolean; compaction_model: string | null }[]>`
+		select default_daily_credits, credits_per_usd, pdf_text_on_server, compaction_model from settings where id = 1`;
+	const settings = {
+		defaultDailyCredits: row.default_daily_credits,
+		creditsPerUsd: row.credits_per_usd,
+		pdfTextOnServer: row.pdf_text_on_server,
+		compactionModel: row.compaction_model ?? DEFAULT_COMPACTION_MODEL,
+	};
 	cached = { settings, at: Date.now() };
 	return settings;
 }
@@ -60,6 +71,11 @@ export async function updateSettings(settings: CreditSettings, by: string) {
 
 export async function setPdfTextOnServer(on: boolean, by: string) {
 	await sql`update settings set pdf_text_on_server = ${on}, updated_by = ${by}, updated_at = now() where id = 1`;
+	cached = undefined;
+}
+
+export async function setCompactionModel(model: string, by: string) {
+	await sql`update settings set compaction_model = ${model}, updated_by = ${by}, updated_at = now() where id = 1`;
 	cached = undefined;
 }
 

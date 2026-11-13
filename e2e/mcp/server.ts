@@ -66,7 +66,8 @@ const notAllowed = (_req: Request, res: Response) => void res.status(405).set("A
 
 function shopApp() {
 	const app = express();
-	app.use(express.json());
+	// A long argument, such as the note in compaction.spec.ts, is over the default 100 KB.
+	app.use(express.json({ limit: "1mb" }));
 	app.post("/open/mcp", serve("open"));
 	app.post(
 		"/key/mcp",

@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
+import { compacting } from "./compaction";
 import { waitingOnPerson } from "./message-queue";
 
 /**
@@ -42,7 +43,9 @@ export function useThinking(busy: Ref<boolean>, messages: Ref<UIMessage[]>) {
 	);
 	onBeforeUnmount(clear);
 
-	const text = computed(() => (seconds.value >= 5 ? `Thinking for ${seconds.value}s` : "Thinking"));
+	// While the reply summarizes a long chat first (compaction.ts), it says so.
+	const doing = computed(() => (compacting(messages.value.at(-1)) ? "Compacting earlier messages" : "Thinking"));
+	const text = computed(() => (seconds.value >= 5 ? `${doing.value} for ${seconds.value}s` : doing.value));
 	return { thinking, text };
 }
 

@@ -51,6 +51,10 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 		text: "Changed how PDFs are read",
 		details: [after.pdfTextOnServer ? "Ponder reads the text" : "OpenRouter reads each PDF"],
 	}),
+	"set-compaction-model": (before, after) => ({
+		text: "Changed the summary model",
+		details: [`${before.compactionModel} → ${after.compactionModel}`],
+	}),
 	"set-openrouter-key": () => ({ text: "Changed the OpenRouter key", details: [] }),
 	"create-skill": (_, after) => ({ text: `Created the skill ${skillName(after)}`, details: [] }),
 	"update-skill": (before, after) => ({ text: `Edited the skill ${skillName(after)}`, details: skillChanges(before, after) }),

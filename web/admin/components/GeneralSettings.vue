@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Avatar, Badge, Button, SettingsRow, Skeleton, Switch, TextInput } from "frappe-ui";
+import { Avatar, Badge, Button, Select, SettingsRow, Skeleton, Switch, TextInput } from "frappe-ui";
 import { computed, ref } from "vue";
 import { creditValue, date, resetTime } from "../lib/format";
 import type { SettingsForm } from "../lib/settings-form";
@@ -8,7 +8,7 @@ import OpenRouterKeyDialog from "./OpenRouterKeyDialog.vue";
 import EmptyState from "../../EmptyState.vue";
 
 /**
- * The General settings: credits, how PDFs are read, the OpenRouter key and the admins. Save is the parent's,
+ * The General settings: credits, how PDFs are read, long chats, the OpenRouter key and the admins. Save is the parent's,
  * from `form`. Skeletons stand in for the values until they load; if they can't, an alert offers Retry.
  */
 const props = defineProps<{ form: SettingsForm }>();
@@ -67,6 +67,25 @@ const keyText = computed(() => {
 						:disabled="form.savingPdf"
 						aria-label="Read PDF text on this server"
 						@update:model-value="form.setPdfReading"
+					/>
+				</SettingsRow>
+			</section>
+
+			<section class="space-y-1">
+				<h2 class="text-base-semibold text-ink-gray-9">Long chats</h2>
+				<SettingsRow
+					title="Summary model"
+					description="Summarizes the older messages when a chat gets too long for its model. Each summary is charged to the person's credits, so a cheap model with a long context works best."
+				>
+					<Skeleton v-if="form.loading" class="h-7 w-48 rounded-4" />
+					<Select
+						v-else
+						:model-value="form.compactionModel"
+						:options="form.models"
+						:disabled="form.savingModel"
+						class="w-48"
+						aria-label="Summary model"
+						@update:model-value="(model) => form.setCompactionModel(String(model ?? ''))"
 					/>
 				</SettingsRow>
 			</section>

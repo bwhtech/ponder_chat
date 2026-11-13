@@ -1,8 +1,9 @@
-import { createModelCallToUIChunkTransform, type ModelCallStreamPart } from "@ai-sdk/workflow";
+import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
 import { loadThread, updateThread } from "../db.ts";
 import { rememberTurn } from "../memory.ts";
+import { toUIChunks } from "./reply-chunks.ts";
 import { finishRun, type Continued } from "./runs.ts";
 import { span } from "../tracing/span.ts";
 
@@ -10,7 +11,7 @@ import { span } from "../tracing/span.ts";
 export const messageIdFor = (runId: string) => `msg-${runId}`;
 
 /**
- * A run's stream as UI chunks, from the start. The durable stream holds raw model parts,
+ * A run's stream as UI chunks (reply-chunks.ts), from the start. The durable stream holds raw model parts,
  * so a reconnect replays them all and skips the UI chunks the browser already has.
  * With `untilTail`, the stream ends at what the run has written so far, instead of
  * when the run closes it: a cancelled run never closes its stream.
@@ -20,7 +21,7 @@ export async function replyStream(runId: string, model: string, { uiStartIndex =
 	const raw = untilTail ? firstChunks(readable, (await readable.getTailIndex()) + 1) : readable;
 	// A run that carries on a message keeps its id, so the page and the saved thread extend that message.
 	const messageId = continued?.messageId ?? messageIdFor(runId);
-	return raw.pipeThrough(createModelCallToUIChunkTransform({ uiStartIndex })).pipeThrough(withMessage(messageId, model));
+	return raw.pipeThrough(toUIChunks({ uiStartIndex })).pipeThrough(withMessage(messageId, model));
 }
 
 /** The first `count` chunks of a stream, then the end. */
@@ -69,6 +70,9 @@ export async function saveReply(
 	await span("reply.save", { "ponder.outcome": cancelled ? "cancelled" : failed ? "failed" : "saved" }, () => saveReplyNow(threadId, owner, runId, model, { cancelled, failed, continued }));
 }
 
+/** Parts that say how the reply went, not what it said. */
+const STATUS_PARTS = new Set(["step-start", "data-compaction"]);
+
 async function saveReplyNow(threadId: string, owner: string, runId: string, model: string, { cancelled, failed, continued }: { cancelled: boolean; failed: boolean; continued: Continued | null }) {
 	const untilTail = cancelled || failed;
 	const messages = await loadThread(threadId);
@@ -80,7 +84,8 @@ async function saveReplyNow(threadId: string, owner: string, runId: string, mode
 	const base = existing ? { ...existing, parts: existing.parts.slice(0, continued.baseParts) } : undefined;
 	let reply: UIMessage | undefined;
 	for await (const message of readUIMessageStream({ message: base, stream: await replyStream(runId, model, { untilTail, continued }) })) reply = message;
-	if (reply?.parts.length) {
+	// A reply with only status parts, such as one stopped while it compacted, is not saved: as one stopped before any output.
+	if (reply?.parts.some((part) => !STATUS_PARTS.has(part.type))) {
 		const at = messages.findIndex((message) => message.id === reply.id);
 		if (at === -1) messages.push(reply);
 		else messages[at] = reply;

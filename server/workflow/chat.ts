@@ -10,6 +10,7 @@ import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
 import { connectorNote } from "../mcp/catalog-note.ts";
 import { EMPTY_CATALOG } from "../mcp/catalog.ts";
 import { calledToolName, CONNECTOR_GUIDANCE, connectorCatalogStep, connectorTools } from "./connectors.ts";
+import { ContextGuard, ContextOverLimitError, toolTokens } from "./context-guard.ts";
 import { ChatModel } from "./model.ts";
 import type { Continued } from "./runs.ts";
 import { skillsGuidance, skillsStep, skillTools } from "./skills.ts";
@@ -68,38 +69,48 @@ export async function chatTurn(turn: ChatTurn) {
 		const skills = await skillsStep().catch(() => []);
 		// Without it, every page waits for the person: safe, only slower.
 		const trustedPages = await trustedPagesStep(turn.threadId).catch(() => []);
+		const tools = {
+			[WEB_SEARCH]: tool({
+				description: WEB_SEARCH_DESCRIPTION,
+				inputSchema: webSearchInput,
+				execute: (input) => webSearchStep(input, turn.threadId, turn.owner),
+			}),
+			// A page that the person did not give and no search returned waits for the person, so
+			// text in a page, a connector's result or a file cannot send private data out in an address.
+			[WEB_FETCH]: tool({
+				description: WEB_FETCH_DESCRIPTION,
+				inputSchema: webFetchInput,
+				needsApproval: (input, { messages }) => needsFetchApproval(input.url, trustedPages, messages),
+				execute: (input) => webFetchStep(input),
+			}),
+			...artifactTools(),
+			...(turn.python && {
+				[RUN_PYTHON]: tool({
+					description: RUN_PYTHON_DESCRIPTION,
+					inputSchema: runPythonInput,
+					execute: (input) => runPythonStep(input, turn.threadId, turn.owner),
+				}),
+			}),
+			// connector_search and connector_call, when the person has a connector on. They don't change when connectors do.
+			...connectorTools(catalog, turn.owner),
+			// Changes only when an admin changes the skills.
+			...skillTools(skills),
+		};
+		const system = [instructions(turn), skillsGuidance(skills), catalog.connectors.length ? CONNECTOR_GUIDANCE : "", memory.guidance].filter(Boolean).join("\n\n");
+		// The <connectors> note goes with the latest message, as memory's does, and is never summarized.
+		const connectors = connectorNote(catalog);
+		// A long chat is summarized before a call would go over the model's window (context-guard.ts).
+		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors);
+		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors };
+		const guard = new ContextGuard(base, context, await toolTokens(tools), writable, turn.model.name);
+		const messages = await guard.initialMessages(system);
 		const agent = new WorkflowAgent({
 			model: new ChatModel(turn.model.id),
-			instructions: [instructions(turn), skillsGuidance(skills), catalog.connectors.length ? CONNECTOR_GUIDANCE : "", memory.guidance].filter(Boolean).join("\n\n"),
+			instructions: system,
 			// A tool that waits for approval comes back approved in the messages the browser sends; the signature shows the model asked for it.
 			experimental_toolApprovalSecret: { environmentVariable: TOOL_APPROVAL_SECRET_ENV },
-			tools: {
-				[WEB_SEARCH]: tool({
-					description: WEB_SEARCH_DESCRIPTION,
-					inputSchema: webSearchInput,
-					execute: (input) => webSearchStep(input, turn.threadId, turn.owner),
-				}),
-				// A page that the person did not give and no search returned waits for the person, so
-				// text in a page, a connector's result or a file cannot send private data out in an address.
-				[WEB_FETCH]: tool({
-					description: WEB_FETCH_DESCRIPTION,
-					inputSchema: webFetchInput,
-					needsApproval: (input, { messages }) => needsFetchApproval(input.url, trustedPages, messages),
-					execute: (input) => webFetchStep(input),
-				}),
-				...artifactTools(),
-				...(turn.python && {
-					[RUN_PYTHON]: tool({
-						description: RUN_PYTHON_DESCRIPTION,
-						inputSchema: runPythonInput,
-						execute: (input) => runPythonStep(input, turn.threadId, turn.owner),
-					}),
-				}),
-				// connector_search and connector_call, when the person has a connector on. They don't change when connectors do.
-				...connectorTools(catalog, turn.owner),
-				// Changes only when an admin changes the skills.
-				...skillTools(skills),
-			},
+			tools,
+			prepareStep: guard.prepareStep,
 			// Credits are charged from what each model call cost (steps.ts).
 			onStepEnd: async (step) => {
 				await recordUsageStep({
@@ -112,11 +123,13 @@ export async function chatTurn(turn: ChatTurn) {
 					costUsd: callCost(step),
 					finishReason: step.finishReason,
 					toolCalls: step.toolCalls.map(calledToolName),
+					requested: turn.model.id,
+					estimated: guard.estimate,
 				});
 			},
 		});
 		await agent.stream({
-			messages: await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectorNote(catalog)),
+			messages,
 			writable,
 			stopWhen: isStepCount(turn.maxSteps),
 			// The agent would end the stream as a finished reply even when the model failed; endReplyStream ends it.
@@ -126,7 +139,7 @@ export async function chatTurn(turn: ChatTurn) {
 	} catch (error) {
 		failure = error;
 	}
-	const message = failure ? `${turn.model.name} could not finish this reply. Retry, or choose another model.` : undefined;
+	const message = failure instanceof ContextOverLimitError ? failure.message : failure ? `${turn.model.name} could not finish this reply. Retry, or choose another model.` : undefined;
 	// A stream left open would keep the save below waiting, so then the save reads only what the run wrote.
 	const ended = await endReplyStream(writable, message).then(
 		() => true,

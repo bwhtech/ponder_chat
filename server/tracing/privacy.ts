@@ -181,7 +181,7 @@ const KNOWN_NAMES = [
 	/^(workflow|step|queue|hook|webhook|world)\.[\w.]+( [\w.:/@+-]{1,120})?$/,
 	/^ai\.[\w.]+$/,
 	/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|CONNECT|TRACE|HTTP)$/,
-	/^(chat\.request|credits\.check|queue\.wait|thread\.load|file_context\.resolve|pdf\.extract_text|memory\.(recall|save)|connectors\.list|mcp\.call_tool|search\.query|web_fetch\.read|python\.run|reply\.save|title\.write)$/,
+	/^(chat\.request|credits\.check|queue\.wait|thread\.load|file_context\.resolve|pdf\.extract_text|memory\.(recall|save)|connectors\.list|mcp\.call_tool|search\.query|web_fetch\.read|python\.run|reply\.save|title\.write|compaction\.run)$/,
 ];
 
 export function cleanName(name: string): string {

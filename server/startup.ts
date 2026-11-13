@@ -9,6 +9,7 @@ import { setupMemory } from "./memory.ts";
 import { checkSandbox } from "./python/pyodide.ts";
 import { migratePythonState } from "./python/state.ts";
 import { migrateConnectors } from "./mcp/store.ts";
+import { migrateCompaction } from "./compaction/store.ts";
 import { migrateSecrets } from "./secrets.ts";
 import { migrateSkills } from "./skills.ts";
 import { seedStandardSkills } from "./standard-skills.ts";
@@ -49,6 +50,8 @@ export async function startup() {
 async function migrateAll() {
 	await setupTelemetry();
 	await migrate();
+	// After threads: its tables reference them.
+	await migrateCompaction();
 	await migrateAuth();
 	await migrateFiles();
 	await migrateCredits();

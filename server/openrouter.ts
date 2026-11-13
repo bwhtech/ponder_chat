@@ -27,24 +27,60 @@ export const privateRouting = PRIVATE as unknown as { data_collection: "deny" };
 /** The same, for requests sent to OpenRouter's API directly. */
 export const privateRoutingBody = PRIVATE;
 
+/**
+ * Providers that hold back a tool call and send it whole at the end; replies skip them.
+ * Wafer sent nothing for 17 seconds while it wrote a slide deck, then all of it in 1.5
+ * seconds, so the page could not show the deck as it was written. Each model on our list
+ * has other private endpoints, so none is left without one.
+ */
+export const HELD_BACK_TOOL_CALLS = ["wafer"];
+
 const ZDR_ENDPOINTS = openRouterUrl("v1/endpoints/zdr");
 const REFRESH_MS = 60 * 60 * 1000;
-let zdrModels: { ids: Set<string>; at: number } | undefined;
+type ZdrEndpoint = { model_id: string; provider_name?: string; tag?: string; context_length?: number };
+let zdrModels: { ids: Set<string>; windows: Map<string, number>; at: number } | undefined;
 
 /**
  * The models with at least one ZDR endpoint, from OpenRouter's public list, read at
  * most once an hour. Undefined when the list can't be read: the caller decides.
  */
 export async function modelsWithZdr(): Promise<Set<string> | undefined> {
-	if (zdrModels && Date.now() - zdrModels.at < REFRESH_MS) return zdrModels.ids;
+	return (await zdrList())?.ids;
+}
+
+/**
+ * A model's context window in tokens: the smallest among its ZDR endpoints that replies
+ * use, since OpenRouter may route a call to any of them. Undefined when it is not known.
+ */
+export async function contextWindow(modelId: string): Promise<number | undefined> {
+	return (await zdrList())?.windows.get(modelId);
+}
+
+async function zdrList() {
+	if (zdrModels && Date.now() - zdrModels.at < REFRESH_MS) return zdrModels;
 	try {
 		const response = await fetch(ZDR_ENDPOINTS, { signal: AbortSignal.timeout(5_000) });
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);
-		const body = (await response.json()) as { data?: { model_id: string }[] };
-		zdrModels = { ids: new Set((body.data ?? []).map((endpoint) => endpoint.model_id)), at: Date.now() };
-		return zdrModels.ids;
+		const endpoints = ((await response.json()) as { data?: ZdrEndpoint[] }).data ?? [];
+		zdrModels = { ids: new Set(endpoints.map((endpoint) => endpoint.model_id)), windows: smallestWindows(endpoints), at: Date.now() };
+		return zdrModels;
 	} catch (error) {
 		console.warn("OpenRouter ZDR list:", error instanceof Error ? error.message : error);
-		return zdrModels?.ids;
+		return zdrModels;
 	}
+}
+
+function smallestWindows(endpoints: ZdrEndpoint[]) {
+	const windows = new Map<string, number>();
+	for (const endpoint of endpoints) {
+		if (!(endpoint.context_length && endpoint.context_length > 0) || heldBack(endpoint)) continue;
+		const known = windows.get(endpoint.model_id);
+		windows.set(endpoint.model_id, known ? Math.min(known, endpoint.context_length) : endpoint.context_length);
+	}
+	return windows;
+}
+
+function heldBack(endpoint: ZdrEndpoint) {
+	const names = [endpoint.provider_name, endpoint.tag?.split("/")[0]].map((name) => name?.toLowerCase());
+	return HELD_BACK_TOOL_CALLS.some((slug) => names.includes(slug));
 }
