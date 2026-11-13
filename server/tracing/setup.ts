@@ -19,6 +19,8 @@ import { setTracingState, tracingState, type TracingState } from "./state.ts";
  */
 export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT, exporter?: SpanExporter): Promise<TracingState | undefined> {
 	if (!endpoint || tracingState()) return tracingState();
+	// Before anything is registered, so a wrong setting leaves tracing off and nothing half set.
+	const url = tracesUrl(endpoint);
 	const [{ TracerProvider, BatchSpanProcessor }, { AsyncLocalStorageContextManager }, { W3CTraceContextPropagator }, { resourceFromAttributes }, { OTLPTraceExporter }, { OpenTelemetry, OpenTelemetryIdGenerator }] =
 		await Promise.all([
 			import("@opentelemetry/sdk-trace"),
@@ -35,7 +37,6 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 	// parent is dropped, unless it is a reply's root (reply-trace.ts asks for those itself).
 	// So a page load, a stream read or a queue poll never starts a trace of its own.
 	const ids = new OpenTelemetryIdGenerator({ sampler: onlyInsideTraces });
-	const url = `${endpoint.replace(/\/+$/, "")}/v1/traces`;
 	const provider = new TracerProvider({
 		idGenerator: ids,
 		sampler: ids,
@@ -47,7 +48,9 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 		spanProcessors: [
 			new BatchSpanProcessor({
 				// `exporter` only in server/tracing.check.ts, which reads the spans in memory.
-				exporter: new PrivacyExporter(exporter ?? new OTLPTraceExporter({ url })),
+				// A collector that is down or does not answer costs at most EXPORT_TIMEOUT_MS a batch, retries included.
+				exporter: new PrivacyExporter(exporter ?? new OTLPTraceExporter({ url: url.href, timeoutMillis: EXPORT_TIMEOUT_MS })),
+				exportTimeoutMillis: EXPORT_TIMEOUT_MS,
 				// How long spans wait to be sent in one batch. The e2e tests make it short.
 				scheduledDelayMillis: Number(process.env.OTEL_BSP_SCHEDULE_DELAY) || 2_000,
 			}),
@@ -68,12 +71,12 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 			usage: true,
 		}),
 	);
-	const stopListening = listenToHttp(new URL(url).origin);
+	const stopListening = listenToHttp(url.origin);
 	addTraceIdToLogs();
 	const state: TracingState = {
 		ids,
 		integration,
-		endpointOrigin: new URL(url).origin,
+		endpointOrigin: url.origin,
 		flush: () => provider.forceFlush(),
 		stop: async () => {
 			stopListening();
@@ -81,15 +84,46 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 		},
 	};
 	setTracingState(state);
-	console.log(`Tracing is on: spans go to ${new URL(url).origin}.`);
+	console.log(`Tracing is on: spans go to ${url.origin}.`);
 	return state;
 }
 
-/** Sends the spans still in the batch. Called on SIGTERM (startup.ts), within its time limit. */
-export async function stopTracing() {
-	await tracingState()
-		?.stop()
-		.catch((error) => console.warn("tracing: could not send the last spans:", error instanceof Error ? error.message : error));
+const EXPORT_TIMEOUT_MS = 2_000;
+
+/**
+ * Where spans go: `<endpoint>/v1/traces`. The endpoint must be an http or https address,
+ * such as http://127.0.0.1:4318. Without the scheme, "localhost:4318" would parse as an
+ * address of scheme "localhost:" and send nothing.
+ */
+export function tracesUrl(endpoint: string): URL {
+	let url: URL;
+	try {
+		url = new URL(`${endpoint.trim().replace(/\/+$/, "")}/v1/traces`);
+	} catch {
+		throw new Error(`OTEL_EXPORTER_OTLP_ENDPOINT is not an address: "${endpoint}". Use one such as http://127.0.0.1:4318.`);
+	}
+	if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) {
+		throw new Error(`OTEL_EXPORTER_OTLP_ENDPOINT must start with http:// or https://, such as http://127.0.0.1:4318. It is "${endpoint}".`);
+	}
+	return url;
+}
+
+/**
+ * Sends the spans still in the batch, for at most `timeoutMs`. Called on SIGTERM
+ * (startup.ts) after the database is closed, so a collector that is down or hangs never
+ * holds up the stop: the spans that are left are lost.
+ */
+export async function stopTracing(timeoutMs = 2_000) {
+	const state = tracingState();
+	if (!state) return;
+	let timer: NodeJS.Timeout | undefined;
+	const late = new Promise<"late">((resolve) => (timer = setTimeout(() => resolve("late"), timeoutMs)));
+	const stopped = state.stop().then(
+		() => "stopped" as const,
+		(error) => console.warn("tracing: could not send the last spans:", error instanceof Error ? error.message : error),
+	);
+	if ((await Promise.race([stopped, late])) === "late") console.warn(`tracing: the last spans were not sent within ${timeoutMs / 1000} seconds.`);
+	clearTimeout(timer);
 }
 
 /** Samples a span when its parent was sampled; drops a span that has no parent. */

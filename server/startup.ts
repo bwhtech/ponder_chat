@@ -123,9 +123,10 @@ function stopCleanly(world: { close?: () => Promise<void> }) {
 		}, 10_000);
 		try {
 			await world.close?.();
-			// The spans of the steps that just stopped, and any still waiting in the batch.
-			await stopTracing();
 			await sql.end({ timeout: 3 });
+			// The spans of the steps that just stopped, and any still waiting in the batch.
+			// Last, and for 2 seconds at most, so a collector that is down never costs the database its clean stop.
+			await stopTracing();
 		} catch (error) {
 			console.error("Stopping:", error instanceof Error ? error.message : error);
 		}
