@@ -10,6 +10,7 @@ import { APICallError, convertToModelMessages, generateText, InvalidPromptError,
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
 import { answeredApprovals, signApproval, withoutApprovals } from "./approvals.ts";
+import { approvedIn } from "./connector-messages.ts";
 import { classifyModelError, MODEL_CALL_ATTEMPTS, ModelStalledError } from "./model-errors.ts";
 import { storedPart, toolCallOf } from "./stream-parts.ts";
 import { outcomeParts, toolMessage, ToolCalls, toolSpans } from "./tool-calls.ts";
@@ -225,5 +226,26 @@ assert.deepEqual(last?.role === "tool" && last.content.map((part) => part.type =
 // A call that already has its result is not carried out again.
 const done = [...messages.slice(0, -1), { role: "tool" as const, content: [...(messages.at(-1)!.content as never[]), { type: "tool-result", toolCallId: "c1", toolName: "fetch_page", output: { type: "text", value: "page" } }] }];
 assert.deepEqual(answeredApprovals(done as never).approved, []);
+
+// An approved connector call runs with the messages that still hold its request and the
+// person's answer, and with the input from that call, so connector_call's own check
+// (approvedIn) finds the approval. A call the model just made has none.
+const connectorAnswer: UIMessage[] = [
+	{ id: "u2", role: "user", parts: [{ type: "text", text: "Add a note" }] },
+	{
+		id: "a2",
+		role: "assistant",
+		parts: [
+			{ type: "step-start" },
+			{ type: "tool-connector_call", toolCallId: "k1", state: "approval-responded", input: { tool: "shop__add_note", input: { order: "A1", note: "Wrap" } }, approval: { id: "approval-k1", approved: true } } as never,
+		],
+	},
+];
+const connectorMessages = await convertToModelMessages(connectorAnswer);
+const [connectorApproval] = answeredApprovals(connectorMessages).approved;
+assert.equal(approvedIn(connectorMessages, "k1", connectorApproval.call.input), true);
+assert.equal(approvedIn(withoutApprovals(connectorMessages), "k1", connectorApproval.call.input), false, "the loop must not drop the approval before the call");
+const justMade: ModelMessage[] = [connectorMessages[0], { role: "assistant", content: [{ type: "tool-call", toolCallId: "k2", toolName: "connector_call", input: { tool: "shop__add_note", input: {} } }] }];
+assert.equal(approvedIn(justMade, "k2", { tool: "shop__add_note", input: {} }), false);
 
 console.log("loop.check: all checks passed");

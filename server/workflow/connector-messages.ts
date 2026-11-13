@@ -52,10 +52,11 @@ function rewrite(part: Part): Part {
  * Some providers reuse call ids from turn to turn, so an approval of an earlier call
  * with the same id does not count.
  *
- * WorkflowAgent checks the request's signature, then runs an approved call with the
- * messages the run started with, and drops these parts only after the call. In the
- * agent loop, a call the model just made runs with messages that hold no approval
- * requests (the prompt drops them), so this is false for it.
+ * The reply loop (loop.ts) checks the request's signature, then runs an approved call
+ * with the messages the run started with, which still hold the request and the answer,
+ * and drops these parts only after the call. A call the model just made runs with the
+ * messages after that model call, which hold no approval request for it, so this is
+ * false for it.
  */
 export function approvedIn(messages: ModelMessage[], toolCallId: string, input: unknown): boolean {
 	let at = messages.length - 1;
