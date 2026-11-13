@@ -96,16 +96,18 @@ const EXPORT_TIMEOUT_MS = 2_000;
  * address of scheme "localhost:" and send nothing.
  */
 export function tracesUrl(endpoint: string): URL {
-	let url: URL;
+	const example = "Use one such as http://127.0.0.1:4318.";
+	let base: URL;
 	try {
-		url = new URL(`${endpoint.trim().replace(/\/+$/, "")}/v1/traces`);
+		base = new URL(endpoint.trim());
 	} catch {
-		throw new Error(`OTEL_EXPORTER_OTLP_ENDPOINT is not an address: "${endpoint}". Use one such as http://127.0.0.1:4318.`);
+		throw new Error(`OTEL_EXPORTER_OTLP_ENDPOINT is not an address: "${endpoint}". ${example}`);
 	}
-	if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) {
-		throw new Error(`OTEL_EXPORTER_OTLP_ENDPOINT must start with http:// or https://, such as http://127.0.0.1:4318. It is "${endpoint}".`);
-	}
-	return url;
+	if (base.protocol !== "http:" && base.protocol !== "https:") throw new Error(`OTEL_EXPORTER_OTLP_ENDPOINT must start with http:// or https://. It is "${endpoint}". ${example}`);
+	// The endpoint is parsed before /v1/traces is added: "http://" plus the path would
+	// parse as host "v1". Cut off after the scheme, it does not parse; this is the guard.
+	if (!base.hostname) throw new Error(`OTEL_EXPORTER_OTLP_ENDPOINT has no host: "${endpoint}". ${example}`);
+	return new URL(`${base.href.replace(/\/+$/, "")}/v1/traces`);
 }
 
 /**
