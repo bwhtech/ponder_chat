@@ -111,8 +111,12 @@ export async function whenReplyFinished(threadId: string, timeoutMs = 10_000) {
 	while ((await activeRun(threadId)) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
-/** Cancels a run and saves what it wrote so far. */
+/** Cancels a run and saves what it wrote so far, inside the run's trace (server/tracing/reply-trace.ts). */
 async function cancel(run: ThreadRun, owner: string) {
+	await withReplyTrace(run.runId, () => cancelNow(run, owner));
+}
+
+async function cancelNow(run: ThreadRun, owner: string) {
 	// A failed cancel still saves the reply below, but the run may write on, so it is logged.
 	await getRun(run.runId)
 		.cancel({ cancelReason: "Stopped by the person, or replaced by a newer message." })
