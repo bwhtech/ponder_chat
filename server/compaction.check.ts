@@ -14,6 +14,7 @@ import { budgetFor, countTokens, estimate, estimateTokens, MAX_TRIGGER_TOKENS, m
 import { clipMiddle, PAYLOAD_CHARS, renderTranscript } from "./compaction/transcript.ts";
 import { withCacheMarks } from "./workflow/cache.ts";
 import { trimOldToolResults } from "./workflow/context.ts";
+import { trimEarlierSteps } from "./workflow/context-guard.ts";
 
 let n = 0;
 const id = () => `m${++n}`;
@@ -80,6 +81,20 @@ assert.ok(fromProvider.text < 5_000, `no base64 counted as text: ${fromProvider.
 assert.ok(Math.abs(fromProvider.text - fromModel.text) < 200);
 // A file part with only a link is text: it carries no data yet.
 assert.equal(estimate({ type: "file", mediaType: "application/pdf", url: "/api/files/f1" }).media, 0);
+
+// --- An approved call counts once: the approval repeats the input, and the provider never gets it.
+{
+	const input = { tool: "shop__add_note", input: { note: "word ".repeat(8_000) } };
+	const call = { type: "tool-call", toolCallId: "c1", toolName: "connector_call", input };
+	const alone = estimate([{ role: "assistant", content: [call] }]).text;
+	const approved = [
+		{ role: "assistant", content: [call, { type: "tool-approval-request", approvalId: "a1", toolCallId: "c1", inputSchemaInput: input, signature: "sig" }] },
+		{ role: "tool", content: [{ type: "tool-approval-response", approvalId: "a1", approved: true }] },
+	];
+	assert.ok(estimate(approved).text < alone + 50, "model messages: the input once");
+	const ui = { id: "a", role: "assistant", parts: [{ type: "tool-connector_call", toolCallId: "c1", state: "approval-responded", input, approval: { id: "a1", approved: true, signature: "sig", inputSchemaInput: input } }] };
+	assert.ok(estimate([ui]).text < alone + 50, "UI messages: the input once");
+}
 
 // --- Which messages a summary covers: whole turns, always the current one, within the tail budget.
 const big = words(5_000); // about 7,500 tokens a message
@@ -233,6 +248,43 @@ const toolTail = trimOldToolResults([
 ]);
 const lastTool = toolTail[3];
 assert.ok(lastTool.role === "tool" && lastTool.content[0].type === "tool-result" && lastTool.content[0].output.type === "text" && lastTool.content[0].output.value.length === 5_000);
+
+// --- Between steps, the long results of the turn's earlier steps are cut: connector_search and connector_call too.
+// Each keeps its call id and name, an approval stays as it was, and the last step's result is whole.
+{
+	const long = "x".repeat(10_000);
+	const searched = { type: "json" as const, value: { results: [{ name: "shop__add_note", signature: long }] } };
+	const prompt: LanguageModelV4Prompt = [
+		{ role: "user", content: [{ type: "text", text: "add my notes to order A1" }] },
+		{ role: "assistant", content: [{ type: "tool-call", toolCallId: "s1", toolName: "connector_search", input: { query: "note" } }] },
+		{ role: "tool", content: [{ type: "tool-result", toolCallId: "s1", toolName: "connector_search", output: searched }] },
+		{
+			role: "assistant",
+			content: [
+				{ type: "tool-call", toolCallId: "c1", toolName: "connector_call", input: { tool: "shop__add_note", input: { order: "A1" } } },
+				{ type: "tool-approval-request", approvalId: "a1", toolCallId: "c1" },
+			],
+		},
+		{
+			role: "tool",
+			content: [
+				{ type: "tool-approval-response", approvalId: "a1", approved: true },
+				{ type: "tool-result", toolCallId: "c1", toolName: "connector_call", output: { type: "text", value: long } },
+			],
+		},
+		{ role: "assistant", content: [{ type: "tool-call", toolCallId: "c2", toolName: "connector_call", input: { tool: "shop__find_order", input: { order: "A1" } } }] },
+		{ role: "tool", content: [{ type: "tool-result", toolCallId: "c2", toolName: "connector_call", output: { type: "text", value: long } }] },
+	] as LanguageModelV4Prompt;
+	const trimmed = trimEarlierSteps(prompt);
+	const results = trimmed.flatMap((message) => (message.role === "tool" ? message.content : [])).filter((part) => part.type === "tool-result");
+	assert.deepEqual(results.map((part) => [part.toolCallId, part.toolName]), [["s1", "connector_search"], ["c1", "connector_call"], ["c2", "connector_call"]]);
+	const size = (part: (typeof results)[number]) => JSON.stringify(part.output).length;
+	assert.ok(size(results[0]) < 2_000 && size(results[1]) < 2_000, "the earlier search and call are cut");
+	assert.ok(size(results[2]) > 10_000, "the last step's result is whole");
+	assert.deepEqual(trimmed[3], prompt[3], "the call and its approval request are unchanged");
+	assert.deepEqual((trimmed[4] as Extract<(typeof trimmed)[number], { role: "tool" }>).content[0], { type: "tool-approval-response", approvalId: "a1", approved: true });
+	assert.ok(estimateTokens(trimmed) < estimateTokens(prompt) - 4_000, "the count drops with the cut");
+}
 
 // --- The person's latest message survives compaction word for word (eve's task-survival regression).
 const sentinel = user("TASK_SENTINEL: write the report in French");

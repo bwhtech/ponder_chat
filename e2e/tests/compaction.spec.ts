@@ -184,7 +184,7 @@ test("a reply that goes on after an approval is summarized when the approved cal
 	const note = `APPROVE-NOTE ${filler(28_000)}`;
 	await fake.chat({
 		match: "APPROVE-ADD",
-		steps: [{ toolCalls: [{ name: "shop__add_note", input: { order: "A1", note } }] }, { text: "APPROVE-UNSUMMARIZED" }],
+		steps: [{ toolCalls: [{ name: "connector_call", input: { tool: "shop__add_note", input: { order: "A1", note } } }] }, { text: "APPROVE-UNSUMMARIZED" }],
 		summarized: [{ text: "APPROVE-DONE" }],
 	});
 	await chat.send(page, "APPROVE-ADD put my notes on order A1");
@@ -204,6 +204,9 @@ test("a reply that goes on after an approval is summarized when the approved cal
 	expect(sent(calls[1].messages)).not.toContain("APPROVE-M1 ");
 	expect(sent(calls[1].messages)).toContain("APPROVE-NOTE");
 	expect(sent(calls[1].messages)).toContain("Added the note to order A1.");
+	// The <connectors> note went with the current message, once, and stayed out of the summary.
+	expect(sent(calls[1].messages).split("</connectors>")).toHaveLength(2);
+	expect((await fake.summaries("APPROVE-M1 "))[0].prompt).not.toContain("</connectors>");
 	await expect(divider(page)).toHaveCount(1);
 });
 

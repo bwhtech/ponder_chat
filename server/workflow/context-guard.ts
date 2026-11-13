@@ -126,7 +126,7 @@ async function providerMessages(messages: ModelMessage[]): Promise<LanguageModel
 }
 
 /** Cuts the long tool results of the current turn's earlier steps; the last step's stay whole. */
-function trimEarlierSteps(prompt: LanguageModelV4Prompt): LanguageModelV4Prompt {
+export function trimEarlierSteps(prompt: LanguageModelV4Prompt): LanguageModelV4Prompt {
 	const roles = prompt.map((message) => message.role);
 	const turn = roles.lastIndexOf("user");
 	const lastTool = roles.lastIndexOf("tool");

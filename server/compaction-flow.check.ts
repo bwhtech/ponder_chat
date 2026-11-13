@@ -8,7 +8,8 @@
 import assert from "node:assert/strict";
 import type { ModelMessage, UIMessage } from "ai";
 import { Compaction, type CompactionDeps, type CompactionState, type CompactRequest } from "./compaction/compaction.ts";
-import type { Summary } from "./compaction/summary.ts";
+import { addConnectorNote } from "./workflow/connector-messages.ts";
+import { currentTurnStart, type Summary } from "./compaction/summary.ts";
 
 let n = 0;
 const id = () => `m${++n}`;
@@ -41,13 +42,16 @@ class World {
 				if (this.fail) throw new Error("summarizer down");
 				return { text: "SUMMARY", model: "deepseek/deepseek-v4.1-flash" };
 			},
-			// As thread-messages.ts builds them: files stay file parts, the rest is text.
-			modelMessages: async (thread) =>
-				thread.map((message): ModelMessage => {
-					const text = (part: UIMessage["parts"][number]) => ({ type: "text" as const, text: part.type === "text" ? part.text : JSON.stringify(part) });
-					if (message.role !== "user") return { role: "assistant", content: message.parts.map(text) };
-					return { role: "user", content: message.parts.map((part) => (part.type === "file" ? { type: "file" as const, data: part.url, mediaType: part.mediaType } : text(part))) };
-				}),
+			// As thread-messages.ts builds them: files stay file parts, the rest is text, and the <connectors> note goes with the latest message.
+			modelMessages: async (thread, { connectors }) =>
+				addConnectorNote(
+					thread.map((message): ModelMessage => {
+						const text = (part: UIMessage["parts"][number]) => ({ type: "text" as const, text: part.type === "text" ? part.text : JSON.stringify(part) });
+						if (message.role !== "user") return { role: "assistant", content: message.parts.map(text) };
+						return { role: "user", content: message.parts.map((part) => (part.type === "file" ? { type: "file" as const, data: part.url, mediaType: part.mediaType } : text(part))) };
+					}),
+					connectors,
+				),
 			status: async (state) => void this.states.push(state),
 			log: (message) => void this.logs.push(message),
 		};
@@ -60,6 +64,7 @@ const request = (overrides: Partial<CompactRequest> = {}): CompactRequest => ({
 	runId: "wrun_02",
 	modelId: "z-ai/glm-5.3",
 	recalled: "",
+	connectors: "",
 	skills: [],
 	ratio: 1,
 	window: 40_000,
@@ -162,6 +167,42 @@ const textOf = (messages: ModelMessage[]) => JSON.stringify(messages);
 	const result = await run(world);
 	assert.equal(result.kind, "compacted", "not over-limit");
 	assert.equal(world.saved?.summary.keepFiles, true, "files are not dropped for their estimate");
+}
+
+// --- The <connectors> note is per-turn context, as memory's is: never summarized, sent once, with the latest message.
+{
+	const note = "<connectors>\nshop: Shop, 2 tools\n</connectors>";
+	const count = (messages: ModelMessage[]) => textOf(messages).split("<connectors>").length - 1;
+	const world = new World(longThread());
+	const result = await run(world, { connectors: note });
+	assert.equal(result.kind, "compacted");
+	assert.ok(!JSON.stringify(world.summarized[0]).includes("<connectors>"), "the summarizer never reads the note");
+	assert.ok(result.kind === "compacted" && count(result.messages) === 1, "the note is sent once");
+	const last = result.kind === "compacted" ? result.messages.findLast((message) => message.role === "user") : undefined;
+	assert.ok(textOf(last ? [last] : []).includes("<connectors>") && textOf(last ? [last] : []).includes("CURRENT question"), "on the current turn's message, not the summary's");
+
+	// Between steps, the current turn is already in the prompt with its note: the summary message carries none.
+	const between = await run(new World(longThread()), { connectors: note, mode: "turn", turn: { text: 100, media: 0 } });
+	assert.ok(between.kind === "compacted" && count(between.messages) === 0, "not counted twice between steps");
+}
+
+// --- A connector_call waiting for approval, or approved and run, is in the current turn, and never summarized away from its turn.
+{
+	const call = { type: "tool-connector_call", toolCallId: "call_1", input: { tool: "shop__add_note", input: { order: "A1", note: "Gift wrap" } } };
+	const waiting = { ...call, state: "approval-requested", approval: { id: "approval_1" } } as unknown as UIMessage["parts"][number];
+	const answered = { ...call, state: "approval-responded", approval: { id: "approval_1", approved: true } } as unknown as UIMessage["parts"][number];
+	for (const part of [waiting, answered]) {
+		const thread = [...longThread(), { id: id(), role: "assistant" as const, parts: [part] }];
+		for (const mode of ["start", "turn"] as const) {
+			const world = new World(thread);
+			const result = await run(world, { mode, turn: mode === "turn" ? { text: 200, media: 0 } : undefined });
+			assert.equal(result.kind, "compacted", mode);
+			assert.ok(!JSON.stringify(world.summarized[0]).includes("call_1"), `${mode}: the call is not summarized`);
+			assert.ok((world.saved?.summary.covers ?? 0) <= currentTurnStart(thread), `${mode}: the summary ends before the current turn`);
+			// From the start, the call and its approval stay together in the messages; between steps they are already in the prompt.
+			if (mode === "start") assert.ok(result.kind === "compacted" && textOf(result.messages).includes("call_1") && textOf(result.messages).includes("approval_1"));
+		}
+	}
 }
 
 console.log("compaction flow checks passed");

@@ -87,6 +87,8 @@ export function estimate(value: unknown): Estimate {
 	const json =
 		JSON.stringify(value, function (key, item) {
 			if (key === "providerOptions" || key === "providerMetadata") return undefined;
+			// An approval is not sent to the provider, and it repeats the call's whole input: counted, an approved call would count twice.
+			if (key === "inputSchemaInput" || isApproval(item)) return undefined;
 			const file = filePart(item);
 			if (!file) return item;
 			media += mediaTokens(file.type, file.bytes);
@@ -96,6 +98,11 @@ export function estimate(value: unknown): Estimate {
 }
 
 /** An image or PDF counts the same however it is sent. */
+function isApproval(item: unknown) {
+	const type = (item as { type?: unknown } | null)?.type;
+	return type === "tool-approval-request" || type === "tool-approval-response";
+}
+
 function mediaTokens(type: string, bytes: number) {
 	if (type.startsWith("image/")) return IMAGE_TOKENS;
 	if (type === "application/pdf") return Math.max(MIN_PDF_TOKENS, Math.ceil(bytes / PDF_BYTES_PER_TOKEN));
