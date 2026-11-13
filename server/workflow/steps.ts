@@ -53,6 +53,9 @@ export async function compactStep(writable: WritableStream<ModelCallStreamPart>,
 			const writer = writable.getWriter();
 			try {
 				await writer.write({ type: "raw", rawValue: { [COMPACTION_MARKER]: state } });
+				// Each model call starts with reset-step, which drops the parts of the step it is in.
+				// So the status ends a step of its own, as the agent does between its steps.
+				if (state.state !== "running") for (const type of ["finish-step", "start-step"]) await writer.write({ type } as unknown as ModelCallStreamPart);
 			} finally {
 				writer.releaseLock();
 			}
