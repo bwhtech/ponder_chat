@@ -111,7 +111,7 @@ class ReplyLoop {
 	 */
 	private async approvedOutcome({ call, request }: Approval): Promise<ToolOutcome> {
 		const now = Date.now();
-		const refused = (output: string): ToolOutcome => ({ call, output, failed: false, start: now, end: now });
+		const refused = (output: string): ToolOutcome => ({ call, output, failed: false, refused: true, start: now, end: now });
 		if (!this.tools.canApprove(call.toolName)) return refused(`Tool "${call.toolName}" does not require approval`);
 		const signed = { approvalId: request.approvalId, toolCallId: call.toolCallId, toolName: call.toolName, input: call.input };
 		if (!(await verifyApprovalStep(signed, request.signature))) return refused("The approval is not valid, so the call did not run.");

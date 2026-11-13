@@ -9,7 +9,7 @@ import { toUIMessageChunk } from "@ai-sdk/workflow";
 import { APICallError, convertToModelMessages, generateText, InvalidPromptError, isStepCount, jsonSchema, NoOutputGeneratedError, simulateReadableStream, streamText, tool, type ModelMessage, type UIMessage } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { z } from "zod";
-import { answeredApprovals, signApproval, withoutApprovals } from "./approvals.ts";
+import { answeredApprovals, signApproval, verifyApproval, withoutApprovals } from "./approvals.ts";
 import { approvedIn } from "./connector-messages.ts";
 import { classifyModelError, MODEL_CALL_ATTEMPTS, ModelStalledError } from "./model-errors.ts";
 import { storedPart, toolCallOf } from "./stream-parts.ts";
@@ -169,6 +169,10 @@ assert.deepEqual(
 	toolSpans(loopOutcomes).map(({ name, callId, failed }) => [name, callId, failed]),
 	[["lookup", "u3", false]],
 );
+// An approved call that was refused, such as for a signature that is not valid, did not run either.
+const refusedCall = { type: "tool-call" as const, toolCallId: "r1", toolName: "lookup", input: {} };
+assert.deepEqual(toolSpans([{ call: refusedCall, output: "The approval is not valid, so the call did not run.", failed: false, refused: true, start: 1, end: 1 }]), []);
+assert.equal(outcomeParts([{ call: refusedCall, output: "not valid", failed: false, refused: true, start: 1, end: 1 }]).length, 1, "the page still shows why");
 
 // --- Approvals ----------------------------------------------------------------
 
@@ -193,6 +197,12 @@ assert.equal(
 	await signApproval(secret, { approvalId: request.approvalId, toolCallId: "call-1", toolName: "fetch_page", input: { url: "https://example.org/a", b: [1, { z: 2, a: 1 }] } }),
 	request.signature,
 );
+// Checked in constant time: the AI SDK's signature passes, a changed or a short one fails.
+const signedCall = { approvalId: request.approvalId, toolCallId: "call-1", toolName: "fetch_page", input: { url: "https://example.org/a", b: [1, { z: 2, a: 1 }] } };
+assert.equal(await verifyApproval(secret, signedCall, request.signature), true);
+assert.equal(await verifyApproval(secret, { ...signedCall, input: { url: "https://example.org/b" } }, request.signature), false);
+assert.equal(await verifyApproval(secret, signedCall, request.signature.slice(0, 10)), false);
+assert.equal(await verifyApproval("another-secret", signedCall, request.signature), false);
 
 // The person's answers, as the page sends them back, come out of the messages in call order.
 const answered: UIMessage[] = [

@@ -105,7 +105,9 @@ export async function insertRun(run: RunRow) {
 
 /**
  * Read-only usage for `GET /api/usage?thread=`: a person's runs, for one thread or the latest 100,
- * with totals. Subagent runs carry the thread of the run that called them.
+ * with totals. Subagent runs carry the thread of the run that called them. The list has
+ * every row; the totals leave out the model calls that did not finish (UNCHARGED_CALLS),
+ * which cost the person nothing.
  */
 export async function usageReport({ user, thread }: { user: string; thread?: string }) {
 	const where = thread ? sql`"user" = ${user} and thread_id = ${thread}` : sql`"user" = ${user}`;
@@ -117,6 +119,6 @@ export async function usageReport({ user, thread }: { user: string; thread?: str
 		select count(*)::int as runs, coalesce(sum(input_tokens), 0)::int as input_tokens,
 			coalesce(sum(output_tokens), 0)::int as output_tokens, coalesce(sum(cached_tokens), 0)::int as cached_tokens,
 			coalesce(sum(cost_usd), 0)::float8 as cost_usd
-		from runs where ${where}`;
+		from runs where ${where} and finish_reason <> all(${[...UNCHARGED_CALLS]})`;
 	return { totals, runs };
 }

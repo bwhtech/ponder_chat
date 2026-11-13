@@ -76,13 +76,28 @@ export async function signApprovalStep(call: SignedCall): Promise<string> {
 /** Whether the person's approval carries a valid signature for exactly this call. */
 export async function verifyApprovalStep(call: SignedCall, signature: string | undefined): Promise<boolean> {
 	"use step";
-	return Boolean(signature) && (await signApproval(approvalSecret(), call)) === signature;
+	return Boolean(signature) && verifyApproval(approvalSecret(), call, signature!);
 }
 
-export async function signApproval(secret: string, { approvalId, toolCallId, toolName, input }: SignedCall): Promise<string> {
-	const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-	const payload = JSON.stringify(["ai-sdk-tool-approval-v1", approvalId, toolCallId, toolName, await digest(input)]);
-	return base64url(await crypto.subtle.sign("HMAC", key, encoder.encode(payload)));
+export async function signApproval(secret: string, call: SignedCall): Promise<string> {
+	return base64url(await crypto.subtle.sign("HMAC", await hmacKey(secret), await payloadOf(call)));
+}
+
+/**
+ * Checks a signature with crypto.subtle.verify, as the AI SDK does: in constant time, so
+ * how long the check takes tells nothing about the right signature. One of another
+ * length fails.
+ */
+export async function verifyApproval(secret: string, call: SignedCall, signature: string): Promise<boolean> {
+	return crypto.subtle.verify("HMAC", await hmacKey(secret), Buffer.from(signature, "base64url"), await payloadOf(call));
+}
+
+function hmacKey(secret: string) {
+	return crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+}
+
+async function payloadOf({ approvalId, toolCallId, toolName, input }: SignedCall) {
+	return encoder.encode(JSON.stringify(["ai-sdk-tool-approval-v1", approvalId, toolCallId, toolName, await digest(input)]));
 }
 
 function approvalSecret() {

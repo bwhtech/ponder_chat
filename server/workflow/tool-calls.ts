@@ -7,7 +7,16 @@ import type { ModelToolCall, ToolSpec } from "./model-call.ts";
  * never ran, and the page already shows its error. `start` and `end` are the workflow's
  * clock (the time of the events delivered before and after the call), for its span.
  */
-export type ToolOutcome = { call: ToolCallPart; output: unknown; failed: boolean; invalid?: boolean; start: number; end: number };
+export type ToolOutcome = {
+	call: ToolCallPart;
+	output: unknown;
+	failed: boolean;
+	invalid?: boolean;
+	/** An approved call that did not run, such as one with a signature that is not valid. The page shows why. */
+	refused?: boolean;
+	start: number;
+	end: number;
+};
 
 /** An `execute_tool` span of a call the loop ran, sent by a step (tool-spans.ts): workflow code can't send spans. */
 export type ToolSpan = { name: string; callId: string; start: number; end: number; failed: boolean };
@@ -85,9 +94,9 @@ export class ToolCalls {
 	}
 }
 
-/** The spans of the calls that ran. The name is the tool the model called, such as connector_call: never a connector's own tool. */
+/** The spans of the calls that ran: not an invalid call, nor an approved one that was refused. The name is the tool the model called, such as connector_call: never a connector's own tool. */
 export function toolSpans(outcomes: ToolOutcome[]): ToolSpan[] {
-	return outcomes.filter(({ invalid }) => !invalid).map(({ call, start, end, failed }) => ({ name: call.toolName, callId: call.toolCallId, start, end, failed }));
+	return outcomes.filter(({ invalid, refused }) => !invalid && !refused).map(({ call, start, end, failed }) => ({ name: call.toolName, callId: call.toolCallId, start, end, failed }));
 }
 
 /** The tool message that gives the model the outcomes. */
