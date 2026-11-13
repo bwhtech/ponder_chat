@@ -3,7 +3,7 @@ import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
 import { loadThread, updateThread } from "../db.ts";
 import { rememberTurn } from "../memory.ts";
-import { toUIChunks } from "./reply-chunks.ts";
+import { joinToolInputDeltas, toUIChunks } from "./reply-chunks.ts";
 import { finishRun, type Continued } from "./runs.ts";
 import { span } from "../tracing/span.ts";
 
@@ -83,7 +83,8 @@ async function saveReplyNow(threadId: string, owner: string, runId: string, mode
 	const existing = continued && messages.find((message) => message.id === continued.messageId && message.role === "assistant");
 	const base = existing ? { ...existing, parts: existing.parts.slice(0, continued.baseParts) } : undefined;
 	let reply: UIMessage | undefined;
-	for await (const message of readUIMessageStream({ message: base, stream: await replyStream(runId, model, { untilTail, continued }) })) reply = message;
+	const stream = (await replyStream(runId, model, { untilTail, continued })).pipeThrough(joinToolInputDeltas());
+	for await (const message of readUIMessageStream({ message: base, stream })) reply = message;
 	// A reply with only status parts, such as one stopped while it compacted, is not saved: as one stopped before any output.
 	if (reply?.parts.some((part) => !STATUS_PARTS.has(part.type))) {
 		const at = messages.findIndex((message) => message.id === reply.id);
