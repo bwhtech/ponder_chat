@@ -293,13 +293,15 @@ try {
 			["check_open__echo", false],
 		]);
 		assert.deepEqual(catalog.connectors, [{ slug: "check_open", name: "Check Open", server: "Check Server", notes: "Use echo to repeat text.", tools: 2 }]);
+		// A tool that is off is named, so a call to it says so, but it has no schema and never runs.
+		assert.deepEqual(catalog.off, [{ name: "check_open__big", title: "big" }]);
 		assert.match(await callConnectorTool(openId, "big", {}, alice, false), /turned .* off/);
 		// A tool on "Ask first" runs only when the call says the person approved it.
 		assert.match(await callConnectorTool(openId, "create_item", { title: "x" }, alice, false), /did not approve this call, so it did not run/);
 		assert.equal(await callConnectorTool(openId, "create_item", { title: "x" }, alice, true), "created x");
 		assert.match(await callConnectorTool(openId, "no_such_tool", {}, alice, true), /has no tool named no_such_tool/);
 		await changeConnector(alice, openId, { rules: { big: null }, enabled: false });
-		assert.deepEqual(await connectorCatalogFor(alice), { tools: [], connectors: [], leftOut: 0 });
+		assert.deepEqual(await connectorCatalogFor(alice), { tools: [], connectors: [], leftOut: 0, off: [] });
 		await changeConnector(alice, openId, { enabled: true });
 	});
 

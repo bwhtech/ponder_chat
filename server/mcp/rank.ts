@@ -35,8 +35,11 @@ export type Rankable = {
 	connector: { slug: string; name: string; server?: string };
 };
 
+/** Only this many of a query's words count: each word is scored against every tool, in the one server process. */
+export const MAX_QUERY_WORDS = 16;
+
 export function rank<T extends Rankable>(query: string, tools: readonly T[]): T[] {
-	const terms = words(query);
+	const terms = [...new Set(words(query.slice(0, MAX_QUERY_CHARS)))].slice(0, MAX_QUERY_WORDS);
 	const scoring = scoringTerms(terms);
 	return tools
 		.map((tool) => ({ tool, tier: tierOf(terms, prepared(tool)), score: score(scoring, prepared(tool).fields) }))
@@ -44,6 +47,9 @@ export function rank<T extends Rankable>(query: string, tools: readonly T[]): T[
 		.sort((a, b) => a.tier - b.tier || b.score - a.score || order(a.tool.connector.slug, b.tool.connector.slug) || order(a.tool.name, b.tool.name))
 		.map((entry) => entry.tool);
 }
+
+/** connector_search takes at most this many characters; a longer text is cut here too. */
+export const MAX_QUERY_CHARS = 300;
 
 const MAX_SUGGESTIONS = 5;
 
@@ -75,7 +81,8 @@ function wholeWords(text: string): string[] {
 	return text
 		.normalize("NFC")
 		.toLowerCase()
-		.split(/[^\p{L}\p{M}\p{N}]+/u)
+		// Zero-width joiners stay too: Persian writes some words with U+200C, and Hindi some conjuncts with U+200D.
+		.split(/[^\p{L}\p{M}\p{N}\u200C\u200D]+/u)
 		.filter((word) => /[\p{L}\p{N}]/u.test(word));
 }
 
@@ -139,19 +146,37 @@ function score(terms: string[], fields: Field[]) {
 const matches = (word: string, term: string) => word.startsWith(term) || formOf(word, term);
 
 /**
- * True when the term is the word with an ending: id → ids, issue → issues, create →
- * created, order → ordered, list → listing, create → creating. "d", "ed" and "ing" need
- * a word of three letters or more, and "d" a word that ends in "e": short words with
- * these endings are other words ("ad" and "add", "be" and "bing", "car" and "card").
+ * True when the term is a form of the word: a plural (id → ids, issue → issues, category →
+ * categories), a past (create → created, order → ordered, copy → copied, stop →
+ * stopped) or an "-ing" (list → listing, create → creating, see → seeing, run →
+ * running). Only "s" and "es" work on two-letter words: short words with the other
+ * endings are other words ("ad" and "add", "be" and "bing", "car" and "card").
  */
 function formOf(word: string, term: string) {
 	if (word.length < 2) return false;
 	if (term === `${word}s` || term === `${word}es`) return true;
-	if (word.length < 3) return false;
-	// "fee" and "feed", "see" and "seed" are other words.
-	if (word.endsWith("e")) return (term === `${word}d` && !(word.length === 3 && word.endsWith("ee"))) || term === `${word.slice(0, -1)}ing`;
-	return term === `${word}ed` || term === `${word}ing`;
+	if (word.length < 3 || STANDALONE.has(term)) return false;
+	return formsOf(word).includes(term);
 }
+
+function formsOf(word: string): string[] {
+	const last = word.at(-1)!;
+	// see → seeing, agree → agreed; but "fee" and "feed", "see" and "seed" are other words.
+	if (word.endsWith("ee")) return [`${word}ing`, ...(word.length > 3 ? [`${word}d`] : [])];
+	// create → created, creating.
+	if (last === "e") return [`${word}d`, `${word.slice(0, -1)}ing`];
+	// category → categories; copy → copied, copying.
+	if (last === "y" && !VOWELS.has(word.at(-2)!)) return [`${word.slice(0, -1)}ies`, `${word.slice(0, -1)}ied`, `${word}ing`];
+	const forms = [`${word}ed`, `${word}ing`];
+	// ship → shipped, shipping; run → running. A short word that ends in one vowel and a consonant doubles it.
+	if (word.length <= 4 && !VOWELS.has(last) && !"wxy".includes(last) && VOWELS.has(word.at(-2)!) && !VOWELS.has(word.at(-3)!)) forms.push(`${word}${last}ed`, `${word}${last}ing`);
+	return forms;
+}
+
+const VOWELS = new Set("aeiou");
+
+/** Words that end like a form but are words of their own: "being" is not "bee", "incoming" is not "income". */
+const STANDALONE = new Set(["being", "incoming", "outgoing", "upcoming", "ongoing", "during", "nothing", "something", "anything", "everything", "evening", "morning", "string"]);
 
 /**
  * Each pair of a name's adjacent words joined, so "github" finds searchGitHub and

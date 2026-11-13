@@ -27,7 +27,7 @@ import {
 } from "./store.ts";
 import { modelToolName, resultText, ruleOf, slugFor } from "./tools.ts";
 import type { ConnectorView } from "../../shared/connectors.ts";
-import type { CatalogConnector, CatalogData, CatalogTool } from "./catalog.ts";
+import type { CatalogConnector, CatalogData, CatalogTool, OffTool } from "./catalog.ts";
 import { withPeer } from "../tracing/http.ts";
 import { span } from "../tracing/span.ts";
 
@@ -312,7 +312,12 @@ async function connectorCatalogNow(userId: string): Promise<CatalogData> {
 		tools: kept,
 		connectors: connections.map((connection) => catalogConnector(connection, kept)),
 		leftOut: total - kept.length,
+		off: signedIn.flatMap(offTools),
 	};
+}
+
+function offTools(connection: Connection): OffTool[] {
+	return connection.tools.filter((tool) => ruleOf(connection, tool) === "off").map((tool) => ({ name: modelToolName(connection.slug, tool.name), title: tool.title ?? tool.name }));
 }
 
 /**

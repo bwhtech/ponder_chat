@@ -1,4 +1,4 @@
-import { closestNames, rank, type Rankable } from "./rank.ts";
+import { closestNames, MAX_QUERY_CHARS, rank, type Rankable } from "./rank.ts";
 import { signature } from "./signature.ts";
 import { inputProblems } from "./validate.ts";
 
@@ -40,7 +40,14 @@ export type CatalogData = {
 	connectors: CatalogConnector[];
 	/** Tools that are on but over the limit, left out. */
 	leftOut: number;
+	/**
+	 * The tools the person turned off, by name, so a call to one says so: such as one the
+	 * person turned off while its approval waited. Older recorded runs have none.
+	 */
+	off?: OffTool[];
 };
+
+export type OffTool = { name: string; title: string };
 
 export const EMPTY_CATALOG: CatalogData = { tools: [], connectors: [], leftOut: 0 };
 
@@ -74,13 +81,17 @@ const MAX_RESULT_DESCRIPTION = 600;
 const MAX_OUTPUT_CHARS = 20_000;
 
 /** The result of checking a connector_call: the tool and its input, or what the model should read. */
-export type Checked = { tool: CatalogTool; input: Record<string, unknown> } | { problem: string };
+/** The tool and its input; a tool the person turned off, which never runs; or what the model should read. */
+export type Checked = { tool: CatalogTool; input: Record<string, unknown> } | { off: OffTool } | { problem: string };
 
 export class Catalog {
 	private byName: Map<string, CatalogTool>;
 
+	private offByName: Map<string, OffTool>;
+
 	constructor(readonly data: CatalogData) {
 		this.byName = new Map(data.tools.map((tool) => [tool.name, tool]));
+		this.offByName = new Map((data.off ?? []).map((tool) => [tool.name, tool]));
 	}
 
 	/** True when the person has a connector that is on: then the model gets the two catalog tools. */
@@ -92,7 +103,9 @@ export class Catalog {
 		return this.byName.get(name);
 	}
 
-	search(query: string, limit = DEFAULT_LIMIT): SearchOutput {
+	search(text: string, limit = DEFAULT_LIMIT): SearchOutput {
+		// connector_search refuses a longer query; this keeps the scope's pattern and the ranker short for any caller.
+		const query = text.slice(0, MAX_QUERY_CHARS);
 		const count = Math.min(Math.max(Math.trunc(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 		const unavailable = this.data.connectors.filter((connector) => connector.unavailable).map(unavailableLine);
 		const scoped = this.scope(query);
@@ -112,6 +125,8 @@ export class Catalog {
 		if (typeof call.tool !== "string" || !call.tool) return { problem: "Name the tool to call, as connector_search returns it." };
 		// The exact name only: needsApproval looks the tool up by the same name, so a padded name must not find it here.
 		const tool = this.get(call.tool);
+		const off = this.offByName.get(call.tool);
+		if (!tool && off) return { off };
 		if (!tool) return { problem: this.unknown(call.tool) };
 		const input = call.input ?? {};
 		if (typeof input !== "object" || Array.isArray(input)) return { problem: `The input for ${tool.name} must be an object. Signature: ${signature(tool.name, tool.inputSchema)}` };
@@ -175,3 +190,6 @@ function toResult(tool: CatalogTool): SearchResult {
 		asksFirst: tool.ask,
 	};
 }
+
+/** What the model reads for a call to a tool the person turned off. */
+export const offText = (tool: OffTool) => `The person turned ${tool.title} (${tool.name}) off in Settings, Connectors, so this call did not run. Tell them, and don't try it again in this reply.`;

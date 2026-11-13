@@ -92,6 +92,14 @@ assert.deepEqual(names(rank("card", [...lookalikes, tool(shop, "charge", "Charge
 // "fee" and "feed" are other words.
 assert.deepEqual(rank("feed", [tool(shop, "get_fee", "")]), []);
 assert.deepEqual(rank("seed", [tool(shop, "see_all", "")]), []);
+// More forms: a doubled consonant, a "y" that turns into "ie", and "ee" words.
+for (const [query, name] of [["shipping", "ship"], ["shipped", "ship"], ["running", "run"], ["stopped", "stop"], ["planned", "plan"], ["categories", "category"], ["copied", "copy"], ["copies", "copy"], ["copying", "copy"], ["seeing", "see"], ["agreeing", "agree"], ["agreed", "agree"], ["played", "play"]]) {
+	assert.equal(rank(query!, [tool(shop, `${name}_it`, "")]).length, 1, `${query} → ${name}`);
+}
+// And words that only look like forms.
+for (const [query, name] of [["being", "bee"], ["incoming", "income"], ["hopped", "hope"], ["listted", "list"], ["sheeing", "she"], ["toies", "toy"]]) {
+	assert.deepEqual(rank(query!, [tool(shop, `${name}_it`, "")]), [], `${query} is not ${name}`);
+}
 // Two words of a name joined: "github" finds searchGitHub and a gitHubRepo property.
 assert.equal(rank("github", [tool(shop, "searchGitHub", "")]).length, 1);
 assert.equal(rank("github", [tool(shop, "search", "", { type: "object", properties: { gitHubRepo: { type: "string" } } })]).length, 1);
@@ -112,6 +120,9 @@ assert.deepEqual(words("cre\u0301er"), words("créer"));
 assert.deepEqual(words("cafe\u0301Bar"), ["café", "bar"]);
 // A "word" of marks alone is not a word.
 assert.deepEqual(words("✏️ Edit"), ["edit"]);
+// Zero-width joiners stay in their word: Persian "می‌خواهم", and a Hindi conjunct.
+assert.deepEqual(words("می\u200Cخواهم"), ["می\u200Cخواهم"]);
+assert.deepEqual(words("क्\u200Dष"), ["क्\u200Dष"]);
 assert.equal(names(rank("订单", [tool(shop, "find_order", "查找 订单")]))[0], "shop__find_order");
 // A typo gets the closest names.
 assert.equal(closestNames("linear__create_isue", tools)[0], "linear__create_issue");
@@ -236,6 +247,21 @@ const given = connectorTools(data, "ana");
 assert.deepEqual(Object.keys(given), ["connector_search", "connector_call"]);
 const options = { toolCallId: "c1", messages: [], context: {} };
 const search = given.connector_search as Tool<{ query: string; limit?: number }>;
+// A query is at most 300 characters, and only its first 16 distinct words are scored: a huge query can't block the server.
+const querySchema = asSchema(search.inputSchema);
+assert.equal((await querySchema.validate!({ query: "x".repeat(300) })).success, true);
+assert.equal((await querySchema.validate!({ query: "x".repeat(301) })).success, false);
+const crowd = new Catalog({
+	...data,
+	tools: Array.from({ length: 500 }, (_, i) => tool(shop, `tool_number_${i}`, "Does something with the records of an order, and returns them with their fields.", bigSchema)),
+});
+crowd.search("warm up");
+for (const huge of [Array.from({ length: 2_000 }, (_, i) => `word${i}`).join(" "), "a".repeat(100_000), `${"shop_".repeat(20_000)}__x`]) {
+	const started = performance.now();
+	crowd.search(huge);
+	const took = performance.now() - started;
+	assert.ok(took < 500, `a ${huge.length}-character query took ${Math.round(took)} ms`);
+}
 const searched = (await search.execute!({ query: "find order" }, options)) as { results: { tool: string }[] };
 assert.equal(searched.results[0]!.tool, "shop__find_order");
 const call = given.connector_call as Tool<{ tool: string; input?: Record<string, unknown> }>;
@@ -317,6 +343,16 @@ for (const [name, messages, call, expected] of cases) {
 	await stubbed.execute!(call, { toolCallId: "c1", messages, context: {} });
 	assert.deepEqual(asked, [expected], name);
 }
+
+// A tool the person turned off: a call to it passes the check, asks nothing, never runs,
+// and the model reads that it is off. Such as one turned off while its approval waited.
+const withOff = connectorTools({ ...data, off: [{ name: "shop__old_tool", title: "Old tool" }] }, "ana", stub);
+const offCall = { tool: "shop__old_tool", input: { anything: 1 } };
+assert.equal((await asSchema(withOff[CONNECTOR_CALL]!.inputSchema).validate!(offCall)).success, true);
+assert.equal(await (withOff[CONNECTOR_CALL]!.needsApproval as (input: unknown, options: unknown) => boolean)(offCall, options), false);
+asked.length = 0;
+assert.match(String(await withOff[CONNECTOR_CALL]!.execute!(offCall, { toolCallId: "c9", messages: [], context: {} })), /^The person turned Old tool \(shop__old_tool\) off in Settings, Connectors, so this call did not run\./);
+assert.deepEqual(asked, [], "a tool that is off never reaches the call step");
 
 // Telemetry names the real tool.
 assert.equal(calledToolName({ toolName: "connector_call", input: good }), "shop__find_order");

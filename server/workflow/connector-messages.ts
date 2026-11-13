@@ -50,7 +50,8 @@ function rewrite(part: Part): Part {
  * with this input. That message must hold the approval request for the call, and a
  * later tool message must answer it with approved. A denial wins over an approval.
  * Some providers reuse call ids from turn to turn, so an approval of an earlier call
- * with the same id does not count.
+ * with the same id does not count. A call that already has a result ran already: an
+ * approval is carried out once.
  *
  * The reply loop (loop.ts) checks the request's signature, then runs an approved call
  * with the messages the run started with, which still hold the request and the answer,
@@ -67,10 +68,9 @@ export function approvedIn(messages: ModelMessage[], toolCallId: string, input: 
 	const call = [...message.content].reverse().find((part) => part.type === "tool-call" && part.toolCallId === toolCallId);
 	if (call?.type !== "tool-call" || call.toolName !== CONNECTOR_CALL || !isDeepEqualData(call.input, input)) return false;
 	const requests = new Set(message.content.flatMap((part) => (part.type === "tool-approval-request" && part.toolCallId === toolCallId ? [part.approvalId] : [])));
-	const answers = messages
-		.slice(at + 1)
-		.flatMap((each) => (each.role === "tool" ? each.content : []))
-		.filter((part) => part.type === "tool-approval-response" && requests.has(part.approvalId));
+	const after = messages.slice(at + 1).flatMap((each) => (each.role === "tool" ? each.content : []));
+	if (after.some((part) => part.type === "tool-result" && part.toolCallId === toolCallId)) return false;
+	const answers = after.filter((part) => part.type === "tool-approval-response" && requests.has(part.approvalId));
 	return answers.length > 0 && answers.every((part) => part.type === "tool-approval-response" && part.approved === true);
 }
 

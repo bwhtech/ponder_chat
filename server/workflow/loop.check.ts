@@ -13,6 +13,7 @@ import { answeredApprovals, signApproval, verifyApproval, withoutApprovals } fro
 import { answersIn, openAnswersSettled, settledChunks, stillAsked, UNCERTAIN, withUncertainOutcomes } from "./answered-again.ts";
 import { THREAD_CHANGED } from "../../shared/replies.ts";
 import { approvedIn } from "./connector-messages.ts";
+import { connectorTools } from "./connectors.ts";
 import { classifyModelError, MODEL_CALL_ATTEMPTS, ModelStalledError } from "./model-errors.ts";
 import { storedPart, toolCallOf } from "./stream-parts.ts";
 import { outcomeParts, toolMessage, ToolCalls, toolSpans } from "./tool-calls.ts";
@@ -310,5 +311,42 @@ assert.deepEqual(
 	settledChunks(undefined, deniedAgain).filter((chunk) => chunk.type.startsWith("tool-")),
 	[{ type: "tool-output-denied", toolCallId: "c1" }],
 );
+// A call that was approved and already ran reads as not approved: on a later turn, the
+// saved thread has the call's result after it, and convertToModelMessages keeps the approval.
+const ranEarlier: UIMessage[] = [
+	{ id: "u3", role: "user", parts: [{ type: "text", text: "Add a note" }] },
+	{
+		id: "a3",
+		role: "assistant",
+		parts: [
+			{ type: "step-start" },
+			{ type: "tool-connector_call", toolCallId: "k1", state: "output-available", input: { tool: "shop__add_note", input: { order: "A1", note: "Wrap" } }, output: "Added the note.", approval: { id: "approval-k1", approved: true } } as never,
+		],
+	},
+	{ id: "u4", role: "user", parts: [{ type: "text", text: "And again?" }] },
+];
+const ranMessages = await convertToModelMessages(ranEarlier);
+assert.ok(JSON.stringify(ranMessages).includes("tool-approval-response"), "the approval is still in the converted messages");
+assert.equal(approvedIn(ranMessages, "k1", { tool: "shop__add_note", input: { order: "A1", note: "Wrap" } }), false);
+assert.deepEqual(answeredApprovals(ranMessages).approved, [], "the loop does not carry it out again");
+
+// Through the tools the loop runs (ToolCalls): connector_call gets approved = true with the
+// messages of a run that carries out the approval, and false with those of a later turn.
+const seen: boolean[] = [];
+const shopCatalog = {
+	tools: [{ name: "shop__add_note", tool: "add_note", description: "Adds a note.", inputSchema: { type: "object" }, connector: { slug: "shop", name: "Shop" }, connectionId: "shop", ask: true, readOnly: false }],
+	connectors: [{ slug: "shop", name: "Shop", tools: 1 }],
+	leftOut: 0,
+};
+const connectorLoopTools = new ToolCalls(
+	connectorTools(shopCatalog, "ana", async (_id, _tool, _input, _owner, wasApproved) => {
+		seen.push(wasApproved);
+		return "ran";
+	}),
+);
+await connectorLoopTools.run([connectorApproval.call], connectorMessages);
+const laterCall = ranMessages.flatMap((message) => (message.role === "assistant" && typeof message.content !== "string" ? message.content : [])).find((part) => part.type === "tool-call")!;
+await connectorLoopTools.run([laterCall as never], ranMessages);
+assert.deepEqual(seen, [true, false]);
 
 console.log("loop.check: all checks passed");
