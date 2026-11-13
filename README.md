@@ -221,6 +221,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`).
 - The calls that write chat names are recorded in `runs` but are not charged to credits. The view `charged_runs` (`server/telemetry/store.ts`) holds this rule, and which run ends a reply (`is_reply`). Credits, `/admin` and `deploy/sentinel.sh` all read it.
 - Each web search is a `runs` row (`function_id` `web-search`) and is charged: about $0.007, so 7 credits.
+- Each summary of a long chat is a `runs` row (`function_id` `compaction`) and is charged. With DeepSeek V4.1 Flash, a summary of 200,000 tokens costs about $0.01, so 10 credits. See "Long chats".
 - The count starts again at midnight UTC.
 - Before each reply, the server adds up today's cost. When nothing is left, it answers 402 and the page shows when credits refill.
 - Nothing is reserved before a reply. The last reply of the day can go a little past the limit.
@@ -238,7 +239,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 | Requests | Requests for more credits that wait, with Approve and Decline. Below: the answers of the last 30 days. |
 | People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
 | Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
-| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the OpenRouter key and the list of admins. On a phone, Settings is a page in the tab bar. |
+| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the summary model for long chats (see "Long chats"), the OpenRouter key and the list of admins. On a phone, Settings is a page in the tab bar. |
 | Activity | Each change an admin made, newest first: who did it, to whom, what changed and when. A click on a name shows that person's events only. Read only. On a phone, it is in the account menu. |
 
 - Admins see usage only. The admin API reads `runs` (cost, model, time), `sessions` (device and time) and the number of threads. It never returns messages or thread titles.
@@ -402,6 +403,26 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 - The `<connectors>` note goes there too. Connector tools are reached through `connector_search` and `connector_call`, which never change, so a new or changed connector leaves the tools and the instructions as they were (see Connectors).
 - Anthropic's models cache only what a request marks, at most four places. Ponder marks the instructions, the history before the two whole turns, the history before the latest turn, and the last message. A cached read costs a tenth of the price. Each call reads from the cache everything before the latest turn, or before the turn before it when that turn's long tool output was just trimmed. Other providers cache the start of a prompt by themselves.
 
+#### Long chats
+
+A chat can grow longer than its model can read. `server/compaction/` and `server/workflow/context-guard.ts` summarize the older part before that happens. The design comes from the compaction engine of [vercel/eve](https://github.com/vercel/eve) (`packages/eve/src/harness/compaction/`).
+
+- When: before a call goes over 90% of the model's window, or over 200,000 tokens, whichever is lower. Longer calls cost more and answer worse. The window is the smallest `context_length` among the model's private (ZDR) endpoints on OpenRouter. When it is not known, Ponder takes 128,000.
+- The count: before a reply's first call, Ponder estimates the tokens from the size of the messages, the instructions and the tools. It multiplies the estimate by the thread's ratio of measured tokens to estimated tokens, which each call updates (1.6 until the first call is measured). Between the steps of a reply, it takes the last call's measured input tokens and adds an estimate of the tool results since.
+- What is summarized: the previous summary and everything after it go to the summarizer. Tool calls and results reach it cut to 2,000 characters. The last 20,000 tokens of whole turns stay word for word, and so does the current turn.
+- The summary replaces the messages it covers. It is one message from the person's side, right after the instructions. It says that a model wrote it and that it is not a new request.
+- Saved and used again: the summary is saved in `thread_summaries`, with the number of messages it covers and a fingerprint of their ids and text. Later calls use it while those messages stay the same, so the start of each call stays the same and the cache keeps working. Retry changes only the last reply, so it keeps the summary. A changed covered message makes the summary stale, and the next compaction writes a new one.
+- Between steps: when a reply's own tool results make it too long, everything before the current turn is summarized. If the turn alone is still too long, the long tool results of its earlier steps are cut, as for older turns.
+- Never summarized: the instructions, and what memory recalls (it goes with the latest message on each call). The summary message also carries these word for word:
+  - the files of the summarized part, read in full under the file budget below
+  - the skills chosen there with `$name`
+  - the latest version of each artifact written there, up to 40,000 tokens
+- When there is still not enough room: Ponder names the files of the summarized part instead of sending them. Then it keeps only the current turn. A message that does not fit even then gets "This message is too long for …".
+- The summarizer: DeepSeek V4.1 Flash. Admins can choose another model in Settings, Long chats. Ponder uses the chat's own model when the chosen one is not available, or when its window is too small. The call goes to a ZDR endpoint and is charged to credits (see "Credits").
+- A failed summary does not fail the reply. After three tries, the reply leaves out the old messages with a note, nothing is saved, and the next reply tries again. The failure is logged as `reply degraded`.
+- The page: while the summary is written, the reply shows "Compacting earlier messages". After it, a divider follows the last summarized message. The chat itself keeps every message: search, export and memory still read all of them.
+- Compaction runs in a workflow step, so a run that replays never summarizes twice. `server/compaction.check.ts` and `e2e/tests/compaction.spec.ts` test it.
+
 ### Limits
 
 - Per person, in memory (`server/rate-limit.ts`): 12 messages a minute and 200 an hour; 30 uploads in 10 minutes and 150 a day; 3 requests for credits an hour; 60 chat searches a minute. Over a limit, the answer is 429 with `Retry-After`. A restart clears the counts.
@@ -418,6 +439,7 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |
 | Files and what the model reads of them | `server/files.ts`, `server/file-context.ts`, `server/image-resize.ts`, `server/pdf-text.ts` |
 | Trimming, memory placement and prompt caching | `server/workflow/context.ts`, `server/workflow/cache.ts` |
+| Summaries of long chats | `server/compaction/`, `server/workflow/context-guard.ts`, `web/compaction.ts` |
 | Rate limits | `server/rate-limit.ts` |
 | Search in chats, Markdown export | `server/thread-search.ts`, `web/thread-search.ts`, `web/export-markdown.ts` |
 | Citation chips | `inline-citation/collect.ts`, `CitationCard.vue` and `response/Response.vue` in [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) |
