@@ -41,6 +41,20 @@ export type MemoryScript = {
 	operations?: { op: "add" | "update" | "forget"; id?: string; kind?: "fact" | "project" | "preference"; text?: string; quote?: string; reason?: string }[];
 };
 
+/**
+ * The summary of a long chat (server/compaction/summarize.ts), for transcripts that
+ * contain `match`. Without `text` the summary names the match. `error` answers with that
+ * HTTP status instead.
+ */
+export type SummaryScript = { match: string; text?: string; error?: { status: number; message: string }; delayMs?: number };
+
+/** A summary call as the fake received it: the summarizer's instructions and the transcript it read. */
+export type ReceivedSummary = { model: string; system: string; prompt: string; at: number };
+
+/** The window the fake's ZDR list gives a model, in tokens. GLM 5.3's is small, so the compaction tests reach it with a few messages. */
+export const SMALL_WINDOW_MODEL = "z-ai/glm-5.3";
+export const SMALL_WINDOW = 40_000;
+
 /** An email that Ponder sent, as the fake Cloudflare API received it. */
 export type SentEmail = { from: string; to: string; subject: string; text: string; html: string; at: number };
 

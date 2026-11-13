@@ -2,7 +2,7 @@ import { test as base, expect, type APIRequestContext, type Page } from "@playwr
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
 import { e2e } from "./env.ts";
-import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, SearchScript, SentEmail } from "./fake/script.ts";
+import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
 
 /**
  * What the tests share:
@@ -30,6 +30,16 @@ export class Fake {
 
 	async memory(script: MemoryScript) {
 		await this.post("/__fake/memory", script);
+	}
+
+	/** The summary of long chats whose transcript contains `match`. */
+	async summary(script: SummaryScript) {
+		await this.post("/__fake/summary", script);
+	}
+
+	/** The summary calls whose transcript contains `match`. */
+	async summaries(match: string): Promise<ReceivedSummary[]> {
+		return (await this.api.get(`/__fake/summaries?match=${encodeURIComponent(match)}&since=${this.since}`)).json();
 	}
 
 	/** The chat calls whose person's latest message contains `match`. */
