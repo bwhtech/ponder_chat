@@ -155,7 +155,7 @@ function streamReply(model: string, step: Step, signal: AbortSignal) {
 	for (const piece of pieces(step.text)) parts.push(chunk({ content: piece }));
 	for (const [index, call] of (step.toolCalls ?? []).entries()) {
 		const args = JSON.stringify(call.input);
-		parts.push(chunk({ tool_calls: [{ index, id: `call_${id}_${index}`, type: "function", function: { name: call.name, arguments: "" } }] }));
+		parts.push(chunk({ tool_calls: [{ index, id: call.id ?? `call_${id}_${index}`, type: "function", function: { name: call.name, arguments: "" } }] }));
 		for (let at = 0; at < args.length; at += 40) parts.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(at, at + 40) } }] }));
 	}
 	parts.push(chunk({}, step.toolCalls?.length ? "tool_calls" : "stop", usage(step)));
@@ -189,7 +189,7 @@ function usage(step: Step) {
 }
 
 function textReply(model: string, step: Step) {
-	const toolCalls = step.toolCalls?.map((call, index) => ({ id: `call_${index}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } }));
+	const toolCalls = step.toolCalls?.map((call, index) => ({ id: call.id ?? `call_${index}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } }));
 	return {
 		id: `gen-fake-${Date.now()}`,
 		model,

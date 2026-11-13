@@ -146,13 +146,18 @@ const NAMED_KEYS = new Set([
 ]);
 
 /**
- * A connector's tools reach the model as `<connector>__<tool>` (mcp/tools.ts), and the
- * connector part is the name the person gave it. Like a connector's host (http.ts), it
- * would tell which apps a person uses, so it becomes "connector". The tool's own name,
- * which the MCP server gives, stays.
+ * A connector's tool is named `<connector>__<tool>` (mcp/tools.ts), and the connector part
+ * is the name the person gave it. Like a connector's host (http.ts), it would tell which
+ * apps a person uses, so it becomes "connector". The tool's own name, which the MCP server
+ * gives, stays.
+ *
+ * The model calls connector tools through connector_call, with the real name in the
+ * call's input, which is never recorded. This still applies to tool names and to tool
+ * call ids, wherever the shape appears in them: some providers build a call's id from the
+ * tool's name, such as `functions.my_bank__list_payments:0`.
  */
-const CONNECTOR_TOOL = /^[a-z0-9_]*?__/;
-const TOOL_NAME_KEYS = new Set(["gen_ai.tool.name", "ai.toolCall.name"]);
+const CONNECTOR_TOOL = /[a-z0-9_]*?__/g;
+const TOOL_NAME_KEYS = new Set(["gen_ai.tool.name", "ai.toolCall.name", "gen_ai.tool.call.id", "ai.toolCall.id"]);
 export const withoutConnector = (tool: string) => tool.replace(CONNECTOR_TOOL, "connector__");
 
 /**

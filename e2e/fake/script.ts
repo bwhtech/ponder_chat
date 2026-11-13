@@ -10,7 +10,8 @@ export type Step = {
 	/** The reply text, streamed in small pieces. */
 	text?: string;
 	/** Tools the model calls. The agent runs them and calls the model again: the next step answers that call. */
-	toolCalls?: { name: string; input: unknown }[];
+	/** `id` is the call's id, made up by the fake when left out. Some providers put the tool's name in it. */
+	toolCalls?: { name: string; input: unknown; id?: string }[];
 	/** Milliseconds between streamed pieces. Use a large value to keep a reply open, such as to test Stop. */
 	delayMs?: number;
 	/** Answers with this HTTP status and an error, in place of a reply. */

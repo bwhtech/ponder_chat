@@ -139,7 +139,13 @@ await check("a connector's tools are named without the connector's name, which t
 	const toolSpan = {
 		name: "execute_tool my_bank__list_payments",
 		status: { code: SpanStatusCode.OK },
-		attributes: { "gen_ai.tool.name": "my_bank__list_payments", "ai.toolCall.name": "my_bank__list_payments" },
+		attributes: {
+			"gen_ai.tool.name": "my_bank__list_payments",
+			"ai.toolCall.name": "my_bank__list_payments",
+			// Some providers build a call's id from the tool's name.
+			"gen_ai.tool.call.id": "functions.my_bank__list_payments:0",
+			"ai.toolCall.id": "tool_0_my_bank__list_payments",
+		},
 		links: [],
 		events: [],
 	};
@@ -147,18 +153,24 @@ await check("a connector's tools are named without the connector's name, which t
 	assert.equal(clean.name, "execute_tool connector__list_payments");
 	assert.equal(clean.attributes["gen_ai.tool.name"], "connector__list_payments");
 	assert.equal(clean.attributes["ai.toolCall.name"], "connector__list_payments");
+	assert.equal(clean.attributes["gen_ai.tool.call.id"], "functions.connector__list_payments:0");
+	assert.equal(clean.attributes["ai.toolCall.id"], "connector__list_payments");
+	assert.ok(!JSON.stringify(clean.attributes).includes("my_bank"));
+	// An id with no connector in it stays as it was.
+	assert.equal(withoutConnector("call_gen-fake-1794569482045_0"), "call_gen-fake-1794569482045_0");
 	// Ponder's own tools have no connector part.
 	assert.equal(withoutConnector("web_fetch"), "web_fetch");
 	assert.equal(withoutConnector("run_python"), "run_python");
 });
 
 await check("an endpoint without http:// or https:// is refused before tracing starts", async () => {
-	for (const endpoint of ["127.0.0.1:4318", "localhost:4318", "ftp://127.0.0.1:4318", "not an address"]) {
+	for (const endpoint of ["127.0.0.1:4318", "localhost:4318", "ftp://127.0.0.1:4318", "not an address", "http://", "https:", "http:/"]) {
 		assert.throws(() => tracesUrl(endpoint), /OTEL_EXPORTER_OTLP_ENDPOINT/, endpoint);
 		await assert.rejects(startTracing(endpoint), /OTEL_EXPORTER_OTLP_ENDPOINT/, endpoint);
 	}
 	assert.equal(tracingState(), undefined, "a refused endpoint left tracing half set up");
 	assert.equal(tracesUrl("http://127.0.0.1:4318/").href, "http://127.0.0.1:4318/v1/traces");
+	assert.equal(tracesUrl("https://otel.example.org/base").href, "https://otel.example.org/base/v1/traces");
 });
 
 await check("the AI SDK records no inputs or outputs through Ponder's integration, even when a call asks it to", async () => {

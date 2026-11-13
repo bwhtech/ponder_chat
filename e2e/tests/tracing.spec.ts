@@ -9,13 +9,16 @@ import { chat, expect, test, type Fake } from "../fixtures.ts";
  * or the model wrote. Ponder sends its spans to the fake (start.ts), as it would to Jaeger.
  *
  * The privacy test puts a marker in every place content could leak from: the message,
- * a file's name and text, an address's host, path and query, a connector tool's input,
- * and the reply. Then it checks that the marker is in none of what Ponder exported.
+ * a file's name and text, an address's host, path and query, a connector search and a
+ * connector tool's input, and the reply. Then it checks that the marker is in none of what Ponder exported.
  */
 test.beforeEach(async ({ person, page }) => {
 	void person;
 	await page.goto("/");
 });
+
+/** A model's call to a connector tool, through connector_call (connectors.spec.ts). */
+const connectorCall = (tool: string, input: Record<string, unknown>) => ({ name: "connector_call", input: { tool, input } });
 
 /** Adds the test MCP server with no sign-in as "Shop" (connectors.spec.ts). */
 async function addShop(page: Page) {
@@ -37,7 +40,9 @@ test("keeps the reply in one trace, and no content in any span", async ({ page, 
 	await fake.chat({
 		match: marker,
 		steps: [
-			{ reasoning: `Thinking about ${marker}.`, toolCalls: [{ name: "web_fetch", input: { url } }, { name: "shop__find_order", input: { order: marker } }] },
+			{ reasoning: `Thinking about ${marker}.`, toolCalls: [{ name: "connector_search", input: { query: `find order ${marker}` } }] },
+			// An id that holds the tool's name, as some providers make them.
+			{ toolCalls: [{ name: "web_fetch", input: { url } }, { ...connectorCall("shop__find_order", { order: marker }), id: "functions.shop__find_order:0" }] },
 			{ text: `Done with ${marker}.` },
 		],
 	});
@@ -68,9 +73,16 @@ test("keeps the reply in one trace, and no content in any span", async ({ page, 
 		expect(names, name).toContain(name);
 	}
 	expect(names).toContain("execute_tool web_fetch");
-	// A connector's tool is named without the connector's name, which the person chose.
-	expect(names).toContain("execute_tool connector__find_order");
-	for (const body of exports) expect(body).not.toContain("shop__");
+	expect(names).toContain("execute_tool connector_search");
+	expect(names).toContain("execute_tool connector_call");
+	// The call to the MCP server has the tool's own name. The name the person gave the
+	// connector ("Shop", slug "shop") is in no span: not through connector_call's input,
+	// the search, or the <connectors> note in the message.
+	expect(trace.find((span) => span.name === "mcp.call_tool")?.attributes["gen_ai.tool.name"]).toBe("find_order");
+	for (const body of exports) {
+		expect(body).not.toContain("shop__");
+		expect(body).not.toContain("Shop");
+	}
 
 	// A model call has its tokens and its time to first token.
 	const call = trace.find((span) => span.name.startsWith("chat ") && span.attributes["gen_ai.client.operation.time_to_first_chunk"] !== undefined);
@@ -85,7 +97,7 @@ test("keeps the reply in one trace, and no content in any span", async ({ page, 
 test("a run that goes on after an approval is a trace of its own, linked to the first", async ({ page, fake, db, person }) => {
 	await addShop(page);
 	const order = `A${randomBytes(3).toString("hex")}`;
-	await fake.chat({ match: order, steps: [{ toolCalls: [{ name: "shop__add_note", input: { order, note: "Gift wrap" } }] }, { text: "I added the note." }] });
+	await fake.chat({ match: order, steps: [{ toolCalls: [connectorCall("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }] });
 
 	await page.goto("/");
 	await chat.send(page, `Add a gift-wrap note to order ${order}`);
