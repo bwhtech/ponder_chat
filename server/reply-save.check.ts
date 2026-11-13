@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import { readUIMessageStream, type UIMessage } from "ai";
+import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { joinToolInputDeltas, toUIChunks } from "./workflow/reply-chunks.ts";
 
 /** What saveReply makes of these raw parts, with or without the join. */
@@ -73,6 +73,26 @@ async function same(name: string, parts: object[]) {
 	const second = streamed("call-a", { ...artifactInput(5_000), title: "Second" });
 	await same("a reset-step in the middle", [first.start, ...first.deltas.slice(0, 40), { type: "reset-step" }, second.start, ...second.deltas, second.call]);
 	await same("a reset-step in the middle, stopped", [first.start, ...first.deltas.slice(0, 40), { type: "reset-step" }, second.start, ...second.deltas.slice(0, 25)]);
+}
+
+// --- Text deltas pass through as they are: each one, in order, with its own metadata. Joined, they lose it.
+{
+	const chunks = [
+		{ type: "text-start", id: "t1" },
+		{ type: "text-delta", id: "t1", delta: "One ", providerMetadata: { fake: { n: 1 } } },
+		{ type: "text-delta", id: "t1", delta: "two ", providerMetadata: { fake: { n: 2 } } },
+		{ type: "text-delta", id: "t1", delta: "three." },
+		{ type: "text-end", id: "t1" },
+	] as UIMessageChunk[];
+	const through: UIMessageChunk[] = [];
+	const source = new ReadableStream<UIMessageChunk>({
+		start(controller) {
+			for (const chunk of chunks) controller.enqueue(chunk);
+			controller.close();
+		},
+	});
+	for await (const chunk of source.pipeThrough(joinToolInputDeltas())) through.push(chunk);
+	assert.deepEqual(through, chunks, "text deltas are not joined");
 }
 
 // --- Speed: 10,000 pieces (400 KB) save in well under a second. Without the join, about 20 seconds.
