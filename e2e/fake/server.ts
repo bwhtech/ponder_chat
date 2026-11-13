@@ -16,6 +16,7 @@ import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, t
  * - chat summaries, when a chat gets too long (`SummaryScript`);
  * - the list of models with private (ZDR) endpoints: every model Ponder lists, with
  *   a 1M-token window, except GLM 5.3's small one (SMALL_WINDOW).
+ * - what a streamed reply cost, by its generation id (`GET /api/v1/generation`).
  *
  * It also takes the traces that Ponder sends with OTLP over HTTP (server/tracing/), in
  * place of Jaeger, so tracing.spec.ts can read them.
@@ -35,6 +36,8 @@ export function fakeApp() {
 	const exports: string[] = [];
 	const summaryScripts: SummaryScript[] = [];
 	const summaries: ReceivedSummary[] = [];
+	/** How many calls each step of a script has had, for `failFirst`. */
+	const attempts = new Map<string, number>();
 	const app = new Hono();
 
 	// --- Control, for the tests. The newest script wins, so a test can replace one.
@@ -89,10 +92,20 @@ export function fakeApp() {
 			provider: body.provider,
 			at: Date.now(),
 		});
-		const step = chatStep(messages, chats);
-		if (step.error) return c.json({ error: { code: step.error.status, message: step.error.message } }, step.error.status as 400);
+		const { step, key } = chatStep(messages, chats);
+		const attempt = (attempts.get(key) ?? 0) + 1;
+		attempts.set(key, attempt);
+		const fails = step.failFirst === undefined ? Boolean(step.error) : attempt <= step.failFirst;
+		const error = step.error ?? { status: 502, message: "Provider returned error" };
+		if (fails && step.breakAfter === undefined) return c.json({ error: { code: error.status, message: error.message } }, error.status as 400);
 		if (!body.stream) return c.json(textReply(body.model, step, promptTokens(body)));
-		return streamReply(body.model, step, c.req.raw.signal, promptTokens(body));
+		return streamReply(body.model, step, c.req.raw.signal, promptTokens(body), fails ? { after: step.breakAfter!, error } : undefined);
+	});
+
+	app.get("/api/v1/generation", (c) => {
+		const generation = generations.get(c.req.query("id") ?? "");
+		if (!generation) return c.json({ error: { code: 404, message: "Generation not found" } }, 404);
+		return c.json({ data: { id: c.req.query("id"), total_cost: generation.cost, tokens_prompt: 500, tokens_completion: generation.tokens } });
 	});
 
 	app.post("/api/v1/embeddings", async (c) => {
@@ -161,21 +174,30 @@ function promptTokens(body: Completion) {
 	return Math.ceil(JSON.stringify([body.messages ?? [], body.tools ?? []]).length / 4);
 }
 
+/** What each streamed reply cost, by its generation id, as OpenRouter's generation API tells. */
+const generations = new Map<string, { cost: number; tokens: number }>();
+let generationCount = 0;
+
 /** The step for this call: the turn's script, at the number of model calls made since the person's message. */
-function chatStep(messages: Message[], scripts: ChatScript[]): Step {
+function chatStep(messages: Message[], scripts: ChatScript[]): { step: Step; key: string } {
 	const said = latestUserText(messages);
 	const script = scripts.find((candidate) => said.includes(candidate.match));
-	if (!script) return { text: `You said: ${said}` };
+	if (!script) return { step: { text: `You said: ${said}` }, key: "" };
 	const lastUser = messages.findLastIndex((message) => message.role === "user");
 	const callsSince = messages.slice(lastUser + 1).filter((message) => message.role === "assistant").length;
 	const summarized = messages.some((message) => message.role === "user" && textOf(message.content).startsWith("<summary>"));
 	const steps = (summarized && script.summarized) || script.steps;
-	return steps[Math.min(callsSince, steps.length - 1)];
+	const index = Math.min(callsSince, steps.length - 1);
+	return { step: steps[index], key: `${script.match}#${summarized ? "summarized" : "steps"}#${index}` };
 }
 
-/** The reply as OpenRouter streams it: server-sent chat completion chunks, then the usage. */
-function streamReply(model: string, step: Step, signal: AbortSignal, prompt: number) {
-	const id = `gen-fake-${Date.now()}`;
+/**
+ * The reply as OpenRouter streams it: server-sent chat completion chunks, then the usage.
+ * With `broken`, it stops after that many pieces with an error chunk, and no usage.
+ */
+function streamReply(model: string, step: Step, signal: AbortSignal, prompt: number, broken?: { after: number; error: { status: number; message: string } }) {
+	const id = `gen-fake-${Date.now()}-${++generationCount}`;
+	generations.set(id, { cost: step.cost ?? DEFAULT_COST, tokens: usage(step).completion_tokens });
 	const chunk = (delta: object, finish: string | null = null, usage?: object) =>
 		`data: ${JSON.stringify({ id, model, provider: "Fake", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), choices: [{ index: 0, delta, finish_reason: finish }], ...(usage && { usage }) })}\n\n`;
 	const parts: string[] = [chunk({ role: "assistant", content: "" })];
@@ -189,6 +211,7 @@ function streamReply(model: string, step: Step, signal: AbortSignal, prompt: num
 	}
 	parts.push(chunk({}, step.toolCalls?.length ? "tool_calls" : "stop", usage(step, prompt)));
 	parts.push("data: [DONE]\n\n");
+	if (broken) parts.splice(1 + broken.after, parts.length, `data: ${JSON.stringify({ id, model, error: { code: broken.error.status, message: broken.error.message } })}\n\n`);
 
 	const encoder = new TextEncoder();
 	const delay = step.delayMs ?? 5;

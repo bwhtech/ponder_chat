@@ -46,6 +46,19 @@ test("writes a document that opens in the side panel", async ({ page, fake }) =>
 	await expect(page.getByText("Water bottle")).toBeVisible();
 });
 
+test("a call to a tool that does not exist gets one error result, and the reply goes on", async ({ page, fake }) => {
+	await fake.chat({ match: "ghost tool", steps: [{ toolCalls: [{ name: "no_such_tool", input: {} }] }, { text: "That tool does not exist." }] });
+
+	await chat.send(page, "Use the ghost tool");
+	await expect(chat.reply(page)).toContainText("That tool does not exist.");
+
+	// The model's second call has one result for the call, the SDK's error, and nothing ran.
+	const [, second] = await fake.calls("ghost tool");
+	const results = (second.messages as { role: string }[]).filter((message) => message.role === "tool");
+	expect(results).toHaveLength(1);
+	expect(JSON.stringify(results)).toContain("unavailable tool");
+});
+
 test("offers the tools the chat has", async ({ page, fake }) => {
 	await chat.send(page, "Which tools, tools test?");
 	await chat.idle(page);

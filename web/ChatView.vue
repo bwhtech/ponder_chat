@@ -116,8 +116,9 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 
 /**
  * fetch for the transport: reconnecting to a reply (a GET) waits and tries again for up
- * to 30 seconds while the server is unreachable or restarting (502, 503, 504 from the
- * proxy). Sending a message (a POST) is never repeated, so it cannot start a reply twice.
+ * to 30 seconds while the server is unreachable or restarting: 502, 503 and 504 from the
+ * proxy, and a 500 from a server that is stopping and has closed its database. Sending a
+ * message (a POST) is never repeated, so it cannot start a reply twice.
  */
 async function patientFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
 	if ((init?.method ?? "GET") !== "GET") return fetch(input, init);
@@ -125,7 +126,7 @@ async function patientFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 	for (let attempt = 0; ; attempt++) {
 		try {
 			const response = await fetch(input, init);
-			if (![502, 503, 504].includes(response.status) || Date.now() > deadline) return response;
+			if (response.status < 500 || Date.now() > deadline) return response;
 		} catch (error) {
 			if (init?.signal?.aborted || Date.now() > deadline) throw error;
 		}

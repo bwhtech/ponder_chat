@@ -23,6 +23,14 @@ export type Step = {
 	delayMs?: number;
 	/** Answers with this HTTP status and an error, in place of a reply. */
 	error?: { status: number; message: string };
+	/**
+	 * Only the first this many calls of the step fail (with `error`, or as `breakAfter`
+	 * says); the calls after them answer. Without it, `error` fails every call. A call
+	 * that Ponder tries again has the same messages, so it is the same step.
+	 */
+	failFirst?: number;
+	/** A failing call streams this many pieces of the reply, then an error chunk, as a provider that fails in the middle does. */
+	breakAfter?: number;
 	/** What the call cost in US dollars, as OpenRouter reports it. Credits are charged from it. */
 	cost?: number;
 };

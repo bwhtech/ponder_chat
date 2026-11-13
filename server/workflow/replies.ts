@@ -1,6 +1,8 @@
 import type { UIMessage } from "ai";
 import { getRun, start } from "workflow/api";
+import { WorkflowRunNotFoundError } from "workflow/errors";
 import { deleteThread, saveThread, threadOwner } from "../db.ts";
+import { settleModelCalls, stopModelCalls } from "../telemetry/model-calls.ts";
 import { pickModel } from "../models.ts";
 import { forgetPythonState } from "../python/state.ts";
 import { pythonReady } from "../startup.ts";
@@ -8,7 +10,7 @@ import { forgetThread } from "../thread-cache.ts";
 import { linkToReply, recordReplySpan, tracingOn, withReplyTrace } from "../tracing/reply-trace.ts";
 import { chatTurn } from "./chat.ts";
 import { replyStream, saveReply } from "./reply.ts";
-import { activeRun, finishRun, forgetRuns, latestRun, setActiveRun, withThreadLock, type Continued, type ThreadRun } from "./runs.ts";
+import { activeRun, finishRun, forgetRuns, latestRun, setActiveRun, unfinishedRuns, withThreadLock, type Continued, type ThreadRun } from "./runs.ts";
 
 /**
  * A reply's whole life, for the routes (app.ts): start it, follow it, stop it, and delete
@@ -111,6 +113,60 @@ export async function whenReplyFinished(threadId: string, timeoutMs = 10_000) {
 	while ((await activeRun(threadId)) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 250));
 }
 
+/**
+ * Finishes the runs that ended without saving their reply, so their thread does not look
+ * busy forever. chatTurn saves the reply on every way out of its own code, but the
+ * workflow runtime can fail a run outside it: a replay that diverged, such as a reply in
+ * flight across a deploy that changed its steps. Run by the sweep (sweep.ts).
+ *
+ * The reply is saved as far as it got: marked failed, so the page offers Retry, or
+ * cancelled, for a run that Stop cancelled and a crash kept from saving. The calls the run
+ * had in flight cost no credits, and the sweep gets their cost. One run that fails to
+ * finish does not keep the others waiting.
+ */
+export async function finishEndedRuns() {
+	for (const run of await unfinishedRuns()) {
+		try {
+			await finishEndedRun(run);
+		} catch (error) {
+			console.error(`replies: could not finish run ${run.runId}:`, error instanceof Error ? error.message : error);
+		}
+	}
+}
+
+async function finishEndedRun(run: ThreadRun) {
+	const status = await workflowStatus(run.runId);
+	if (status === "pending" || status === "running") return;
+	const cancelled = status === "cancelled";
+	const failed = !cancelled && status !== "completed";
+	// Inside the run's trace, so the reply.save span has its parent (server/tracing/reply-trace.ts).
+	await withThreadLock(run.threadId, () =>
+		withReplyTrace(run.runId, async () => {
+			if ((await activeRun(run.threadId))?.runId !== run.runId) return;
+			console.warn(`replies: run ${run.runId} ended (${status}) without saving its reply; saving what it wrote`);
+			try {
+				if (cancelled) await stopModelCalls(run.threadId, run.runId);
+				else await settleModelCalls(run.threadId, run.runId);
+				const owner = await threadOwner(run.threadId);
+				if (owner) await saveReply(run.threadId, owner, run.runId, run.model, { cancelled, failed, continued: run.continued });
+			} finally {
+				// Finished even when the save fails, so the thread does not look busy forever.
+				await finishRun(run.threadId, run.runId, run.model, { cancelled, failed, continued: run.continued });
+			}
+		}),
+	);
+}
+
+/** The workflow run's status, or "gone" when the runtime has no such run. */
+async function workflowStatus(runId: string) {
+	try {
+		return await getRun(runId).status;
+	} catch (error) {
+		if (WorkflowRunNotFoundError.is(error)) return "gone";
+		throw error;
+	}
+}
+
 /** Cancels a run and saves what it wrote so far, inside the run's trace (server/tracing/reply-trace.ts). */
 async function cancel(run: ThreadRun, owner: string) {
 	await withReplyTrace(run.runId, () => cancelNow(run, owner));
@@ -128,6 +184,8 @@ async function cancelNow(run: ThreadRun, owner: string) {
 		await saveReply(run.threadId, owner, run.runId, run.model, { cancelled: true, continued: run.continued });
 	} finally {
 		await finishRun(run.threadId, run.runId, run.model, { cancelled: true, continued: run.continued });
+		// The model call in flight runs to its end on OpenRouter; it costs the person no credits.
+		await stopModelCalls(run.threadId, run.runId).catch((error) => console.warn(`replies: could not mark the calls of run ${run.runId} stopped:`, error));
 	}
 }
 

@@ -42,6 +42,8 @@ To use another Postgres, set `E2E_DATABASE_URL`. The database's name must end in
 
 Tracing is on, and Ponder sends its traces to the fake, at `/v1/traces`. `fake.spans()` reads them (`tests/tracing.spec.ts`). To see the tests' traces in a local Jaeger instead, set `E2E_OTEL_ENDPOINT=http://127.0.0.1:4318` (README, "Tracing"). Then `tracing.spec.ts` fails, because the fake gets no spans.
 
+`tests/durability.spec.ts` starts a second Ponder on port 3596 (`E2E_DURABILITY_PORT`), with its own database `ponder_durability_e2e` on the same Postgres (`e2e/ponder.ts`). It stops that server with SIGKILL and SIGTERM in the middle of a reply, and starts it again. One server runs the workflow worker of a database, so this server can't share the database of the other tests. Its tests run one at a time.
+
 Python is off, because it needs Deno and Pyodide. To include it, run `npm run sandbox:setup` and set `E2E_PYTHON=1`.
 
 To look at the app as the tests see it, run `npm run e2e:server` and open http://127.0.0.1:3597. Playwright uses that server while it runs, and does not start another one. Sign in with an invited email: the code is in the fake's outbox, at http://127.0.0.1:3598/__fake/emails?to=you@example.com. To invite an email, add it with `npx tsx scripts/invite.ts` and `DATABASE_URL` set to the test database.
@@ -86,6 +88,8 @@ A step can also have:
 - `reasoning`: thinking, streamed before the text.
 - `delayMs`: the time between streamed pieces. A large value keeps the reply open, such as to test Stop.
 - `error`: an HTTP status and a message, in place of a reply.
+- `failFirst`: only the first this many calls of the step fail. The calls after them answer. Ponder tries a failed model call again with the same messages, so each attempt is a call of the same step.
+- `breakAfter`: a failing call streams this many pieces, then an error chunk, as a provider that fails in the middle of a reply does.
 - `cost`: the cost in US dollars that OpenRouter reports. Credits are charged from it.
 
 `fake.search()` sets the results of a web search. `fake.memory()` sets what memory saves from a turn. `e2e/fake/script.ts` describes each script.

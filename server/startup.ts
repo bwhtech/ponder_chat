@@ -44,6 +44,9 @@ export async function startup() {
 	const world = await getWorld();
 	await world.start?.();
 	stopCleanly(world);
+	// Loaded here: replies.ts imports this file.
+	const { startSweeps } = await import("./workflow/sweep.ts");
+	startSweeps();
 	console.log(`Ponder Chat is ready. Python is ${(await pythonReady) ? "on" : "off"}.`);
 }
 

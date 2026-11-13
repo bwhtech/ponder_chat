@@ -40,8 +40,8 @@ type CallStep = (connectionId: string, toolName: string, input: unknown, owner: 
  *
  * connector_call's input is checked against the real tool's schema before anything else
  * (Catalog.check), so the person is never asked to approve a call that can't run. Its
- * needsApproval follows the real tool's rule, and is a function, never `false`:
- * WorkflowAgent runs an approved call only for a tool that can need approval, and
+ * needsApproval follows the real tool's rule, and is a function, never `false`: the
+ * reply loop (loop.ts) runs an approved call only for a tool that can need approval, and
  * "Always allow" turns the rule to "allow" before the run that carries out the approved
  * call starts. The approval's signature covers the whole input, so the real tool's name
  * and its input too.
@@ -76,7 +76,7 @@ export function connectorTools(data: CatalogData, owner: string, call: CallStep 
 					additionalProperties: false,
 				},
 				{
-					// Returns the input as it came: WorkflowAgent checks an approved call again and refuses one whose input changed.
+					// Returns the input as it came. The reply loop checks each call with it before it asks or runs (tool-calls.ts), an approved call too.
 					validate: (value) => {
 						const checked = catalog.check((value ?? {}) as Partial<CallInput>);
 						return "problem" in checked ? { success: false, error: new Error(checked.problem) } : { success: true, value: value as CallInput };
@@ -88,7 +88,7 @@ export function connectorTools(data: CatalogData, owner: string, call: CallStep 
 			execute: async (input, { toolCallId, messages }) => {
 				const checked = catalog.check(input);
 				if ("problem" in checked) return checked.problem;
-				return call(checked.tool.connectionId, checked.tool.tool, checked.input, owner, approvedIn(messages, toolCallId, input));
+				return call(checked.tool.connectionId, checked.tool.tool, checked.input, owner, approvedIn(messages, toolCallId, input)).catch(interruptedOrThrow);
 			},
 		}),
 	};
@@ -102,9 +102,23 @@ export function calledToolName(call: { toolName: string; input?: unknown }) {
 }
 
 /**
+ * What the model reads for a call that a server stop cut short: it can't tell whether the
+ * call took effect. The runtime fails a started step that has no retries left with
+ * "Step … exceeded max retries" instead of running it again. Any other error is the call's
+ * own, and the model reads it as it is.
+ */
+function interruptedOrThrow(error: unknown): string {
+	if (error instanceof Error && /exceeded max retries/.test(error.message)) {
+		return "The server restarted during this call, so it may or may not have taken effect. Check before you call it again.";
+	}
+	throw error;
+}
+
+/**
  * One connector tool call. It returns a failure as its result instead of throwing, and
  * it is never retried: a retried call could create the same issue or send the same
- * email twice. A crash in the middle of the call still runs it again after the restart.
+ * email twice. After a crash in the middle of the call, the workflow runtime fails the
+ * step instead of running it again (a step with no retries runs once).
  */
 export async function callConnectorToolStep(connectionId: string, toolName: string, input: unknown, owner: string, approved: boolean): Promise<string> {
 	"use step";

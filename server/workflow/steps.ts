@@ -1,6 +1,5 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { CompactionState, CompactRequest, CompactResult } from "../compaction/compaction.ts";
-import type { Estimate } from "../compaction/tokens.ts";
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 import type { ActiveSkill } from "../skills.ts";
@@ -121,6 +120,7 @@ export async function saveReplyStep(
 ) {
 	"use step";
 	const { saveReply } = await import("./reply.ts");
+	await settleModelCalls(threadId, runId);
 	await saveReply(threadId, owner, runId, model, { failed, continued });
 }
 
@@ -128,11 +128,12 @@ export async function saveReplyStep(
 export async function finishRunStep(threadId: string, runId: string, model: string, continued: Continued | null = null) {
 	"use step";
 	const { finishRun } = await import("./runs.ts");
+	await settleModelCalls(threadId, runId);
 	await finishRun(threadId, runId, model, { failed: true, continued });
 }
 
 /**
- * Ends the reply's stream. The agent leaves it open (chat.ts), so that a run whose model
+ * Ends the reply's stream. The reply loop leaves it open (loop.ts), so that a run whose model
  * kept erroring can say so first: the page then shows the error and Retry, instead of
  * an empty reply.
  */
@@ -147,50 +148,11 @@ export async function endReplyStream(writable: WritableStream<ModelCallStreamPar
 	await writable.close();
 }
 
-export type StepUsage = {
-	threadId: string;
-	user: string;
-	model: string;
-	inputTokens: number;
-	outputTokens: number;
-	cachedTokens: number;
-	costUsd: number | null;
-	finishReason: string;
-	toolCalls: string[];
-	/** The model asked for, and Ponder's estimate of the call's input tokens, to measure the thread's ratio. */
-	requested: string;
-	estimated: Estimate;
-};
-
 /**
- * One `runs` row per model call: its tokens and OpenRouter's cost, which credits are
- * charged from. AI SDK telemetry records ToolLoopAgent runs; a WorkflowAgent's model
- * calls happen in steps, so the workflow records them with this step. On a replay the
- * step returns its recorded result, so a call is never counted twice. It also keeps the
- * thread's measured ratio of provider tokens to estimated ones (compaction/tokens.ts).
+ * Settles the run's model calls that a crash cut short on their last attempt (model-calls.ts):
+ * nothing ran again to settle them. They are not charged, and the sweep gets their cost.
  */
-export async function recordUsageStep(usage: StepUsage) {
-	"use step";
-	const { randomUUID } = await import("node:crypto");
-	const { insertRun } = await import("../telemetry/store.ts");
-	const { measuredRatio } = await import("../compaction/tokens.ts");
-	const { saveTokenRatio } = await import("../compaction/store.ts");
-	const ratio = measuredRatio(usage.inputTokens, usage.estimated);
-	if (ratio) await saveTokenRatio(usage.threadId, usage.requested, ratio);
-	await insertRun({
-		id: randomUUID(),
-		parentId: null,
-		threadId: usage.threadId,
-		user: usage.user,
-		functionId: "chat",
-		model: usage.model,
-		steps: 1,
-		inputTokens: usage.inputTokens,
-		outputTokens: usage.outputTokens,
-		cachedTokens: usage.cachedTokens,
-		costUsd: usage.costUsd,
-		durationMs: 0,
-		toolCalls: usage.toolCalls.map((name) => ({ name, status: "ok" as const })),
-		finishReason: usage.finishReason,
-	});
+async function settleModelCalls(threadId: string, runId: string) {
+	const { settleModelCalls } = await import("../telemetry/model-calls.ts");
+	await settleModelCalls(threadId, runId).catch((error) => console.warn(`steps: could not settle the model calls of run ${runId}:`, error));
 }
