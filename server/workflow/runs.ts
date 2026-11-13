@@ -1,4 +1,5 @@
 import { sql } from "../db.ts";
+import { endReplyTrace } from "../tracing/reply-trace.ts";
 
 /**
  * Each thread's latest workflow run: the one writing its reply now, or the last one.
@@ -72,6 +73,9 @@ export async function latestRun(id: string): Promise<ThreadRun | undefined> {
  * Marks the run finished. A run quick enough to finish before the route wrote its row
  * writes the row itself, finished. An older run never replaces a newer one, and a
  * deleted thread gets no row.
+ *
+ * The first time a run is marked finished, this also sends its reply's root span
+ * (server/tracing/reply-trace.ts): every way a reply ends comes through here.
  */
 export async function finishRun(
 	threadId: string,
@@ -79,7 +83,7 @@ export async function finishRun(
 	model: string,
 	{ cancelled = false, failed = false, continued = null as Continued | null } = {},
 ) {
-	await sql`
+	const marked = await sql`
 		insert into thread_runs (thread_id, run_id, model, message_id, base_parts, finished_at, cancelled, failed)
 		select ${threadId}, ${runId}, ${model}, ${continued?.messageId ?? null}, ${continued?.baseParts ?? null}, now(), ${cancelled}, ${failed}
 		where exists (select 1 from threads where id = ${threadId})
@@ -88,6 +92,7 @@ export async function finishRun(
 			finished_at = now(), cancelled = excluded.cancelled, failed = excluded.failed
 		where (thread_runs.run_id = excluded.run_id and thread_runs.finished_at is null)
 			or excluded.run_id collate "C" > thread_runs.run_id collate "C"`;
+	if (marked.count) endReplyTrace({ runId, threadId, model, outcome: cancelled ? "cancelled" : failed ? "failed" : "saved", continued: Boolean(continued) });
 }
 
 /** For a deleted thread. */

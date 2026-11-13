@@ -5,6 +5,7 @@ import { pgvectorIndex } from "./memory/pgvector-index.ts";
 import { postgresMemory } from "./memory/postgres.ts";
 
 import { readExtractPrompt } from "./memory/extract.ts";
+import { span } from "./tracing/span.ts";
 
 /**
  * Memory across chats: what the person told Ponder about themselves before. Ported from
@@ -37,7 +38,12 @@ When the person asks you to remember or forget something, say you will. But memo
  */
 export async function memoryForRun(ctx: MemoryContext, messages: UIMessage[]) {
 	if (!memoryEnabled) return { guidance: "", recalled: "" };
-	return { guidance: MEMORY_GUIDANCE, recalled: await memory.recall(ctx, messages) };
+	return span("memory.recall", {}, async (active) => {
+		const recalled = await memory.recall(ctx, messages);
+		// The count of memories recalled (postgres.ts numbers each one), never their text.
+		active.setAttribute("ponder.recalled", recalled.match(/^\d+\. \[/gm)?.length ?? 0);
+		return { guidance: MEMORY_GUIDANCE, recalled };
+	});
 }
 
 /** Saves the turn that ends the thread, in the background. */

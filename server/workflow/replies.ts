@@ -5,6 +5,7 @@ import { pickModel } from "../models.ts";
 import { forgetPythonState } from "../python/state.ts";
 import { pythonReady } from "../startup.ts";
 import { forgetThread } from "../thread-cache.ts";
+import { linkToReply, recordReplySpan, tracingOn, withReplyTrace } from "../tracing/reply-trace.ts";
 import { chatTurn } from "./chat.ts";
 import { replyStream, saveReply } from "./reply.ts";
 import { activeRun, finishRun, forgetRuns, latestRun, setActiveRun, withThreadLock, type Continued, type ThreadRun } from "./runs.ts";
@@ -36,6 +37,7 @@ export type Started = Reply & {
  */
 export async function startReply(input: { threadId: string; owner: string; messages: UIMessage[]; model?: string }): Promise<Started | null> {
 	const { threadId, owner, messages } = input;
+	const requested = Date.now();
 	if (!(await mayUse(threadId, owner))) return null;
 	const model = await pickModel(input.model);
 	const python = await pythonReady;
@@ -44,16 +46,19 @@ export async function startReply(input: { threadId: string; owner: string; messa
 		const previous = await activeRun(threadId);
 		if (previous && sameContinuation(previous.continued, continued)) return { runId: previous.runId, model: previous.model, followed: true };
 		if (previous) await cancel(previous, owner);
+		// A continued run is a trace of its own that links to the run it carries on (server/tracing/reply-trace.ts).
+		const carriesOn = continued && tracingOn() ? (await latestRun(threadId))?.runId : undefined;
 		// The run reads the thread from the database, so it is saved first.
 		await saveThread(threadId, owner, messages);
 		const run = await start(chatTurn, [
 			{ threadId, owner, model: { id: model.id, name: model.name }, python, today: new Date().toDateString(), maxSteps: MAX_STEPS, continued },
 		]);
 		await setActiveRun(threadId, run.runId, model.id, continued);
+		recordReplySpan(run.runId, "chat.request", requested, Date.now(), { "ponder.continued": Boolean(continued) }, carriesOn ? [linkToReply(carriesOn)] : []);
 		return { runId: run.runId, model: model.id, followed: false };
 	});
 	// The run goes on if the request closes; the page reconnects with followReply.
-	return { ...started, stream: await replyStream(started.runId, started.model, { continued }) };
+	return { ...started, stream: await withReplyTrace(started.runId, () => replyStream(started.runId, started.model, { continued })) };
 }
 
 /**
@@ -64,7 +69,9 @@ export async function startReply(input: { threadId: string; owner: string; messa
 export async function followReply(id: string, owner: string, uiStartIndex = 0): Promise<Reply | null> {
 	const run = await latestRun(id);
 	if (!run || !(await mayUse(run.threadId, owner))) return null;
-	const stream = await replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled || run.failed, continued: run.continued });
+	const stream = await withReplyTrace(run.runId, () =>
+		replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled || run.failed, continued: run.continued }),
+	);
 	return { runId: run.runId, stream };
 }
 

@@ -1,5 +1,6 @@
 import { registerTelemetry, type Telemetry } from "ai";
 import { RunRecorder } from "./telemetry/run-recorder.ts";
+import { tracingState } from "./tracing/state.ts";
 import { migrateRuns } from "./telemetry/store.ts";
 
 export { TITLE_FUNCTION_ID, usageReport } from "./telemetry/store.ts";
@@ -14,7 +15,10 @@ export { TITLE_FUNCTION_ID, usageReport } from "./telemetry/store.ts";
 export type RunContext = { threadId: string; user: string };
 
 export async function setupTelemetry() {
-	const integrations: Telemetry[] = [new RunRecorder()];
+	// With tracing on (server/tracing/setup.ts), the AI SDK's calls also become spans.
+	// registerTelemetry replaces the list, so both are registered here.
+	const tracing = tracingState()?.integration;
+	const integrations: Telemetry[] = [new RunRecorder(), ...(tracing ? [tracing] : [])];
 	registerTelemetry(...integrations);
 	await migrateRuns();
 }

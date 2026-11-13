@@ -13,8 +13,12 @@ import { defineConfig } from "nitro";
 export default defineConfig({
 	serverDir: "./server",
 	modules: ["workflow/nitro"],
-	plugins: ["./server/plugins/startup.ts"],
+	// Tracing first: its tracer must be registered before startup starts the worker.
+	plugins: ["./server/plugins/tracing.ts", "./server/plugins/startup.ts"],
 	routes: { "/**": "./server/app.ts" },
+	// Runs each workflow delivery inside its reply's trace (server/tracing/flow-middleware.ts).
+	// Not lazy: Nitro then calls it with `next`, which it needs.
+	handlers: [{ route: "/.well-known/workflow/v1/flow", middleware: true, lazy: false, handler: "./server/tracing/flow-middleware.ts" }],
 	buildPlugins: [workerFiles()],
 });
 

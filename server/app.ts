@@ -29,6 +29,7 @@ import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
 import { threadResponse } from "./thread-cache.ts";
 import { usageReport } from "./telemetry.ts";
+import { recordReplySpan, withReplyTrace } from "./tracing/reply-trace.ts";
 import { validate } from "./validate.ts";
 import { WEB_BUILD } from "./web-build.ts";
 import { deleteChat, followReply, startReply, stopReply, whenReplyFinished } from "./workflow/replies.ts";
@@ -180,12 +181,16 @@ const api = app
 	.post("/api/chat", perPerson(chatLimit, { plain: true }), validate("json", chatBody, { error: "Nothing to send.", plain: true }), async (c) => {
 		const body = c.req.valid("json");
 		// The chat transport shows the response text as the error, so this one is plain text.
+		const checking = Date.now();
 		const credits = await creditStatus(userOf(c));
+		const checked = Date.now();
 		if (credits.remaining <= 0) return c.text(outOfCredits(credits.resetsAt), 402);
 		const reply = await startReply({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model });
 		if (!reply) return c.json({ error: "Not found" }, 404);
+		// Measured before the run had an id, so recorded into its trace now (server/tracing/reply-trace.ts).
+		if (!reply.followed) recordReplySpan(reply.runId, "credits.check", checking, checked);
 		// A new thread gets a name from a cheap model while the reply is written (thread-title.ts).
-		if (!reply.followed && isFirstMessage(body.messages)) void nameThread({ threadId: body.id, user: userOf(c) }, body.messages);
+		if (!reply.followed && isFirstMessage(body.messages)) withReplyTrace(reply.runId, () => void nameThread({ threadId: body.id, user: userOf(c) }, body.messages));
 		return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
 	})
 

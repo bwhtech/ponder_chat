@@ -1,4 +1,5 @@
 import { Worker } from "node:worker_threads";
+import { span } from "./tracing/span.ts";
 
 /**
  * The text of a PDF, read once on this server with pdf.js, so that a model that cannot
@@ -17,12 +18,18 @@ const MAX_READS_AT_ONCE = 2;
 const WORKER = new URL("./pdf-text-worker.ts", import.meta.url);
 
 export async function extractPdfText(data: Buffer, timeoutMs = TIMEOUT_MS): Promise<string> {
-	await readers.take();
-	try {
-		return await readInWorker(data, timeoutMs);
-	} finally {
-		readers.release();
-	}
+	return span("pdf.extract_text", { "ponder.bytes": data.length }, async (active) => {
+		const waiting = Date.now();
+		await readers.take();
+		active.setAttribute("ponder.wait_ms", Date.now() - waiting);
+		try {
+			const text = await readInWorker(data, timeoutMs);
+			active.setAttribute("ponder.chars", text.length);
+			return text;
+		} finally {
+			readers.release();
+		}
+	});
 }
 
 function readInWorker(data: Buffer, timeoutMs: number): Promise<string> {

@@ -4,6 +4,7 @@ import { getRun } from "workflow/api";
 import { loadThread, updateThread } from "../db.ts";
 import { rememberTurn } from "../memory.ts";
 import { finishRun, type Continued } from "./runs.ts";
+import { span } from "../tracing/span.ts";
 
 /** The reply's message id: the same in the live stream, a reconnect, and the saved thread. */
 export const messageIdFor = (runId: string) => `msg-${runId}`;
@@ -65,6 +66,10 @@ export async function saveReply(
 	model: string,
 	{ cancelled = false, failed = false, continued = null as Continued | null } = {},
 ) {
+	await span("reply.save", { "ponder.outcome": cancelled ? "cancelled" : failed ? "failed" : "saved" }, () => saveReplyNow(threadId, owner, runId, model, { cancelled, failed, continued }));
+}
+
+async function saveReplyNow(threadId: string, owner: string, runId: string, model: string, { cancelled, failed, continued }: { cancelled: boolean; failed: boolean; continued: Continued | null }) {
 	const untilTail = cancelled || failed;
 	const messages = await loadThread(threadId);
 	// After the person answers an approval, the run carries on the thread's last assistant

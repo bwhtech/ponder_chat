@@ -1,6 +1,7 @@
 import postgres from "postgres";
 import type { UIMessage } from "ai";
 import { nameFromFirstMessage } from "../shared/thread-name.ts";
+import { span } from "./tracing/span.ts";
 
 // Notices are "already exists, skipping" from the migrations.
 export const sql = postgres(process.env.DATABASE_URL!, { onnotice: () => {} });
@@ -37,8 +38,12 @@ async function migrateThreadSearch() {
 }
 
 export async function loadThread(id: string): Promise<UIMessage[]> {
-	const [row] = await sql`select messages from threads where id = ${id}`;
-	return row?.messages ?? [];
+	return span("thread.load", {}, async (active) => {
+		const [row] = await sql`select messages from threads where id = ${id}`;
+		const messages: UIMessage[] = row?.messages ?? [];
+		active.setAttribute("ponder.messages", messages.length);
+		return messages;
+	});
 }
 
 /** When the person's thread was last saved, or null for one not saved yet (or not theirs). Its version for caching. */

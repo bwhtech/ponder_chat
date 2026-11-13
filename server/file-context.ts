@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 import { loadFile, pdfText, SPREADSHEET_TYPES, TEXT_TYPES, URL_PREFIX, type LoadedFile } from "./files.ts";
+import { span } from "./tracing/span.ts";
 
 /**
  * Attached files as the model reads them. Messages carry only links (files.ts); before
@@ -21,7 +22,9 @@ type FilePart = Extract<UIMessage["parts"][number], { type: "file" }>;
 type Options = { pdfAsText: boolean };
 
 export async function resolveFileParts(messages: UIMessage[], owner: string, options: Options): Promise<UIMessage[]> {
-	return new FileContext(owner, options).resolve(messages);
+	const files = messages.reduce((count, message) => count + message.parts.filter(isStoredFile).length, 0);
+	if (!files) return messages;
+	return span("file_context.resolve", { "ponder.files": files, "ponder.pdf_as_text": options.pdfAsText }, () => new FileContext(owner, options).resolve(messages));
 }
 
 class FileContext {

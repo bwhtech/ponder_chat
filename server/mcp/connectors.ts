@@ -28,6 +28,8 @@ import {
 import { modelToolName, resultText, ruleOf, slugFor } from "./tools.ts";
 import type { ConnectorView } from "../../shared/connectors.ts";
 import type { CatalogConnector, CatalogData, CatalogTool } from "./catalog.ts";
+import { withPeer } from "../tracing/http.ts";
+import { span } from "../tracing/span.ts";
 
 /**
  * What Ponder does with connectors, for the routes (routes.ts) and the chat workflow
@@ -286,6 +288,15 @@ const RETRY_ERROR_MS = 5 * 60_000;
  * next reply, and so is a connector in "error", so it can recover.
  */
 export async function connectorCatalogFor(userId: string): Promise<CatalogData> {
+	// Counts only: never a connector's name or a tool's (tracing/privacy.ts).
+	return span("connectors.list", {}, async (active) => {
+		const catalog = await connectorCatalogNow(userId);
+		active.setAttributes({ "ponder.tools": catalog.tools.length, "ponder.connectors": catalog.connectors.length });
+		return catalog;
+	});
+}
+
+async function connectorCatalogNow(userId: string): Promise<CatalogData> {
 	const connections = await connectionsForReply(userId);
 	const signedIn = connections.filter((connection) => connection.status === "connected");
 	for (const connection of signedIn) {
@@ -377,8 +388,16 @@ export async function callConnectorTool(connectionId: string, tool: string, inpu
 	if (rule === "off") return `The person turned ${info.title ?? tool} off in Settings, Connectors.`;
 	if (rule === "ask" && !approved) return `${info.title ?? tool} asks the person first, and they did not approve this call, so it did not run. Call it again to ask them.`;
 	try {
-		const result = await withConnection(connection, (client) =>
-			client.callTool({ name: tool, arguments: (input ?? {}) as Record<string, unknown>, options: { timeout: CALL_TIMEOUT_MS } }),
+		// The tool's name as its server gives it, never its input or result, nor the connector's name.
+		// Its HTTP requests are marked as MCP, and their host left out (tracing/http.ts).
+		const result = await span("mcp.call_tool", { "gen_ai.tool.name": tool }, (active) =>
+			withPeer("mcp", async () => {
+				const called = await withConnection(connection, (client) =>
+					client.callTool({ name: tool, arguments: (input ?? {}) as Record<string, unknown>, options: { timeout: CALL_TIMEOUT_MS } }),
+				);
+				if (called.isError) active.setAttribute("ponder.outcome", "tool_error");
+				return called;
+			}),
 		);
 		await markUsed(connection.id);
 		const { text, isError } = resultText(result);

@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 import type { MemoryAdapter, MemoryScope, MemoryTurn } from "./types.ts";
+import { span } from "../tracing/span.ts";
 
 /**
  * TanStack AI's `memoryMiddleware` (`@tanstack/ai-memory` 1.0.0, src/middleware.ts), for a
@@ -39,7 +40,7 @@ export function memoryMiddleware({ adapter, scope }: { adapter: MemoryAdapter; s
 		const key = turn.messageId ?? `${ctx.threadId}:${messages.length}`;
 		if (saving.has(key)) return;
 		saving.add(key);
-		track(ctx.threadId, write(scope(ctx), turn).finally(() => saving.delete(key)));
+		track(ctx.threadId, span("memory.save", {}, () => write(scope(ctx), turn)).finally(() => saving.delete(key)));
 	}
 
 	async function write(resolved: MemoryScope, turn: MemoryTurn) {
