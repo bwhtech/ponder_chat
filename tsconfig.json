@@ -1,7 +1,9 @@
 {
 	"extends": "frappe-ui/tsconfig.base.json",
 	"compilerOptions": {
-		"types": ["vite/client"]
+		"types": ["vite/client"],
+		// The server's API types, for the typed client (web/api.ts). Imported as types only.
+		"paths": { "#server/app": ["./server/app.ts"] }
 	},
 	"include": ["web/**/*.ts", "web/**/*.vue", "web/env.d.ts"]
 }

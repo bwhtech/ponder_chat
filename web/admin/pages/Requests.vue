@@ -2,7 +2,7 @@
 import { Avatar, Badge, Button, PageHeader, PageHeaderMobile, dialog, toast } from "frappe-ui";
 import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "frappe-ui/list";
 import { computed, ref, watch } from "vue";
-import { api, type DecidedRequest, type PendingRequest } from "../api";
+import { admin, unwrap, type DecidedRequest, type PendingRequest } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import CreditBar from "../components/CreditBar.vue";
 import ExtraCreditsDialog from "../components/ExtraCreditsDialog.vue";
@@ -29,7 +29,7 @@ let asked = 0;
 async function load() {
 	const mine = ++asked;
 	try {
-		const data = await api<{ pending: PendingRequest[]; decided: DecidedRequest[] }>("/requests");
+		const data = await unwrap(admin.requests.$get());
 		if (mine !== asked) return;
 		pending.value = data.pending;
 		decided.value = data.decided;
@@ -61,7 +61,7 @@ function approve(request: PendingRequest) {
 
 async function submitApproval(amount: number) {
 	const request = approving.value as PendingRequest;
-	await api(`/requests/${request.id}/approve`, { body: { credits: amount } });
+	await unwrap(admin.requests[":id"].approve.$post({ param: { id: String(request.id) }, json: { credits: amount } }));
 	toast.success(`Gave ${request.person.name} ${amount} extra credits for today`);
 	await Promise.all([load(), refreshCounts()]);
 }
@@ -72,7 +72,7 @@ function decline(request: PendingRequest) {
 		message: "Their limit stays as it is, and their credits refill at midnight UTC. They get an email, and can ask again.",
 		confirmLabel: "Decline",
 		onConfirm: async () => {
-			await api(`/requests/${request.id}/decline`, { body: {} });
+			await unwrap(admin.requests[":id"].decline.$post({ param: { id: String(request.id) } }));
 			toast.success(`Declined ${request.person.name}'s request`);
 			await Promise.all([load(), refreshCounts()]);
 		},

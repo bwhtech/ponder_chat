@@ -158,6 +158,42 @@ To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP s
 
 To try Ponder with demo data, or to make the images above again after a UI change, see [`scripts/demo/README.md`](scripts/demo/README.md).
 
+## Develop
+
+`npm run dev` starts two servers: `nitro dev` for the server, and Vite for the pages. Open the Vite address. Vite sends `/api`, `/health` and `/oauth` to the server.
+
+- A change under `web/` updates the open page (hot reload).
+- A change under `server/` makes Nitro build the server again and restart it. This takes a few seconds.
+
+To start:
+
+1. Make a database on a Postgres with pgvector. The e2e Postgres works (`e2e/README.md`): `createdb -h 127.0.0.1 -p 55433 -U ponder ponder_dev`.
+2. Put the settings in `.env` in the repository. Git ignores this file.
+
+   ```bash
+   DATABASE_URL=postgres://ponder:ponder@127.0.0.1:55433/ponder_dev
+   BETTER_AUTH_SECRET=<a random string of 32 or more characters>
+   OPENROUTER_API_KEY=<your key>
+   PONDER_PYTHON=off   # or run npm run sandbox:setup once
+   ```
+
+3. Run `npm run dev`, and open http://localhost:5173.
+4. Invite yourself: `set -a; . ./.env; set +a; npx tsx scripts/invite.ts add you@example.org`. The sign-in email is in the log of `npm run dev`.
+
+`scripts/dev.ts` sets the rest, as `start.sh` does. Workflow runs are in the development database, with the Postgres World. Each start runs `npx bootstrap`, which creates or updates the workflow's tables. The server listens on 127.0.0.1:3501, and Vite on 127.0.0.1:5173. To change the ports, set `PORT` and `WEB_PORT` in `.env`. Sign-in links use the Vite port. To open the pages through another host, such as a tunnel, set `PONDER_HOSTS` to all the hosts, such as `localhost:5173,dev.example.org`.
+
+To spend nothing on OpenRouter, use the fake from the end-to-end tests:
+
+1. Start it: `npx tsx -e 'import("./e2e/fake/server.ts").then((f) => f.startFake(3502))'`.
+2. Set `OPENROUTER_API_KEY=sk-or-fake` and `OPENROUTER_BASE_URL=http://127.0.0.1:3502/api` in `.env`.
+
+Limits:
+
+- A server restart cuts the reply in progress. The reply starts its current step again after the restart.
+- Vite does not send the Content Security Policy that `server/app.ts` adds to each page. To check the policy, use `npm run build` and `npm start`.
+- After a change to `nitro.config.ts` or `.env`, start `npm run dev` again.
+- Memory does not save. The workflow's development bundle does not copy `gate.json` and `extract.md` (`server/memory/`), so each save logs `ENOENT`. Replies are not affected.
+
 ## How it works
 
 Ponder started as a copy of the Seva platform with its Frappe parts removed. Python and memory came back later, adapted. The sections below describe each part and where its code is.

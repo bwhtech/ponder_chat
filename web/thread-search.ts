@@ -1,10 +1,11 @@
 import { ref, watch, type Ref } from "vue";
+import { client, unwrap, type Answer } from "./api";
 
 /**
  * Search in the person's chats (GET /api/threads/search). Asks a moment after the person
  * stops typing, and drops answers to older questions that arrive late.
  */
-export type ThreadHit = { id: string; title: string; updatedAt: string; excerpt: string };
+export type ThreadHit = Answer<typeof client.api.threads.search.$get>["threads"][number];
 
 /** The server marks matched words with these (server/thread-search.ts). */
 const MATCH = /(.*?)/g;
@@ -33,9 +34,7 @@ export function useThreadSearch(query: Ref<string>) {
 	async function ask(text: string) {
 		const mine = ++asked;
 		try {
-			const response = await fetch(`/api/threads/search?q=${encodeURIComponent(text)}`);
-			if (!response.ok) throw new Error(String(response.status));
-			const { threads } = (await response.json()) as { threads: ThreadHit[] };
+			const { threads } = await unwrap(client.api.threads.search.$get({ query: { q: text } }));
 			if (mine !== asked) return;
 			hits.value = threads;
 			failed.value = false;

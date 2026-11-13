@@ -2,7 +2,7 @@
 import { Avatar, Badge, Button, Dropdown, PageHeader, PageHeaderMobile, TabButtons, TextInput, toast } from "frappe-ui";
 import { List, ListCell, ListHeader, ListHeaderCell, ListHeaderCellSort, ListRow, ListRows } from "frappe-ui/list";
 import { computed, ref } from "vue";
-import { api, type Person, type Settings } from "../api";
+import { admin, unwrap, type Person, type Settings } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import CreditBar from "../components/CreditBar.vue";
 import CreditsDialog from "../components/CreditsDialog.vue";
@@ -26,7 +26,7 @@ let asked = 0;
 async function load() {
 	const mine = ++asked;
 	try {
-		const data = await api<{ people: Person[]; settings: Settings }>("/people");
+		const data = await unwrap(admin.people.$get());
 		if (mine !== asked) return;
 		Object.assign(settings, data.settings);
 		people.value = data.people;

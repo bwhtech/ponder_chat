@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { onBeforeRouteLeave, useRouter } from "vue-router";
 import { checkSkill, MAX_DESCRIPTION, parseSkillFile, skillTitle, toSkillName, type SkillFields } from "../../../shared/skill-file";
 import { Response } from "frappe-ui-ai-elements";
-import { api, ApiError, type SkillDetail } from "../api";
+import { admin, ApiError, unwrap, type SkillDetail } from "../api";
 import NewSkillDialog from "../components/NewSkillDialog.vue";
 import SkillInstructionsEditor from "../components/SkillInstructionsEditor.vue";
 import { lastActive } from "../lib/format";
@@ -32,7 +32,7 @@ const duplicating = ref(false);
 async function load() {
 	status.value = { kind: "loading" };
 	try {
-		show(await api<SkillDetail>(`/skills/${props.id}`));
+		show(await unwrap(admin.skills[":id"].$get({ param: { id: props.id } })));
 		status.value = { kind: "loaded" };
 	} catch (e) {
 		status.value = { kind: "error", message: (e as Error).message, missing: e instanceof ApiError && e.status === 404 };
@@ -90,10 +90,9 @@ async function save() {
 	if (errors.value.length) return toast.error(errors.value[0]!);
 	saving.value = true;
 	try {
-		const result = await api<SkillDetail>(`/skills/${props.id}`, {
-			method: "PUT",
-			body: { ...form.value, expectedUpdatedAt: skill.value?.updatedAt },
-		});
+		const result = await unwrap(
+			admin.skills[":id"].$put({ param: { id: props.id }, json: { ...form.value, expectedUpdatedAt: skill.value?.updatedAt } }),
+		);
 		show(result);
 		toast.success(result.enabled ? "Saved. New replies use it now." : "Saved");
 	} catch (e) {
@@ -112,7 +111,7 @@ function remove() {
 		message: "No one can use it after this. Chats that used it keep their replies.",
 		confirmLabel: "Delete",
 		onConfirm: async () => {
-			await api(`/skills/${current.id}`, { method: "DELETE" });
+			await unwrap(admin.skills[":id"].$delete({ param: { id: String(current.id) } }));
 			saved.value = { ...form.value };
 			toast.success(`Deleted ${skillTitle(current.name)}`);
 			await router.push("/skills");

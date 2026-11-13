@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "build": "vite build && nitro build",
-    "typecheck": "node scripts/vue-tsc.cjs --noEmit -p tsconfig.json",
+    "typecheck": "node scripts/vue-tsc.cjs --noEmit -p tsconfig.json && node scripts/vue-tsc.cjs --noEmit -p tsconfig.no-node.json",
+    "dev": "tsx scripts/dev.ts",
     "start": "./start.sh",
     "typecheck:server": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --allowImportingTsExtensions server/app.ts server/plugins/startup.ts server/pdf-text-worker.ts",
     "typecheck:e2e": "node node_modules/frappe-ui/node_modules/typescript/bin/tsc --noEmit --module nodenext --moduleResolution nodenext --target es2023 --strict --skipLibCheck --allowImportingTsExtensions --types node playwright.config.ts e2e/*.ts e2e/fake/*.ts e2e/mcp/*.ts e2e/tests/*.ts",
@@ -27,6 +28,7 @@
     "@ai-sdk/workflow": "^2.0.94",
     "@codemirror/lang-markdown": "^6.5.2",
     "@hono/node-server": "^2.1.5",
+    "@hono/zod-validator": "^0.9.1",
     "@mozilla/readability": "^0.6.0",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@workflow/serde": "^4.1.0",

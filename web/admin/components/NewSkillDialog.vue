@@ -3,7 +3,7 @@ import { Button, Dialog, FormControl, toast } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { checkDetails, MAX_DESCRIPTION, toSkillName } from "../../../shared/skill-file";
-import { api, type SkillDetail } from "../api";
+import { admin, unwrap, type SkillDetail } from "../api";
 
 /**
  * New skill: a name and a description, then the editor opens for the instructions. The
@@ -43,9 +43,11 @@ async function create() {
 	saving.value = true;
 	try {
 		const from = props.from;
-		const skill = await api<SkillDetail>("/skills", {
-			body: { name: name.value, description: description.value, automatic: from?.automatic ?? true, body: from?.body ?? "", enabled: false },
-		});
+		const skill = await unwrap(
+			admin.skills.$post({
+				json: { name: name.value, description: description.value, automatic: from?.automatic ?? true, body: from?.body ?? "", enabled: false },
+			}),
+		);
 		open.value = false;
 		await router.push(`/skills/${skill.id}`);
 	} catch (e) {

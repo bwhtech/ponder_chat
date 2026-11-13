@@ -15,7 +15,7 @@ import {
 import { BarChart, DonutChart, NumberCard } from "frappe-ui/charts";
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
-import { api, ApiError, type Person, type PersonDetail } from "../api";
+import { admin, ApiError, unwrap, type Day, type Person, type PersonDetail } from "../api";
 import CreditsDialog from "../components/CreditsDialog.vue";
 import ExtraCreditsDialog from "../components/ExtraCreditsDialog.vue";
 import StatusBadge from "../components/StatusBadge.vue";
@@ -60,7 +60,7 @@ watch(
 async function load() {
 	const mine = ++asked;
 	try {
-		const data = await api<PersonDetail>(`/people/${encodeURIComponent(props.id)}`);
+		const data = await unwrap(admin.people[":id"].$get({ param: { id: encodeURIComponent(props.id) } }));
 		if (mine !== asked) return;
 		Object.assign(settings, data.settings);
 		state.value = { kind: "loaded", detail: data };
@@ -95,12 +95,12 @@ const actions = computed(() =>
 
 async function giveExtra(amount: number) {
 	const p = person.value as Person;
-	await api(`/people/${encodeURIComponent(p.id)}/grant`, { body: { credits: amount } });
+	await unwrap(admin.people[":id"].grant.$post({ param: { id: encodeURIComponent(p.id) }, json: { credits: amount } }));
 	toast.success(`Gave ${p.name} ${amount} extra credits for today`);
 	await load();
 }
 
-const days = computed(() => detail.value?.days ?? []);
+const days = computed<Day[]>(() => detail.value?.days ?? []);
 const week = computed(() => days.value.slice(-7));
 const weekCredits = computed(() => Math.round(week.value.reduce((sum, day) => sum + day.credits, 0) * 10) / 10);
 const weekReplies = computed(() => week.value.reduce((sum, day) => sum + day.replies, 0));
@@ -153,7 +153,7 @@ async function emailInvite() {
 	const p = person.value;
 	if (!p) return;
 	try {
-		await api(`/invites/${encodeURIComponent(p.email)}/send`, { body: {} });
+		await unwrap(admin.invites[":email"].send.$post({ param: { email: encodeURIComponent(p.email) } }));
 		toast.success(`Sent to ${p.email}`);
 	} catch (e) {
 		toast.error((e as Error).message);

@@ -15,6 +15,7 @@ import { seedStandardSkills } from "./standard-skills.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
 import { setupTelemetry } from "./telemetry.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
+import { checkWebBuild } from "./web-build.ts";
 
 /**
  * What the server does once when it starts, before it answers requests: create and
@@ -26,6 +27,7 @@ let resolvePython: (ready: boolean) => void;
 export const pythonReady = new Promise<boolean>((resolve) => (resolvePython = resolve));
 
 export async function startup() {
+	checkWebBuild();
 	// A failed migration still settles pythonReady, so the routes that wait on it don't hang.
 	try {
 		await migrateAll();

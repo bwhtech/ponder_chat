@@ -1,6 +1,6 @@
 import { dialog, toast } from "frappe-ui";
 import { computed, reactive, ref } from "vue";
-import { api, type Admin, type KeyStatus, type Settings, type SettingsData } from "../api";
+import { admin, unwrap, type Admin, type KeyStatus, type Settings } from "../api";
 import { settings } from "../store";
 import { creditValue, money } from "./format";
 
@@ -27,7 +27,7 @@ export function useSettingsForm() {
 	async function load() {
 		status.value = { kind: "loading" };
 		try {
-			const data = await api<SettingsData>("/settings");
+			const data = await unwrap(admin.settings.$get());
 			show(data);
 			admins.value = data.admins;
 			openRouterKey.value = data.openRouterKey;
@@ -60,7 +60,7 @@ export function useSettingsForm() {
 		saving.value = true;
 		try {
 			const body = { defaultDailyCredits: Number(defaultCredits.value), creditsPerUsd: Number(perUsd.value) };
-			show(await api<Settings>("/settings", { method: "PUT", body }));
+			show(await unwrap(admin.settings.$put({ json: body })));
 			toast.success("Settings saved");
 		} finally {
 			saving.value = false;
@@ -88,7 +88,7 @@ export function useSettingsForm() {
 		pdfTextOnServer.value = onServer;
 		savingPdf.value = true;
 		try {
-			const next = await api<Settings>("/settings/pdf-reading", { method: "PUT", body: { onServer } });
+			const next = await unwrap(admin.settings["pdf-reading"].$put({ json: { onServer } }));
 			if (saved.value) saved.value.pdfTextOnServer = next.pdfTextOnServer;
 			settings.pdfTextOnServer = next.pdfTextOnServer;
 			pdfTextOnServer.value = next.pdfTextOnServer;

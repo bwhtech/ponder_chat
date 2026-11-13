@@ -19,6 +19,7 @@ export type SkillSummary = {
 	id: number;
 	name: string;
 	description: string;
+	/** Ponder can load it on its own. False: only when someone types $name. */
 	automatic: boolean;
 	enabled: boolean;
 	updatedAt: string;

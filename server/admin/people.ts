@@ -9,6 +9,7 @@ import { creditsByModel, limitsToday, Usage } from "./usage.ts";
 export type Status = "active" | "invited" | "banned";
 
 export type Person = {
+	/** The user id, or the email for an invite without an account. */
 	id: string;
 	name: string;
 	email: string;
@@ -23,6 +24,7 @@ export type Person = {
 	dailyCredits: number | null;
 	banReason: string | null;
 	banExpires: string | null;
+	/** `limit` includes `extra`, the credits admins gave for today. */
 	today: { used: number; limit: number; extra: number };
 	/** Credits over the last 7 days. */
 	week: number;

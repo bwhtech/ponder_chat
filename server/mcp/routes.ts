@@ -14,6 +14,7 @@ import {
 import { ConnectorProblem, describeError, NeedsSignIn } from "./errors.ts";
 import { probe } from "./probe.ts";
 import { takeSignIn } from "./store.ts";
+import { validate } from "../validate.ts";
 import type { SignInMessage } from "../../shared/connectors.ts";
 
 /**
@@ -22,7 +23,6 @@ import type { SignInMessage } from "../../shared/connectors.ts";
  * person's browser lands there from the server's sign-in page.
  */
 type Env = SignedInEnv;
-export const connectorsApi = new Hono<Env>();
 
 const userOf = (c: Context<Env>) => c.get("user").id;
 const idOf = (c: Context<Env>) => c.req.param("id") ?? "";
@@ -44,11 +44,35 @@ const change = z.object({
 	rules: z.record(z.string(), z.enum(["allow", "ask", "off"]).nullable()).optional(),
 	headers: headerList.optional(),
 });
+const probeBody = z.object({ url: z.string().trim().max(2_000) });
 
-/** Runs a request: a problem the person can fix is a 400 with its message. */
-async function answer(c: Context<Env>, run: () => Promise<unknown>) {
+export const connectorsApi = new Hono<Env>()
+	.get("/", (c) => answer(c, async () => ({ connectors: await listConnectors(userOf(c)) })))
+
+	.post("/probe", limited, validate("json", probeBody), (c) => answer(c, () => probe(c.req.valid("json").url)))
+
+	.post("/", limited, validate("json", newConnector), (c) => answer(c, () => addConnector(userOf(c), appOrigin(c.req.raw.headers), c.req.valid("json"))))
+
+	.post("/:id/sign-in", limited, (c) => answer(c, () => signInAgain(userOf(c), appOrigin(c.req.raw.headers), idOf(c))))
+
+	.post("/:id/refresh", limited, (c) => answer(c, async () => ({ connector: await refreshConnector(userOf(c), idOf(c)) })))
+
+	.patch("/:id", validate("json", change), (c) => answer(c, async () => ({ connector: await changeConnector(userOf(c), idOf(c), c.req.valid("json")) })))
+
+	.delete("/:id", (c) =>
+		answer(c, async () => {
+			if (!(await removeConnector(userOf(c), idOf(c)))) throw new ConnectorProblem("That connector was not found.");
+			return { ok: true };
+		}),
+	);
+
+/**
+ * Runs a request: a problem the person can fix is a 400 with its message. The MCP SDK
+ * checks a server's replies with zod, and its message says what the server got wrong.
+ */
+async function answer<T extends object>(c: Context<Env>, run: () => Promise<T>) {
 	try {
-		return c.json((await run()) as object);
+		return c.json(await run());
 	} catch (error) {
 		if (error instanceof z.ZodError) return c.json({ error: error.issues[0]?.message ?? "That request is not valid." }, 400);
 		if (error instanceof ConnectorProblem || error instanceof NeedsSignIn) return c.json({ error: error.message }, 400);
@@ -56,32 +80,6 @@ async function answer(c: Context<Env>, run: () => Promise<unknown>) {
 		return c.json({ error: describeError(error) }, 502);
 	}
 }
-
-/** The request's JSON. Not JSON is a 400 that says so, not an empty object that fails the schema with a puzzling message. */
-const body = async (c: Context<Env>): Promise<unknown> =>
-	c.req.json().catch(() => {
-		throw new ConnectorProblem("The request body is not valid JSON.");
-	});
-
-connectorsApi.get("/", (c) => answer(c, async () => ({ connectors: await listConnectors(userOf(c)) })));
-
-connectorsApi.post("/probe", limited, (c) => answer(c, async () => probe(z.object({ url: z.string().trim().max(2_000) }).parse(await body(c)).url)));
-
-connectorsApi.post("/", limited, (c) => answer(c, async () => addConnector(userOf(c), appOrigin(c.req.raw.headers), newConnector.parse(await body(c)))));
-
-connectorsApi.post("/:id/sign-in", limited, (c) => answer(c, () => signInAgain(userOf(c), appOrigin(c.req.raw.headers), idOf(c))));
-
-connectorsApi.post("/:id/refresh", limited, (c) => answer(c, async () => ({ connector: await refreshConnector(userOf(c), idOf(c)) })));
-
-connectorsApi.patch("/:id", (c) => answer(c, async () => ({ connector: await changeConnector(userOf(c), idOf(c), change.parse(await body(c))) })));
-
-connectorsApi.delete("/:id", (c) =>
-	answer(c, async () => {
-		if (!(await removeConnector(userOf(c), idOf(c)))) throw new ConnectorProblem("That connector was not found.");
-		return { ok: true };
-	}),
-);
-
 
 /**
  * GET /oauth/mcp/callback: the end of an OAuth sign-in. The person's session must be the

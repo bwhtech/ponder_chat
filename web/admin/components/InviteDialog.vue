@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button, Checkbox, Dialog, FormControl, toast } from "frappe-ui";
 import { computed, ref } from "vue";
-import { api } from "../api";
+import { admin, unwrap } from "../api";
 import { credits } from "../lib/format";
 import { settings } from "../store";
 
@@ -48,7 +48,7 @@ async function invite() {
 			dailyCredits: dailyCredits.value ? Number(dailyCredits.value) : null,
 			sendEmail: sendEmail.value,
 		};
-		const result = await api<{ invited: number; notSent: string[] }>("/invites", { body });
+		const result = await unwrap(admin.invites.$post({ json: body }));
 		toast.success(result.invited === 1 ? `Invited ${parsed.value[0]}` : `Invited ${result.invited} people`);
 		if (result.notSent.length) toast.warning(`The email could not be sent to ${result.notSent.join(", ")}`);
 		emails.value = "";

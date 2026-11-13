@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button, Dialog, FormControl, Radio, RadioGroup, toast } from "frappe-ui";
 import { computed, ref, watch } from "vue";
-import { api, type Person } from "../api";
+import { admin, unwrap, type Person } from "../api";
 import { credits, creditValue } from "../lib/format";
 import { settings } from "../store";
 
@@ -32,7 +32,7 @@ async function save() {
 	saving.value = true;
 	try {
 		const credits = choice.value === "default" ? null : Number(amount.value);
-		await api(`/people/${encodeURIComponent(person.id)}/daily-credits`, { method: "PUT", body: { credits } });
+		await unwrap(admin.people[":id"]["daily-credits"].$put({ param: { id: encodeURIComponent(person.id) }, json: { credits } }));
 		open.value = false;
 		toast.success(`Daily credits saved for ${person.name}`);
 		emit("saved");
