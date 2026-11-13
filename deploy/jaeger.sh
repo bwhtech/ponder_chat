@@ -6,11 +6,11 @@
 # in /etc/ponder-chat/env and restart ponder-chat after it.
 set -euo pipefail
 
-VERSION=2.22.0
+VERSION=2.23.0
 # The sha256 of the jaeger binary in the release, from jaeger-$VERSION-linux-<arch>.sha256sum.txt.
 case "$(uname -m)" in
-	x86_64) ARCH=amd64 SHA256=fa574f53e2f739301f301f66e5608c84d0b9a90cdd08e4f6cba8809d171854e1 ;;
-	aarch64) ARCH=arm64 SHA256=b3af2361d4eb72e4b34fa7ed839d9d9c6d305102181d9c8b3c7491d83769a326 ;;
+	x86_64) ARCH=amd64 SHA256=c6cea66870096a0af23cce386f35bff5540c21786d71ac6ced3060b754ce4423 ;;
+	aarch64) ARCH=arm64 SHA256=32aa34107ea877aad36a7e4100af782b8263cc2d9af187f6633048bf065e6f26 ;;
 	*) echo "No Jaeger build for $(uname -m)." >&2 && exit 1 ;;
 esac
 HERE=$(cd "$(dirname "$0")" && pwd)

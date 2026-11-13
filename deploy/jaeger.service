@@ -12,7 +12,10 @@ RestartSec=5
 # A user of its own, made by systemd. Spans are kept in /var/lib/jaeger.
 DynamicUser=true
 StateDirectory=jaeger
-# Limits, so traces never take memory or CPU from Ponder or PostgreSQL.
+# Limits, so traces never take memory or CPU from Ponder or PostgreSQL. Jaeger starts at
+# about 60 MB and grows with the spans it holds. Above MemoryHigh the kernel takes memory
+# back from it; MemoryMax is the hard stop.
+MemoryHigh=384M
 MemoryMax=512M
 CPUWeight=20
 TasksMax=128
