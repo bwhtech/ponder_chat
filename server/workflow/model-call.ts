@@ -1,5 +1,6 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { JSONSchema7, ModelMessage, ToolCallPart } from "ai";
+import type { Estimate } from "../compaction/tokens.ts";
 import { MODEL_CALL_ATTEMPTS } from "./model-errors.ts";
 
 /** A tool as the model sees it: no `execute`, so the model step only asks for calls. The loop runs them (loop.ts). */
@@ -13,6 +14,8 @@ export type ModelCall = {
 	instructions: string;
 	messages: ModelMessage[];
 	tools: ToolSpec[];
+	/** Ponder's estimate of this call's input tokens (context-guard.ts), to measure the thread's ratio of real tokens to estimated ones. */
+	estimated?: Estimate;
 };
 
 /**
@@ -28,6 +31,8 @@ export type ModelResponse = {
 	messages: ModelMessage[];
 	toolCalls: ModelToolCall[];
 	finishReason: string;
+	/** The input tokens the provider reported, which the next call's estimate starts from (context-guard.ts). */
+	inputTokens: number;
 };
 
 /**

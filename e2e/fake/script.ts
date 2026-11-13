@@ -9,9 +9,12 @@ export type Step = {
 	reasoning?: string;
 	/** The reply text, streamed in small pieces. */
 	text?: string;
-	/** Tools the model calls. The agent runs them and calls the model again: the next step answers that call. */
-	/** `id` is the call's id, made up by the fake when left out. Some providers put the tool's name in it. */
-	/** `cutAfter`: the arguments stop after this many characters, as a model's output limit cuts them. */
+	/**
+	 * Tools the model calls. The agent runs them and calls the model again: the next step
+	 * answers that call. `id` is the call's id, made up by the fake when left out; some
+	 * providers put the tool's name in it. With `cutAfter`, the arguments stop after this
+	 * many characters, as a model's output limit cuts them.
+	 */
 	toolCalls?: { name: string; input: unknown; id?: string; cutAfter?: number }[];
 	/**
 	 * Streams each tool call's arguments in this many pieces, not 40 characters at a time.

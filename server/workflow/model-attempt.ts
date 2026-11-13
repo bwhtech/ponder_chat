@@ -2,6 +2,8 @@ import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { isStepCount, jsonSchema, streamText, tool, wrapLanguageModel, type TextStreamPart, type ToolSet } from "ai";
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
+import { saveTokenRatio } from "../compaction/store.ts";
+import { measuredRatio } from "../compaction/tokens.ts";
 import { callCost } from "../telemetry/cost.ts";
 import { tracingState } from "../tracing/state.ts";
 import { calledToolName } from "./connectors.ts";
@@ -90,8 +92,20 @@ class ModelAttempt {
 		// Only the assistant message: the SDK adds its own error results for invalid calls, and the loop adds every result.
 		const messages = (await result.response).messages.filter((message) => message.role === "assistant");
 		await this.started;
-		await this.record.finish(this.usage(finish, toolCalls), { stopped: await runStopped(this.call.runId) });
-		return { messages, toolCalls, finishReason: finish.finishReason };
+		const usage = this.usage(finish, toolCalls);
+		await this.record.finish(usage, { stopped: await runStopped(this.call.runId) });
+		await this.measureRatio(usage.inputTokens);
+		return { messages, toolCalls, finishReason: finish.finishReason, inputTokens: usage.inputTokens };
+	}
+
+	/**
+	 * Keeps the thread's measured ratio of the provider's tokens to Ponder's estimate,
+	 * which compaction decides from (compaction/tokens.ts). Only a finished call measures.
+	 */
+	private async measureRatio(inputTokens: number) {
+		const ratio = this.call.estimated && measuredRatio(inputTokens, this.call.estimated);
+		if (!ratio) return;
+		await saveTokenRatio(this.call.threadId, this.call.modelId, ratio).catch((error) => console.warn("model-attempt: could not save the token ratio:", error));
 	}
 
 	/** The error to throw: another attempt after a wait, or the end of the reply. */

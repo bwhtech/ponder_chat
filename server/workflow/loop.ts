@@ -1,17 +1,27 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { ModelMessage, ToolCallPart, ToolSet } from "ai";
+import type { Estimate } from "../compaction/tokens.ts";
 import { answeredApprovals, signApprovalStep, verifyApprovalStep, withoutApprovals, type Approval } from "./approvals.ts";
 import { modelCallStep, type ModelCall, type ModelToolCall } from "./model-call.ts";
 import { STEP_BOUNDARY } from "./stream-parts.ts";
 import { outcomeParts, toolMessage, ToolCalls, toolSpans, type ToolOutcome, type ToolSpan } from "./tool-calls.ts";
 
 export type Reply = {
-	call: Omit<ModelCall, "messages" | "tools">;
+	call: Omit<ModelCall, "messages" | "tools" | "estimated">;
 	messages: ModelMessage[];
 	tools: ToolSet;
 	writable: WritableStream<ModelCallStreamPart>;
 	/** The most model calls in one reply. */
 	maxSteps: number;
+	/** Keeps each model call inside the model's window: compaction, between steps too (context-guard.ts). */
+	guard?: CallGuard;
+};
+
+/** What the loop needs of ContextGuard. */
+export type CallGuard = {
+	beforeCall(instructions: string, messages: ModelMessage[], call: { first: boolean; measured: number }): Promise<ModelMessage[]>;
+	/** The estimate of the call it just prepared. */
+	readonly estimate: Estimate;
 };
 
 /**
@@ -38,12 +48,28 @@ class ReplyLoop {
 	async run() {
 		await this.carryOutApprovals();
 		const tools = await this.tools.specs();
+		let measured = 0;
 		for (let step = 1; step <= this.reply.maxSteps; step++) {
-			const response = await modelCallStep({ ...this.reply.call, messages: this.messages, tools }, this.reply.writable);
+			const estimated = await this.keepInside(step === 1, measured);
+			const response = await modelCallStep({ ...this.reply.call, messages: this.messages, tools, estimated }, this.reply.writable);
+			measured = response.inputTokens;
 			this.messages = [...this.messages, ...response.messages];
 			if (!response.toolCalls.length) return;
 			if (!(await this.runToolCalls(response.toolCalls))) return;
 		}
+	}
+
+	/**
+	 * Before a model call: the guard may summarize the history or trim earlier steps' tool
+	 * results, and its messages replace the reply's from then on. Its summary is a step of
+	 * its own, outside the model step, so a retried model call never summarizes again, and
+	 * a replay reuses the recorded summary. A call it can't fit ends the reply (ContextOverLimitError).
+	 */
+	private async keepInside(first: boolean, measured: number): Promise<Estimate | undefined> {
+		const guard = this.reply.guard;
+		if (!guard) return undefined;
+		this.messages = await guard.beforeCall(this.reply.call.instructions, this.messages, { first, measured });
+		return guard.estimate;
 	}
 
 	/** Runs the calls, or asks the person first. False when the reply waits for the person. */

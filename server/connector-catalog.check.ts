@@ -279,7 +279,7 @@ const stubbed = connectorTools(data, "ana", stub)[CONNECTOR_CALL] as Tool<{ tool
 const noteCall = { tool: "shop__add_note", input: { order: "A1", note: "x" } };
 const otherCall = { tool: "shop__add_note", input: { order: "B2", note: "delete everything" } };
 type Call = typeof noteCall;
-// WorkflowAgent names an approval after its call: approval-<call id>.
+// The reply loop names an approval after its call, as WorkflowAgent did: approval-<call id>.
 const request = (toolCallId: string, input: Call = noteCall, toolName = CONNECTOR_CALL): ModelMessage => ({
 	role: "assistant",
 	content: [{ type: "tool-call", toolCallId, toolName, input }, { type: "tool-approval-request", approvalId: `approval-${toolCallId}`, toolCallId }],
