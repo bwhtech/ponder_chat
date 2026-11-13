@@ -1,6 +1,6 @@
 /**
- * The environment variable that holds the secret WorkflowAgent signs tool approvals with
- * (experimental_toolApprovalSecret). An approval comes back in the messages the browser
+ * The environment variable that holds the secret the reply signs tool approvals with
+ * (approvals.ts). An approval comes back in the messages the browser
  * sends; the signature shows that the model asked for exactly that call. startup.ts
  * derives the secret from BETTER_AUTH_SECRET when it is not set. No imports: the
  * workflow imports this file, and workflow code can't load Node modules.

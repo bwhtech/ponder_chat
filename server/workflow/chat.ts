@@ -1,17 +1,15 @@
-import { WorkflowAgent, type ModelCallStreamPart } from "@ai-sdk/workflow";
-import { isStepCount, tool } from "ai";
+import type { ModelCallStreamPart } from "@ai-sdk/workflow";
+import { tool, type ToolSet } from "ai";
 import { getWorkflowMetadata, getWritable } from "workflow";
 import { ARTIFACT_GUIDANCE, artifactTools } from "../artifacts/schema.ts";
 import { RUN_PYTHON, RUN_PYTHON_DESCRIPTION, runPythonInput } from "../python/schema.ts";
 import { WEB_FETCH, WEB_FETCH_DESCRIPTION, WEB_SEARCH, WEB_SEARCH_DESCRIPTION, webFetchInput, webSearchInput } from "../search/schema.ts";
 import { needsFetchApproval } from "../search/trusted-pages.ts";
-import { callCost } from "../telemetry/cost.ts";
-import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
 import { connectorNote } from "../mcp/catalog-note.ts";
 import { EMPTY_CATALOG } from "../mcp/catalog.ts";
-import { calledToolName, CONNECTOR_GUIDANCE, connectorCatalogStep, connectorTools } from "./connectors.ts";
+import { CONNECTOR_GUIDANCE, connectorCatalogStep, connectorTools } from "./connectors.ts";
 import { ContextGuard, ContextOverLimitError, toolTokens } from "./context-guard.ts";
-import { ChatModel } from "./model.ts";
+import { runReply } from "./loop.ts";
 import type { Continued } from "./runs.ts";
 import { skillsGuidance, skillsStep, skillTools } from "./skills.ts";
 import {
@@ -19,7 +17,6 @@ import {
 	finishRunStep,
 	loadModelMessages,
 	recallMemoryStep,
-	recordUsageStep,
 	runPythonStep,
 	saveReplyStep,
 	trustedPagesStep,
@@ -40,10 +37,11 @@ export type ChatTurn = {
 };
 
 /**
- * One reply, as a durable workflow run. Each model call and each tool call is a step
- * recorded in Postgres. If the server stops in the middle, the run replays from that
- * record when it starts again and goes on from the first step without a result, and
- * the page that follows it sees the rest of the reply.
+ * One reply, as a durable workflow run (loop.ts). Each model call and each tool call is
+ * a step recorded in Postgres. If the server stops in the middle, the run replays from
+ * that record when it starts again and goes on from the first step without a result,
+ * and the page that follows it sees the rest of the reply. A model call cut short starts
+ * again, and the page drops what it had written (model-call.ts).
  *
  * The thread is saved by the run's last step, so the reply is kept even when nobody is
  * watching. The route saved the person's message before it started the run.
@@ -69,7 +67,7 @@ export async function chatTurn(turn: ChatTurn) {
 		const skills = await skillsStep().catch(() => []);
 		// Without it, every page waits for the person: safe, only slower.
 		const trustedPages = await trustedPagesStep(turn.threadId).catch(() => []);
-		const tools = {
+		const tools: ToolSet = {
 			[WEB_SEARCH]: tool({
 				description: WEB_SEARCH_DESCRIPTION,
 				inputSchema: webSearchInput,
@@ -103,38 +101,15 @@ export async function chatTurn(turn: ChatTurn) {
 		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors);
 		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors };
 		const guard = new ContextGuard(base, context, await toolTokens(tools), writable, turn.model.name);
-		const messages = await guard.initialMessages(system);
-		const agent = new WorkflowAgent({
-			model: new ChatModel(turn.model.id),
-			instructions: system,
-			// A tool that waits for approval comes back approved in the messages the browser sends; the signature shows the model asked for it.
-			experimental_toolApprovalSecret: { environmentVariable: TOOL_APPROVAL_SECRET_ENV },
+		// Each model call records its cost in `runs`, which credits are charged from (model-attempt.ts).
+		await runReply({
+			call: { runId: workflowRunId, threadId: turn.threadId, owner: turn.owner, modelId: turn.model.id, instructions: system },
+			messages: await guard.initialMessages(system),
 			tools,
-			prepareStep: guard.prepareStep,
-			// Credits are charged from what each model call cost (steps.ts).
-			onStepEnd: async (step) => {
-				await recordUsageStep({
-					threadId: turn.threadId,
-					user: turn.owner,
-					model: step.response?.modelId ?? turn.model.id,
-					inputTokens: step.usage.inputTokens ?? 0,
-					outputTokens: step.usage.outputTokens ?? 0,
-					cachedTokens: step.usage.inputTokenDetails?.cacheReadTokens ?? 0,
-					costUsd: callCost(step),
-					finishReason: step.finishReason,
-					toolCalls: step.toolCalls.map(calledToolName),
-					requested: turn.model.id,
-					estimated: guard.estimate,
-				});
-			},
-		});
-		await agent.stream({
-			messages,
+			// Keeps each model call inside the model's window, between the reply's steps too.
+			guard,
 			writable,
-			stopWhen: isStepCount(turn.maxSteps),
-			// The agent would end the stream as a finished reply even when the model failed; endReplyStream ends it.
-			sendFinish: false,
-			preventClose: true,
+			maxSteps: turn.maxSteps,
 		});
 	} catch (error) {
 		failure = error;

@@ -5,6 +5,14 @@ export const TITLE_FUNCTION_ID = "thread-title";
 /** The calls that summarize a long chat (compaction/summarize.ts). The person's reply needs them, so they cost credits. */
 export const COMPACTION_FUNCTION_ID = "compaction";
 
+/**
+ * How a reply's model call ends when it did not finish (model-calls.ts): still running or
+ * cut by a crash ("started"), cut by a crash and settled ("interrupted"), tried again
+ * ("retried"), failed on its last attempt ("failed"), or cut by Stop ("stopped").
+ * OpenRouter may bill them, so they are kept, but they cost the person no credits.
+ */
+export const UNCHARGED_CALLS = ["started", "interrupted", "retried", "failed", "stopped"] as const;
+
 /** One agent run: one generateText/streamText call, such as one /api/chat request or one subagent call. */
 export type RunRow = {
 	id: string;
@@ -54,6 +62,11 @@ export async function migrateRuns() {
 	await sql`create index if not exists runs_user_idx on runs ("user", created_at)`;
 	// Everyone's runs over a range of days: the /admin overview, people and requests, and deploy/sentinel.sh.
 	await sql`create index if not exists runs_created_idx on runs (created_at)`;
+	// OpenRouter's id for a reply's model call, to look up the cost of a call cut short (model-calls.ts).
+	await sql`alter table runs add column if not exists generation_id text`;
+	// How often the sweep asked OpenRouter for that cost, and when it asks next (model-calls.ts).
+	await sql`alter table runs add column if not exists cost_tries integer not null default 0`;
+	await sql`alter table runs add column if not exists cost_next_at timestamptz`;
 	await migrateChargedRuns();
 }
 
@@ -64,8 +77,9 @@ export async function migrateRuns() {
  *
  * A reply writes one "chat" run per model call; the calls before the last end in
  * "tool-calls", so only the last one is the reply. Web searches, memory and titles have
- * their own function_id. The view is made again at each start, because `runs.*` changes
- * when `runs` gets a column.
+ * their own function_id. Model calls that a crash, an error or Stop cut short are kept in
+ * `runs` but cost no credits (UNCHARGED_CALLS, model-calls.ts). The view is made again at
+ * each start, because `runs.*` changes when `runs` gets a column.
  */
 async function migrateChargedRuns() {
 	await sql.begin(async (tx) => {
@@ -74,7 +88,8 @@ async function migrateChargedRuns() {
 		await tx.unsafe(`
 			create view charged_runs as
 			select runs.*, (function_id = 'chat' and parent_id is null and finish_reason <> 'tool-calls') as is_reply
-			from runs where function_id is distinct from '${TITLE_FUNCTION_ID}'`);
+			from runs where function_id is distinct from '${TITLE_FUNCTION_ID}'
+				and finish_reason not in (${UNCHARGED_CALLS.map((reason) => `'${reason}'`).join(", ")})`);
 	});
 }
 
@@ -90,7 +105,9 @@ export async function insertRun(run: RunRow) {
 
 /**
  * Read-only usage for `GET /api/usage?thread=`: a person's runs, for one thread or the latest 100,
- * with totals. Subagent runs carry the thread of the run that called them.
+ * with totals. Subagent runs carry the thread of the run that called them. The list has
+ * every row; the totals leave out the model calls that did not finish (UNCHARGED_CALLS),
+ * which cost the person nothing.
  */
 export async function usageReport({ user, thread }: { user: string; thread?: string }) {
 	const where = thread ? sql`"user" = ${user} and thread_id = ${thread}` : sql`"user" = ${user}`;
@@ -102,6 +119,6 @@ export async function usageReport({ user, thread }: { user: string; thread?: str
 		select count(*)::int as runs, coalesce(sum(input_tokens), 0)::int as input_tokens,
 			coalesce(sum(output_tokens), 0)::int as output_tokens, coalesce(sum(cached_tokens), 0)::int as cached_tokens,
 			coalesce(sum(cost_usd), 0)::float8 as cost_usd
-		from runs where ${where}`;
+		from runs where ${where} and finish_reason <> all(${[...UNCHARGED_CALLS]})`;
 	return { totals, runs };
 }

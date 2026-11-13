@@ -65,6 +65,9 @@ jobs:
       - name: Check a compaction run, its retries and a stopped run
         run: npx tsx server/compaction-flow.check.ts
 
+      - name: Check the reply loop's retries, stream and approvals
+        run: npx tsx server/workflow/loop.check.ts
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

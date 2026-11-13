@@ -56,17 +56,24 @@ export async function latestRun(id: string): Promise<ThreadRun | undefined> {
 	const [row] = id.startsWith("wrun_")
 		? await sql`select * from thread_runs where run_id = ${id}`
 		: await sql`select * from thread_runs where thread_id = ${id}`;
-	return (
-		row && {
-			threadId: row.thread_id,
-			runId: row.run_id,
-			model: row.model,
-			finished: Boolean(row.finished_at),
-			cancelled: row.cancelled,
-			failed: row.failed,
-			continued: row.message_id ? { messageId: row.message_id, baseParts: row.base_parts ?? 0 } : null,
-		}
-	);
+	return row && threadRun(row);
+}
+
+/** The runs that are not marked finished: running, or ended without saving (replies.ts, finishEndedRuns). */
+export async function unfinishedRuns(): Promise<ThreadRun[]> {
+	return (await sql`select * from thread_runs where finished_at is null`).map(threadRun);
+}
+
+function threadRun(row: Record<string, any>): ThreadRun {
+	return {
+		threadId: row.thread_id,
+		runId: row.run_id,
+		model: row.model,
+		finished: Boolean(row.finished_at),
+		cancelled: row.cancelled,
+		failed: row.failed,
+		continued: row.message_id ? { messageId: row.message_id, baseParts: row.base_parts ?? 0 } : null,
+	};
 }
 
 /**

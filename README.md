@@ -150,9 +150,9 @@ Then, with the app's environment:
 
 Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL` (every OpenRouter call; default `https://openrouter.ai/api`) and `CLOUDFLARE_API_URL` (the email API). Production sets neither.
 
-Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts`, `server/tracing.check.ts` and `server/mcp.check.ts` on every pull request.
+Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts`, `server/tracing.check.ts`, `server/workflow/loop.check.ts` and `server/mcp.check.ts` on every pull request.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, `npx tsx server/tracing.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, `npx tsx server/tracing.check.ts`, `npx tsx server/workflow/loop.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -189,7 +189,7 @@ To spend nothing on OpenRouter, use the fake from the end-to-end tests:
 
 Limits:
 
-- A server restart cuts the reply in progress. The reply starts its current step again after the restart.
+- A server restart cuts the reply in progress. After the restart, the reply runs its current step again. A model call has 3 attempts (see "Durable replies").
 - Vite does not send the Content Security Policy that `server/app.ts` adds to each page. To check the policy, use `npm run build` and `npm start`.
 - After a change to `nitro.config.ts` or `.env`, start `npm run dev` again.
 - Memory does not save. The workflow's development bundle does not copy `gate.json` and `extract.md` (`server/memory/`), so each save logs `ENOENT`. Replies are not affected.
@@ -220,6 +220,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`).
 - The calls that write chat names are recorded in `runs` but are not charged to credits. The view `charged_runs` (`server/telemetry/store.ts`) holds this rule, and which run ends a reply (`is_reply`). Credits, `/admin` and `deploy/sentinel.sh` all read it.
+- A model call that did not finish is also recorded in `runs` but not charged: a call that a crash cut short (`finish_reason` "interrupted", or "started" until the reply settles it), a call that failed and was tried again ("retried"), the last failed attempt ("failed"), and the call that Stop cut short ("stopped"). OpenRouter can bill them, so `deploy/sentinel.sh`'s daily cost, which reads `runs`, includes them.
 - Each web search is a `runs` row (`function_id` `web-search`) and is charged: about $0.007, so 7 credits.
 - Each summary of a long chat is a `runs` row (`function_id` `compaction`) and is charged. With DeepSeek V4.1 Flash, a summary of 200,000 tokens costs about $0.01, so 10 credits. See "Long chats".
 - The count starts again at midnight UTC.
@@ -243,7 +244,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 | Activity | Each change an admin made, newest first: who did it, to whom, what changed and when. A click on a name shows that person's events only. Read only. On a phone, it is in the account menu. |
 
 - Admins see usage only. The admin API reads `runs` (cost, model, time), `sessions` (device and time) and the number of threads. It never returns messages or thread titles.
-- A "reply" is a `runs` row with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each model call, so a reply that used tools has several rows, and only the last one counts.
+- A "reply" is a `runs` row in `charged_runs` with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each attempt at a model call, so a reply that used tools, or whose model call was tried again, has several rows. Only the last one counts.
 - The OpenRouter key: an admin pastes it in Settings. The server checks it with OpenRouter, then saves it encrypted in the `secrets` table (AES-256-GCM, with a key derived from `BETTER_AUTH_SECRET`), so a copy of the database alone does not give it away. The key is never sent back to the page; Settings shows its last four characters. Until a key is saved there, `OPENROUTER_API_KEY` from the environment is used. A new `BETTER_AUTH_SECRET` makes the saved key unreadable: the server then uses `OPENROUTER_API_KEY` if it is set, and Settings asks for the key again.
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
 - The admin activity log is the `admin_events` table (`server/admin-events.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/admin-auth-events.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
@@ -253,17 +254,56 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 
 | Part | Where |
 | --- | --- |
-| The workflow: one reply, each model call and tool call a step | `server/workflow/chat.ts`, `server/workflow/steps.ts` |
-| The model, serializable across steps | `server/workflow/model.ts` |
+| The workflow: one reply | `server/workflow/chat.ts` |
+| The agent loop: model calls, tool calls, approvals | `server/workflow/loop.ts`, `server/workflow/tool-calls.ts`, `server/workflow/approvals.ts` |
+| One model call as a step, and its retries | `server/workflow/model-call.ts`, `server/workflow/model-attempt.ts`, `server/workflow/model-errors.ts` |
+| The `runs` row of each model call | `server/telemetry/model-calls.ts` |
 | Streams, reconnects, saving the reply | `server/workflow/reply.ts`, `server/workflow/runs.ts` |
 | Start-up and shutdown of the worker | `server/startup.ts` |
 | Browser: reconnects with `WorkflowChatTransport` | `web/ChatView.vue` |
 
-- Nitro builds the server (`nitro.config.ts`) and compiles `"use workflow"` and `"use step"`. Runs are stored in Postgres (schemas `workflow` and `graphile_worker`); `npx --no-install bootstrap` creates them, and again after an upgrade of `@workflow/world-postgres`.
-- `@ai-sdk/workflow` does not retry a model call whose server stopped. `scripts/patch-workflow-retries.mjs` (run after `npm install`) lets it retry twice; each attempt starts with `reset-step`, so the page drops the partial text. The script fails if a new version changes that code.
-- One server runs the worker. At start-up it waits for an advisory lock until the previous server is gone, then releases the jobs a crash left locked (graphile-worker otherwise waits 4 hours). On SIGTERM it stops the worker and exits.
-- The flow route `/.well-known/workflow/v1/flow` has no authentication. The server listens on 127.0.0.1; in production the proxy must refuse that path.
-- Stop cancels the run and saves what it wrote. The model call in flight still runs to its end on OpenRouter; that cost is not charged to credits.
+- Nitro builds the server (`nitro.config.ts`) and compiles `"use workflow"` and `"use step"`. Runs are stored in Postgres (schemas `workflow` and `graphile_worker`). `npx --no-install bootstrap` creates them. Run it again after an upgrade of `@workflow/world-postgres`.
+- Ponder runs its own agent loop, not `WorkflowAgent` from `@ai-sdk/workflow`. `WorkflowAgent` does not let a model call run again after its server stopped.
+- Each model call is one step. The step calls `streamText` for one model call, with tools that have no `execute`, so the model only asks for tool calls. The loop runs them. Each tool call is its own step, so a model call that runs again never runs a tool again.
+- The step writes the model's output to the reply's stream as it comes, in the format that `WorkflowAgent` used. `reply.ts`, `WorkflowChatTransport` and runs from before the change read it the same way.
+
+A model call has 3 attempts. One attempt is one request to OpenRouter. The same 3 attempts cover errors and a server that stopped:
+
+- A crash, a deploy or a restart in the middle of a call: the next server runs the call again.
+- The model refused the request with a 4xx other than 408, 409 and 429: no other attempt. A bad request, a bad key, no OpenRouter credit or a missing model fails again.
+- The AI SDK refused the call itself, with no HTTP status (such as a prompt it can't send): no other attempt.
+- Any other error gets another attempt: 408, 409, 429, 5xx, a network error, a broken or empty stream, or an error of the server itself.
+- The waits are 2 seconds before the 2nd attempt and 8 seconds before the 3rd, plus up to 1 second at random. A 429 with `Retry-After` waits that long, up to 30 seconds.
+- A call that sends nothing for 10 minutes, or stops sending for 2 minutes, counts as failed. The first limit is long because a reasoning model that does not stream its thinking can think for minutes.
+- Each attempt starts with a `reset-step` chunk. The page and the saved reply then drop what the earlier attempt wrote.
+- After the 3rd attempt, the reply ends with an error, and the page shows Retry.
+
+Each attempt that OpenRouter started is a row in `runs`:
+
+- The row is written when the first chunk names the call (OpenRouter's generation id). So a call that a crash cuts short is in `runs` too.
+- A finished call gets its tokens and cost from the response.
+- A call that failed, or that a crash or Stop cut short, costs no credits (see "Credits").
+- A stream that was cut does not report its cost. The sweep gets it from OpenRouter's generation API (`GET /api/v1/generation`) within a minute, after the reply goes on.
+- A call that finished, but whose server stopped before the step saved its result, runs again. Its row becomes "retried", so only the new call is charged.
+
+Tool calls:
+
+- A connector call runs at most once. Its step has no retries. After a crash in the middle of the call, the workflow runtime fails the step and does not run it again. The model then reads that the call may or may not have taken effect.
+- A call that can't run never runs, and the person is never asked about it:
+  - A call to a tool that does not exist: the model reads the AI SDK's reason as the call's result, and the page shows an input error.
+  - A call whose input fails the tool's own check (its zod schema, or `Catalog.check` for `connector_call`): the model reads the problem as the call's result.
+  - Input that a model's output limit cut off is in the second group. OpenRouter sends it as `{}` when the finish reason is "tool_calls", and leaves the call out when it is "length".
+- `web_search`, `web_fetch` and `run_python` run again after a crash. Each web search that runs again is charged again.
+- A tool call that waits for the person ends the reply with a signed `tool-approval-request`. The signature is the AI SDK's format, keyed by `PONDER_TOOL_APPROVAL_SECRET`. The run after the person answers carries out the approved calls first (a `continued` run, `runs.ts`).
+
+Workers:
+
+- One server runs the worker. At start-up it waits for an advisory lock until the previous server is gone. Then it releases the jobs that a crash left locked (graphile-worker otherwise waits 4 hours). On SIGTERM it stops the worker and exits within 10 seconds.
+- The page reconnects to a reply for up to 30 seconds while the server restarts (`patientFetch` in `web/ChatView.vue`).
+- The flow route `/.well-known/workflow/v1/flow` has no authentication. The server listens on 127.0.0.1. In production the proxy must refuse that path.
+- Stop cancels the run and saves what it wrote. The model call in flight still runs to its end on OpenRouter. Its row keeps its cost, as "stopped", and costs no credits.
+- The sweep (`server/workflow/sweep.ts`) runs at start-up and then every minute, as two jobs on their own timers. One finishes the replies whose workflow run ended without saving them. The other gets the cost of calls that were cut short, and asks again later and later when OpenRouter can't tell yet: 1 minute, then 2, 4 and so on, up to 3 hours apart, for a day.
+- The workflow runtime can fail a run outside `chatTurn`, which saves the reply on every other way out. An example is a reply in flight across a deploy that changed the reply loop's steps: its replay diverges. The sweep then ends the run's stream with an error and saves what the reply wrote, marked failed. A page that follows the reply stops and offers Retry, with no reload. Until the sweep runs, the thread shows the reply as running. `deploy/README.md` says when to deploy such a change.
 
 ### Tracing
 
@@ -286,8 +326,8 @@ A reply's trace has these spans:
 | `queue.wait` | Ponder | Each step's time in the queue |
 | `workflow.execute chatTurn`, `step.execute <step>` | Workflow | Each delivery and each step, with replays |
 | `thread.load`, `file_context.resolve`, `pdf.extract_text`, `memory.recall`, `connectors.list` | Ponder | Context building |
-| `invoke_agent <model>`, `step N`, `chat <model>` | AI SDK (`@ai-sdk/otel`) | The agent, its steps and each model call, with tokens and time to first token (`gen_ai.client.operation.time_to_first_chunk`) |
-| `execute_tool <tool>` | AI SDK | Each tool call |
+| `invoke_agent <model>`, `step 1`, `chat <model>` | AI SDK (`@ai-sdk/otel`) | Each attempt at a model call: one `streamText` call of one step (`server/workflow/model-attempt.ts`), with tokens and time to first token (`gen_ai.client.operation.time_to_first_chunk`) |
+| `execute_tool <tool>` | Ponder (`server/workflow/tool-spans.ts`) | Each tool call that ran. The reply loop runs tools in workflow code, which can't send spans, so the step that writes the results sends them, with the times the loop measured. A tool's own spans, such as `web_fetch.read`, are beside it, not under it |
 | `mcp.call_tool`, `search.query`, `web_fetch.read`, `python.run` | Ponder | The work inside a tool |
 | `compaction.run` | Ponder | A long chat's summary (see "Long chats"): how it ended (`ponder.outcome`) and the estimated tokens after it. The summarizer's model call is in it. |
 | `GET`, `POST` | Ponder (`http.ts`) | Each HTTP request: OpenRouter, MCP servers, pages |
@@ -308,7 +348,7 @@ Privacy: admins see usage, never chats (see "Admin"), and traces keep that promi
 1. At the source. The AI SDK's integration is told for every event not to record inputs or outputs, whatever the call asked. HTTP spans record the method, the status and the kind of peer (`ponder.peer`: `openrouter`, `mcp`, `web`). They record the host for OpenRouter only, because a subdomain can carry data, and a connector's host tells which apps a person uses. No `traceparent` header goes out, so a page or an MCP server learns nothing about the trace.
 2. At export. An allowlist (`server/tracing/privacy.ts`) keeps only known attribute keys. It drops error messages, events other than `exception` (which keeps only its type) and status messages. A span name of an unknown shape becomes `span`. A library that starts to record a new attribute sends nothing until the key is added there. A value that comes from outside Ponder's code, such as a tool name, a response id or an error type, must look like a name, or it is dropped.
 
-Tool names stay, as in `runs`, but never the name the person gave a connector, which tells which apps they use. This is the same rule as for a connector's host. The model reaches a connector's tools through `connector_search` and `connector_call` (see "Connectors"), so the AI SDK's spans are `execute_tool connector_search` and `execute_tool connector_call`. The real tool, `<connector>__<tool>`, is in the call's input, which is never recorded. `mcp.call_tool` records the tool's own name, which the MCP server gives. If a span ever carries a name of the shape `<connector>__<tool>`, the allowlist changes it to `connector__<tool>`.
+Tool names stay, as in `runs`, but never the name the person gave a connector, which tells which apps they use. This is the same rule as for a connector's host. The model reaches a connector's tools through `connector_search` and `connector_call` (see "Connectors"), so the tool spans are `execute_tool connector_search` and `execute_tool connector_call`. The real tool, `<connector>__<tool>`, is in the call's input, which is never recorded. `mcp.call_tool` records the tool's own name, which the MCP server gives. If a span ever carries a name of the shape `<connector>__<tool>`, the allowlist changes it to `connector__<tool>`.
 
 `server/tracing.check.ts` checks both with a marker in every place content could come from. `e2e/tests/tracing.spec.ts` checks the whole path: a reply whose message, file, address and connector input hold a marker exports no span with it.
 
@@ -422,7 +462,7 @@ A chat can grow longer than its model can read. `server/compaction/` and `server
 - The summarizer: DeepSeek V4.1 Flash. Admins can choose another model that has a ZDR endpoint in Settings, Long chats. Ponder uses the chat's own model when the chosen one is not available, or when its window is too small. The call goes to a ZDR endpoint and is charged to credits (see "Credits").
 - A failed summary does not fail the reply. A summary that takes more than three minutes, or that is cut off at the output limit, counts as failed. After three tries, the reply leaves out the old messages with a note, nothing is saved, and the next reply tries again. The failure is logged as `reply degraded`.
 - The page: while the summary is written, the reply shows "Compacting earlier messages". After it, a divider follows the last summarized message. Each later reply that reads the saved summary shows the divider again, so it stays after Retry. The chat itself keeps every message: search, export and memory still read all of them.
-- Compaction runs in a workflow step, so a run that replays never summarizes twice. A step that is tried again after the save uses the saved summary. A run that was stopped or replaced does not save its summary. `server/compaction.check.ts`, `server/compaction-flow.check.ts` and `e2e/tests/compaction.spec.ts` test it.
+- Compaction runs in a workflow step, so a run that replays never summarizes twice. The reply loop runs it before each model call, in a step apart from the model call's (`server/workflow/loop.ts`), so a model call that is tried again does not summarize again. A step that is tried again after the save uses the saved summary. A run that was stopped or replaced does not save its summary. `server/compaction.check.ts`, `server/compaction-flow.check.ts` and `e2e/tests/compaction.spec.ts` test it.
 
 ### Limits
 

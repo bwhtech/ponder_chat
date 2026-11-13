@@ -183,6 +183,46 @@ test("does not run a tool that the person denies", async ({ page, fake }) => {
 	expect(JSON.stringify((await fake.calls(order))[1].messages)).toContain("The person denied this.");
 });
 
+test("runs the call the person allows, and not the one they deny, in the same reply", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({
+		match: order,
+		steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" }), call("shop__add_note", { order, note: "Rush" })] }, { text: "I added one note." }],
+	});
+
+	await page.goto("/");
+	await chat.send(page, `Add two notes to order ${order}`);
+	const cards = page.locator("[data-slot=confirmation]");
+	await expect(cards).toHaveCount(2);
+	await cards.first().getByRole("button", { name: "Allow once" }).click();
+	// An answered question folds away, so the one left is the second.
+	await expect(cards).toHaveCount(1);
+	await expect(cards).toContainText("Rush");
+	await cards.getByRole("button", { name: "Deny" }).click();
+
+	await expect(chat.reply(page)).toContainText("I added one note.");
+	expect(await serverCalls(page, order)).toEqual([expect.objectContaining({ tool: "add_note", args: { order, note: "Gift wrap" } })]);
+	expect(JSON.stringify((await fake.calls(order))[1].messages)).toContain("The person denied this.");
+});
+
+test("keeps a question after a reload, and runs the call once allowed", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a gift-wrap note to order ${order}`);
+	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	// The question comes back from the saved reply, with its signature.
+	await page.reload();
+	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	await page.getByRole("button", { name: "Allow once" }).click();
+
+	await expect(chat.reply(page)).toContainText("I added the note.");
+	expect(await serverCalls(page, order)).toEqual([expect.objectContaining({ tool: "add_note", args: { order, note: "Gift wrap" } })]);
+});
+
 test("stops asking for a tool that the person always allows", async ({ page, fake }) => {
 	await addShop(page);
 	const order = orderNumber();
@@ -217,6 +257,20 @@ test("checks a call's input against the tool before it asks", async ({ page, fak
 	const sent = JSON.stringify((await fake.calls(order))[1].messages);
 	expect(sent).toContain('missing the required property \\"note\\"');
 	expect(sent).toMatch(/Signature: shop__add_note\(\{ [^)]*note: string/);
+});
+
+test("does not ask about a call whose input the model's output limit cut off", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	const cut = { ...call("shop__add_note", { order, note: "A note long enough to be cut" }), cutAfter: 30 };
+	await fake.chat({ match: order, steps: [{ toolCalls: [cut] }, { text: "My note was cut off." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a long note to order ${order}`);
+	await expect(chat.reply(page)).toContainText("My note was cut off.");
+	// OpenRouter sends the cut input as {}, which the tool's check refuses before anything asks.
+	await expect(page.getByRole("button", { name: "Allow once" })).toHaveCount(0);
+	expect(await serverCalls(page, order)).toEqual([]);
 });
 
 test(`does not run an "Ask first" tool called by a padded name`, async ({ page, fake }) => {

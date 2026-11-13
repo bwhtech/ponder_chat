@@ -1,15 +1,10 @@
 import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider";
-import { WORKFLOW_DESERIALIZE, WORKFLOW_SERIALIZE } from "@workflow/serde";
 import { needsCacheMarks, withCacheMarks } from "./cache.ts";
 
 /**
- * The OpenRouter model, made safe to cross workflow step boundaries, from the platform's
- * spike (platform/server/workflow/model.ts).
- *
- * WorkflowAgent passes its model into each durable model step, so the model is
- * serialized into Postgres. OpenRouter's model class is not serializable, and
- * providers that are serialize their config, API key headers included. This class
- * keeps only the model id, and reads the key (openrouter-key.ts) in the step.
+ * The OpenRouter model of a reply's model calls (model-attempt.ts). It keeps only the
+ * model id, and reads the key (openrouter-key.ts) for each call, so an admin's new key
+ * applies at once and the key is never part of a step's input or result.
  */
 export class ChatModel implements LanguageModelV4 {
 	readonly specificationVersion = "v4";
@@ -17,14 +12,6 @@ export class ChatModel implements LanguageModelV4 {
 	readonly supportedUrls = {};
 
 	constructor(readonly modelId: string) {}
-
-	static [WORKFLOW_SERIALIZE](model: ChatModel) {
-		return { modelId: model.modelId };
-	}
-
-	static [WORKFLOW_DESERIALIZE](data: { modelId: string }) {
-		return new ChatModel(data.modelId);
-	}
 
 	// Called only inside model steps, which run in plain Node.
 	async doGenerate(options: LanguageModelV4CallOptions) {

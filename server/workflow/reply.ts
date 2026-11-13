@@ -52,7 +52,7 @@ function withMessage(messageId: string, model: string) {
 }
 
 /**
- * Saves what the run wrote as the thread's last message. WorkflowAgent returns model
+ * Saves what the run wrote as the thread's last message. The reply loop keeps model
  * messages, with no conversion back to UI messages, so this replays the run's own
  * stream into a UI message, as the browser did. Used by the run's last step, and by Stop
  * for a run cut short (`cancelled`: what it wrote up to the moment it was stopped). A

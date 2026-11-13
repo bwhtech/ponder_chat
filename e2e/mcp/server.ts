@@ -22,7 +22,10 @@ import type { McpCall } from "./calls.ts";
  *   server's address, and the key server must not have any.
  *
  * Each server has two tools: find_order only reads, and add_note changes something.
+ * find_order takes SLOW_MS for an order that starts with "SLOW", so a test can stop
+ * Ponder in the middle of the call (durability.spec.ts). The call is recorded first.
  */
+const SLOW_MS = 6_000;
 export const SHOP_KEY = "shop-key";
 const calls: McpCall[] = [];
 
@@ -33,6 +36,7 @@ function shop(server: McpCall["server"]) {
 		{ title: "Find order", description: "Finds an order by its number.", inputSchema: { order: z.string() }, annotations: { readOnlyHint: true } },
 		async (args) => {
 			calls.push({ server, tool: "find_order", args, at: Date.now() });
+			if (args.order.startsWith("SLOW")) await new Promise((resolve) => setTimeout(resolve, SLOW_MS));
 			return { content: [{ type: "text", text: `Order ${args.order}: 2 blue mugs, shipped on 3 November.` }] };
 		},
 	);

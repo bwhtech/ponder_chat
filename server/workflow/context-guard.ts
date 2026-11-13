@@ -1,7 +1,6 @@
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import { asSchema, type ModelMessage, type ToolResultPart, type ToolSet } from "ai";
-import { convertToLanguageModelPrompt, standardizePrompt } from "ai/internal";
 import type { CompactRequest } from "../compaction/compaction.ts";
 import { addEstimates, budgetFor, countTokens, estimate, estimateTokens, measuredRatio, type Budget, type Estimate } from "../compaction/tokens.ts";
 import { trimResult } from "./context.ts";
@@ -28,10 +27,11 @@ export class ContextOverLimitError extends Error {
 }
 
 type Base = Pick<CompactRequest, "threadId" | "owner" | "runId" | "modelId" | "recalled" | "skills" | "connectors">;
-type StepInfo = { stepNumber: number; steps: { usage: { inputTokens?: number | undefined } }[]; messages: LanguageModelV4Prompt };
+/** A prompt with the instructions as its first, system message: the reply loop's messages, or the provider's prompt (the checks). */
+type Prompt = ModelMessage[] | LanguageModelV4Prompt;
 
 export class ContextGuard {
-	/** Ponder's estimate of the call about to be made, for recordUsageStep. */
+	/** Ponder's estimate of the call about to be made. The model step measures the thread's ratio with it (model-attempt.ts). */
 	estimate: Estimate = { text: 0, media: 0 };
 	private budget: Budget;
 	private ratio: number;
@@ -61,16 +61,20 @@ export class ContextGuard {
 		return this.context.messages;
 	}
 
-	/** For WorkflowAgent's prepareStep: the messages it returns replace the prompt for this step and the next. */
-	prepareStep = async ({ stepNumber, steps, messages }: StepInfo): Promise<{ messages: LanguageModelV4Prompt } | undefined> => {
-		const measured = stepNumber > 0 ? (steps.at(-1)?.usage.inputTokens ?? 0) : 0;
-		const prompt = await this.keepInside(messages, measured, stepNumber === 0 ? "message" : "reply");
-		this.estimate = this.estimateOf(prompt);
-		this.seen = prompt.length;
-		return prompt === messages ? undefined : { messages: prompt };
-	};
+	/**
+	 * Before each model call of the reply loop (loop.ts): the messages, inside the window.
+	 * `measured` is the input tokens the last call reported, 0 before the first. The
+	 * messages it returns replace the reply's messages for this call and the next.
+	 */
+	async beforeCall(instructions: string, messages: ModelMessage[], { first, measured }: { first: boolean; measured: number }): Promise<ModelMessage[]> {
+		const prompt: ModelMessage[] = [{ role: "system", content: instructions }, ...messages];
+		const kept = await this.keepInside(prompt, first ? 0 : measured, first ? "message" : "reply");
+		this.estimate = this.estimateOf(kept);
+		this.seen = kept.length;
+		return kept === prompt ? messages : kept.slice(1);
+	}
 
-	private async keepInside(messages: LanguageModelV4Prompt, measured: number, what: "message" | "reply") {
+	private async keepInside(messages: ModelMessage[], measured: number, what: "message" | "reply") {
 		if (measured > 0) this.ratio = measuredRatio(measured, this.estimate) ?? this.ratio;
 		const tokens = measured > 0 ? measured + countTokens(estimate(messages.slice(this.seen)), this.ratio) : countTokens(this.estimateOf(messages), this.ratio);
 		if (tokens <= this.budget.trigger) return messages;
@@ -81,7 +85,7 @@ export class ContextGuard {
 	}
 
 	/** Summarizes everything before the current turn, once a reply, when that can bring the call under the trigger. */
-	private async compactTurn(messages: LanguageModelV4Prompt): Promise<LanguageModelV4Prompt> {
+	private async compactTurn(messages: ModelMessage[]): Promise<ModelMessage[]> {
 		if (this.turnCompacted) return messages;
 		const system = messages.findIndex((message) => message.role !== "system");
 		const turn = messages.map((message) => message.role).lastIndexOf("user");
@@ -92,11 +96,11 @@ export class ContextGuard {
 		const envelope = estimate(messages.slice(0, system)).text + this.toolTokens;
 		const result = await compactStep(this.writable, { ...this.request("turn", envelope), turn: estimate(messages.slice(turn)) });
 		if (result.kind !== "compacted" && result.kind !== "left-out") return messages;
-		return [...messages.slice(0, system), ...(await providerMessages(result.messages)), ...messages.slice(turn)];
+		return [...messages.slice(0, system), ...result.messages, ...messages.slice(turn)];
 	}
 
 	/** A prompt's estimate, with the tools, which go with every call. */
-	private estimateOf(prompt: LanguageModelV4Prompt) {
+	private estimateOf(prompt: Prompt) {
 		return addEstimates(estimate(prompt), { text: this.toolTokens, media: 0 });
 	}
 
@@ -121,12 +125,6 @@ export async function toolTokens(tools: ToolSet) {
 	return estimateTokens(specs);
 }
 
-/** Model messages in the provider's format, as WorkflowAgent converts its own. */
-async function providerMessages(messages: ModelMessage[]): Promise<LanguageModelV4Prompt> {
-	const prompt = await standardizePrompt({ messages });
-	return convertToLanguageModelPrompt({ prompt, supportedUrls: {}, download: async (requests) => requests.map(() => null) });
-}
-
 /**
  * True when summarizing everything before the current turn can bring the call under the
  * trigger. The summary removes only that text: the instructions, the tools and the
@@ -134,7 +132,7 @@ async function providerMessages(messages: ModelMessage[]): Promise<LanguageModel
  * alone never drops). So a large PDF that is over the trigger by itself is not folded again.
  */
 export function foldCanFit(
-	prompt: LanguageModelV4Prompt,
+	prompt: Prompt,
 	{ system, turn, toolTokens, ratio, trigger }: { system: number; turn: number; toolTokens: number; ratio: number; trigger: number },
 ) {
 	const kept = addEstimates(estimate(prompt.slice(0, system)), estimate(prompt.slice(turn)), { text: toolTokens, media: estimate(prompt.slice(system, turn)).media });
@@ -142,13 +140,14 @@ export function foldCanFit(
 }
 
 /** Cuts the long tool results of the current turn's earlier steps; the last step's stay whole. */
-export function trimEarlierSteps(prompt: LanguageModelV4Prompt): LanguageModelV4Prompt {
-	const roles = prompt.map((message) => message.role);
+export function trimEarlierSteps<P extends Prompt>(prompt: P): P {
+	const messages = prompt as ModelMessage[];
+	const roles = messages.map((message) => message.role);
 	const turn = roles.lastIndexOf("user");
 	const lastTool = roles.lastIndexOf("tool");
-	return prompt.map((message, index) => {
+	return messages.map((message, index) => {
 		if (message.role !== "tool" || index < turn || index === lastTool) return message;
-		const content = message.content.map((part) => (part.type === "tool-result" ? (trimResult(part as unknown as ToolResultPart) as unknown as typeof part) : part));
+		const content = message.content.map((part) => (part.type === "tool-result" ? trimResult(part as ToolResultPart) : part));
 		return { ...message, content };
-	});
+	}) as P;
 }

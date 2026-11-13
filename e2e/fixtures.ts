@@ -126,11 +126,12 @@ export async function invite(db: postgres.Sql, email: string) {
 
 /**
  * Invites the email and signs the page in with the code from the email, through Ponder's
- * sign-in API. sign-in.spec.ts tests the sign-in page itself.
+ * sign-in API. sign-in.spec.ts tests the sign-in page itself. `baseUrl` is the Ponder
+ * that the page uses, when it is not the shared one.
  */
-export async function signIn(page: Page, db: postgres.Sql, fake: Fake, email: string): Promise<Person> {
+export async function signIn(page: Page, db: postgres.Sql, fake: Fake, email: string, baseUrl = e2e.baseUrl): Promise<Person> {
 	await invite(db, email);
-	const headers = { origin: e2e.baseUrl };
+	const headers = { origin: baseUrl };
 	const sent = await page.request.post("/api/auth/email-otp/send-verification-otp", { data: { email, type: "sign-in" }, headers });
 	expect(sent.ok(), await sent.text()).toBe(true);
 	const otp = await fake.signInCode(email);

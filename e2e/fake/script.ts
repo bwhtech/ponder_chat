@@ -9,9 +9,13 @@ export type Step = {
 	reasoning?: string;
 	/** The reply text, streamed in small pieces. */
 	text?: string;
-	/** Tools the model calls. The agent runs them and calls the model again: the next step answers that call. */
-	/** `id` is the call's id, made up by the fake when left out. Some providers put the tool's name in it. */
-	toolCalls?: { name: string; input: unknown; id?: string }[];
+	/**
+	 * Tools the model calls. The agent runs them and calls the model again: the next step
+	 * answers that call. `id` is the call's id, made up by the fake when left out; some
+	 * providers put the tool's name in it. With `cutAfter`, the arguments stop after this
+	 * many characters, as a model's output limit cuts them.
+	 */
+	toolCalls?: { name: string; input: unknown; id?: string; cutAfter?: number }[];
 	/**
 	 * Streams each tool call's arguments in this many pieces, not 40 characters at a time.
 	 * For long arguments: the AI SDK parses the arguments so far again at each piece, in
@@ -23,6 +27,14 @@ export type Step = {
 	delayMs?: number;
 	/** Answers with this HTTP status and an error, in place of a reply. */
 	error?: { status: number; message: string };
+	/**
+	 * Only the first this many calls of the step fail (with `error`, or as `breakAfter`
+	 * says); the calls after them answer. Without it, `error` fails every call. A call
+	 * that Ponder tries again has the same messages, so it is the same step.
+	 */
+	failFirst?: number;
+	/** A failing call streams this many pieces of the reply, then an error chunk, as a provider that fails in the middle does. */
+	breakAfter?: number;
 	/** What the call cost in US dollars, as OpenRouter reports it. Credits are charged from it. */
 	cost?: number;
 };
