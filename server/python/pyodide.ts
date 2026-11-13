@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { RUN_TIMEOUT_MS } from "./schema.ts";
+import { annotate } from "../tracing/span.ts";
 
 /**
  * Runs Python in Pyodide inside a Deno process with no permissions (sandbox/pyodide/runner.ts),
@@ -66,8 +67,10 @@ const waiting: (() => void)[] = [];
 
 /** At most MAX_RUNS at once. A run that ends hands its slot to the next one waiting, so a new caller can't take it first. */
 export async function runPython(request: RunRequest): Promise<RunReply> {
+	const asked = Date.now();
 	if (running >= MAX_RUNS) await new Promise<void>((resolve) => waiting.push(resolve));
 	else running++;
+	annotate({ "ponder.wait_ms": Date.now() - asked });
 	try {
 		return await runNow(request);
 	} finally {

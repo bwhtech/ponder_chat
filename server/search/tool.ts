@@ -3,6 +3,8 @@ import { insertRun } from "../telemetry/store.ts";
 import { searchBackend } from "./backend.ts";
 import { fetchPage } from "./fetch-page.ts";
 import type { WebFetchInput, WebSearchInput } from "./schema.ts";
+import { withPeer } from "../tracing/http.ts";
+import { span } from "../tracing/span.ts";
 
 /**
  * web_search and web_fetch, run as durable steps by the chat workflow (workflow/steps.ts).
@@ -17,7 +19,12 @@ export async function executeWebSearch({ query }: WebSearchInput, { threadId, ow
 	const started = Date.now();
 	const backend = searchBackend();
 	try {
-		const reply = await backend.search(query);
+		// The backend and the count of results, never the query or the results.
+		const reply = await span("search.query", { "ponder.search.backend": backend.name }, async (active) => {
+			const found = await backend.search(query);
+			active.setAttributes({ "ponder.results": found.results.length, "gen_ai.request.model": found.model });
+			return found;
+		});
 		// Credits are charged from `runs`, so a search costs the person what it cost us.
 		await insertRun({
 			id: randomUUID(),
@@ -45,7 +52,8 @@ export async function executeWebSearch({ query }: WebSearchInput, { threadId, ow
 
 export async function executeWebFetch({ url }: WebFetchInput) {
 	try {
-		return await fetchPage(url);
+		// Never the address: its path and query can carry what a prompt injection planted.
+		return await span("web_fetch.read", {}, () => withPeer("web", () => fetchPage(url)));
 	} catch (error) {
 		// undici says only "fetch failed"; the cause names the real reason, such as a private address.
 		const cause = error instanceof Error && error.cause instanceof Error ? error.cause : error;

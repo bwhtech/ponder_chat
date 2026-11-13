@@ -2,6 +2,7 @@ import { loadFile, storeFile } from "../files.ts";
 import { runPython, type SandboxFile } from "./pyodide.ts";
 import type { RunPythonInput } from "./schema.ts";
 import { loadPythonState, savePythonState } from "./state.ts";
+import { span } from "../tracing/span.ts";
 
 /**
  * run_python: the model writes Python and Ponder Chat runs it in the sandbox (pyodide.ts).
@@ -35,10 +36,14 @@ export async function executeRunPython({ code, inputs }: RunPythonInput, { threa
 	// Runs in one chat take turns: each starts from the state the last one saved.
 	const previous = queues.get(threadId) ?? Promise.resolve();
 	const turn = previous.catch(() => undefined).then(async () => {
-		const state = await loadPythonState(threadId, owner);
-		const reply = await runPython({ code, files, state });
-		if (reply.state) await savePythonState(threadId, owner, reply.state);
-		return reply;
+		// The run's time, its wait for a slot (pyodide.ts) and how it ended, never the code or what it printed.
+		return span("python.run", { "ponder.files": files.length }, async (active) => {
+			const state = await loadPythonState(threadId, owner);
+			const reply = await runPython({ code, files, state });
+			active.setAttributes({ "ponder.python.status": reply.stopped ?? (reply.ok ? "ok" : "error"), "ponder.outputs": reply.outputs.length });
+			if (reply.state) await savePythonState(threadId, owner, reply.state);
+			return reply;
+		});
 	});
 	queues.set(threadId, turn);
 	const reply = await turn;

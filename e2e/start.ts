@@ -56,6 +56,10 @@ const env = {
 	MCP_ALLOW_PRIVATE_NETWORKS: "1",
 	// Python needs Deno and Pyodide (npm run sandbox:setup). Off, unless E2E_PYTHON=1.
 	PONDER_PYTHON: process.env.E2E_PYTHON === "1" ? "on" : "off",
+	// Traces go to the fake, which tracing.spec.ts reads, or to E2E_OTEL_ENDPOINT, such as a
+	// local Jaeger (README, "Tracing"). Sent every 100 ms, so a test does not wait long.
+	OTEL_EXPORTER_OTLP_ENDPOINT: process.env.E2E_OTEL_ENDPOINT ?? e2e.fakeUrl,
+	OTEL_BSP_SCHEDULE_DELAY: "100",
 	...(process.env.PONDER_DENO && { PONDER_DENO: process.env.PONDER_DENO }),
 	...(process.env.PONDER_DENO_DIR && { PONDER_DENO_DIR: process.env.PONDER_DENO_DIR }),
 };

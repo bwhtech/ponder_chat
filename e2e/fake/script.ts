@@ -10,7 +10,8 @@ export type Step = {
 	/** The reply text, streamed in small pieces. */
 	text?: string;
 	/** Tools the model calls. The agent runs them and calls the model again: the next step answers that call. */
-	toolCalls?: { name: string; input: unknown }[];
+	/** `id` is the call's id, made up by the fake when left out. Some providers put the tool's name in it. */
+	toolCalls?: { name: string; input: unknown; id?: string }[];
 	/** Milliseconds between streamed pieces. Use a large value to keep a reply open, such as to test Stop. */
 	delayMs?: number;
 	/** Answers with this HTTP status and an error, in place of a reply. */
@@ -45,3 +46,18 @@ export type SentEmail = { from: string; to: string; subject: string; text: strin
 
 /** A chat call as the fake received it, for tests that check what the model was sent. */
 export type ReceivedCall = { model: string; system: string; messages: unknown[]; tools: string[]; provider: unknown; at: number };
+
+/** A span that Ponder exported, as the fake received it (server/tracing/). */
+export type ReceivedSpan = {
+	traceId: string;
+	spanId: string;
+	parentSpanId?: string;
+	name: string;
+	attributes: Record<string, unknown>;
+	events: { name: string; attributes: Record<string, unknown> }[];
+	links: { traceId: string; spanId: string }[];
+	/** 0 unset, 1 ok, 2 error. */
+	statusCode: number;
+	/** The server process that sent it (service.instance.id). */
+	instance: string;
+};

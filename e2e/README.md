@@ -40,6 +40,8 @@ To use another Postgres, set `E2E_DATABASE_URL`. The database's name must end in
 4. Starts the test MCP servers (`e2e/mcp/server.ts`) on ports 3599 and 3600.
 5. Starts Ponder's build on port 3597. Ponder sends every OpenRouter call and every email to the fake, through `OPENROUTER_BASE_URL` and `CLOUDFLARE_API_URL`. `MCP_ALLOW_PRIVATE_NETWORKS=1` lets connectors reach the test MCP servers on 127.0.0.1.
 
+Tracing is on, and Ponder sends its traces to the fake, at `/v1/traces`. `fake.spans()` reads them (`tests/tracing.spec.ts`). To see the tests' traces in a local Jaeger instead, set `E2E_OTEL_ENDPOINT=http://127.0.0.1:4318` (README, "Tracing"). Then `tracing.spec.ts` fails, because the fake gets no spans.
+
 Python is off, because it needs Deno and Pyodide. To include it, run `npm run sandbox:setup` and set `E2E_PYTHON=1`.
 
 To look at the app as the tests see it, run `npm run e2e:server` and open http://127.0.0.1:3597. Playwright uses that server while it runs, and does not start another one. Sign in with an invited email: the code is in the fake's outbox, at http://127.0.0.1:3598/__fake/emails?to=you@example.com. To invite an email, add it with `npx tsx scripts/invite.ts` and `DATABASE_URL` set to the test database.
@@ -52,7 +54,7 @@ Import `test` and `expect` from `e2e/fixtures.ts`. Its fixtures:
 | --- | --- |
 | `person` | Signs the page in as a new person, with no chats and a full day's credits. |
 | `admin` | The same, with the admin role. |
-| `fake` | Scripts the fake OpenRouter, and reads what Ponder sent to it. |
+| `fake` | Scripts the fake OpenRouter, and reads what Ponder sent to it, traces included. |
 | `db` | Ponder's database, for setup that the app can't do, such as an invite. |
 
 Each test gets a new person, so tests can run in parallel and in any order.

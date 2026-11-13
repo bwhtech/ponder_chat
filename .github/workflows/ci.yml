@@ -56,6 +56,9 @@ jobs:
       - name: Check that a PDF's text is read off the server's thread
         run: npx tsx server/pdf-text.check.ts
 
+      - name: Check that no span carries content, and a reply is one trace
+        run: npx tsx server/tracing.check.ts
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

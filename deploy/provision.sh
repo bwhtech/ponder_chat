@@ -126,6 +126,8 @@ PYTHON_MAX_RUNS=3
 # Monitoring (deploy/sentinel.sh): an ntfy topic URL, such as https://ntfy.sh/<long random name>.
 NOTIFY_URL=
 SPEND_ALERT_USD=10
+# Traces (deploy/README.md, "Traces"): http://127.0.0.1:4318 once deploy/jaeger.sh has installed Jaeger. Empty: off.
+OTEL_EXPORTER_OTLP_ENDPOINT=
 # Off-site backups (deploy/backup.sh): an rclone remote and an age public key. Both optional.
 BACKUP_RCLONE_REMOTE=
 BACKUP_AGE_RECIPIENT=

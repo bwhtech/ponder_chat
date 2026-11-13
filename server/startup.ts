@@ -14,6 +14,7 @@ import { migrateSkills } from "./skills.ts";
 import { seedStandardSkills } from "./standard-skills.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
 import { setupTelemetry } from "./telemetry.ts";
+import { stopTracing } from "./tracing/setup.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
 import { checkWebBuild } from "./web-build.ts";
 
@@ -123,6 +124,9 @@ function stopCleanly(world: { close?: () => Promise<void> }) {
 		try {
 			await world.close?.();
 			await sql.end({ timeout: 3 });
+			// The spans of the steps that just stopped, and any still waiting in the batch.
+			// Last, and for 2 seconds at most, so a collector that is down never costs the database its clean stop.
+			await stopTracing();
 		} catch (error) {
 			console.error("Stopping:", error instanceof Error ? error.message : error);
 		}

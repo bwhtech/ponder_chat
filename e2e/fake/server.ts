@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MODELS } from "../../server/models.ts";
-import type { ChatScript, MemoryScript, ReceivedCall, SearchScript, SentEmail, Step } from "./script.ts";
+import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, SearchScript, SentEmail, Step } from "./script.ts";
 
 /**
  * A fake OpenRouter, and a fake Cloudflare email API, for the end-to-end tests. Ponder
@@ -15,6 +15,9 @@ import type { ChatScript, MemoryScript, ReceivedCall, SearchScript, SentEmail, S
  * - memory: the decision gate and the writer (`MemoryScript`), and embeddings;
  * - the list of models with private (ZDR) endpoints: every model Ponder lists.
  *
+ * It also takes the traces that Ponder sends with OTLP over HTTP (server/tracing/), in
+ * place of Jaeger, so tracing.spec.ts can read them.
+ *
  * Tests send scripts and read what Ponder sent over HTTP, at /__fake/* (fixtures.ts),
  * because they run in other processes. A message that no script matches gets
  * "You said: <message>", so a test that only needs a reply needs no script.
@@ -25,6 +28,9 @@ export function fakeApp() {
 	const memories: MemoryScript[] = [];
 	const emails: SentEmail[] = [];
 	const calls: ReceivedCall[] = [];
+	const spans: ReceivedSpan[] = [];
+	// Each OTLP request as it came, so a test can look for text anywhere in it.
+	const exports: string[] = [];
 	const app = new Hono();
 
 	// --- Control, for the tests. The newest script wins, so a test can replace one.
@@ -34,6 +40,7 @@ export function fakeApp() {
 	app.post("/__fake/memory", async (c) => (memories.unshift(await c.req.json()), c.json({ ok: true })));
 	const since = (query: string | undefined) => Number(query ?? 0);
 	app.get("/__fake/emails", (c) => c.json(emails.filter((email) => email.to === c.req.query("to") && email.at >= since(c.req.query("since")))));
+	app.get("/__fake/spans", (c) => c.json({ spans, exports }));
 	app.get("/__fake/calls", (c) =>
 		c.json(calls.filter((call) => call.at >= since(c.req.query("since")) && latestUserText(call.messages as Message[]).includes(c.req.query("match") ?? ""))),
 	);
@@ -92,6 +99,14 @@ export function fakeApp() {
 		return c.json({ success: true });
 	});
 
+	// --- OTLP over HTTP, in JSON, as the exporter sends it.
+	app.post("/v1/traces", async (c) => {
+		const body = await c.req.text();
+		exports.push(body);
+		spans.push(...spansIn(JSON.parse(body) as OtlpRequest));
+		return c.json({});
+	});
+
 	app.all("*", (c) => {
 		console.warn(`fake: no route for ${c.req.method} ${c.req.path}`);
 		return c.json({ error: { message: `The fake has no route for ${c.req.method} ${c.req.path}.` } }, 404);
@@ -140,7 +155,7 @@ function streamReply(model: string, step: Step, signal: AbortSignal) {
 	for (const piece of pieces(step.text)) parts.push(chunk({ content: piece }));
 	for (const [index, call] of (step.toolCalls ?? []).entries()) {
 		const args = JSON.stringify(call.input);
-		parts.push(chunk({ tool_calls: [{ index, id: `call_${id}_${index}`, type: "function", function: { name: call.name, arguments: "" } }] }));
+		parts.push(chunk({ tool_calls: [{ index, id: call.id ?? `call_${id}_${index}`, type: "function", function: { name: call.name, arguments: "" } }] }));
 		for (let at = 0; at < args.length; at += 40) parts.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(at, at + 40) } }] }));
 	}
 	parts.push(chunk({}, step.toolCalls?.length ? "tool_calls" : "stop", usage(step)));
@@ -174,7 +189,7 @@ function usage(step: Step) {
 }
 
 function textReply(model: string, step: Step) {
-	const toolCalls = step.toolCalls?.map((call, index) => ({ id: `call_${index}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } }));
+	const toolCalls = step.toolCalls?.map((call, index) => ({ id: call.id ?? `call_${index}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.input) } }));
 	return {
 		id: `gen-fake-${Date.now()}`,
 		model,
@@ -248,4 +263,48 @@ function textOf(content: Message["content"]) {
 function latestUserText(messages: Message[]) {
 	const message = messages.findLast((candidate) => candidate.role === "user");
 	return message ? textOf(message.content) : "";
+}
+
+// --- Traces -------------------------------------------------------------------
+
+type OtlpValue = { stringValue?: string; intValue?: string | number; doubleValue?: number; boolValue?: boolean; arrayValue?: { values?: OtlpValue[] } };
+type OtlpAttribute = { key: string; value: OtlpValue };
+type OtlpSpan = {
+	traceId: string;
+	spanId: string;
+	parentSpanId?: string;
+	name: string;
+	attributes?: OtlpAttribute[];
+	events?: { name: string; attributes?: OtlpAttribute[] }[];
+	links?: { traceId: string; spanId: string }[];
+	status?: { code?: number; message?: string };
+};
+type OtlpRequest = { resourceSpans?: { resource?: { attributes?: OtlpAttribute[] }; scopeSpans?: { spans?: OtlpSpan[] }[] }[] };
+
+function spansIn(request: OtlpRequest): ReceivedSpan[] {
+	return (request.resourceSpans ?? []).flatMap((resource) =>
+		(resource.scopeSpans ?? []).flatMap((scope) =>
+			(scope.spans ?? []).map((span) => ({
+				traceId: span.traceId,
+				spanId: span.spanId,
+				parentSpanId: span.parentSpanId || undefined,
+				name: span.name,
+				attributes: attributesOf(span.attributes),
+				events: (span.events ?? []).map((event) => ({ name: event.name, attributes: attributesOf(event.attributes) })),
+				links: (span.links ?? []).map((link) => ({ traceId: link.traceId, spanId: link.spanId })),
+				statusCode: span.status?.code ?? 0,
+				instance: String(attributesOf(resource.resource?.attributes)["service.instance.id"] ?? ""),
+			})),
+		),
+	);
+}
+
+function attributesOf(attributes: OtlpAttribute[] = []): Record<string, unknown> {
+	return Object.fromEntries(attributes.map(({ key, value }) => [key, valueOf(value)]));
+}
+
+function valueOf(value: OtlpValue): unknown {
+	if (value.arrayValue) return (value.arrayValue.values ?? []).map(valueOf);
+	if (value.intValue !== undefined) return Number(value.intValue);
+	return value.stringValue ?? value.doubleValue ?? value.boolValue;
 }

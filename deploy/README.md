@@ -17,6 +17,7 @@ Internet ──443──▶ Caddy ──127.0.0.1:3500──▶ ponder-chat (Nod
 | `Caddyfile` | HTTPS, the blocked workflow route, and requests held during a restart. |
 | `backup.sh` + timer | A nightly dump, encrypted off-site copy, restore test on Sundays. |
 | `sentinel.sh` + timers | Checks every 5 minutes and a daily summary, sent to a phone through ntfy. |
+| `jaeger.sh`, `jaeger.service`, `jaeger.yaml` | Jaeger, which keeps a trace of each reply for 7 days. Installed by hand, once, not by a deploy. |
 
 ## First time
 
@@ -89,6 +90,31 @@ To set up alerts, install the ntfy app on a phone and subscribe to a long random
 
 Logs: `journalctl -u ponder-chat -f`; Caddy's are in `/var/log/caddy/`. Workflow runs: `npx workflow inspect runs --backend @workflow/world-postgres` in `/srv/ponder-chat/current` with the env loaded.
 
+## Traces
+
+Ponder can send a trace of each reply to Jaeger on the same VM. A trace shows where the reply's time went and where it failed: the queue, memory and files, each model call with its time to first token, and each tool. Traces hold no chat content (README, "Tracing").
+
+A deploy does not install Jaeger. To install it, once:
+
+1. On the server, run `cd /srv/ponder-chat/current && sudo bash deploy/jaeger.sh`. It downloads Jaeger 2.23.0 from GitHub, checks the binary's sha256, installs `/etc/jaeger/jaeger.yaml` and `jaeger.service`, and starts it.
+2. In `/etc/ponder-chat/env`, set `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`.
+3. Run `sudo systemctl restart ponder-chat`. Its log says "Tracing is on".
+
+To read traces:
+
+1. On your machine, open a tunnel: `ssh -N -L 16686:127.0.0.1:16686 deploy@<ip>`.
+2. Open http://localhost:16686 and pick the service `ponder-chat`.
+3. Find a reply by its tags, such as `gen_ai.conversation.id=<thread id>` or `workflow.run.id=<run id>`. A journal line that ends with `trace_id=<id>` leads to its trace: paste the id in the search box.
+
+| | |
+| --- | --- |
+| Listens on | 127.0.0.1 only: 4318 (OTLP over HTTP), 16686 (UI and API), 16685 (gRPC API), 13133 (health) |
+| Keeps | 7 days, in Badger on disk (`/var/lib/jaeger`) |
+| Uses | About 60 MB of memory at start, and about 150 MB after a few thousand spans. The unit holds it near 384 MB (`MemoryHigh`) and stops it at 512 MB (`MemoryMax`). About 1.5 KB of disk for each span. A reply is 50 to 200 spans, more when it calls many tools, so 200 replies a day take less than 100 MB a day, and less than 1 GB for 7 days. |
+| Runs as | A user that systemd makes (`DynamicUser`). It can reach only localhost, and write only `/var/lib/jaeger`. |
+
+To turn tracing off, empty `OTEL_EXPORTER_OTLP_ENDPOINT` and restart `ponder-chat`. To remove Jaeger, run `sudo systemctl disable --now jaeger`, then delete `/usr/local/bin/jaeger`, `/etc/jaeger`, `/etc/systemd/system/jaeger.service` and `/var/lib/private/jaeger`.
+
 ## Backups and restore
 
 Every night at 02:15 UTC, `backup.sh` makes a `pg_dump` in `/var/backups/ponder-chat` and keeps 14. The database holds everything: accounts, chats, attached files, Python state and workflow runs.
@@ -110,7 +136,7 @@ sudo systemctl start ponder-chat
 ## Security
 
 - SSH: keys only, no root login, fail2ban. The firewall allows only 22, 80 and 443.
-- PostgreSQL and the app listen only on localhost. Caddy refuses `/.well-known/workflow/*`, which has no authentication.
+- PostgreSQL, the app and Jaeger listen only on localhost. Caddy refuses `/.well-known/workflow/*`, which has no authentication.
 - The service runs as `ponder-chat`, with a read-only system and no home folder. It can write only `/var/cache/ponder-chat`.
 - Secrets are in `/etc/ponder-chat/env` (root:ponder-chat, mode 640).
 - The `deploy` user has passwordless sudo, so that deploys run unattended. Protect its key.
