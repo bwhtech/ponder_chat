@@ -2,7 +2,7 @@ import { test as base, expect, type APIRequestContext, type Page } from "@playwr
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
 import { e2e } from "./env.ts";
-import type { ChatScript, MemoryScript, ReceivedCall, SearchScript, SentEmail } from "./fake/script.ts";
+import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, SearchScript, SentEmail } from "./fake/script.ts";
 
 /**
  * What the tests share:
@@ -35,6 +35,11 @@ export class Fake {
 	/** The chat calls whose person's latest message contains `match`. */
 	async calls(match: string): Promise<ReceivedCall[]> {
 		return (await this.api.get(`/__fake/calls?match=${encodeURIComponent(match)}&since=${this.since}`)).json();
+	}
+
+	/** Every span Ponder exported (server/tracing/), and each export request as it came. */
+	async spans(): Promise<{ spans: ReceivedSpan[]; exports: string[] }> {
+		return (await this.api.get("/__fake/spans")).json();
 	}
 
 	async emails(to: string): Promise<SentEmail[]> {

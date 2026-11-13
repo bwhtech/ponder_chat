@@ -45,3 +45,18 @@ export type SentEmail = { from: string; to: string; subject: string; text: strin
 
 /** A chat call as the fake received it, for tests that check what the model was sent. */
 export type ReceivedCall = { model: string; system: string; messages: unknown[]; tools: string[]; provider: unknown; at: number };
+
+/** A span that Ponder exported, as the fake received it (server/tracing/). */
+export type ReceivedSpan = {
+	traceId: string;
+	spanId: string;
+	parentSpanId?: string;
+	name: string;
+	attributes: Record<string, unknown>;
+	events: { name: string; attributes: Record<string, unknown> }[];
+	links: { traceId: string; spanId: string }[];
+	/** 0 unset, 1 ok, 2 error. */
+	statusCode: number;
+	/** The server process that sent it (service.instance.id). */
+	instance: string;
+};

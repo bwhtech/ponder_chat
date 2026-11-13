@@ -1,0 +1,258 @@
+/**
+ * Checks for tracing (server/tracing/): no span leaves Ponder with content in it, and a
+ * reply's trace has the same ids in every process. No database, no network: the spans
+ * go to memory, and the one HTTP request goes to a server on this machine.
+ * Run: npx tsx server/tracing.check.ts
+ */
+import assert from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
+import { OpenTelemetry } from "@ai-sdk/otel";
+import { context, SpanKind, SpanStatusCode, trace, TraceFlags } from "@opentelemetry/api";
+import { InMemorySpanExporter, SimpleSpanProcessor, TracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace";
+import { registerTelemetry, stepCountIs, streamText, tool } from "ai";
+import { MockLanguageModelV4 } from "ai/test";
+import { z } from "zod";
+import { withPeer } from "./tracing/http.ts";
+import { cleanSpan } from "./tracing/privacy.ts";
+import { endReplyTrace, linkToReply, recordReplySpan, replyIds, runStartTime, withReplyTrace } from "./tracing/reply-trace.ts";
+import { startTracing, withoutContent } from "./tracing/setup.ts";
+import { span } from "./tracing/span.ts";
+
+let failed = 0;
+
+async function check(name: string, body: () => Promise<void>) {
+	try {
+		await body();
+		console.log(`ok   ${name}`);
+	} catch (error) {
+		failed++;
+		console.log(`FAIL ${name}\n     ${error instanceof Error ? error.message : error}`);
+	}
+}
+
+/** Text that stands for content: a message, a prompt, a tool's input or output, a file name, an address. */
+const MARKER = "mk-7f3a9c-private";
+const RUN_ID = "wrun_01M7AAXEME3MDRQZPA53SJG1W7";
+
+/** Everything a span would send: its name, attributes, events, status and links. */
+const sent = (spans: ReadableSpan[]) =>
+	JSON.stringify(
+		spans.map((each) => ({ name: each.name, attributes: each.attributes, events: each.events, status: each.status, links: each.links, resource: each.resource.attributes })),
+	);
+
+/** A model that calls the `lookup` tool once, then answers. The prompt, the call and the answer all hold MARKER. */
+function model() {
+	const usage = { inputTokens: { total: 120, noCache: 100, cacheRead: 20, cacheWrite: undefined }, outputTokens: { total: 9, text: 9, reasoning: undefined } };
+	const finish = (unified: "stop" | "tool-calls") => ({ unified, raw: unified });
+	let calls = 0;
+	return new MockLanguageModelV4({
+		provider: "openrouter",
+		modelId: "test/model",
+		doStream: async () => {
+			calls++;
+			const parts =
+				calls === 1
+					? [
+							{ type: "stream-start" as const, warnings: [] },
+							{ type: "tool-call" as const, toolCallId: "call-1", toolName: "lookup", input: JSON.stringify({ query: MARKER }) },
+							{ type: "finish" as const, finishReason: finish("tool-calls"), usage },
+						]
+					: [
+							{ type: "stream-start" as const, warnings: [] },
+							{ type: "text-start" as const, id: "t" },
+							{ type: "text-delta" as const, id: "t", delta: `The answer is ${MARKER}.` },
+							{ type: "text-end" as const, id: "t" },
+							{ type: "finish" as const, finishReason: finish("stop"), usage },
+						];
+			return { stream: new ReadableStream({ start: (controller) => (parts.forEach((part) => controller.enqueue(part)), controller.close()) }) };
+		},
+	});
+}
+
+const tools = {
+	lookup: tool({ description: "Looks something up.", inputSchema: z.object({ query: z.string() }), execute: async ({ query }) => `Found ${query} and ${MARKER}.` }),
+};
+
+// --- The allowlist, on its own.
+
+await check("a span loses every attribute, event, status message and name that is not on the allowlist", async () => {
+	const fake = {
+		name: `GET https://x.invalid/${MARKER}?q=${MARKER}`,
+		kind: SpanKind.INTERNAL,
+		spanContext: () => ({ traceId: "a".repeat(32), spanId: "b".repeat(16), traceFlags: TraceFlags.SAMPLED }),
+		startTime: [0, 0],
+		endTime: [1, 0],
+		duration: [1, 0],
+		ended: true,
+		status: { code: SpanStatusCode.ERROR, message: `could not read https://x.invalid/${MARKER}` },
+		attributes: {
+			"gen_ai.input.messages": `[{"role":"user","content":"${MARKER}"}]`,
+			"gen_ai.output.messages": MARKER,
+			"gen_ai.system_instructions": MARKER,
+			"gen_ai.tool.call.arguments": MARKER,
+			"gen_ai.tool.call.result": MARKER,
+			"ai.prompt": MARKER,
+			"ai.response.text": MARKER,
+			"ai.toolCall.args": MARKER,
+			"step.error.message": MARKER,
+			"workflow.error.message": MARKER,
+			"workflow.hook.token": MARKER,
+			"url.full": `https://x.invalid/${MARKER}?q=${MARKER}`,
+			"url.path": MARKER,
+			"db.statement": MARKER,
+			"ponder.file_name": MARKER,
+			"gen_ai.usage.input_tokens": 120,
+			"gen_ai.request.model": "test/model",
+			"workflow.run.id": RUN_ID,
+			"workflow.queue.overhead_ms": 12,
+		},
+		links: [{ context: { traceId: "c".repeat(32), spanId: "d".repeat(16), traceFlags: 1 }, attributes: { note: MARKER } }],
+		events: [
+			{ name: "exception", time: [0, 0], attributes: { "exception.type": "TypeError", "exception.message": MARKER, "exception.stacktrace": MARKER } },
+			{ name: "gen_ai.content.prompt", time: [0, 0], attributes: { "gen_ai.prompt": MARKER } },
+		],
+		resource: { attributes: {} },
+		instrumentationScope: { name: "test" },
+		droppedAttributesCount: 0,
+		droppedEventsCount: 0,
+		droppedLinksCount: 0,
+	} as unknown as ReadableSpan;
+	assert.ok(sent([fake]).includes(MARKER), "the check's span holds the marker before it is cleaned");
+
+	const clean = cleanSpan(fake);
+	assert.ok(!sent([clean]).includes(MARKER), sent([clean]));
+	assert.equal(clean.name, "span");
+	assert.deepEqual(clean.attributes, { "gen_ai.usage.input_tokens": 120, "gen_ai.request.model": "test/model", "workflow.run.id": RUN_ID, "workflow.queue.overhead_ms": 12 });
+	assert.deepEqual(clean.events.map((event) => [event.name, event.attributes]), [["exception", { "exception.type": "TypeError" }]]);
+	assert.deepEqual(clean.status, { code: SpanStatusCode.ERROR });
+	assert.equal(clean.spanContext().spanId, "b".repeat(16));
+	assert.equal(cleanSpan({ ...fake, name: "execute_tool web_fetch" } as ReadableSpan).name, "execute_tool web_fetch");
+});
+
+await check("the AI SDK records no inputs or outputs through Ponder's integration, even when a call asks it to", async () => {
+	// A provider of its own, with no allowlist, so this sees what the integration itself records.
+	const record = async (wrap: boolean) => {
+		const exporter = new InMemorySpanExporter();
+		const provider = new TracerProvider({ spanProcessors: [new SimpleSpanProcessor({ exporter })] });
+		const integration = new OpenTelemetry({ tracer: provider.getTracer("ai"), usage: true });
+		await streamText({
+			model: model(),
+			prompt: `Tell me about ${MARKER}`,
+			tools,
+			stopWhen: stepCountIs(3),
+			telemetry: { integrations: [wrap ? withoutContent(integration) : integration], recordInputs: true, recordOutputs: true },
+		}).consumeStream();
+		return exporter.getFinishedSpans();
+	};
+	// Without Ponder's wrapper the same call records the prompt, the tool's input and output, and the answer.
+	assert.ok(sent(await record(false)).includes(MARKER), "the integration recorded no content without the wrapper: this check would prove nothing");
+	const spans = await record(true);
+	assert.ok(spans.some((each) => each.name.startsWith("chat ")), spans.map((each) => each.name).join(", "));
+	assert.ok(!sent(spans).includes(MARKER), sent(spans));
+});
+
+// --- The whole pipeline: Ponder's provider, the AI SDK, HTTP, the root span, the allowlist.
+
+const exported = new InMemorySpanExporter();
+const tracing = await startTracing("http://127.0.0.1:9", exported);
+assert.ok(tracing);
+registerTelemetry(tracing.integration);
+
+const server = createServer((request, response) => {
+	response.statusCode = request.url?.includes("missing") ? 404 : 200;
+	response.end(`page with ${MARKER}`);
+});
+await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+const address = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+await withReplyTrace(RUN_ID, async () => {
+	recordReplySpan(RUN_ID, "chat.request", Date.now() - 50, Date.now(), { "ponder.continued": true }, [linkToReply("wrun_01M7AAXEME3MDRQZPA53SJG1W6")]);
+	await span("thread.load", { "ponder.messages": 3 }, async () => undefined);
+	const reply = streamText({ model: model(), prompt: `Tell me about ${MARKER}`, tools, stopWhen: stepCountIs(3), telemetry: { recordInputs: true, recordOutputs: true } });
+	await reply.consumeStream();
+	await span("web_fetch.read", {}, () => withPeer("web", async () => (await fetch(`${address}/${MARKER}/page?q=${MARKER}`)).text()));
+	await withPeer("web", () => fetch(`${address}/missing/${MARKER}`)).then((response) => response.text());
+	await span("python.run", {}, async () => {
+		throw new Error(`the code printed ${MARKER}`);
+	}).catch(() => undefined);
+});
+// Outside any reply: never traced.
+await span("thread.load", { "ponder.messages": 1 }, async () => undefined);
+await fetch(`${address}/outside`).then((response) => response.text());
+endReplyTrace({ runId: RUN_ID, threadId: "thread-1", model: "test/model", outcome: "saved", continued: true });
+server.close();
+await tracing.flush();
+const spans = exported.getFinishedSpans();
+const named = (name: string) => spans.filter((each) => each.name === name);
+
+await check("no exported span holds content", async () => {
+	assert.ok(spans.length > 5, `${spans.length} spans`);
+	assert.ok(!sent(spans).includes(MARKER), sent(spans));
+});
+
+await check("a reply's trace and root span ids come from its run id, the same in every process", async () => {
+	const ids = replyIds(RUN_ID);
+	assert.deepEqual(replyIds(RUN_ID), ids);
+	assert.notDeepEqual(replyIds("wrun_01M7AAXEME3MDRQZPA53SJG1W6"), ids);
+	assert.match(ids.traceId, /^[0-9a-f]{32}$/);
+	assert.match(ids.spanId, /^[0-9a-f]{16}$/);
+	const [root] = named("invoke_agent ponder");
+	assert.ok(root, "no root span");
+	assert.equal(root.spanContext().traceId, ids.traceId);
+	assert.equal(root.spanContext().spanId, ids.spanId);
+	assert.equal(root.parentSpanContext, undefined);
+	assert.equal(root.attributes["gen_ai.conversation.id"], "thread-1");
+	assert.equal(root.attributes["ponder.outcome"], "saved");
+	// The root starts when the run started: the time in its id.
+	assert.equal(runStartTime(RUN_ID), 1794569583246);
+	assert.equal(root.startTime[0], Math.floor(1794569583246 / 1000));
+});
+
+await check("everything the reply does is in its trace, under its root", async () => {
+	const { traceId, spanId } = replyIds(RUN_ID);
+	const inReply = spans.filter((each) => each.name !== "invoke_agent ponder");
+	for (const each of inReply) assert.equal(each.spanContext().traceId, traceId, each.name);
+	for (const name of ["chat.request", "thread.load", "web_fetch.read", "python.run"]) assert.equal(named(name)[0]?.parentSpanContext?.spanId, spanId, name);
+	assert.equal(named("thread.load").length, 1, "a span outside a reply was traced");
+	// The continued run's request links to the run it carries on.
+	assert.deepEqual(named("chat.request")[0].links[0].context.spanId, replyIds("wrun_01M7AAXEME3MDRQZPA53SJG1W6").spanId);
+});
+
+await check("model calls have their model, tokens and time to first token; tools their name", async () => {
+	const calls = spans.filter((each) => each.name === "chat test/model");
+	assert.equal(calls.length, 2);
+	for (const call of calls) {
+		assert.equal(call.attributes["gen_ai.request.model"], "test/model");
+		assert.equal(call.attributes["gen_ai.usage.input_tokens"], 120);
+		assert.equal(typeof call.attributes["gen_ai.client.operation.time_to_first_chunk"], "number");
+	}
+	const [toolCall] = named("execute_tool lookup");
+	assert.equal(toolCall?.attributes["gen_ai.tool.name"], "lookup");
+});
+
+await check("an HTTP span has the method, status and kind of peer, and never the host or address", async () => {
+	const requests = spans.filter((each) => each.kind === SpanKind.CLIENT && !each.name.startsWith("chat "));
+	assert.equal(requests.length, 2, requests.map((each) => each.name).join(", "));
+	for (const request of requests) {
+		assert.equal(request.name, "GET");
+		assert.equal(request.attributes["ponder.peer"], "web");
+		assert.equal(request.attributes["server.address"], undefined);
+	}
+	assert.deepEqual(requests.map((each) => each.attributes["http.response.status_code"]).sort(), [200, 404]);
+	assert.equal(requests.find((each) => each.attributes["http.response.status_code"] === 404)?.status.code, SpanStatusCode.ERROR);
+});
+
+await check("a failure keeps its kind, not its message", async () => {
+	const [python] = named("python.run");
+	assert.equal(python.status.code, SpanStatusCode.ERROR);
+	assert.equal(python.status.message, undefined);
+	assert.equal(python.attributes["error.type"], "Error");
+});
+
+await check("a span outside a reply records nothing", async () => {
+	const ran = await context.with(trace.deleteSpan(context.active()), () => span("thread.load", {}, async (active) => active.isRecording()));
+	assert.equal(ran, false);
+});
+
+process.exit(failed ? 1 : 0);
