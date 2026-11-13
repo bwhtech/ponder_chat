@@ -330,6 +330,8 @@ type OtlpSpan = {
 	events?: { name: string; attributes?: OtlpAttribute[] }[];
 	links?: { traceId: string; spanId: string }[];
 	status?: { code?: number; message?: string };
+	startTimeUnixNano?: string;
+	endTimeUnixNano?: string;
 };
 type OtlpRequest = { resourceSpans?: { resource?: { attributes?: OtlpAttribute[] }; scopeSpans?: { spans?: OtlpSpan[] }[] }[] };
 
@@ -345,6 +347,7 @@ function spansIn(request: OtlpRequest): ReceivedSpan[] {
 				events: (span.events ?? []).map((event) => ({ name: event.name, attributes: attributesOf(event.attributes) })),
 				links: (span.links ?? []).map((link) => ({ traceId: link.traceId, spanId: link.spanId })),
 				statusCode: span.status?.code ?? 0,
+				durationMs: Number((BigInt(span.endTimeUnixNano ?? "0") - BigInt(span.startTimeUnixNano ?? "0")) / 1_000_000n),
 				instance: String(attributesOf(resource.resource?.attributes)["service.instance.id"] ?? ""),
 			})),
 		),

@@ -18,9 +18,10 @@ export type Step = {
 	toolCalls?: { name: string; input: unknown; id?: string; cutAfter?: number }[];
 	/**
 	 * Streams each tool call's arguments in this many pieces, not 40 characters at a time.
-	 * For long arguments: the AI SDK parses the arguments so far again at each piece, in
-	 * Ponder's reply save and in the page, so 100 KB in 40-character pieces holds the
-	 * server's event loop for seconds and slows the tests that run beside it.
+	 * For long arguments in a test with a page: the page's copy of the AI SDK parses the
+	 * arguments so far again at each piece, so 100 KB in 40-character pieces costs the
+	 * browser seconds of CPU and slows the tests that run beside it. Ponder's own save joins
+	 * the pieces first (reply-chunks.ts), and reply-save.spec.ts tests it with many pieces.
 	 */
 	toolInputPieces?: number;
 	/** Milliseconds between streamed pieces. Use a large value to keep a reply open, such as to test Stop. */
@@ -96,6 +97,7 @@ export type ReceivedSpan = {
 	links: { traceId: string; spanId: string }[];
 	/** 0 unset, 1 ok, 2 error. */
 	statusCode: number;
+	durationMs: number;
 	/** The server process that sent it (service.instance.id). */
 	instance: string;
 };
