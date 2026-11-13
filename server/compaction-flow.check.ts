@@ -6,7 +6,7 @@
  *   npx tsx server/compaction-flow.check.ts
  */
 import assert from "node:assert/strict";
-import type { ModelMessage, UIMessage } from "ai";
+import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
 import { Compaction, type CompactionDeps, type CompactionState, type CompactRequest } from "./compaction/compaction.ts";
 import { addConnectorNote } from "./workflow/connector-messages.ts";
 import { currentTurnStart, type Summary } from "./compaction/summary.ts";
@@ -42,16 +42,8 @@ class World {
 				if (this.fail) throw new Error("summarizer down");
 				return { text: "SUMMARY", model: "deepseek/deepseek-v4.1-flash" };
 			},
-			// As thread-messages.ts builds them: files stay file parts, the rest is text, and the <connectors> note goes with the latest message.
-			modelMessages: async (thread, { connectors }) =>
-				addConnectorNote(
-					thread.map((message): ModelMessage => {
-						const text = (part: UIMessage["parts"][number]) => ({ type: "text" as const, text: part.type === "text" ? part.text : JSON.stringify(part) });
-						if (message.role !== "user") return { role: "assistant", content: message.parts.map(text) };
-						return { role: "user", content: message.parts.map((part) => (part.type === "file" ? { type: "file" as const, data: part.url, mediaType: part.mediaType } : text(part))) };
-					}),
-					connectors,
-				),
+			// As thread-messages.ts builds them: the SDK's own conversion, and the <connectors> note with the latest message.
+			modelMessages: async (thread, { connectors }) => addConnectorNote(await convertToModelMessages(thread), connectors),
 			status: async (state) => void this.states.push(state),
 			log: (message) => void this.logs.push(message),
 		};

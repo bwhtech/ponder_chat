@@ -115,14 +115,16 @@ function filePart(item: unknown): { type: string; bytes: number } | undefined {
 	const part = item as { type?: unknown; mediaType?: unknown; data?: unknown; url?: unknown; image?: unknown };
 	const declared = typeof part.mediaType === "string" ? part.mediaType : part.type === "image" ? "image/*" : undefined;
 	if (!declared) return undefined;
-	const nested = part.data && typeof part.data === "object" && !(part.data instanceof Uint8Array) ? (part.data as { data?: unknown }).data : undefined;
-	const payload = [part.data, nested, part.url, part.image].map(payloadOf).find(Boolean);
+	// Model messages (convertToModelMessages) hold it at data.url, as a URL; the provider prompt at data.data.
+	const nested = part.data && typeof part.data === "object" && !(part.data instanceof Uint8Array) ? (part.data as { data?: unknown; url?: unknown }) : undefined;
+	const payload = [part.data, nested?.data, nested?.url, part.url, part.image].map(payloadOf).find(Boolean);
 	return payload && { type: payload.type ?? declared, bytes: payload.bytes };
 }
 
 /** The size of binary data: bytes, a data: URL, or base64. */
 function payloadOf(item: unknown): { type?: string; bytes: number } | undefined {
 	if (item instanceof Uint8Array || item instanceof ArrayBuffer) return { bytes: item.byteLength };
+	if (item instanceof URL) return payloadOf(item.href);
 	if (typeof item !== "string") return undefined;
 	if (item.startsWith("data:")) {
 		const comma = item.indexOf(",");

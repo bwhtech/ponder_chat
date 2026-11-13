@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import sharp from "sharp";
 import { e2e } from "../env.ts";
 import type { ReceivedSpan } from "../fake/script.ts";
 import { chat, expect, test, type Fake } from "../fixtures.ts";
@@ -147,6 +148,22 @@ test("a reply whose tool calls grow too long is summarized between its steps", a
 	await expect(divider(page)).toHaveCount(1);
 });
 
+test("an image counts as an image, not by its size: a large one is neither refused nor summarized", async ({ page, fake }) => {
+	// Noise does not compress: about 1 MB, which counted as text would be over 500,000 tokens.
+	const png = await sharp({ create: { width: 640, height: 640, channels: 3, background: "#808080", noise: { type: "gaussian", mean: 128, sigma: 80 } } }).png().toBuffer();
+	expect(png.length).toBeGreaterThan(400_000);
+	await fake.summary({ match: "IMAGE-M1", text: "SUMMARY-IMAGE" });
+	await fake.chat({ match: "IMAGE-M1", steps: [{ text: "IMAGE-DONE: a noisy square." }] });
+	await page.locator('[data-slot="prompt-input"] input[type="file"]').setInputFiles({ name: "noise.png", mimeType: "image/png", buffer: png });
+	await chat.send(page, "IMAGE-M1 what is in this picture?");
+	await expect(chat.reply(page)).toContainText("IMAGE-DONE", { timeout: 60_000 });
+	await expect(page.getByText(/too long for GLM 5\.3/)).toHaveCount(0);
+	expect(await fake.summaries("IMAGE-M1")).toHaveLength(0);
+	// The model got the image itself.
+	const [call] = await fake.calls("IMAGE-M1");
+	expect(sent(call.messages)).toContain("data:image/png;base64,");
+});
+
 test("a message too long for the model says so", async ({ page, fake }) => {
 	await chat.send(page, `HUGE-M1 ${filler(45_000)}`);
 	await expect(page.getByText("This message is too long for GLM 5.3")).toBeVisible({ timeout: 60_000 });
@@ -247,6 +264,9 @@ test("Stop during the summary saves nothing, and the next message summarizes aga
 	await page.waitForTimeout(delayMs + 2_000);
 	const saved = () => db`select count(*)::int as n from thread_summaries s join threads t on t.id = s.thread_id where t.owner = ${person.id}`;
 	expect((await saved())[0].n).toBe(0);
+	// The stopped reply had only its compaction status, so it is not saved: the thread ends on the person's message.
+	const [thread] = await db`select messages from threads where owner = ${person.id}`;
+	expect((thread.messages as { role: string }[]).at(-1)?.role).toBe("user");
 
 	await fake.summary({ match: "STOP-M1 ", text: "SUMMARY-STOP: the person sent long notes." });
 	await fake.chat({ match: "STOP-AFTER", steps: [{ text: "Noted STOP-AFTER." }] });

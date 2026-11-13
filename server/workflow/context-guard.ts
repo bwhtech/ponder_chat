@@ -80,13 +80,15 @@ export class ContextGuard {
 		return prompt;
 	}
 
-	/** Summarizes everything before the current turn, once a reply. */
+	/** Summarizes everything before the current turn, once a reply, when that can bring the call under the trigger. */
 	private async compactTurn(messages: LanguageModelV4Prompt): Promise<LanguageModelV4Prompt> {
 		if (this.turnCompacted) return messages;
-		this.turnCompacted = true;
 		const system = messages.findIndex((message) => message.role !== "system");
 		const turn = messages.map((message) => message.role).lastIndexOf("user");
 		if (system < 0 || turn < system) return messages;
+		// A summary that can't bring the call under the trigger is only a second charge.
+		if (!foldCanFit(messages, { system, turn, toolTokens: this.toolTokens, ratio: this.ratio, trigger: this.budget.trigger })) return messages;
+		this.turnCompacted = true;
 		const envelope = estimate(messages.slice(0, system)).text + this.toolTokens;
 		const result = await compactStep(this.writable, { ...this.request("turn", envelope), turn: estimate(messages.slice(turn)) });
 		if (result.kind !== "compacted" && result.kind !== "left-out") return messages;
@@ -126,6 +128,20 @@ async function providerMessages(messages: ModelMessage[]): Promise<LanguageModel
 }
 
 /** Cuts the long tool results of the current turn's earlier steps; the last step's stay whole. */
+/**
+ * True when summarizing everything before the current turn can bring the call under the
+ * trigger. The summary removes only that text: the instructions, the tools and the
+ * current turn stay, and so do the files, which the summary message carries (and media
+ * alone never drops). So a large PDF that is over the trigger by itself is not folded again.
+ */
+export function foldCanFit(
+	prompt: LanguageModelV4Prompt,
+	{ system, turn, toolTokens, ratio, trigger }: { system: number; turn: number; toolTokens: number; ratio: number; trigger: number },
+) {
+	const kept = addEstimates(estimate(prompt.slice(0, system)), estimate(prompt.slice(turn)), { text: toolTokens, media: estimate(prompt.slice(system, turn)).media });
+	return countTokens(kept, ratio) <= trigger;
+}
+
 export function trimEarlierSteps(prompt: LanguageModelV4Prompt): LanguageModelV4Prompt {
 	const roles = prompt.map((message) => message.role);
 	const turn = roles.lastIndexOf("user");

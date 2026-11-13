@@ -59,25 +59,33 @@ function renderPart(part: Part, payloadChars: number): string {
 	return tool ? renderTool(tool, payloadChars) : "";
 }
 
-type ToolPart = { name: string; input: unknown; output: unknown; errorText: unknown };
+type ToolPart = { name: string; input: unknown; output: unknown; errorText: unknown; state?: unknown };
 
 /** A static (`tool-<name>`) or dynamic tool part, else undefined. */
 export function toolOf(part: Part): ToolPart | undefined {
-	const raw = part as { type: string; toolName?: string; input?: unknown; output?: unknown; errorText?: unknown };
+	const raw = part as { type: string; toolName?: string; input?: unknown; output?: unknown; errorText?: unknown; state?: unknown };
 	const name = raw.type === "dynamic-tool" ? raw.toolName : raw.type.startsWith("tool-") ? raw.type.slice(5) : undefined;
-	return name ? { name, input: raw.input, output: raw.output, errorText: raw.errorText } : undefined;
+	return name ? { name, input: raw.input, output: raw.output, errorText: raw.errorText, state: raw.state } : undefined;
 }
 
-function renderTool({ name, input, output, errorText }: ToolPart, payloadChars: number) {
+function renderTool({ name, input, output, errorText, state }: ToolPart, payloadChars: number) {
 	if (name === "write_artifact") {
 		const { id, kind, title } = (input ?? {}) as { id?: string; kind?: string; title?: string };
 		return `Wrote artifact ${id} (${kind}): ${title}`;
 	}
 	const lines = [`Called ${name} with ${clipMiddle(payload(input), payloadChars)}`];
-	if (typeof errorText === "string") lines.push(`Tool ${name} errored: ${clipMiddle(errorText, payloadChars)}`);
+	// The error is a tool's or a server's text too: encoded, so it can't start a line of its own.
+	if (typeof errorText === "string") lines.push(`Tool ${name} errored: ${clipMiddle(payload(errorText), payloadChars)}`);
 	else if (output !== undefined) lines.push(`Tool ${name} returned: ${clipMiddle(payload(output), payloadChars)}`);
+	// A call with no result did not run: the summary must not record it as done.
+	else lines.push(NOT_RUN[String(state)] ?? "The call did not finish, so it did not run.");
 	return lines.join("\n");
 }
+
+const NOT_RUN: Record<string, string> = {
+	"output-denied": "The person refused this call, so it did not run.",
+	"approval-requested": "The call waited for the person's approval, and did not run.",
+};
 
 function renderCitation(data: unknown, chars: number) {
 	const { text, comment } = (data ?? {}) as { text?: unknown; comment?: unknown };

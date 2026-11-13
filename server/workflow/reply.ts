@@ -70,6 +70,9 @@ export async function saveReply(
 	await span("reply.save", { "ponder.outcome": cancelled ? "cancelled" : failed ? "failed" : "saved" }, () => saveReplyNow(threadId, owner, runId, model, { cancelled, failed, continued }));
 }
 
+/** Parts that say how the reply went, not what it said. */
+const STATUS_PARTS = new Set(["step-start", "data-compaction"]);
+
 async function saveReplyNow(threadId: string, owner: string, runId: string, model: string, { cancelled, failed, continued }: { cancelled: boolean; failed: boolean; continued: Continued | null }) {
 	const untilTail = cancelled || failed;
 	const messages = await loadThread(threadId);
@@ -81,7 +84,8 @@ async function saveReplyNow(threadId: string, owner: string, runId: string, mode
 	const base = existing ? { ...existing, parts: existing.parts.slice(0, continued.baseParts) } : undefined;
 	let reply: UIMessage | undefined;
 	for await (const message of readUIMessageStream({ message: base, stream: await replyStream(runId, model, { untilTail, continued }) })) reply = message;
-	if (reply?.parts.length) {
+	// A reply with only status parts, such as one stopped while it compacted, is not saved: as one stopped before any output.
+	if (reply?.parts.some((part) => !STATUS_PARTS.has(part.type))) {
 		const at = messages.findIndex((message) => message.id === reply.id);
 		if (at === -1) messages.push(reply);
 		else messages[at] = reply;
