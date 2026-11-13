@@ -1,4 +1,4 @@
-import type { CatalogData, CatalogTool } from "./catalog.ts";
+import { unavailableText, type CatalogData, type CatalogTool } from "./catalog.ts";
 import { signature } from "./signature.ts";
 
 /**
@@ -16,15 +16,15 @@ const MAX_LINE_DESCRIPTION = 120;
 
 export function connectorNote(catalog: CatalogData): string {
 	if (!catalog.connectors.length) return "";
-	const usable = catalog.connectors.filter((connector) => !connector.signedOut);
-	const signedOut = catalog.connectors.filter((connector) => connector.signedOut);
+	const usable = catalog.connectors.filter((connector) => !connector.unavailable);
+	const unavailable = catalog.connectors.filter((connector) => connector.unavailable);
 	const toolLines = catalog.tools.map(toolLine);
 	const listsTools = toolLines.length > 0 && toolLines.join("\n").length <= TOOL_LINES_BUDGET;
 	return [
 		"<connectors>",
 		"The apps the person connected to Ponder. Their tools are named <slug>__<tool>.",
 		...(usable.length ? usable.map((connector) => `- ${clean(connector.slug)}: ${clean(connector.name)}${connector.server && connector.server !== connector.name ? ` (${clean(connector.server)})` : ""}, ${plural(connector.tools, "tool")}`) : []),
-		...(signedOut.length ? [`These have no tools until the person signs in again in Settings, Connectors: ${signedOut.map((connector) => clean(connector.name)).join(", ")}.`] : []),
+		...unavailable.map((connector) => `- ${clean(connector.slug)}: no tools now. ${clean(unavailableText(connector))}`),
 		...(listsTools ? ["All their tools, so you can call one with connector_call without a search:", ...toolLines] : []),
 		...(!listsTools && catalog.tools.length ? ["Find their tools with connector_search, then call one with connector_call."] : []),
 		...(catalog.leftOut ? [`The person has too many tools on, so Ponder left out ${plural(catalog.leftOut, "tool")}. If one you need is missing, ask them to turn off tools they don't use in Settings, Connectors.`] : []),
@@ -32,9 +32,10 @@ export function connectorNote(catalog: CatalogData): string {
 	].join("\n");
 }
 
+/** The whole line is cleaned: the server wrote the description and every part of the signature. */
 function toolLine(tool: CatalogTool) {
-	const about = clean(firstLine(tool.title && tool.description ? `${tool.title}. ${tool.description}` : tool.title || tool.description));
-	return `- ${signature(tool.name, tool.inputSchema)}${about ? `: ${about}` : ""}${tool.ask ? " (asks the person first)" : ""}`;
+	const about = firstLine(tool.title && tool.description ? `${tool.title}. ${tool.description}` : tool.title || tool.description);
+	return clean(`- ${signature(tool.name, tool.inputSchema)}${about ? `: ${about}` : ""}${tool.ask ? " (asks the person first)" : ""}`);
 }
 
 function firstLine(text: string) {
@@ -42,7 +43,7 @@ function firstLine(text: string) {
 	return line.length > MAX_LINE_DESCRIPTION ? `${line.slice(0, MAX_LINE_DESCRIPTION - 1)}…` : line;
 }
 
-/** A name or a server's text can't close the note. */
+/** A name or a server's text can't close the note or open a tag in it. */
 const clean = (text: string) => text.replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
 
 const plural = (count: number, noun: string) => `${count} ${count === 1 ? noun : `${noun}s`}`;

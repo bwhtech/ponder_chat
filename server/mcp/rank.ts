@@ -13,8 +13,10 @@
  *    words. "linear" lists Linear's tools; "git" leaves GitHub's to the next tiers.
  * 4. Name prefix: the name starts with the query's words, and the last word may be
  *    cut, so "create_iss" finds create_issue.
- * 5. Keyword: any other match. A query word matches a word when one starts with the
- *    other, and adds the weight of each field it matches.
+ * 5. Keyword: any other match. A query word matches a word that it starts, or the
+ *    word with a plural ending ("issues" matches issue), and adds the weight of each
+ *    field it matches. Filler words such as "the" and "for" match nothing, in the query
+ *    or in a tool, so "weather forecast" does not find a tool that is "for" orders.
  *
  * In a tier, a higher keyword score comes first, then the connector, then the name.
  */
@@ -51,16 +53,13 @@ export function closestNames(name: string, tools: readonly Rankable[]): string[]
 		.map((tool) => tool.name);
 }
 
-/** True when the query has no words to search with, such as "  " or "^". */
-export const isEmptyQuery = (query: string) => words(query).length === 0;
-
-/** Every word of a name or a query, lowercase. */
+/** Every word of a name or a query, lowercase, in any script: "订单" and "créer" are words too. */
 export function words(text: string): string[] {
 	return text
-		.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
-		.replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+		.replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
+		.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2")
 		.toLowerCase()
-		.split(/[^a-z0-9]+/)
+		.split(/[^\p{L}\p{N}]+/u)
 		.filter(Boolean);
 }
 
@@ -91,12 +90,12 @@ function fields(tool: Rankable): Field[] {
 	const properties = isObject(tool.inputSchema.properties) ? Object.entries(tool.inputSchema.properties) : [];
 	const propertyDescriptions = properties.flatMap(([, schema]) => (isObject(schema) && typeof schema.description === "string" ? [schema.description] : []));
 	return [
-		[words(tool.tool), 6],
-		[[...words(tool.connector.slug), ...words(tool.connector.name)], 4],
-		[properties.flatMap(([key]) => words(key)), 3],
-		[prose(`${tool.title ?? ""} ${tool.description}`), 2],
-		[propertyDescriptions.flatMap(prose), 1],
-		[prose(tool.connector.server ?? ""), 1],
+		[meaningful(words(tool.tool)), 6],
+		[meaningful([...words(tool.connector.slug), ...words(tool.connector.name)]), 4],
+		[meaningful(properties.flatMap(([key]) => words(key))), 3],
+		[meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), 2],
+		[meaningful(propertyDescriptions.flatMap(prose)), 1],
+		[meaningful(prose(tool.connector.server ?? "")), 1],
 	];
 }
 
@@ -106,7 +105,12 @@ function score(terms: string[], fields: Field[]) {
 	return total;
 }
 
-const matches = (word: string, term: string) => word.startsWith(term) || (word.length >= 3 && term.startsWith(word));
+/** The query word starts the word ("repo" finds repositories), or is the word with a plural ending ("issues" finds issue). */
+const matches = (word: string, term: string) => word.startsWith(term) || PLURAL_ENDINGS.some((ending) => term === `${word}${ending}`);
+const PLURAL_ENDINGS = ["s", "es"];
+
+/** A tool's words without filler: "for" in a description must not match "forecast". */
+const meaningful = (list: string[]) => list.filter((word) => !FILLER.has(word));
 
 function sameWords(list: string[], terms: string[]) {
 	return list.length === terms.length && startsWithWholeWords(list, terms);

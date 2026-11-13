@@ -171,10 +171,10 @@ export async function listConnections(userId: string): Promise<Connection[]> {
 	return rows.map(fromRow);
 }
 
-/** The connections a reply knows of: on, and signed in or waiting for a new sign-in. */
+/** The connections a reply knows of: every one that is on, whatever its status. */
 export async function connectionsForReply(userId: string): Promise<Connection[]> {
 	const rows = await sql<Row[]>`
-		select * from mcp_connections where user_id = ${userId} and enabled and status in ('connected', 'needs_sign_in') order by slug`;
+		select * from mcp_connections where user_id = ${userId} and enabled order by slug`;
 	return rows.map(fromRow);
 }
 

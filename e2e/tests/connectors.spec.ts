@@ -219,6 +219,42 @@ test("checks a call's input against the tool before it asks", async ({ page, fak
 	expect(sent).toMatch(/Signature: shop__add_note\(\{ [^)]*note: string/);
 });
 
+test(`does not run an "Ask first" tool called by a padded name`, async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	for (const name of ["shop__add_note ", "\nshop__add_note"]) {
+		await fake.chat({ match: `${order} ${JSON.stringify(name)}`, steps: [{ toolCalls: [call(name, { order, note: "Padded" })] }, { text: "That did not work." }] });
+	}
+
+	await page.goto("/");
+	for (const name of ["shop__add_note ", "\nshop__add_note"]) {
+		await chat.send(page, `Add a note to order ${order} ${JSON.stringify(name)}`);
+		await expect(chat.reply(page)).toContainText("That did not work.");
+	}
+	// No approval was asked for, and the server ran nothing: the name is not the tool's.
+	await expect(page.getByRole("button", { name: "Allow once" })).toHaveCount(0);
+	expect(await serverCalls(page, order)).toEqual([]);
+	expect(JSON.stringify((await fake.calls(order))[1].messages)).toContain("No connector tool is named");
+});
+
+test("does not run a tool that the person turned off", async ({ page, fake }) => {
+	await addShop(page);
+	const [shop] = (await (await page.request.get("/api/connectors")).json()).connectors;
+	const off = await page.request.patch(`/api/connectors/${shop.id}`, { data: { rules: { find_order: "off" } } });
+	expect(off.ok(), await off.text()).toBe(true);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__find_order", { order })] }, { text: "I can't look that up." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Where is order ${order}?`);
+	await expect(chat.reply(page)).toContainText("I can't look that up.");
+	expect(await serverCalls(page, order)).toEqual([]);
+	const [first, second] = await fake.calls(order);
+	// The tool is not in the catalog: the note leaves it out, and the call gets an error.
+	expect(JSON.stringify(first.messages)).not.toContain("shop__find_order(");
+	expect(JSON.stringify(second.messages)).toContain('No connector tool is named \\"shop__find_order\\"');
+});
+
 test("keeps the instructions and tools the same when the person adds a connector", async ({ page, fake }) => {
 	await addShop(page);
 	const first = `Cache check ${orderNumber()}`;

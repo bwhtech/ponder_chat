@@ -271,8 +271,9 @@ export async function removeConnector(userId: string, id: string) {
 
 // For the chat workflow.
 
-/** A safety limit on the tools in one reply's catalog: each is recorded with the reply's run. */
+/** Safety limits on one reply's catalog: it is recorded with the reply's run. */
 const MAX_CATALOG_TOOLS = 500;
+const MAX_CATALOG_CHARS = 2_000_000;
 const MAX_NOTES_CHARS = 2_000;
 const STALE_TOOLS_MS = 60 * 60_000;
 const RETRY_ERROR_MS = 5 * 60_000;
@@ -280,9 +281,9 @@ const RETRY_ERROR_MS = 5 * 60_000;
 /**
  * The person's connector catalog, as plain data the workflow records: the tools of the
  * connections that are on and signed in, minus the tools turned off, and every
- * connection that is on. Sorted, so the same tools give the same catalog. A tool list
- * more than an hour old is listed again in the background, for the next reply, and so
- * is a connector in "error", so it can recover.
+ * connection that is on, with or without tools. Sorted, so the same tools give the same
+ * catalog. A tool list more than an hour old is listed again in the background, for the
+ * next reply, and so is a connector in "error", so it can recover.
  */
 export async function connectorCatalogFor(userId: string): Promise<CatalogData> {
 	const connections = await connectionsForReply(userId);
@@ -292,20 +293,43 @@ export async function connectorCatalogFor(userId: string): Promise<CatalogData> 
 	}
 	// A connector in "error" is tried again every few minutes, so it comes back by itself when its server does.
 	for (const connection of await connectionsToRetry(userId, RETRY_ERROR_MS)) void refreshTools(connection, { background: true }).catch(() => undefined);
-	const tools = signedIn.flatMap(catalogTools).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-	const kept = tools.slice(0, MAX_CATALOG_TOOLS);
-	if (tools.length > kept.length) console.warn(`connectors: ${userId} has ${tools.length} tools on; the catalog keeps ${kept.length}.`);
+	const perConnection = signedIn.map(catalogTools);
+	const total = perConnection.reduce((sum, list) => sum + list.length, 0);
+	const kept = fairShare(perConnection).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+	if (total > kept.length) console.warn(`connectors: ${userId} has ${total} tools on; the catalog keeps ${kept.length}.`);
 	return {
 		tools: kept,
-		connectors: connections.map((connection) => catalogConnector(connection, tools)),
-		leftOut: tools.length - kept.length,
+		connectors: connections.map((connection) => catalogConnector(connection, kept)),
+		leftOut: total - kept.length,
 	};
+}
+
+/**
+ * The tools to keep when there are too many: one from each connection in turn, so a
+ * cut takes from the largest connections and leaves none out entirely. Stops at
+ * MAX_CATALOG_TOOLS, or when the tools' JSON reaches MAX_CATALOG_CHARS.
+ */
+function fairShare(perConnection: CatalogTool[][]): CatalogTool[] {
+	const kept: CatalogTool[] = [];
+	let chars = 0;
+	const longest = Math.max(0, ...perConnection.map((list) => list.length));
+	for (let index = 0; index < longest; index++) {
+		for (const list of perConnection) {
+			const tool = list[index];
+			if (!tool) continue;
+			chars += JSON.stringify(tool).length;
+			if (kept.length >= MAX_CATALOG_TOOLS || chars > MAX_CATALOG_CHARS) return kept;
+			kept.push(tool);
+		}
+	}
+	return kept;
 }
 
 function catalogTools(connection: Connection): CatalogTool[] {
 	const connector = { slug: connection.slug, name: connection.name, server: serverName(connection) };
 	return connection.tools
 		.filter((tool) => ruleOf(connection, tool) !== "off")
+		.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
 		.map((tool) => ({
 			name: modelToolName(connection.slug, tool.name),
 			tool: tool.name,
@@ -328,7 +352,8 @@ function catalogConnector(connection: Connection, tools: CatalogTool[]): Catalog
 		...(server && { server }),
 		...(notes && { notes }),
 		tools: tools.filter((tool) => tool.connectionId === connection.id).length,
-		signedOut: connection.status === "needs_sign_in",
+		...(connection.status === "needs_sign_in" && { unavailable: "sign-in" as const }),
+		...(connection.status === "error" && { unavailable: "error" as const }),
 	};
 }
 
@@ -337,14 +362,20 @@ const serverName = (connection: Connection) => connection.serverInfo?.title ?? c
 /**
  * One tool call, for the model. Never throws: a failure is the result, so the model can
  * tell the person, and the workflow does not retry a call that may have changed something.
+ *
+ * `approved` says the person approved this call. The rule is checked again here, as the
+ * last guard: a tool on "Ask first" runs only with it, whatever the caller did.
  */
-export async function callConnectorTool(connectionId: string, tool: string, input: unknown, userId: string): Promise<string> {
+export async function callConnectorTool(connectionId: string, tool: string, input: unknown, userId: string, approved: boolean): Promise<string> {
 	const connection = await getConnection(connectionId, userId);
 	if (!connection) return "This connector was removed.";
 	if (!connection.enabled) return `${connection.name} is turned off in Settings, Connectors.`;
 	if (connection.status === "needs_sign_in") return needsSignIn(connection);
 	const info = connection.tools.find((each) => each.name === tool);
-	if (info && ruleOf(connection, info) === "off") return `The person turned ${info.title ?? tool} off in Settings, Connectors.`;
+	if (!info) return `${connection.name} has no tool named ${tool} now.`;
+	const rule = ruleOf(connection, info);
+	if (rule === "off") return `The person turned ${info.title ?? tool} off in Settings, Connectors.`;
+	if (rule === "ask" && !approved) return `${info.title ?? tool} asks the person first, and they did not approve this call, so it did not run. Call it again to ask them.`;
 	try {
 		const result = await withConnection(connection, (client) =>
 			client.callTool({ name: tool, arguments: (input ?? {}) as Record<string, unknown>, options: { timeout: CALL_TIMEOUT_MS } }),

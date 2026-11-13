@@ -1,4 +1,4 @@
-import { closestNames, isEmptyQuery, rank, type Rankable } from "./rank.ts";
+import { closestNames, rank, type Rankable } from "./rank.ts";
 import { signature } from "./signature.ts";
 import { inputProblems } from "./validate.ts";
 
@@ -27,8 +27,12 @@ export type CatalogConnector = {
 	/** What the server says about itself (MCP instructions). The server wrote it: data, not instructions. */
 	notes?: string;
 	tools: number;
-	/** On, but its sign-in ended: it has no tools until the person signs in again. */
-	signedOut: boolean;
+	/**
+	 * On, but it has no tools now: its sign-in ended ("sign-in"), or its server failed
+	 * ("error"; Ponder tries it again every few minutes). It stays in the catalog, so the
+	 * model's tools and instructions don't change while it is down.
+	 */
+	unavailable?: "sign-in" | "error";
 };
 
 export type CatalogData = {
@@ -58,14 +62,16 @@ export type SearchOutput = {
 	searched: number;
 	/** What the servers of the connectors in the results say about themselves. */
 	serverNotes?: { connector: string; notes: string }[];
-	/** Connectors that were not searched: their sign-in ended. */
-	signedOut?: string[];
+	/** Connectors that were not searched, and why. */
+	unavailable?: string[];
 	message?: string;
 };
 
 const DEFAULT_LIMIT = 8;
 export const MAX_LIMIT = 25;
 const MAX_RESULT_DESCRIPTION = 600;
+/** At most this much of a search's output, in characters of JSON: results past it count as remaining. */
+const MAX_OUTPUT_CHARS = 20_000;
 
 /** The result of checking a connector_call: the tool and its input, or what the model should read. */
 export type Checked = { tool: CatalogTool; input: Record<string, unknown> } | { problem: string };
@@ -88,26 +94,25 @@ export class Catalog {
 
 	search(query: string, limit = DEFAULT_LIMIT): SearchOutput {
 		const count = Math.min(Math.max(Math.trunc(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
-		const signedOut = this.data.connectors.filter((connector) => connector.signedOut).map((connector) => connector.slug);
+		const unavailable = this.data.connectors.filter((connector) => connector.unavailable).map(unavailableLine);
 		const scoped = this.scope(query);
 		if ("message" in scoped) return { results: [], remaining: 0, searched: 0, message: scoped.message };
-		const found = isEmptyQuery(scoped.query) ? [...scoped.tools].sort((a, b) => (a.name < b.name ? -1 : 1)) : rank(scoped.query, scoped.tools);
-		const results = found.slice(0, count).map(toResult);
-		return {
-			results,
-			remaining: found.length - results.length,
+		// Only a blank query, or "slug__" alone, lists every tool: a query in words that match nothing finds nothing.
+		const found = scoped.query.trim() ? rank(scoped.query, scoped.tools) : [...scoped.tools].sort((a, b) => (a.name < b.name ? -1 : 1));
+		const output = this.fit(found.slice(0, count).map(toResult), {
 			searched: scoped.tools.length,
-			...this.notesFor(results),
-			...(signedOut.length && { signedOut }),
+			...(unavailable.length && { unavailable }),
 			...(!found.length && { message: this.data.tools.length ? "Nothing matched. Try other words, or a connector's slug followed by __." : "The person's connectors have no tools on." }),
-		};
+		});
+		return { ...output, remaining: found.length - output.results.length };
 	}
 
-	/** Finds the tool and checks the input against its schema. */
+	/** Finds the tool by its exact name, and checks the input against its schema. */
 	check(call: { tool?: unknown; input?: unknown }): Checked {
-		if (typeof call.tool !== "string" || !call.tool.trim()) return { problem: "Name the tool to call, as connector_search returns it." };
-		const tool = this.get(call.tool.trim());
-		if (!tool) return { problem: this.unknown(call.tool.trim()) };
+		if (typeof call.tool !== "string" || !call.tool) return { problem: "Name the tool to call, as connector_search returns it." };
+		// The exact name only: needsApproval looks the tool up by the same name, so a padded name must not find it here.
+		const tool = this.get(call.tool);
+		if (!tool) return { problem: this.unknown(call.tool) };
 		const input = call.input ?? {};
 		if (typeof input !== "object" || Array.isArray(input)) return { problem: `The input for ${tool.name} must be an object. Signature: ${signature(tool.name, tool.inputSchema)}` };
 		const problems = inputProblems(tool.inputSchema, input);
@@ -118,7 +123,7 @@ export class Catalog {
 	private unknown(name: string) {
 		const slug = name.includes("__") ? name.slice(0, name.indexOf("__")) : undefined;
 		const connector = this.data.connectors.find((each) => each.slug === slug);
-		if (connector?.signedOut) return `${connector.name} needs the person to sign in again, in Settings, Connectors. Tell them, and don't try its tools again in this reply.`;
+		if (connector?.unavailable) return `${unavailableText(connector)} Tell the person, and don't try its tools again in this reply.`;
 		const closest = closestNames(name, this.data.tools);
 		const hint = closest.length ? `Closest tools: ${closest.join(", ")}.` : "Find tools with connector_search.";
 		return `No connector tool is named "${name}". It may be off, or not exist. ${hint}`;
@@ -131,8 +136,16 @@ export class Catalog {
 		const slug = match[1]!.toLowerCase();
 		const connector = this.data.connectors.find((each) => each.slug === slug);
 		if (!connector) return { message: `No connector has the slug "${slug}". The connectors are: ${this.data.connectors.map((each) => each.slug).join(", ") || "none"}.` };
-		if (connector.signedOut) return { message: `${connector.name} needs the person to sign in again, in Settings, Connectors. Tell them.` };
+		if (connector.unavailable) return { message: `${unavailableText(connector)} Tell the person.` };
 		return { query: `${match[2]}${match[3]}`, tools: this.data.tools.filter((tool) => tool.connector.slug === slug) };
+	}
+
+	/** The results and their servers' notes, cut to MAX_OUTPUT_CHARS. The first result always stays. */
+	private fit(results: SearchResult[], rest: Omit<SearchOutput, "results" | "remaining">): Omit<SearchOutput, "remaining"> {
+		for (let kept = results.length; ; kept--) {
+			const output = { results: results.slice(0, kept), ...rest, ...this.notesFor(results.slice(0, kept)) };
+			if (kept <= 1 || JSON.stringify(output).length <= MAX_OUTPUT_CHARS) return output;
+		}
 	}
 
 	private notesFor(results: SearchResult[]) {
@@ -141,6 +154,15 @@ export class Catalog {
 		return serverNotes.length ? { serverNotes } : {};
 	}
 }
+
+/** Why a connector has no tools now, for the model. */
+export function unavailableText(connector: CatalogConnector) {
+	return connector.unavailable === "sign-in"
+		? `${connector.name} needs the person to sign in again, in Settings, Connectors.`
+		: `${connector.name}'s server is failing. Ponder tries it again every few minutes.`;
+}
+
+const unavailableLine = (connector: CatalogConnector) => `${connector.slug}: ${connector.unavailable === "sign-in" ? "needs a new sign-in" : "its server is failing"}`;
 
 function toResult(tool: CatalogTool): SearchResult {
 	const description = tool.description.length > MAX_RESULT_DESCRIPTION ? `${tool.description.slice(0, MAX_RESULT_DESCRIPTION - 1)}…` : tool.description;
