@@ -25,7 +25,12 @@ export type Step = {
  * person's latest message. Each model call in the turn takes the next step, so a script
  * with a tool call has two steps: the call, then the answer after the tool ran.
  */
-export type ChatScript = { match: string; steps: Step[] };
+export type ChatScript = {
+	match: string;
+	steps: Step[];
+	/** The steps instead, when the request carries a summary of the chat (server/compaction/). */
+	summarized?: Step[];
+};
 
 /** A web search's results (search/openrouter-search.ts), for queries that contain `match`. */
 export type SearchScript = { match: string; results: { url: string; title: string; content: string }[] };

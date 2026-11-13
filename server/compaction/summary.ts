@@ -19,6 +19,12 @@ export type Summary = {
 	covers: number;
 	/** False when the covered files are named only, to make room. */
 	keepFiles: boolean;
+	/**
+	 * How many of the thread's first messages the summarizer read: up to the current turn,
+	 * so the kept tail too. A change to any of them makes the summary stale. The covered
+	 * count when not given.
+	 */
+	reads?: number;
 };
 
 export const SUMMARY_MESSAGE_ID = "ponder-summary";

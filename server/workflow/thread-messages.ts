@@ -1,7 +1,7 @@
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
 import { loadSummary, tokenRatio } from "../compaction/store.ts";
 import { withSummary } from "../compaction/summary.ts";
-import { estimateTokens } from "../compaction/tokens.ts";
+import { estimate, type Estimate } from "../compaction/tokens.ts";
 import { loadThread } from "../db.ts";
 import { resolveFileParts } from "../file-context.ts";
 import { MODELS } from "../models.ts";
@@ -27,22 +27,26 @@ export type MessageOptions = {
 export type ThreadContext = {
 	messages: ModelMessage[];
 	/** Their estimated tokens (compaction/tokens.ts). */
-	tokens: number;
+	estimate: Estimate;
 	/** Provider tokens per estimated token, measured on this thread's last call of this model. */
 	ratio: number;
 	/** The model's context window, or null when OpenRouter's list does not give it. */
 	window: number | null;
+	/** The last message the saved summary covers, when the messages read one. */
+	through?: string;
 };
 
 /** The thread as the model reads it, with its saved summary in place of the messages it covers. */
 export async function loadThreadContext(threadId: string, options: MessageOptions): Promise<ThreadContext> {
 	const thread = await loadThread(threadId);
-	const messages = await modelMessages(withSummary(thread, await loadSummary(threadId, thread)), options);
+	const summary = await loadSummary(threadId, thread);
+	const messages = await modelMessages(withSummary(thread, summary), options);
 	return {
 		messages,
-		tokens: estimateTokens(messages),
+		estimate: estimate(messages),
 		ratio: await tokenRatio(threadId, options.modelId),
 		window: (await contextWindow(options.modelId)) ?? null,
+		...(summary && { through: thread[summary.covers - 1]?.id }),
 	};
 }
 

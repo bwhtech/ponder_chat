@@ -11,7 +11,7 @@ import { creditAnswerEmail, inviteEmail, sendEmail } from "../email.ts";
 import { decideRequest, grantCredits, pendingCount, type Decision } from "../extra-credits.ts";
 import { allow, disallow, setInviteCredits } from "../invites.ts";
 import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
-import { MODELS } from "../models.ts";
+import { availableModels } from "../models.ts";
 import { getSettings, setCompactionModel, setPdfTextOnServer, updateSettings } from "../settings.ts";
 import { MAX_BODY } from "../../shared/skill-file.ts";
 import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult, type SkillDetail } from "../skills.ts";
@@ -182,7 +182,8 @@ export const adminApi = new Hono<Env>()
 			...(await getSettings()),
 			admins: await listAdmins(),
 			openRouterKey: await openRouterKeyStatus(),
-			models: MODELS.map(({ id, name }) => ({ id, name })),
+			// Only models with a private (ZDR) endpoint: another would fall back to the chat's own model.
+			models: (await availableModels()).models.map(({ id, name }) => ({ id, name })),
 		}),
 	)
 
@@ -203,9 +204,11 @@ export const adminApi = new Hono<Env>()
 		return c.json(await getSettings());
 	})
 
-	// The model that writes a chat's summary when it gets too long (compaction/summarize.ts). Any model on the list.
-	.put("/settings/compaction-model", body(z.object({ model: z.enum(MODELS.map((model) => model.id) as [string, ...string[]]) })), async (c) => {
+	// The model that writes a chat's summary when it gets too long (compaction/summarize.ts). A model with a private (ZDR) endpoint.
+	.put("/settings/compaction-model", body(z.object({ model: z.string() })), async (c) => {
 		const input = c.req.valid("json");
+		const { models } = await availableModels();
+		if (!models.some((model) => model.id === input.model)) return c.json({ error: "That model has no private endpoint now. Choose another." }, 400);
 		const before = { compactionModel: (await getSettings()).compactionModel };
 		await setCompactionModel(input.model, adminOf(c));
 		await record(c, "set-compaction-model", { before, after: { compactionModel: input.model } });

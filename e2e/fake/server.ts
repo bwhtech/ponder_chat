@@ -168,7 +168,9 @@ function chatStep(messages: Message[], scripts: ChatScript[]): Step {
 	if (!script) return { text: `You said: ${said}` };
 	const lastUser = messages.findLastIndex((message) => message.role === "user");
 	const callsSince = messages.slice(lastUser + 1).filter((message) => message.role === "assistant").length;
-	return script.steps[Math.min(callsSince, script.steps.length - 1)];
+	const summarized = messages.some((message) => message.role === "user" && textOf(message.content).startsWith("<summary>"));
+	const steps = (summarized && script.summarized) || script.steps;
+	return steps[Math.min(callsSince, steps.length - 1)];
 }
 
 /** The reply as OpenRouter streams it: server-sent chat completion chunks, then the usage. */

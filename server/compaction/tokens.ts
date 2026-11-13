@@ -44,28 +44,55 @@ export function budgetFor(window: number | null | undefined): Budget {
 	return { trigger, limit, tail: Math.min(KEPT_TAIL_TOKENS, Math.floor(trigger / 2)), target: Math.floor(trigger / 2) };
 }
 
-/** The measured ratio for a call, kept within sane bounds so one odd call can't skew the thread. */
-export function measuredRatio(inputTokens: number, estimated: number) {
-	if (!(inputTokens > 0) || !(estimated > 0)) return undefined;
-	return Math.min(MAX_RATIO, Math.max(MIN_RATIO, inputTokens / estimated));
+/**
+ * An estimate in two parts. The thread's measured ratio corrects `text` only. `media`
+ * (images, PDFs) is a guess from the file's size, so it never refuses a message or drops
+ * a file on its own: the provider measures it.
+ */
+export type Estimate = { text: number; media: number };
+
+/** Estimated provider tokens: text corrected by the measured ratio, media as estimated. */
+export function countTokens({ text, media }: Estimate, ratio: number) {
+	return Math.ceil(ratio * text + media);
+}
+
+export function addEstimates(...estimates: Estimate[]): Estimate {
+	return { text: estimates.reduce((sum, each) => sum + each.text, 0), media: estimates.reduce((sum, each) => sum + each.media, 0) };
 }
 
 /**
- * Estimated tokens of any message value (UI messages, model messages, a provider prompt):
- * UTF-8 bytes of its JSON ÷ 4, with images and PDFs counted at their own rate, never by
- * the length of their base64.
+ * The measured ratio for a call: its input tokens, less the media estimate, per estimated
+ * text token, within sane bounds so one odd call can't skew the thread. Undefined for a
+ * call that is mostly media: there the guess for the media would decide the ratio.
  */
+export function measuredRatio(inputTokens: number, estimated: Estimate) {
+	if (!(inputTokens > 0) || !(estimated.text > 0) || estimated.media > estimated.text) return undefined;
+	return Math.min(MAX_RATIO, Math.max(MIN_RATIO, (inputTokens - estimated.media) / estimated.text));
+}
+
+/** Estimated tokens of any message value, text and media together. */
 export function estimateTokens(value: unknown): number {
+	const { text, media } = estimate(value);
+	return text + media;
+}
+
+/**
+ * Estimated tokens of any message value: UI messages, model messages or a provider
+ * prompt. Text is UTF-8 bytes of its JSON ÷ 4. A file or image part counts once, at the
+ * rate for its kind, however deep its data sits ({ data: { type: "data", data } } in a
+ * provider prompt), and never by the length of its base64.
+ */
+export function estimate(value: unknown): Estimate {
 	let media = 0;
 	const json =
-		JSON.stringify(value, function (this: Record<string, unknown>, key, item) {
+		JSON.stringify(value, function (key, item) {
 			if (key === "providerOptions" || key === "providerMetadata") return undefined;
-			const payload = mediaPayload(item, this?.mediaType);
-			if (!payload) return item;
-			media += mediaTokens(payload.type, payload.bytes);
-			return "";
+			const file = filePart(item);
+			if (!file) return item;
+			media += mediaTokens(file.type, file.bytes);
+			return { type: (item as { type?: unknown }).type, mediaType: file.type };
 		}) ?? "";
-	return Math.ceil(utf8Length(json) / 4) + media;
+	return { text: Math.ceil(utf8Length(json) / 4), media };
 }
 
 /** An image or PDF counts the same however it is sent. */
@@ -75,18 +102,26 @@ function mediaTokens(type: string, bytes: number) {
 	return Math.ceil(bytes / 4);
 }
 
-/** The media type and size of binary data: bytes, a data: URL, or long base64 beside a media type. */
-function mediaPayload(item: unknown, holderType: unknown): { type: string; bytes: number } | undefined {
-	const type = typeof holderType === "string" ? holderType : "";
-	if (item instanceof Uint8Array) return { type, bytes: item.byteLength };
-	if (item instanceof ArrayBuffer) return { type, bytes: item.byteLength };
+/** A part that carries file data: its media type and size. A part with only a link is text. */
+function filePart(item: unknown): { type: string; bytes: number } | undefined {
+	if (!item || typeof item !== "object" || item instanceof Uint8Array) return undefined;
+	const part = item as { type?: unknown; mediaType?: unknown; data?: unknown; url?: unknown; image?: unknown };
+	const declared = typeof part.mediaType === "string" ? part.mediaType : part.type === "image" ? "image/*" : undefined;
+	if (!declared) return undefined;
+	const nested = part.data && typeof part.data === "object" && !(part.data instanceof Uint8Array) ? (part.data as { data?: unknown }).data : undefined;
+	const payload = [part.data, nested, part.url, part.image].map(payloadOf).find(Boolean);
+	return payload && { type: payload.type ?? declared, bytes: payload.bytes };
+}
+
+/** The size of binary data: bytes, a data: URL, or base64. */
+function payloadOf(item: unknown): { type?: string; bytes: number } | undefined {
+	if (item instanceof Uint8Array || item instanceof ArrayBuffer) return { bytes: item.byteLength };
 	if (typeof item !== "string") return undefined;
 	if (item.startsWith("data:")) {
 		const comma = item.indexOf(",");
-		const header = item.slice(5, comma);
-		return { type: header.split(";")[0] || type, bytes: Math.floor(((item.length - comma - 1) * 3) / 4) };
+		return { type: item.slice(5, comma).split(";")[0] || undefined, bytes: Math.floor(((item.length - comma - 1) * 3) / 4) };
 	}
-	if (type && item.length > 1_000 && /^[A-Za-z0-9+/=\s]+$/.test(item.slice(0, 200))) return { type, bytes: Math.floor((item.length * 3) / 4) };
+	if (item.length > 1_000 && /^[A-Za-z0-9+/=\s]+$/.test(item.slice(0, 200))) return { bytes: Math.floor((item.length * 3) / 4) };
 	return undefined;
 }
 

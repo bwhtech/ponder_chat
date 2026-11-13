@@ -62,6 +62,9 @@ jobs:
       - name: Check how a long chat is summarized
         run: npx tsx server/compaction.check.ts
 
+      - name: Check a compaction run, its retries and a stopped run
+        run: npx tsx server/compaction-flow.check.ts
+
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20

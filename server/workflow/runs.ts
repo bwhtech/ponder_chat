@@ -95,6 +95,16 @@ export async function finishRun(
 	if (marked.count) endReplyTrace({ runId, threadId, model, outcome: cancelled ? "cancelled" : failed ? "failed" : "saved", continued: Boolean(continued) });
 }
 
+/**
+ * True when the thread's latest run is newer than `runId`, or is `runId` and was stopped.
+ * A run that is still starting may not have its row yet: an older run's row does not count.
+ */
+export async function superseded(threadId: string, runId: string) {
+	const run = await latestRun(threadId);
+	if (!run) return false;
+	return run.runId > runId || (run.runId === runId && run.cancelled);
+}
+
 /** For a deleted thread. */
 export async function forgetRuns(threadId: string) {
 	await sql`delete from thread_runs where thread_id = ${threadId}`;

@@ -1,0 +1,167 @@
+/**
+ * Checks for one compaction run (compaction/compaction.ts) with fake storage and a fake
+ * summarizer: what is summarized and saved, a step retried after its save, a run that was
+ * stopped or replaced, a summary that fails, and a chat that is long because of its files.
+ * No database, no network:
+ *   npx tsx server/compaction-flow.check.ts
+ */
+import assert from "node:assert/strict";
+import type { ModelMessage, UIMessage } from "ai";
+import { Compaction, type CompactionDeps, type CompactionState, type CompactRequest } from "./compaction/compaction.ts";
+import type { Summary } from "./compaction/summary.ts";
+
+let n = 0;
+const id = () => `m${++n}`;
+const words = (count: number, word = "word") => Array.from({ length: count }, () => word).join(" ");
+const user = (text: string, ...parts: UIMessage["parts"]): UIMessage => ({ id: id(), role: "user", parts: [{ type: "text", text }, ...parts] });
+const reply = (text: string): UIMessage => ({ id: id(), role: "assistant", parts: [{ type: "text", text }] });
+/** Four long turns, then the current one: about 7,500 tokens a long message. */
+const longThread = () => [user(`ONE ${words(5_000)}`), reply("a"), user(`TWO ${words(5_000)}`), reply("b"), user(`THREE ${words(5_000)}`), reply("c"), user(`FOUR ${words(5_000)}`), reply("d"), user("CURRENT question")];
+
+/** The fake world one run sees, and what it did. */
+class World {
+	saved: { summary: Summary; model: string } | undefined;
+	states: CompactionState[] = [];
+	summarized: UIMessage[][] = [];
+	logs: string[] = [];
+	supersededAt = Number.POSITIVE_INFINITY;
+	supersededChecks = 0;
+	fail = false;
+
+	constructor(public thread: UIMessage[]) {}
+
+	deps(): CompactionDeps {
+		return {
+			loadThread: async () => this.thread,
+			loadSummary: async () => this.saved?.summary,
+			saveSummary: async (_id, _thread, summary, model) => void (this.saved = { summary, model }),
+			superseded: async () => ++this.supersededChecks >= this.supersededAt,
+			writeSummary: async ({ messages }) => {
+				this.summarized.push(messages);
+				if (this.fail) throw new Error("summarizer down");
+				return { text: "SUMMARY", model: "deepseek/deepseek-v4.1-flash" };
+			},
+			// As thread-messages.ts builds them: files stay file parts, the rest is text.
+			modelMessages: async (thread) =>
+				thread.map((message): ModelMessage => {
+					const text = (part: UIMessage["parts"][number]) => ({ type: "text" as const, text: part.type === "text" ? part.text : JSON.stringify(part) });
+					if (message.role !== "user") return { role: "assistant", content: message.parts.map(text) };
+					return { role: "user", content: message.parts.map((part) => (part.type === "file" ? { type: "file" as const, data: part.url, mediaType: part.mediaType } : text(part))) };
+				}),
+			status: async (state) => void this.states.push(state),
+			log: (message) => void this.logs.push(message),
+		};
+	}
+}
+
+const request = (overrides: Partial<CompactRequest> = {}): CompactRequest => ({
+	threadId: "t1",
+	owner: "p1",
+	runId: "wrun_02",
+	modelId: "z-ai/glm-5.3",
+	recalled: "",
+	skills: [],
+	ratio: 1,
+	window: 40_000,
+	envelope: 2_000,
+	mode: "start",
+	...overrides,
+});
+const run = (world: World, overrides: Partial<CompactRequest> = {}, lastAttempt = false) => new Compaction(request(overrides), world.deps()).run(lastAttempt);
+const textOf = (messages: ModelMessage[]) => JSON.stringify(messages);
+
+// --- A compaction: the summarizer reads up to the current turn, not into it; the summary saved says what it read.
+{
+	const world = new World(longThread());
+	const result = await run(world);
+	assert.equal(result.kind, "compacted");
+	assert.equal(world.summarized.length, 1);
+	const read = JSON.stringify(world.summarized[0]);
+	assert.ok(read.includes("ONE") && !read.includes("CURRENT question"), "the current turn stays out of the summary");
+	assert.equal(world.saved?.summary.reads, 8, "it read up to the current turn");
+	assert.ok(world.saved && world.saved.summary.covers <= 8);
+	assert.deepEqual(world.states.map((state) => state.state), ["running", "done"]);
+	assert.equal(world.states.at(-1)?.through, world.thread[world.saved!.summary.covers - 1].id);
+	assert.ok(result.kind === "compacted" && textOf(result.messages).includes("SUMMARY") && textOf(result.messages).includes("CURRENT question"));
+}
+
+// --- A step retried after its save: the saved summary is the result, and nothing is summarized again.
+{
+	const world = new World(longThread());
+	await run(world);
+	const first = world.saved;
+	world.states = [];
+	const retried = await run(world);
+	assert.equal(retried.kind, "compacted");
+	assert.equal(world.summarized.length, 1, "no second summary");
+	assert.equal(world.saved, first);
+	assert.deepEqual(world.states, [{ state: "done", through: world.thread[first!.summary.covers - 1].id }]);
+	assert.ok(retried.kind === "compacted" && textOf(retried.messages).includes("SUMMARY"));
+}
+
+// --- A run that was stopped or replaced before the summary: it summarizes nothing and saves nothing.
+{
+	const world = new World(longThread());
+	world.supersededAt = 1;
+	assert.equal((await run(world)).kind, "unchanged");
+	assert.equal(world.summarized.length, 0);
+	assert.equal(world.saved, undefined);
+}
+// Stopped while the summary was written: the summary is not saved over a newer run's.
+{
+	const world = new World(longThread());
+	world.supersededAt = 2;
+	const result = await run(world);
+	assert.equal(result.kind, "compacted");
+	assert.equal(world.summarized.length, 1);
+	assert.equal(world.saved, undefined);
+}
+
+// --- A summary that fails: the step tries again; on its last attempt the reply goes on without the old messages.
+{
+	const world = new World(longThread());
+	world.fail = true;
+	await assert.rejects(run(world), /summarizer down/);
+	// Long instructions leave room for the current turn only, so the ladder covers up to it.
+	const result = await run(world, { envelope: 15_000 }, true);
+	assert.equal(result.kind, "left-out");
+	assert.equal(world.saved, undefined, "nothing is saved, so the next reply tries again");
+	assert.equal(world.states.at(-1)?.state, "failed");
+	assert.ok(world.logs[0].startsWith("reply degraded: summary"));
+	// The note counts the messages the reply really leaves out, also when the ladder keeps only the current turn.
+	const text = result.kind === "left-out" ? textOf(result.messages) : "";
+	const count = Number(text.match(/\[(\d+) earlier messages/)?.[1]);
+	const kept = result.kind === "left-out" ? result.messages.length - 1 : 0;
+	assert.equal(count, 8, "all eight messages before the current turn");
+	assert.equal(count + kept, world.thread.length, `the note's ${count} and the ${kept} messages kept are the whole thread`);
+}
+
+// --- Between steps: everything before the current turn is summarized, and only the summary message comes back.
+{
+	const world = new World(longThread());
+	const result = await run(world, { mode: "turn", turn: { text: 100, media: 0 } });
+	assert.equal(result.kind, "compacted");
+	assert.equal(world.saved?.summary.covers, 8);
+	assert.ok(result.kind === "compacted" && result.messages.length === 1 && textOf(result.messages).includes("SUMMARY"));
+	// A second time in another reply: the same summary stands for the same messages.
+	assert.equal((await run(world, { mode: "turn", turn: { text: 100, media: 0 } })).kind, "compacted");
+	assert.equal(world.summarized.length, 1);
+}
+
+// --- A chat that is long because of its files: little text to fold is not worth a summary.
+{
+	const pdf = { type: "file" as const, mediaType: "application/pdf", url: `data:application/pdf;base64,${"A".repeat(4_000_000)}` };
+	const world = new World([user("Read this", pdf), reply("ok"), user("And this?"), reply("yes"), user("CURRENT question")]);
+	assert.equal((await run(world)).kind, "unchanged");
+	assert.equal(world.summarized.length, 0);
+}
+// Files never refuse a message: a huge PDF in the current turn still fits, since its estimate is a guess.
+{
+	const pdf = { type: "file" as const, mediaType: "application/pdf", url: `data:application/pdf;base64,${"A".repeat(8_000_000)}` };
+	const world = new World([...longThread().slice(0, 8), user("CURRENT question", pdf)]);
+	const result = await run(world);
+	assert.equal(result.kind, "compacted", "not over-limit");
+	assert.equal(world.saved?.summary.keepFiles, true, "files are not dropped for their estimate");
+}
+
+console.log("compaction flow checks passed");

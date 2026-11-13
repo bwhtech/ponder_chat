@@ -100,8 +100,8 @@ export async function chatTurn(turn: ChatTurn) {
 		// The <connectors> note goes with the latest message, as memory's does, and is never summarized.
 		const connectors = connectorNote(catalog);
 		// A long chat is summarized before a call would go over the model's window (context-guard.ts).
-		const context = await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors);
-		const base = { threadId: turn.threadId, owner: turn.owner, modelId: turn.model.id, recalled: memory.recalled, skills, connectors };
+		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors);
+		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors };
 		const guard = new ContextGuard(base, context, await toolTokens(tools), writable, turn.model.name);
 		const messages = await guard.initialMessages(system);
 		const agent = new WorkflowAgent({
@@ -124,7 +124,7 @@ export async function chatTurn(turn: ChatTurn) {
 					finishReason: step.finishReason,
 					toolCalls: step.toolCalls.map(calledToolName),
 					requested: turn.model.id,
-					estimatedTokens: guard.estimate,
+					estimated: guard.estimate,
 				});
 			},
 		});

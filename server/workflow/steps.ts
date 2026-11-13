@@ -1,5 +1,6 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import type { CompactRequest, CompactResult } from "../compaction/compact.ts";
+import type { CompactionState, CompactRequest, CompactResult } from "../compaction/compaction.ts";
+import type { Estimate } from "../compaction/tokens.ts";
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 import type { ActiveSkill } from "../skills.ts";
@@ -19,8 +20,12 @@ import type { ThreadContext } from "./thread-messages.ts";
  * The thread as the model reads it (thread-messages.ts), with its saved summary in place
  * of the messages it covers, and what compaction decides from: the estimate, the
  * thread's measured ratio and the model's window. A step, so a replay reads the same.
+ *
+ * A reply that reads a saved summary says so to the page, as the reply that wrote it did,
+ * so the divider stays after a Retry of that reply.
  */
 export async function loadModelMessages(
+	writable: WritableStream<ModelCallStreamPart>,
 	threadId: string,
 	owner: string,
 	modelId: string,
@@ -31,7 +36,9 @@ export async function loadModelMessages(
 ): Promise<ThreadContext> {
 	"use step";
 	const { loadThreadContext } = await import("./thread-messages.ts");
-	return loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors });
+	const context = await loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors });
+	if (context.through) await writeCompactionState(writable, { state: "done", through: context.through });
+	return context;
 }
 
 /** How many times compaction runs again after it fails. On the last attempt it leaves the old messages out instead of failing. */
@@ -47,22 +54,22 @@ export async function compactStep(writable: WritableStream<ModelCallStreamPart>,
 	const { getStepMetadata } = await import("workflow");
 	const { compact } = await import("../compaction/compact.ts");
 	const { attempt } = getStepMetadata();
-	return compact(request, {
-		lastAttempt: attempt > COMPACT_RETRIES,
-		status: async (state) => {
-			const writer = writable.getWriter();
-			try {
-				await writer.write({ type: "raw", rawValue: { [COMPACTION_MARKER]: state } });
-				// Each model call starts with reset-step, which drops the parts of the step it is in.
-				// So the status ends a step of its own, as the agent does between its steps.
-				if (state.state !== "running") for (const type of ["finish-step", "start-step"]) await writer.write({ type } as unknown as ModelCallStreamPart);
-			} finally {
-				writer.releaseLock();
-			}
-		},
-	});
+	return compact(request, { lastAttempt: attempt > COMPACT_RETRIES, status: (state) => writeCompactionState(writable, state) });
 }
 compactStep.maxRetries = COMPACT_RETRIES;
+
+/** The compaction status for the page (reply-chunks.ts). Called inside steps. */
+async function writeCompactionState(writable: WritableStream<ModelCallStreamPart>, state: CompactionState) {
+	const writer = writable.getWriter();
+	try {
+		await writer.write({ type: "raw", rawValue: { [COMPACTION_MARKER]: state } });
+		// Each model call starts with reset-step, which drops the parts of the step it is in.
+		// So the status ends a step of its own, as the agent does between its steps.
+		if (state.state !== "running") for (const type of ["finish-step", "start-step"]) await writer.write({ type } as unknown as ModelCallStreamPart);
+	} finally {
+		writer.releaseLock();
+	}
+}
 
 /** Memory's guidance for the instructions, and what it recalls for the person's latest message. */
 export async function recallMemoryStep(threadId: string, owner: string): Promise<{ guidance: string; recalled: string }> {
@@ -152,7 +159,7 @@ export type StepUsage = {
 	toolCalls: string[];
 	/** The model asked for, and Ponder's estimate of the call's input tokens, to measure the thread's ratio. */
 	requested: string;
-	estimatedTokens: number;
+	estimated: Estimate;
 };
 
 /**
@@ -168,7 +175,7 @@ export async function recordUsageStep(usage: StepUsage) {
 	const { insertRun } = await import("../telemetry/store.ts");
 	const { measuredRatio } = await import("../compaction/tokens.ts");
 	const { saveTokenRatio } = await import("../compaction/store.ts");
-	const ratio = measuredRatio(usage.inputTokens, usage.estimatedTokens);
+	const ratio = measuredRatio(usage.inputTokens, usage.estimated);
 	if (ratio) await saveTokenRatio(usage.threadId, usage.requested, ratio);
 	await insertRun({
 		id: randomUUID(),

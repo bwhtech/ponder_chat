@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { e2e } from "../env.ts";
 import { chat, expect, test, type Fake } from "../fixtures.ts";
 
 /**
@@ -138,4 +139,105 @@ test("a message too long for the model says so", async ({ page, fake }) => {
 	await chat.send(page, `HUGE-M1 ${filler(45_000)}`);
 	await expect(page.getByText("This message is too long for GLM 5.3")).toBeVisible({ timeout: 60_000 });
 	expect(await fake.calls("HUGE-M1")).toHaveLength(0);
+});
+
+test("Retry on the reply that compacted keeps the summary and its divider", async ({ page, fake }) => {
+	test.setTimeout(240_000);
+	await fake.summary({ match: "RETRY-M1 ", text: "SUMMARY-RETRY: the person sent long notes." });
+	// Each message is answered, unless the call carries a summary: then the reply fails once.
+	let at = 0;
+	for (let i = 1; i <= 8 && !at; i++) {
+		const marker = `RETRY-M${i}`;
+		await fake.chat({ match: marker, steps: [{ text: `Noted ${marker}.` }], summarized: [{ error: { status: 400, message: "The provider refused the request." } }] });
+		await chat.send(page, longMessage(marker));
+		await expect(chat.reply(page).getByText(`Noted ${marker}.`).or(page.getByText("Something went wrong"))).toBeVisible({ timeout: 60_000 });
+		await chat.idle(page);
+		if ((await fake.summaries("RETRY-M1 ")).length) at = i;
+	}
+	expect(at, "the chat was summarized").toBeGreaterThan(0);
+	await expect(page.getByText("Something went wrong")).toBeVisible();
+
+	await fake.chat({ match: `RETRY-M${at}`, steps: [{ text: "RETRY-DONE" }] });
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(chat.reply(page)).toContainText("RETRY-DONE", { timeout: 60_000 });
+	await chat.idle(page);
+	// The retry read the saved summary, wrote no new one, and the page still shows where it ends.
+	expect(await fake.summaries("RETRY-M1 ")).toHaveLength(1);
+	const calls = await fake.calls(`RETRY-M${at} `);
+	expect(sent(calls.at(-1)!.messages)).toContain("SUMMARY-RETRY");
+	await expect(divider(page)).toHaveCount(1);
+	await page.reload();
+	await expect(divider(page)).toHaveCount(1);
+});
+
+test("a reply that goes on after an approval is summarized when the approved call made it too long", async ({ page, fake }) => {
+	test.setTimeout(180_000);
+	const shop = await page.request.post("/api/connectors", { data: { name: "Shop", url: `${e2e.mcpUrl}/open/mcp`, transport: "http", auth: "none" } });
+	expect(shop.ok(), await shop.text()).toBe(true);
+	await fake.summary({ match: "APPROVE-M1 ", text: "SUMMARY-APPROVE: the person sent long notes." });
+	await fake.chat({ match: "APPROVE-M1", steps: [{ text: "Noted APPROVE-M1." }] });
+	await chat.send(page, longMessage("APPROVE-M1"));
+	await expect(chat.reply(page)).toContainText("Noted APPROVE-M1.", { timeout: 60_000 });
+	await chat.idle(page);
+
+	// The model writes a long note. Its first call did not read it, so only the run after the approval is over the trigger.
+	const note = `APPROVE-NOTE ${filler(28_000)}`;
+	await fake.chat({
+		match: "APPROVE-ADD",
+		steps: [{ toolCalls: [{ name: "shop__add_note", input: { order: "A1", note } }] }, { text: "APPROVE-UNSUMMARIZED" }],
+		summarized: [{ text: "APPROVE-DONE" }],
+	});
+	await chat.send(page, "APPROVE-ADD put my notes on order A1");
+	// The page loaded before the connector was added, so the question names the tool only.
+	const approve = page.getByRole("button", { name: "Approve", exact: true });
+	await expect(approve).toBeVisible({ timeout: 60_000 });
+	expect(await fake.summaries("APPROVE-M1 ")).toHaveLength(0);
+
+	await approve.click();
+	await expect(chat.reply(page)).toContainText("APPROVE-DONE", { timeout: 90_000 });
+	await chat.idle(page);
+	expect(await fake.summaries("APPROVE-M1 ")).toHaveLength(1);
+	const calls = await fake.calls("APPROVE-ADD");
+	expect(calls).toHaveLength(2);
+	// The call after the approval read the summary in place of the first message, and the approved call word for word.
+	expect(sent(calls[1].messages)).toContain("SUMMARY-APPROVE");
+	expect(sent(calls[1].messages)).not.toContain("APPROVE-M1 ");
+	expect(sent(calls[1].messages)).toContain("APPROVE-NOTE");
+	expect(sent(calls[1].messages)).toContain("Added the note to order A1.");
+	await expect(divider(page)).toHaveCount(1);
+});
+
+test("Stop during the summary saves nothing, and the next message summarizes again", async ({ page, fake, person, db }) => {
+	test.setTimeout(240_000);
+	const delayMs = 6_000;
+	await fake.summary({ match: "STOP-M1 ", text: "SUMMARY-STOP: the person sent long notes.", delayMs });
+	const compacting = page.getByText(/Compacting earlier messages/);
+	let stopped = false;
+	for (let i = 1; i <= 8 && !stopped; i++) {
+		const marker = `STOP-M${i}`;
+		await fake.chat({ match: marker, steps: [{ text: `Noted ${marker}.` }] });
+		await chat.send(page, longMessage(marker));
+		await expect(chat.reply(page).getByText(`Noted ${marker}.`).or(compacting)).toBeVisible({ timeout: 60_000 });
+		if (await compacting.isVisible()) {
+			await chat.stop(page).click();
+			stopped = true;
+		}
+		await chat.idle(page);
+	}
+	expect(stopped, "the chat was summarized").toBe(true);
+
+	// The summarizer still answers after Stop, but the stopped run does not save it.
+	await expect.poll(async () => (await fake.summaries("STOP-M1 ")).length).toBe(1);
+	await page.waitForTimeout(delayMs + 2_000);
+	const saved = () => db`select count(*)::int as n from thread_summaries s join threads t on t.id = s.thread_id where t.owner = ${person.id}`;
+	expect((await saved())[0].n).toBe(0);
+
+	await fake.summary({ match: "STOP-M1 ", text: "SUMMARY-STOP: the person sent long notes." });
+	await fake.chat({ match: "STOP-AFTER", steps: [{ text: "Noted STOP-AFTER." }] });
+	await chat.send(page, "STOP-AFTER a short follow-up");
+	await expect(chat.reply(page)).toContainText("Noted STOP-AFTER.", { timeout: 60_000 });
+	await chat.idle(page);
+	expect(await fake.summaries("STOP-M1 ")).toHaveLength(2);
+	expect((await saved())[0].n).toBe(1);
+	expect(sent((await fake.calls("STOP-AFTER"))[0].messages)).toContain("SUMMARY-STOP");
 });

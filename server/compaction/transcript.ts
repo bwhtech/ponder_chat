@@ -7,6 +7,10 @@ import { estimateTokens } from "./tokens.ts";
  * in the middle to 2,000 characters, so large outputs reach the summarizer as findings
  * to keep, not as text to copy. A file is named, never sent as base64. Artifact
  * content is left out: the summary message carries the latest versions (summary.ts).
+ *
+ * Each message sits in a <msg-NONCE role="…"> tag, with a random nonce for each call, so
+ * text in a message can't open a message of its own: a page or a connector's result
+ * can't pass as the person. Tool payloads are JSON, so their line breaks stay escaped.
  */
 export const PAYLOAD_CHARS = 2_000;
 /** When the transcript is over its budget, older text is cut to this... */
@@ -18,23 +22,23 @@ const SLACK_CHARS = 64;
 type Part = UIMessage["parts"][number];
 type Entry = { role: string; text: string };
 
-/** The transcript of `messages`, cut oldest first to fit `budgetTokens`. */
-export function renderTranscript(messages: UIMessage[], budgetTokens: number): string {
+/** The transcript of `messages`, cut oldest first to fit `budgetTokens`. `nonce` names the message tags. */
+export function renderTranscript(messages: UIMessage[], budgetTokens: number, nonce: string): string {
 	const entries = messages.map((message) => ({ role: message.role, text: renderMessage(message, PAYLOAD_CHARS) }));
-	let excess = estimateTokens(join(entries)) - budgetTokens;
+	let excess = estimateTokens(join(entries, nonce)) - budgetTokens;
 	for (let i = 0; i < entries.length && excess > 0; i++) {
 		const before = entries[i].text.length;
 		const limit = Math.max(DEGRADED_TEXT_CHARS, before - Math.ceil(excess * 4) - SLACK_CHARS);
 		entries[i] = { ...entries[i], text: capText(renderMessage(messages[i], DEGRADED_PAYLOAD_CHARS), limit) };
 		excess -= Math.max(0, Math.floor((before - entries[i].text.length) / 4));
 	}
-	return join(entries);
+	return join(entries, nonce);
 }
 
-function join(entries: Entry[]) {
+function join(entries: Entry[], nonce: string) {
 	const text = entries
 		.filter((entry) => entry.text.trim())
-		.map((entry) => `### ${entry.role}\n${entry.text.trim()}`)
+		.map((entry) => `<msg-${nonce} role="${entry.role}">\n${entry.text.trim()}\n</msg-${nonce}>`)
 		.join("\n\n");
 	return text || "(empty)";
 }
@@ -78,14 +82,13 @@ function renderTool({ name, input, output, errorText }: ToolPart, payloadChars: 
 function renderCitation(data: unknown, chars: number) {
 	const { text, comment } = (data ?? {}) as { text?: unknown; comment?: unknown };
 	if (typeof text !== "string") return "";
-	const quote = `[Quoted from an earlier reply: "${clipMiddle(text, chars)}"]`;
+	const quote = `[Quoted from an earlier reply: ${clipMiddle(JSON.stringify(text), chars)}]`;
 	return typeof comment === "string" && comment.trim() ? `${quote}\n${comment}` : quote;
 }
 
-/** Text as is; anything else as compact JSON. */
+/** A tool's input or output as compact JSON: a string's line breaks stay escaped, so it can't start a line of its own. */
 function payload(value: unknown) {
-	if (typeof value === "string") return value;
-	return (JSON.stringify(value) ?? "").replace(/\s+/g, " ");
+	return typeof value === "string" ? JSON.stringify(value) : (JSON.stringify(value) ?? "").replace(/\s+/g, " ");
 }
 
 /** The start and end of `text`, cut in the middle to `max` characters, without splitting a surrogate pair. */
