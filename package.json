@@ -39,7 +39,7 @@
     "better-auth": "^1.7.12",
     "dompurify": "^3.4.17",
     "frappe-ui": "^1.1.0",
-    "frappe-ui-ai-elements": "^1.1.0",
+    "frappe-ui-ai-elements": "^1.2.0",
     "hono": "^4.13.13",
     "linkedom": "^0.18.15",
     "nitro": "^3.0.261103-rc",
