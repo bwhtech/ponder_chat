@@ -75,7 +75,7 @@ const keyText = computed(() => {
 				<h2 class="text-base-semibold text-ink-gray-9">Long chats</h2>
 				<SettingsRow
 					title="Summary model"
-					description="When a chat gets too long for its model, this model summarizes the older messages, and the reply reads the summary in their place. Each summary is charged to the person's credits. A cheap model with a long context works best."
+					description="Summarizes the older messages when a chat gets too long for its model. Each summary is charged to the person's credits, so a cheap model with a long context works best."
 				>
 					<Skeleton v-if="form.loading" class="h-7 w-48 rounded-4" />
 					<Select
