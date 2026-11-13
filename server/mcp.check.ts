@@ -19,7 +19,7 @@ import { Hono } from "hono";
 import type { SignedInEnv } from "./auth.ts";
 import { sql } from "./db.ts";
 import { forgetClient } from "./mcp/client.ts";
-import { addConnector, callConnectorTool, changeConnector, completeSignIn, connectorToolsFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
+import { addConnector, callConnectorTool, changeConnector, completeSignIn, connectorCatalogFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
 import { freshCredentials } from "./mcp/oauth.ts";
 import { probe } from "./mcp/probe.ts";
 import { connectorsApi } from "./mcp/routes.ts";
@@ -285,17 +285,17 @@ try {
 		await assert.rejects(addConnector(alice, ORIGIN, { name: "Again", url: `${base}/open/mcp`, transport: "http", auth: "none", headers: [] }), /already have/);
 	});
 
-	await check("the workflow's tools: rules decide which tools show and which ask first", async () => {
+	await check("the catalog: rules decide which tools are in it and which ask first", async () => {
 		await changeConnector(alice, openId, { rules: { big: "off" } });
-		const { specs, guidance } = await connectorToolsFor(alice);
-		assert.deepEqual(specs.map((spec) => [spec.name, spec.ask]), [
+		const catalog = await connectorCatalogFor(alice);
+		assert.deepEqual(catalog.tools.map((tool) => [tool.name, tool.ask]), [
 			["check_open__create_item", true],
 			["check_open__echo", false],
 		]);
-		assert.ok(guidance.includes("Check Open") && guidance.includes("Use echo to repeat text."));
+		assert.deepEqual(catalog.connectors, [{ slug: "check_open", name: "Check Open", server: "Check Server", notes: "Use echo to repeat text.", tools: 2, signedOut: false }]);
 		assert.match(await callConnectorTool(openId, "big", {}, alice), /turned .* off/);
 		await changeConnector(alice, openId, { rules: { big: null }, enabled: false });
-		assert.equal((await connectorToolsFor(alice)).specs.length, 0);
+		assert.deepEqual(await connectorCatalogFor(alice), { tools: [], connectors: [], leftOut: 0 });
 		await changeConnector(alice, openId, { enabled: true });
 	});
 
@@ -358,7 +358,9 @@ try {
 		const text = await callConnectorTool(oauthId, "echo", { text: "x" }, alice);
 		assert.match(text, /sign in again/);
 		assert.equal((await getConnection(oauthId, alice))!.status, "needs_sign_in");
-		assert.equal((await connectorToolsFor(alice)).specs.filter((spec) => spec.connectionId === oauthId).length, 0);
+		const catalog = await connectorCatalogFor(alice);
+		assert.equal(catalog.tools.filter((tool) => tool.connectionId === oauthId).length, 0);
+		assert.ok(catalog.connectors.some((connector) => connector.slug === "check_oauth" && connector.signedOut && connector.tools === 0));
 	});
 
 	await check("OAuth with the person's own app and secret", async () => {

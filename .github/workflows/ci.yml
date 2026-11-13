@@ -47,6 +47,9 @@ jobs:
       - name: Check which pages web_fetch reads without asking
         run: npx tsx server/trusted-pages.check.ts
 
+      - name: Check the connector catalog (search, signatures, input checks)
+        run: npx tsx server/connector-catalog.check.ts
+
       - name: Check that web_fetch tidies a page in linear time
         run: npx tsx server/fetch-page.check.ts
 
