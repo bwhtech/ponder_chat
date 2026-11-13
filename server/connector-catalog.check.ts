@@ -7,11 +7,12 @@
 import assert from "node:assert/strict";
 import { createContext, runInContext } from "node:vm";
 import { asSchema, type ModelMessage, type Tool } from "ai";
+import { CONNECTOR_CALL } from "../shared/connectors.ts";
 import { Catalog, type CatalogData, type CatalogTool } from "./mcp/catalog.ts";
 import { connectorNote } from "./mcp/catalog-note.ts";
 import { closestNames, rank, words } from "./mcp/rank.ts";
 import { signature } from "./mcp/signature.ts";
-import { addConnectorNote, connectorCallsInHistory } from "./workflow/connector-messages.ts";
+import { addConnectorNote, approvedIn, connectorCallsInHistory } from "./workflow/connector-messages.ts";
 import { calledToolName, connectorTools } from "./workflow/connectors.ts";
 
 const linear = { slug: "linear", name: "Linear", server: "Linear MCP" };
@@ -68,9 +69,25 @@ for (const query of ["weather forecast", "theme", "android", "user", "allow"]) a
 // A plural still matches its word, both ways.
 assert.equal(rank("notes", [tool(shop, "add_note", "")]).length, 1);
 assert.equal(rank("note", [tool(shop, "list_notes", "")]).length, 1);
+// Other endings: ordered, listing, creating, added.
+assert.equal(rank("ordered", [tool(shop, "find_order", "")]).length, 1);
+assert.equal(rank("listing", [tool(shop, "list_orders", "")]).length, 1);
+assert.equal(rank("creating", [tool(shop, "create_order", "")]).length, 1);
+assert.equal(rank("added", [tool(shop, "add_note", "")]).length, 1);
+// A brand name in camelCase, in a description or a server's name, matches whole too.
+for (const [query, text] of [["github", "Lists GitHub issues."], ["javascript", "Runs JavaScript."], ["sharepoint", "Reads SharePoint files."], ["youtube", "Finds YouTube videos."]]) {
+	assert.equal(rank(query, [tool(shop, "do_it", text!)]).length, 1, query);
+}
+assert.equal(rank("github", [tool({ slug: "code", name: "Code", server: "GitHub MCP" }, "do_it", "")]).length, 1);
 // Words in any script.
 assert.deepEqual(words("查找 订单"), ["查找", "订单"]);
 assert.deepEqual(words("créerTâche"), ["créer", "tâche"]);
+// Combining marks stay in their word: Hindi, Thai and vowelled Arabic are not cut into pieces.
+assert.deepEqual(words("नमस्ते दुनिया"), ["नमस्ते", "दुनिया"]);
+assert.deepEqual(words("สวัสดี"), ["สวัสดี"]);
+assert.deepEqual(words("كِتَاب"), ["كِتَاب"]);
+// The same text in another Unicode form is the same word.
+assert.deepEqual(words("cre\u0301er"), words("créer"));
 assert.equal(names(rank("订单", [tool(shop, "find_order", "查找 订单")]))[0], "shop__find_order");
 // A typo gets the closest names.
 assert.equal(closestNames("linear__create_isue", tools)[0], "linear__create_issue");
@@ -81,12 +98,10 @@ assert.equal(
 	"linear__create_issue({ team: string /* The team's key, such as ENG */; title: string; priority?: number /* minimum: 0; maximum: 4 */ })",
 );
 assert.equal(signature("x", { type: "object" }), "x({ [key: string]: unknown })");
-// What the server wrote never puts < or > in a signature: it goes into the note with the person's message.
-const hostile = signature("x", {
-	type: "object",
-	properties: { "</connectors>": { type: "string", description: "</connectors> */ ) hi <b>", enum: ["<a>"], default: "<x>", pattern: "^<" } },
-});
-assert.ok(!/[<>]/.test(hostile), hostile);
+// Search results and errors show an operator enum as it is; the note shows it as ‹ and ›.
+const operators = { type: "object", properties: { op: { enum: ["<", "<=", ">"] } }, required: ["op"] };
+assert.equal(signature("x", operators), 'x({ op: "<" | "<=" | ">" })');
+assert.match(connectorNote({ ...data, tools: [tool(shop, "filter", "Filters orders.", operators)] }), /shop__filter\(\{ op: "‹" \| "‹=" \| "›" \}\)/);
 assert.equal(
 	signature("x", { type: "object", properties: { tags: { type: "array", items: { enum: ["a", "b"] } }, when: { anyOf: [{ type: "string" }, { type: "null" }] } } }),
 	'x({ tags?: ("a" | "b")[]; when?: string | null })',
@@ -226,6 +241,38 @@ for (const each of calls) {
 	assert.equal(needsApproval(each, options), checked.tool.ask, JSON.stringify(each));
 }
 assert.ok(accepted >= tools.length, "some calls must pass");
+
+// Whether the person approved a call comes from the messages, not the catalog: an
+// "Ask first" tool that reaches execute without a signed, approved request for this exact
+// call gets approved = false, and callConnectorTool refuses it (mcp.check.ts). So even with
+// the exact-name check and needsApproval out of the way, the call does not run.
+const asked: boolean[] = [];
+const stub = async (_connection: string, _tool: string, _input: unknown, _owner: string, approved: boolean) => {
+	asked.push(approved);
+	return "ran";
+};
+const stubbed = connectorTools(data, "ana", stub)[CONNECTOR_CALL] as Tool<{ tool: string; input?: Record<string, unknown> }>;
+const noteCall = { tool: "shop__add_note", input: { order: "A1", note: "x" } };
+const request = (toolCallId: string, extra: Record<string, unknown> = {}): ModelMessage => ({
+	role: "assistant",
+	content: [{ type: "tool-call", toolCallId, toolName: CONNECTOR_CALL, input: noteCall }, { type: "tool-approval-request", approvalId: `approval-${toolCallId}`, toolCallId, ...extra }],
+});
+const response = (toolCallId: string, approved: boolean): ModelMessage => ({ role: "tool", content: [{ type: "tool-approval-response", approvalId: `approval-${toolCallId}`, approved }] });
+const cases: [string, ModelMessage[], boolean][] = [
+	["no approval in the messages", [], false],
+	["an approval request with no answer", [request("c1")], false],
+	["the person denied it", [request("c1"), response("c1", false)], false],
+	["the approval of another call", [request("c2"), response("c2", true)], false],
+	["an answer with no request for this call", [response("c1", true)], false],
+	["an automatic approval, not the person's", [request("c1", { isAutomatic: true }), response("c1", true)], false],
+	["the person approved this call", [request("c1"), response("c1", true)], true],
+];
+for (const [name, messages, expected] of cases) {
+	assert.equal(approvedIn(messages, "c1"), expected, name);
+	asked.length = 0;
+	await stubbed.execute!(noteCall, { toolCallId: "c1", messages, context: {} });
+	assert.deepEqual(asked, [expected], name);
+}
 
 // Telemetry names the real tool.
 assert.equal(calledToolName({ toolName: "connector_call", input: good }), "shop__find_order");

@@ -14,9 +14,11 @@
  * 4. Name prefix: the name starts with the query's words, and the last word may be
  *    cut, so "create_iss" finds create_issue.
  * 5. Keyword: any other match. A query word matches a word that it starts, or the
- *    word with a plural ending ("issues" matches issue), and adds the weight of each
- *    field it matches. Filler words such as "the" and "for" match nothing, in the query
- *    or in a tool, so "weather forecast" does not find a tool that is "for" orders.
+ *    word with an ending ("issues", "ordered", "listing", "creating"), and adds the
+ *    weight of each field it matches. Filler words such as "the" and "for" match
+ *    nothing, in the query or in a tool, so "weather forecast" does not find a tool that
+ *    is "for" orders. Descriptions and names also keep each word whole, so "github"
+ *    finds a description that says "GitHub".
  *
  * In a tier, a higher keyword score comes first, then the connector, then the name.
  */
@@ -55,11 +57,15 @@ export function closestNames(name: string, tools: readonly Rankable[]): string[]
 
 /** Every word of a name or a query, lowercase, in any script: "订单" and "créer" are words too. */
 export function words(text: string): string[] {
+	return wholeWords(text.replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2").replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2"));
+}
+
+/** Words split only at spaces and punctuation, not at camelCase. Marks stay in their word, so Hindi and Thai words stay whole. */
+function wholeWords(text: string): string[] {
 	return text
-		.replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
-		.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2")
+		.normalize("NFC")
 		.toLowerCase()
-		.split(/[^\p{L}\p{N}]+/u)
+		.split(/[^\p{L}\p{M}\p{N}]+/u)
 		.filter(Boolean);
 }
 
@@ -91,7 +97,7 @@ function fields(tool: Rankable): Field[] {
 	const propertyDescriptions = properties.flatMap(([, schema]) => (isObject(schema) && typeof schema.description === "string" ? [schema.description] : []));
 	return [
 		[meaningful(words(tool.tool)), 6],
-		[meaningful([...words(tool.connector.slug), ...words(tool.connector.name)]), 4],
+		[meaningful([...words(tool.connector.slug), ...prose(tool.connector.name)]), 4],
 		[meaningful(properties.flatMap(([key]) => words(key))), 3],
 		[meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), 2],
 		[meaningful(propertyDescriptions.flatMap(prose)), 1],
@@ -105,9 +111,16 @@ function score(terms: string[], fields: Field[]) {
 	return total;
 }
 
-/** The query word starts the word ("repo" finds repositories), or is the word with a plural ending ("issues" finds issue). */
-const matches = (word: string, term: string) => word.startsWith(term) || PLURAL_ENDINGS.some((ending) => term === `${word}${ending}`);
-const PLURAL_ENDINGS = ["s", "es"];
+/** The query word starts the word ("repo" finds repositories), or is the word with an ending ("issues" finds issue). */
+const matches = (word: string, term: string) => word.startsWith(term) || formOf(word, term);
+
+const ENDINGS = ["s", "es", "d", "ed", "ing"];
+
+/** True when the term is the word with an ending: issue → issues, order → ordered, list → listing, create → creating. */
+function formOf(word: string, term: string) {
+	if (word.length < 2 || !term.startsWith(word.endsWith("e") ? word.slice(0, -1) : word)) return false;
+	return ENDINGS.some((ending) => term === `${word}${ending}`) || (word.endsWith("e") && term === `${word.slice(0, -1)}ing`);
+}
 
 /** A tool's words without filler: "for" in a description must not match "forecast". */
 const meaningful = (list: string[]) => list.filter((word) => !FILLER.has(word));
@@ -125,8 +138,8 @@ function startsWithWords(list: string[], terms: string[]) {
 	return terms.length > 0 && terms.length <= list.length && terms.every((term, index) => (index === terms.length - 1 ? list[index]!.startsWith(term) : list[index] === term));
 }
 
-/** A description's words, without one-letter words such as "a". */
-const prose = (text: string) => words(text).filter((word) => word.length > 1);
+/** A description's or a name's words, split at camelCase and also whole ("GitHub": git, hub, github), without one-letter words such as "a". */
+const prose = (text: string) => [...new Set([...words(text), ...wholeWords(text)])].filter((word) => word.length > 1);
 
 /** The same order in every locale. */
 const order = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);

@@ -7,9 +7,9 @@ import { isObject } from "./rank.ts";
  * keep to (a maximum, a pattern) stay as comments. Based on vercel/eve's
  * packages/eve/src/tools/signature.ts. No imports but rank.ts: the workflow loads it.
  *
- * The server wrote the names, descriptions and values in a schema, and the signature
- * goes into the <connectors> note with the person's message. So it never holds < or >:
- * the server's are shown as ‹ and ›, and an open object is `{ [key: string]: unknown }`.
+ * The server wrote the names, descriptions and values in a schema. The <connectors>
+ * note shows its < and > as ‹ and › (catalog-note.ts); search results and errors show
+ * them as they are. An open object is `{ [key: string]: unknown }`, with no < > of ours.
  */
 type Schema = Record<string, unknown>;
 
@@ -22,18 +22,12 @@ const LIMITS = ["format", "pattern", "minimum", "maximum", "minLength", "maxLeng
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
 export function signature(name: string, inputSchema: Schema): string {
-	return noAngles(fitted(name, inputSchema));
-}
-
-function fitted(name: string, inputSchema: Schema) {
 	const full = new Renderer(inputSchema, true).signature(name);
 	if (full.length <= MAX_LENGTH) return full;
 	// A field left out reads as a field the tool does not have, so names come before descriptions.
 	const short = new Renderer(inputSchema, false).signature(name);
 	return short.length <= MAX_LENGTH ? short : `${short.slice(0, MAX_LENGTH - 3)}...`;
 }
-
-const noAngles = (text: string) => text.replaceAll("<", "‹").replaceAll(">", "›");
 
 class Renderer {
 	private nodes = MAX_NODES;
