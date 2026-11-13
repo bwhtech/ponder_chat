@@ -16,6 +16,7 @@ import { seedStandardSkills } from "./standard-skills.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
 import { setupTelemetry } from "./telemetry.ts";
 import { stopTracing } from "./tracing/setup.ts";
+import { migrateApprovalUses } from "./workflow/approval-uses.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
 import { checkWebBuild } from "./web-build.ts";
 
@@ -67,6 +68,7 @@ async function migrateAll() {
 	setToolApprovalSecret();
 	await migratePythonState();
 	await migrateThreadRuns();
+	await migrateApprovalUses();
 	await setupMemory();
 	resolvePython(await checkSandbox());
 }

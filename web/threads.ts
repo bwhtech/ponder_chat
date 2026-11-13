@@ -54,6 +54,7 @@ export function useThreads() {
 		loading,
 		revision,
 		chatBusy,
+		reload,
 		refresh,
 		open,
 		prefetch,
@@ -117,6 +118,17 @@ async function open(id: string, { push = true } = {}) {
 	if (!fresh || fresh === "same" || sameThread(cached, fresh)) return;
 	// A reply is on its way: the chat's own messages will be newer than this copy (chatBusy).
 	if (chatBusy.value) return;
+	show(fresh);
+	revision.value++;
+}
+
+/**
+ * The open thread as the server saved it, in place of the page's copy: an answer from
+ * another tab, or an earlier reply, went ahead of this page (ChatView.vue).
+ */
+async function reload(id: string) {
+	const fresh = await fetchThread(id, null);
+	if (!fresh || fresh === "same" || id !== current.value) return;
 	show(fresh);
 	revision.value++;
 }

@@ -32,6 +32,7 @@ import UseSkillPart from "./skills/UseSkillPart.vue";
 import WebToolPart from "./WebToolPart.vue";
 import CompactionDivider from "./CompactionDivider.vue";
 import { summarizedThrough } from "./compaction";
+import { THREAD_CHANGED } from "../shared/replies";
 import { useThreads } from "./threads";
 import { clockTime } from "./dates";
 import {
@@ -91,6 +92,8 @@ function lastReplyModel(messages: UIMessage[]) {
 	return reply && replyModelId(reply);
 }
 
+/** The server said the saved thread is ahead of this page (THREAD_CHANGED). */
+let threadChanged = false;
 const { messages, sendMessage, addToolApprovalResponse, status, error, stop, regenerate, resumeStream } = useChat({
 	id: props.threadId,
 	messages: props.initialMessages,
@@ -107,6 +110,11 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 	}),
 	// A connector tool on "Ask first" waits for the person; their answer goes out at once.
 	sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithApprovalResponses,
+	// The server answers an approval that was used already with this, and no run (server/workflow/replies.ts):
+	// the saved thread is ahead of this page, so the page loads it once the reply ends.
+	onData: (part) => {
+		if (part.type === THREAD_CHANGED) threadChanged = true;
+	},
 	onFinish: () => {
 		emit("saved");
 		void notes.load({ wait: true });
@@ -355,13 +363,17 @@ const lastMessage = computed(() => messages.value[messages.value.length - 1]);
 const failedBefore = ref(Boolean(props.failed && !props.running));
 // The copy of the thread on this device follows the chat: written when a reply ends, or when
 // the chat closes mid-reply (it reconnects on the way back).
-const { chatBusy, remember, added } = useThreads();
+const { chatBusy, remember, added, reload } = useThreads();
 watch(
 	busy,
 	(now, before) => {
 		chatBusy.value = now;
 		if (now) failedBefore.value = false;
 		if (before && !now) remember(props.threadId, { messages: messages.value, running: false, failed: Boolean(error.value) });
+		if (before && !now && threadChanged) {
+			threadChanged = false;
+			void reload(props.threadId);
+		}
 	},
 	{ immediate: true },
 );

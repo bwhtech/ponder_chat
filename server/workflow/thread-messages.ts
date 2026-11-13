@@ -8,6 +8,7 @@ import { MODELS } from "../models.ts";
 import { contextWindow } from "../openrouter.ts";
 import { getSettings } from "../settings.ts";
 import type { ActiveSkill } from "../skills.ts";
+import { openAnswersSettled } from "./answered-again.ts";
 import { citationPartText } from "./citations.ts";
 import { addConnectorNote, connectorCallsInHistory } from "./connector-messages.ts";
 import { addRecalledMemory, dropOtherModelsReasoning, trimOldToolResults } from "./context.ts";
@@ -61,7 +62,7 @@ export async function loadThreadContext(threadId: string, options: MessageOption
 export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors }: MessageOptions): Promise<ModelMessage[]> {
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
-	const resolved = await resolveFileParts(dropOtherModelsReasoning(thread, modelId), owner, { pdfAsText });
+	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId), owner, { pdfAsText });
 	const messages = await convertToModelMessages(resolved, {
 		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 	});
