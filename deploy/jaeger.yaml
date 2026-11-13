@@ -1,0 +1,56 @@
+# Jaeger v2 for Ponder Chat's traces (deploy/README.md, "Traces"). Installed by
+# deploy/jaeger.sh as /etc/jaeger/jaeger.yaml.
+#
+# Everything listens on 127.0.0.1 only. Ponder sends spans over OTLP/HTTP to :4318, and
+# the UI on :16686 is opened through an SSH tunnel. Spans stay 7 days in Badger, on disk.
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    # No metrics port: nothing reads it.
+    metrics:
+      level: none
+    logs:
+      level: warn
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 127.0.0.1:13133
+
+  jaeger_query:
+    storage:
+      traces: ponder
+    http:
+      endpoint: 127.0.0.1:16686
+    grpc:
+      endpoint: 127.0.0.1:16685
+
+  jaeger_storage:
+    backends:
+      ponder:
+        badger:
+          directories:
+            keys: /var/lib/jaeger/keys
+            values: /var/lib/jaeger/values
+          ephemeral: false
+          ttl:
+            spans: 168h
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  batch:
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: ponder

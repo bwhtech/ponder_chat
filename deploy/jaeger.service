@@ -1,0 +1,36 @@
+# Jaeger: keeps Ponder Chat's traces for 7 days, on 127.0.0.1 only. Installed by
+# deploy/jaeger.sh, not by release.sh: a deploy never starts it.
+[Unit]
+Description=Jaeger (Ponder Chat traces)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/jaeger --config /etc/jaeger/jaeger.yaml
+Restart=always
+RestartSec=5
+# A user of its own, made by systemd. Spans are kept in /var/lib/jaeger.
+DynamicUser=true
+StateDirectory=jaeger
+# Limits, so traces never take memory or CPU from Ponder or PostgreSQL.
+MemoryMax=512M
+CPUWeight=20
+TasksMax=128
+# Local addresses only: Jaeger receives and answers on 127.0.0.1, and reaches nothing.
+IPAddressDeny=any
+IPAddressAllow=localhost
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+# Hardening: it can write only its state folder.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
