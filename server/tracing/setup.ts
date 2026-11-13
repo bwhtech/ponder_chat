@@ -31,7 +31,7 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 			import("@ai-sdk/otel"),
 		]);
 
-	// The AI SDK's id generator and sampler: it gives a durable WorkflowAgent run the same
+	// The AI SDK's id generator and sampler: it gives a durable run the same
 	// span ids in every step and process, and reply-trace.ts uses it to send a reply's root.
 	// Every reply is traced (Ponder's traffic is small), and only replies: a span with no
 	// parent is dropped, unless it is a reply's root (reply-trace.ts asks for those itself).
@@ -140,8 +140,8 @@ const onlyInsideTraces = {
 
 /**
  * The AI SDK's integration, told for every event not to record inputs or outputs,
- * whatever the call asked. WorkflowAgent's calls set nothing (chat.ts), so without this
- * the integration would record prompts and replies.
+ * whatever the call asked. Not every call says so (the reply's model calls do,
+ * workflow/model-attempt.ts), so without this the integration would record prompts and replies.
  */
 export function withoutContent<T extends object>(integration: T): T {
 	const quiet = (event: unknown) =>

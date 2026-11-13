@@ -289,7 +289,10 @@ Each attempt that OpenRouter started is a row in `runs`:
 Tool calls:
 
 - A connector call runs at most once. Its step has no retries. After a crash in the middle of the call, the workflow runtime fails the step and does not run it again. The model then reads that the call may or may not have taken effect.
-- A call that can't run never runs: a tool that does not exist, or input that is not JSON (such as input cut by the output limit). The model reads the AI SDK's reason as the call's result, and the page shows it as an input error.
+- A call that can't run never runs, and the person is never asked about it:
+  - A call to a tool that does not exist: the model reads the AI SDK's reason as the call's result, and the page shows an input error.
+  - A call whose input fails the tool's own check (its zod schema, or `Catalog.check` for `connector_call`): the model reads the problem as the call's result.
+  - Input that a model's output limit cut off is in the second group. OpenRouter sends it as `{}` when the finish reason is "tool_calls", and leaves the call out when it is "length".
 - `web_search`, `web_fetch` and `run_python` run again after a crash. Each web search that runs again is charged again.
 - A tool call that waits for the person ends the reply with a signed `tool-approval-request`. The signature is the AI SDK's format, keyed by `PONDER_TOOL_APPROVAL_SECRET`. The run after the person answers carries out the approved calls first (a `continued` run, `runs.ts`).
 
@@ -323,8 +326,8 @@ A reply's trace has these spans:
 | `queue.wait` | Ponder | Each step's time in the queue |
 | `workflow.execute chatTurn`, `step.execute <step>` | Workflow | Each delivery and each step, with replays |
 | `thread.load`, `file_context.resolve`, `pdf.extract_text`, `memory.recall`, `connectors.list` | Ponder | Context building |
-| `invoke_agent <model>`, `step N`, `chat <model>` | AI SDK (`@ai-sdk/otel`) | The agent, its steps and each model call, with tokens and time to first token (`gen_ai.client.operation.time_to_first_chunk`) |
-| `execute_tool <tool>` | AI SDK | Each tool call |
+| `invoke_agent <model>`, `step 1`, `chat <model>` | AI SDK (`@ai-sdk/otel`) | Each attempt at a model call: one `streamText` call of one step (`server/workflow/model-attempt.ts`), with tokens and time to first token (`gen_ai.client.operation.time_to_first_chunk`) |
+| `execute_tool <tool>` | Ponder (`server/workflow/tool-spans.ts`) | Each tool call that ran. The reply loop runs tools in workflow code, which can't send spans, so the step that writes the results sends them, with the times the loop measured. A tool's own spans, such as `web_fetch.read`, are beside it, not under it |
 | `mcp.call_tool`, `search.query`, `web_fetch.read`, `python.run` | Ponder | The work inside a tool |
 | `compaction.run` | Ponder | A long chat's summary (see "Long chats"): how it ended (`ponder.outcome`) and the estimated tokens after it. The summarizer's model call is in it. |
 | `GET`, `POST` | Ponder (`http.ts`) | Each HTTP request: OpenRouter, MCP servers, pages |
@@ -345,7 +348,7 @@ Privacy: admins see usage, never chats (see "Admin"), and traces keep that promi
 1. At the source. The AI SDK's integration is told for every event not to record inputs or outputs, whatever the call asked. HTTP spans record the method, the status and the kind of peer (`ponder.peer`: `openrouter`, `mcp`, `web`). They record the host for OpenRouter only, because a subdomain can carry data, and a connector's host tells which apps a person uses. No `traceparent` header goes out, so a page or an MCP server learns nothing about the trace.
 2. At export. An allowlist (`server/tracing/privacy.ts`) keeps only known attribute keys. It drops error messages, events other than `exception` (which keeps only its type) and status messages. A span name of an unknown shape becomes `span`. A library that starts to record a new attribute sends nothing until the key is added there. A value that comes from outside Ponder's code, such as a tool name, a response id or an error type, must look like a name, or it is dropped.
 
-Tool names stay, as in `runs`, but never the name the person gave a connector, which tells which apps they use. This is the same rule as for a connector's host. The model reaches a connector's tools through `connector_search` and `connector_call` (see "Connectors"), so the AI SDK's spans are `execute_tool connector_search` and `execute_tool connector_call`. The real tool, `<connector>__<tool>`, is in the call's input, which is never recorded. `mcp.call_tool` records the tool's own name, which the MCP server gives. If a span ever carries a name of the shape `<connector>__<tool>`, the allowlist changes it to `connector__<tool>`.
+Tool names stay, as in `runs`, but never the name the person gave a connector, which tells which apps they use. This is the same rule as for a connector's host. The model reaches a connector's tools through `connector_search` and `connector_call` (see "Connectors"), so the tool spans are `execute_tool connector_search` and `execute_tool connector_call`. The real tool, `<connector>__<tool>`, is in the call's input, which is never recorded. `mcp.call_tool` records the tool's own name, which the MCP server gives. If a span ever carries a name of the shape `<connector>__<tool>`, the allowlist changes it to `connector__<tool>`.
 
 `server/tracing.check.ts` checks both with a marker in every place content could come from. `e2e/tests/tracing.spec.ts` checks the whole path: a reply whose message, file, address and connector input hold a marker exports no span with it.
 

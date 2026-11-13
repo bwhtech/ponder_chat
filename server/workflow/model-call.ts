@@ -17,8 +17,9 @@ export type ModelCall = {
 
 /**
  * A tool call the model asked for. `invalid` is the AI SDK's reason when the call can't
- * run: a tool that does not exist, or input that is not JSON (such as input cut by the
- * output limit). The loop gives the model that reason, and runs nothing.
+ * run: a tool that does not exist, or input that is not JSON. The loop gives the model
+ * that reason, and runs nothing. Input that fails the tool's own check is refused by the
+ * loop instead (tool-calls.ts).
  */
 export type ModelToolCall = ToolCallPart & { invalid?: string };
 

@@ -219,6 +219,20 @@ test("checks a call's input against the tool before it asks", async ({ page, fak
 	expect(sent).toMatch(/Signature: shop__add_note\(\{ [^)]*note: string/);
 });
 
+test("does not ask about a call whose input the model's output limit cut off", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	const cut = { ...call("shop__add_note", { order, note: "A note long enough to be cut" }), cutAfter: 30 };
+	await fake.chat({ match: order, steps: [{ toolCalls: [cut] }, { text: "My note was cut off." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a long note to order ${order}`);
+	await expect(chat.reply(page)).toContainText("My note was cut off.");
+	// OpenRouter sends the cut input as {}, which the tool's check refuses before anything asks.
+	await expect(page.getByRole("button", { name: "Allow once" })).toHaveCount(0);
+	expect(await serverCalls(page, order)).toEqual([]);
+});
+
 test(`does not run an "Ask first" tool called by a padded name`, async ({ page, fake }) => {
 	await addShop(page);
 	const order = orderNumber();

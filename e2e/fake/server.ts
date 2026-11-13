@@ -204,7 +204,7 @@ function streamReply(model: string, step: Step, signal: AbortSignal, prompt: num
 	for (const piece of pieces(step.reasoning)) parts.push(chunk({ reasoning: piece }));
 	for (const piece of pieces(step.text)) parts.push(chunk({ content: piece }));
 	for (const [index, call] of (step.toolCalls ?? []).entries()) {
-		const args = JSON.stringify(call.input);
+		const args = JSON.stringify(call.input).slice(0, call.cutAfter);
 		parts.push(chunk({ tool_calls: [{ index, id: call.id ?? `call_${id}_${index}`, type: "function", function: { name: call.name, arguments: "" } }] }));
 		const size = step.toolInputPieces ? Math.ceil(args.length / step.toolInputPieces) : 40;
 		for (let at = 0; at < args.length; at += size) parts.push(chunk({ tool_calls: [{ index, function: { arguments: args.slice(at, at + size) } }] }));

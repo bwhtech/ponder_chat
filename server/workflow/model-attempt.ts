@@ -3,6 +3,8 @@ import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { isStepCount, jsonSchema, streamText, tool, wrapLanguageModel, type TextStreamPart, type ToolSet } from "ai";
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import { callCost } from "../telemetry/cost.ts";
+import { tracingState } from "../tracing/state.ts";
+import { calledToolName } from "./connectors.ts";
 import { ModelCallRecord, settleEarlierAttempts, type CallUsage } from "../telemetry/model-calls.ts";
 import type { ModelCall, ModelResponse, ModelToolCall } from "./model-call.ts";
 import { classifyModelError, FIRST_CHUNK_MS, ModelStalledError, NEXT_CHUNK_MS } from "./model-errors.ts";
@@ -58,8 +60,10 @@ class ModelAttempt {
 			// This step owns retries (model-errors.ts), so the AI SDK makes one request.
 			maxRetries: 0,
 			abortSignal: watchdog.signal,
-			// Recorded by this attempt (model-calls.ts); the global RunRecorder would count the call twice.
-			telemetry: { isEnabled: false },
+			// The call's cost is recorded by this attempt (model-calls.ts). A list of integrations
+			// replaces the global one, so the RunRecorder can't record it twice; only the trace's
+			// integration (server/tracing/setup.ts) gets the call, as a `chat <model>` span.
+			telemetry: traceOnly(),
 			// Errors come as stream parts, which this attempt handles.
 			onError: () => {},
 		});
@@ -135,9 +139,16 @@ class ModelAttempt {
 			cachedTokens: finish.usage.inputTokenDetails?.cacheReadTokens ?? 0,
 			costUsd: callCost({ providerMetadata: finish.providerMetadata, usage: finish.usage }),
 			finishReason: finish.finishReason,
-			toolCalls: toolCalls.map((call) => call.toolName),
+			// The connector's own tool for a connector_call, as /admin shows it.
+			toolCalls: toolCalls.map(calledToolName),
 		};
 	}
+}
+
+/** The telemetry of a model call: tracing only, or none when tracing is off. */
+function traceOnly() {
+	const tracing = tracingState()?.integration;
+	return tracing ? { integrations: [tracing], recordInputs: false, recordOutputs: false } : { isEnabled: false };
 }
 
 /** Whether Stop cancelled the reply's workflow run. The run's own status, so a newer run in the thread does not matter. */

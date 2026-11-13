@@ -3,7 +3,7 @@ import type { ModelMessage, ToolCallPart, ToolSet } from "ai";
 import { answeredApprovals, signApprovalStep, verifyApprovalStep, withoutApprovals, type Approval } from "./approvals.ts";
 import { modelCallStep, type ModelCall, type ModelToolCall } from "./model-call.ts";
 import { STEP_BOUNDARY } from "./stream-parts.ts";
-import { outcomeParts, toolMessage, ToolCalls, type ToolOutcome } from "./tool-calls.ts";
+import { outcomeParts, toolMessage, ToolCalls, toolSpans, type ToolOutcome, type ToolSpan } from "./tool-calls.ts";
 
 export type Reply = {
 	call: Omit<ModelCall, "messages" | "tools">;
@@ -56,10 +56,10 @@ class ReplyLoop {
 		);
 		this.messages = [...this.messages, ...toolMessage(outcomes)];
 		if (!asks.length) {
-			await writePartsStep(this.reply.writable, [...outcomeParts(outcomes), ...STEP_BOUNDARY]);
+			await writePartsStep(this.reply.writable, [...outcomeParts(outcomes), ...STEP_BOUNDARY], toolSpans(outcomes));
 			return true;
 		}
-		await writePartsStep(this.reply.writable, [...outcomeParts(outcomes), ...(await Promise.all(asks.map(approvalRequest)))]);
+		await writePartsStep(this.reply.writable, [...outcomeParts(outcomes), ...(await Promise.all(asks.map(approvalRequest)))], toolSpans(outcomes));
 		return false;
 	}
 
@@ -75,15 +75,21 @@ class ReplyLoop {
 		const unanswered = denied.filter((approval) => !approval.answered).map((approval) => approval.call);
 		this.messages = withResults(withoutApprovals(this.messages), toolMessage(outcomes, unanswered));
 		const deniedParts = denied.map(({ call }) => ({ type: "tool-output-denied", toolCallId: call.toolCallId }) as unknown as ModelCallStreamPart);
-		await writePartsStep(this.reply.writable, [...outcomeParts(outcomes), ...deniedParts, ...STEP_BOUNDARY]);
+		await writePartsStep(this.reply.writable, [...outcomeParts(outcomes), ...deniedParts, ...STEP_BOUNDARY], toolSpans(outcomes));
 	}
 
-	/** Runs an approved call, if the approval is the one Ponder signed and the tool still asks first. */
+	/**
+	 * Runs an approved call, if the approval is the one Ponder signed and the tool still
+	 * asks first. The tool reads the messages with the approval's request and answer still
+	 * in them: a connector call checks that the person approved this call (connectors.ts).
+	 */
 	private async approvedOutcome({ call, request }: Approval): Promise<ToolOutcome> {
-		if (!this.tools.canApprove(call.toolName)) return { call, output: `Tool "${call.toolName}" does not require approval`, failed: false };
+		const now = Date.now();
+		const refused = (output: string): ToolOutcome => ({ call, output, failed: false, start: now, end: now });
+		if (!this.tools.canApprove(call.toolName)) return refused(`Tool "${call.toolName}" does not require approval`);
 		const signed = { approvalId: request.approvalId, toolCallId: call.toolCallId, toolName: call.toolName, input: call.input };
-		if (!(await verifyApprovalStep(signed, request.signature))) return { call, output: "The approval is not valid, so the call did not run.", failed: false };
-		const [outcome] = await this.tools.run([call], withoutApprovals(this.messages));
+		if (!(await verifyApprovalStep(signed, request.signature))) return refused("The approval is not valid, so the call did not run.");
+		const [outcome] = await this.tools.run([call], this.messages);
 		return outcome;
 	}
 }
@@ -103,9 +109,14 @@ async function approvalRequest(call: ToolCallPart): Promise<ModelCallStreamPart>
 	return { type: "tool-approval-request", approvalId, toolCallId: call.toolCallId, signature };
 }
 
-/** Writes parts to the reply's stream. Writing is done in steps: workflow code can't write. */
-async function writePartsStep(writable: WritableStream<ModelCallStreamPart>, parts: ModelCallStreamPart[]) {
+/**
+ * Writes parts to the reply's stream, and sends the spans of the tool calls whose results
+ * they are. A step: workflow code can neither write nor send spans.
+ */
+async function writePartsStep(writable: WritableStream<ModelCallStreamPart>, parts: ModelCallStreamPart[], spans: ToolSpan[] = []) {
 	"use step";
+	const { sendToolSpans } = await import("./tool-spans.ts");
+	sendToolSpans(spans);
 	const writer = writable.getWriter();
 	try {
 		for (const part of parts) await writer.write(part);

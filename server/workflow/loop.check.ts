@@ -12,7 +12,7 @@ import { z } from "zod";
 import { answeredApprovals, signApproval, withoutApprovals } from "./approvals.ts";
 import { classifyModelError, MODEL_CALL_ATTEMPTS, ModelStalledError } from "./model-errors.ts";
 import { storedPart, toolCallOf } from "./stream-parts.ts";
-import { outcomeParts, toolMessage, ToolCalls } from "./tool-calls.ts";
+import { outcomeParts, toolMessage, ToolCalls, toolSpans } from "./tool-calls.ts";
 
 const noJitter = () => 0;
 const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 }, outputTokens: { total: 5, text: 5, reasoning: 0 } };
@@ -163,6 +163,11 @@ const assistant = (await invalidStream.response).messages.filter((message) => me
 const conversation: ModelMessage[] = [...assistant, ...toolMessage(loopOutcomes)];
 const resultIds = conversation.flatMap((message) => (message.role === "tool" ? message.content.map((part) => part.type === "tool-result" && part.toolCallId) : []));
 assert.deepEqual(resultIds, ["u1", "u2", "u3"], "one result for each call");
+// Only the call that ran has an execute_tool span.
+assert.deepEqual(
+	toolSpans(loopOutcomes).map(({ name, callId, failed }) => [name, callId, failed]),
+	[["lookup", "u3", false]],
+);
 
 // --- Approvals ----------------------------------------------------------------
 

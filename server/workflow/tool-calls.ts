@@ -2,8 +2,15 @@ import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import { asSchema, type ModelMessage, type ToolCallPart, type ToolResultPart, type ToolSet } from "ai";
 import type { ModelToolCall, ToolSpec } from "./model-call.ts";
 
-/** A tool call's outcome: what the model reads, and what the page shows. An invalid call never ran, and the page already shows its error. */
-export type ToolOutcome = { call: ToolCallPart; output: unknown; failed: boolean; invalid?: boolean };
+/**
+ * A tool call's outcome: what the model reads, and what the page shows. An invalid call
+ * never ran, and the page already shows its error. `start` and `end` are the workflow's
+ * clock (the time of the events delivered before and after the call), for its span.
+ */
+export type ToolOutcome = { call: ToolCallPart; output: unknown; failed: boolean; invalid?: boolean; start: number; end: number };
+
+/** An `execute_tool` span of a call the loop ran, sent by a step (tool-spans.ts): workflow code can't send spans. */
+export type ToolSpan = { name: string; callId: string; start: number; end: number; failed: boolean };
 
 /**
  * Runs the model's tool calls in the workflow (loop.ts). Each tool's `execute` makes its
@@ -45,12 +52,17 @@ export class ToolCalls {
 	 * model reads. An invalid call does not run: its outcome is the SDK's reason.
 	 */
 	async run(calls: ModelToolCall[], messages: ModelMessage[]): Promise<ToolOutcome[]> {
-		const settled = await Promise.allSettled(calls.map((call) => (call.invalid ? Promise.reject(new Error(call.invalid)) : this.execute(call, messages))));
-		return settled.map((result, index) => {
-			const { invalid, ...call } = calls[index];
-			if (result.status === "fulfilled") return { call, output: result.value, failed: false };
-			return { call, output: errorText(result.reason), failed: true, ...(invalid && { invalid: true }) };
-		});
+		return Promise.all(calls.map((call) => this.outcome(call, messages)));
+	}
+
+	private async outcome({ invalid, ...call }: ModelToolCall, messages: ModelMessage[]): Promise<ToolOutcome> {
+		const start = Date.now();
+		if (invalid) return { call, output: invalid, failed: true, invalid: true, start, end: start };
+		try {
+			return { call, output: await this.execute(call, messages), failed: false, start, end: Date.now() };
+		} catch (error) {
+			return { call, output: errorText(error), failed: true, start, end: Date.now() };
+		}
 	}
 
 	private async execute(call: ToolCallPart, messages: ModelMessage[]) {
@@ -60,13 +72,22 @@ export class ToolCalls {
 		return tool.execute(input as never, { toolCallId: call.toolCallId, messages, context: undefined as never });
 	}
 
-	/** The call's input, checked against the tool's own schema. The model step checks only the JSON schema. */
+	/**
+	 * The call's input, checked against the tool's own schema: a zod schema, or a JSON
+	 * schema with its own check, such as connector_call's (Catalog.check). The model step
+	 * checks nothing. A call that fails the check is never asked about, and never runs.
+	 */
 	private async validInput(call: ToolCallPart): Promise<unknown> {
 		const tool = this.tools[call.toolName];
 		const result = await asSchema(tool?.inputSchema).validate?.(call.input);
 		if (!result || result.success) return result ? result.value : call.input;
 		throw new Error(`Invalid input for ${call.toolName}: ${errorText(result.error)}`);
 	}
+}
+
+/** The spans of the calls that ran. The name is the tool the model called, such as connector_call: never a connector's own tool. */
+export function toolSpans(outcomes: ToolOutcome[]): ToolSpan[] {
+	return outcomes.filter(({ invalid }) => !invalid).map(({ call, start, end, failed }) => ({ name: call.toolName, callId: call.toolCallId, start, end, failed }));
 }
 
 /** The tool message that gives the model the outcomes. */

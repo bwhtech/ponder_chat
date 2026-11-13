@@ -100,7 +100,7 @@ test("a connector call cut by a crash is not run again, and the model is told", 
 	const order = `SLOW${tag}`;
 	await fake.chat({
 		match: order,
-		steps: [{ toolCalls: [{ name: "shop__find_order", input: { order } }] }, { text: "I could not tell whether the lookup ran." }],
+		steps: [{ toolCalls: [{ name: "connector_call", input: { tool: "shop__find_order", input: { order } } }] }, { text: "I could not tell whether the lookup ran." }],
 	});
 
 	await page.goto("/");
@@ -153,7 +153,7 @@ test("a model call that a crash cuts on all 3 attempts ends the reply with Retry
 	}
 
 	// The runtime does not start a 4th attempt: the reply ends, saved as failed.
-	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: true });
+	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: true, cancelled: false });
 	await page.reload();
 	await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
 	expect(await fake.calls(tag)).toHaveLength(3);
@@ -173,29 +173,53 @@ test("Stop keeps the stopped call's cost, and does not charge it", async ({ page
 	await expect.poll(() => modelCalls(person), { timeout: 30_000 }).toEqual([{ finish_reason: "stopped", cost_usd: 0.0003, charged: false }]);
 });
 
-test("a run that ends without saving its reply is finished, and the page offers Retry", async ({ page, fake }, testInfo) => {
-	const { person, tag, words } = await setUp(page, fake, testInfo.title);
-	await fake.chat({ match: tag, steps: [{ text: words, delayMs: 250 }] });
+test("a run that fails without saving its reply is finished, and the page offers Retry", async ({ page, fake }, testInfo) => {
+	const { person, tag } = await startSlowReply(page, fake, testInfo.title);
+	// The workflow runtime fails the run outside chatTurn, as a replay that diverged after a deploy does.
+	await endRun(person, { eventType: "run_failed", eventData: { error: new TextEncoder().encode("diverged"), errorCode: "REPLAY_DIVERGENCE" } });
 
-	await chat.send(page, `Tell the ${tag} story`);
-	await expect(chat.reply(page)).toContainText(`${tag}-3`);
-	// The workflow runtime ends the run outside chatTurn, as a replay that diverged after a deploy does.
-	const [{ run_id }] = await db<{ run_id: string }[]>`select run_id from thread_runs r join threads t on t.id = r.thread_id where t.owner = ${person.id}`;
-	const world = createWorld({ connectionString: e2e.durabilityDatabaseUrl });
-	await world.events.create(run_id, { eventType: "run_cancelled" });
-	await world.close?.();
-
-	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: true });
+	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: true, cancelled: false });
 	await page.reload();
 	await expect(chat.reply(page)).toContainText(`${tag}-3`);
 	await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
 	await expect(chat.stop(page)).toHaveCount(0);
+	// The call in flight is settled, so it is uncharged and the sweep gets its cost.
+	await expect.poll(async () => (await modelCalls(person)).some((call) => call.finish_reason === "started")).toBe(false);
 });
 
-/** Whether the person's latest run is marked finished, and failed. */
+test("a run cancelled without saving its reply is finished as stopped, with no Retry", async ({ page, fake }, testInfo) => {
+	const { person, tag } = await startSlowReply(page, fake, testInfo.title);
+	// Stop cancelled the run, and the server stopped before it saved the reply.
+	await endRun(person, { eventType: "run_cancelled" });
+
+	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: false, cancelled: true });
+	await page.reload();
+	await expect(chat.reply(page)).toContainText(`${tag}-3`);
+	await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
+	await expect(chat.stop(page)).toHaveCount(0);
+});
+
+/** A signed-in person, and a reply that streams for about 15 seconds: it has written its first words. */
+async function startSlowReply(page: Page, fake: Fake, title: string) {
+	const { person, tag, words } = await setUp(page, fake, title);
+	await fake.chat({ match: tag, steps: [{ text: words, delayMs: 250 }] });
+	await chat.send(page, `Tell the ${tag} story`);
+	await expect(chat.reply(page)).toContainText(`${tag}-3`);
+	return { person, tag };
+}
+
+/** Ends the person's run behind Ponder's back, through the workflow world's own API. */
+async function endRun(person: Person, event: Parameters<ReturnType<typeof createWorld>["events"]["create"]>[1]) {
+	const [{ run_id }] = await db<{ run_id: string }[]>`select run_id from thread_runs r join threads t on t.id = r.thread_id where t.owner = ${person.id}`;
+	const world = createWorld({ connectionString: e2e.durabilityDatabaseUrl });
+	await world.events.create(run_id, event);
+	await world.close?.();
+}
+
+/** Whether the person's latest run is marked finished, failed or cancelled. */
 async function runOf(person: Person) {
-	const [run] = await db<{ finished: boolean; failed: boolean }[]>`
-		select finished_at is not null as finished, failed from thread_runs r join threads t on t.id = r.thread_id where t.owner = ${person.id}`;
+	const [run] = await db<{ finished: boolean; failed: boolean; cancelled: boolean }[]>`
+		select finished_at is not null as finished, failed, cancelled from thread_runs r join threads t on t.id = r.thread_id where t.owner = ${person.id}`;
 	return run;
 }
 

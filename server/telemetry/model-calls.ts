@@ -120,14 +120,15 @@ export async function stopModelCalls(threadId: string, runId: string) {
  * Gets the cost of model calls that ended without it, from OpenRouter's generation API.
  * Run by the sweep (workflow/sweep.ts). OpenRouter can take a few seconds to have a
  * generation's cost, so a call it can't tell about yet is asked again by the next sweep,
- * for up to COST_LOOKUP_DAYS.
+ * for up to COST_LOOKUP_DAYS. Newest first: a generation that OpenRouter never reports
+ * can't keep the newer ones waiting.
  */
 export async function fillModelCallCosts() {
 	const rows = await sql<{ id: string; generation_id: string }[]>`
 		select id, generation_id from runs
 		where generation_id is not null and cost_usd is null and finish_reason in ('interrupted', 'retried', 'failed', 'stopped')
 			and created_at > now() - make_interval(days => ${COST_LOOKUP_DAYS})
-		order by created_at limit ${COST_LOOKUPS_PER_SWEEP}`;
+		order by created_at desc limit ${COST_LOOKUPS_PER_SWEEP}`;
 	for (const row of rows) {
 		const cost = await generationCost(row.generation_id);
 		if (!cost) continue;

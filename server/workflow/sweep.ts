@@ -7,12 +7,20 @@ import { finishEndedRuns } from "./replies.ts";
  * - finish the runs that ended without saving their reply (replies.ts);
  * - get the cost of model calls that were cut short (telemetry/model-calls.ts).
  */
-const SWEEP_MS = Number(process.env.PONDER_SWEEP_SECONDS ?? 60) * 1000;
+const SWEEP_MS = Math.max(1, Number(process.env.PONDER_SWEEP_SECONDS) || 60) * 1000;
 let sweeping = false;
+let timer: ReturnType<typeof setInterval> | undefined;
 
 export function startSweeps() {
 	void sweep();
-	setInterval(() => void sweep(), SWEEP_MS).unref();
+	timer = setInterval(() => void sweep(), SWEEP_MS);
+	timer.unref();
+}
+
+/** On SIGTERM, before the database closes (startup.ts). A sweep in progress ends on its own. */
+export function stopSweeps() {
+	clearInterval(timer);
+	timer = undefined;
 }
 
 async function sweep() {

@@ -43,9 +43,9 @@ export async function startup() {
 	const { getWorld } = await import("workflow/runtime");
 	const world = await getWorld();
 	await world.start?.();
-	stopCleanly(world);
 	// Loaded here: replies.ts imports this file.
-	const { startSweeps } = await import("./workflow/sweep.ts");
+	const { startSweeps, stopSweeps } = await import("./workflow/sweep.ts");
+	stopCleanly(world, stopSweeps);
 	startSweeps();
 	console.log(`Ponder Chat is ready. Python is ${(await pythonReady) ? "on" : "off"}.`);
 }
@@ -117,7 +117,7 @@ async function releaseDeadWorkers() {
  * server: the step runs again (start.sh sets WORKFLOW_POSTGRES_APPLICATION_MANAGED_SHUTDOWN,
  * so the worker leaves the process to this code).
  */
-function stopCleanly(world: { close?: () => Promise<void> }) {
+function stopCleanly(world: { close?: () => Promise<void> }, stopSweeps: () => void) {
 	let stopping = false;
 	const stop = async (signal: string) => {
 		if (stopping) return;
@@ -128,6 +128,8 @@ function stopCleanly(world: { close?: () => Promise<void> }) {
 			process.exit(0);
 		}, 10_000);
 		try {
+			// The sweep needs the database, which closes below.
+			stopSweeps();
 			await world.close?.();
 			await sql.end({ timeout: 3 });
 			// The spans of the steps that just stopped, and any still waiting in the batch.
