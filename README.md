@@ -289,6 +289,7 @@ A reply's trace has these spans:
 | `invoke_agent <model>`, `step N`, `chat <model>` | AI SDK (`@ai-sdk/otel`) | The agent, its steps and each model call, with tokens and time to first token (`gen_ai.client.operation.time_to_first_chunk`) |
 | `execute_tool <tool>` | AI SDK | Each tool call |
 | `mcp.call_tool`, `search.query`, `web_fetch.read`, `python.run` | Ponder | The work inside a tool |
+| `compaction.run` | Ponder | A long chat's summary (see "Long chats"): how it ended (`ponder.outcome`) and the estimated tokens after it. The summarizer's model call is in it. |
 | `GET`, `POST` | Ponder (`http.ts`) | Each HTTP request: OpenRouter, MCP servers, pages |
 | `reply.save`, `memory.save` | Ponder | Saving the reply, and memory after it |
 
@@ -413,7 +414,7 @@ A chat can grow longer than its model can read. `server/compaction/` and `server
 - The summary replaces the messages it covers. It is one message from the person's side, right after the instructions. It says that a model wrote it and that it is not a new request.
 - Saved and used again: the summary is saved in `thread_summaries`, with the number of messages it covers and a fingerprint of the ids and text of all the messages the summarizer read. Later calls use it while those messages stay the same, so the start of each call stays the same and the cache keeps working. Retry changes only the last reply, so it keeps the summary. A change to any message the summarizer read makes the summary stale, and the next compaction writes a new one.
 - Between steps: when a reply's own tool results make it too long, everything before the current turn is summarized. If the turn alone is still too long, the long tool results of its earlier steps are cut, as for older turns.
-- Never summarized: the instructions, and what memory recalls (it goes with the latest message on each call). The summary message also carries these word for word:
+- Never summarized: the instructions, what memory recalls, and the `<connectors>` note (both go with the latest message on each call). The summary message also carries these word for word:
   - the files of the summarized part, read in full under the file budget below
   - the skills chosen there with `$name`
   - the latest version of each artifact written there, up to 40,000 tokens

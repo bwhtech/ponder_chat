@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { e2e } from "../env.ts";
+import type { ReceivedSpan } from "../fake/script.ts";
 import { chat, expect, test, type Fake } from "../fixtures.ts";
 
 /**
@@ -55,6 +56,16 @@ test("a long chat is summarized, and the summary is used again", async ({ page, 
 	expect(sent(call.messages)).toContain("SUMMARY-SUM");
 	expect(sent(call.messages)).not.toContain("SUM-M1 ");
 	expect(sent(call.messages)).toContain(JSON.stringify(longMessage(`SUM-M${at}`)).slice(1, -1));
+
+	// The compaction is in the reply's trace, with its outcome and no summary text (server/tracing/).
+	const [{ run_id: runId }] = await db`select run_id from thread_runs r join threads t on t.id = r.thread_id where t.owner = ${person.id}`;
+	let root: ReceivedSpan | undefined;
+	await expect.poll(async () => (root = (await fake.spans()).spans.find((span) => span.name === "invoke_agent ponder" && span.attributes["workflow.run.id"] === runId)), { timeout: 15_000 }).toBeTruthy();
+	const { spans, exports } = await fake.spans();
+	const compaction = spans.find((span) => span.traceId === root!.traceId && span.name === "compaction.run");
+	expect(compaction?.attributes["ponder.outcome"]).toBe("compacted");
+	expect(spans.some((span) => span.traceId === root!.traceId && span.name === "chat deepseek/deepseek-v4.1-flash"), "the summarizer's call").toBe(true);
+	for (const body of exports) expect(body).not.toContain("SUMMARY-SUM");
 
 	// The summary is charged, and is not a reply.
 	const [charged] = await db`select count(*)::int as n from charged_runs where "user" = ${person.id} and function_id = 'compaction' and not is_reply`;

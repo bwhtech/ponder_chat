@@ -311,4 +311,29 @@ await check("a span outside a reply records nothing", async () => {
 	assert.equal(ran, false);
 });
 
+await check("a compaction's span keeps its outcome and counts, and no summary or message text", async () => {
+	const compaction = {
+		name: "compaction.run",
+		kind: SpanKind.INTERNAL,
+		spanContext: () => ({ traceId: "a".repeat(32), spanId: "e".repeat(16), traceFlags: TraceFlags.SAMPLED }),
+		startTime: [0, 0],
+		endTime: [1, 0],
+		duration: [1, 0],
+		ended: true,
+		status: { code: SpanStatusCode.OK },
+		// What compaction/compact.ts sets, and what it must never set.
+		attributes: { "ponder.between_steps": false, "ponder.last_attempt": false, "ponder.outcome": "compacted", "ponder.tokens": 24_000, "ponder.summary": MARKER, "ponder.messages": MARKER },
+		links: [],
+		events: [],
+		resource: { attributes: {} },
+		instrumentationScope: { name: "ponder" },
+		droppedAttributesCount: 0,
+		droppedEventsCount: 0,
+		droppedLinksCount: 0,
+	} as unknown as ReadableSpan;
+	const clean = cleanSpan(compaction);
+	assert.equal(clean.name, "compaction.run");
+	assert.deepEqual(clean.attributes, { "ponder.between_steps": false, "ponder.last_attempt": false, "ponder.outcome": "compacted", "ponder.tokens": 24_000 });
+});
+
 process.exit(failed ? 1 : 0);
