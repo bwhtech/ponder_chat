@@ -127,7 +127,6 @@ async function providerMessages(messages: ModelMessage[]): Promise<LanguageModel
 	return convertToLanguageModelPrompt({ prompt, supportedUrls: {}, download: async (requests) => requests.map(() => null) });
 }
 
-/** Cuts the long tool results of the current turn's earlier steps; the last step's stay whole. */
 /**
  * True when summarizing everything before the current turn can bring the call under the
  * trigger. The summary removes only that text: the instructions, the tools and the
@@ -142,6 +141,7 @@ export function foldCanFit(
 	return countTokens(kept, ratio) <= trigger;
 }
 
+/** Cuts the long tool results of the current turn's earlier steps; the last step's stay whole. */
 export function trimEarlierSteps(prompt: LanguageModelV4Prompt): LanguageModelV4Prompt {
 	const roles = prompt.map((message) => message.role);
 	const turn = roles.lastIndexOf("user");
