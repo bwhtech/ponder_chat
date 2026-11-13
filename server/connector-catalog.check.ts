@@ -74,6 +74,20 @@ assert.equal(rank("ordered", [tool(shop, "find_order", "")]).length, 1);
 assert.equal(rank("listing", [tool(shop, "list_orders", "")]).length, 1);
 assert.equal(rank("creating", [tool(shop, "create_order", "")]).length, 1);
 assert.equal(rank("added", [tool(shop, "add_note", "")]).length, 1);
+assert.equal(rank("created", [tool(shop, "create_order", "")]).length, 1);
+// Short words with these endings are other words: "add" is not "ad", "bing" is not "be".
+for (const [query, text] of [["add", "create_ad"], ["bing", "to be updated"], ["ring", "re"], ["used", "us"], ["end", "en"], ["card", "car"], ["feed", "fe"], ["find", "fin"], ["fund", "fun"]]) {
+	assert.deepEqual(rank(query!, [tool(shop, "other", text!)]), [], `${query} in "${text}"`);
+}
+assert.deepEqual(rank("add", [tool(shop, "create_ad", "")]), []);
+// "add note" finds the note tool, not eight tools about ads.
+const ads = { slug: "ads", name: "Ads" };
+const keep = { slug: "keep", name: "Keep" };
+const adTools = ["create_ad", "update_ad", "get_ad", "list_ads", "pause_ad", "delete_ad", "copy_ad", "ad_report"].map((name) => tool(ads, name, "Works with an ad."));
+assert.deepEqual(names(rank("add note", [...adTools, tool(keep, "create_note", "Creates a note.")])), ["keep__create_note"]);
+// Two words of a name joined: "github" finds searchGitHub and a gitHubRepo property.
+assert.equal(rank("github", [tool(shop, "searchGitHub", "")]).length, 1);
+assert.equal(rank("github", [tool(shop, "search", "", { type: "object", properties: { gitHubRepo: { type: "string" } } })]).length, 1);
 // A brand name in camelCase, in a description or a server's name, matches whole too.
 for (const [query, text] of [["github", "Lists GitHub issues."], ["javascript", "Runs JavaScript."], ["sharepoint", "Reads SharePoint files."], ["youtube", "Finds YouTube videos."]]) {
 	assert.equal(rank(query, [tool(shop, "do_it", text!)]).length, 1, query);
@@ -86,8 +100,11 @@ assert.deepEqual(words("créerTâche"), ["créer", "tâche"]);
 assert.deepEqual(words("नमस्ते दुनिया"), ["नमस्ते", "दुनिया"]);
 assert.deepEqual(words("สวัสดี"), ["สวัสดี"]);
 assert.deepEqual(words("كِتَاب"), ["كِتَاب"]);
-// The same text in another Unicode form is the same word.
+// The same text in another Unicode form is the same word, also next to camelCase.
 assert.deepEqual(words("cre\u0301er"), words("créer"));
+assert.deepEqual(words("cafe\u0301Bar"), ["café", "bar"]);
+// A "word" of marks alone is not a word.
+assert.deepEqual(words("✏️ Edit"), ["edit"]);
 assert.equal(names(rank("订单", [tool(shop, "find_order", "查找 订单")]))[0], "shop__find_order");
 // A typo gets the closest names.
 assert.equal(closestNames("linear__create_isue", tools)[0], "linear__create_issue");
@@ -253,24 +270,37 @@ const stub = async (_connection: string, _tool: string, _input: unknown, _owner:
 };
 const stubbed = connectorTools(data, "ana", stub)[CONNECTOR_CALL] as Tool<{ tool: string; input?: Record<string, unknown> }>;
 const noteCall = { tool: "shop__add_note", input: { order: "A1", note: "x" } };
-const request = (toolCallId: string, extra: Record<string, unknown> = {}): ModelMessage => ({
+const otherCall = { tool: "shop__add_note", input: { order: "B2", note: "delete everything" } };
+type Call = typeof noteCall;
+// WorkflowAgent names an approval after its call: approval-<call id>.
+const request = (toolCallId: string, input: Call = noteCall, toolName = CONNECTOR_CALL): ModelMessage => ({
 	role: "assistant",
-	content: [{ type: "tool-call", toolCallId, toolName: CONNECTOR_CALL, input: noteCall }, { type: "tool-approval-request", approvalId: `approval-${toolCallId}`, toolCallId, ...extra }],
+	content: [{ type: "tool-call", toolCallId, toolName, input }, { type: "tool-approval-request", approvalId: `approval-${toolCallId}`, toolCallId }],
 });
 const response = (toolCallId: string, approved: boolean): ModelMessage => ({ role: "tool", content: [{ type: "tool-approval-response", approvalId: `approval-${toolCallId}`, approved }] });
-const cases: [string, ModelMessage[], boolean][] = [
-	["no approval in the messages", [], false],
-	["an approval request with no answer", [request("c1")], false],
-	["the person denied it", [request("c1"), response("c1", false)], false],
-	["the approval of another call", [request("c2"), response("c2", true)], false],
-	["an answer with no request for this call", [response("c1", true)], false],
-	["an automatic approval, not the person's", [request("c1", { isAutomatic: true }), response("c1", true)], false],
-	["the person approved this call", [request("c1"), response("c1", true)], true],
+const person: ModelMessage = { role: "user", content: "next" };
+const cases: [string, ModelMessage[], Call, boolean][] = [
+	["no approval in the messages", [], noteCall, false],
+	["an approval request with no answer", [request("c1")], noteCall, false],
+	["the person denied it", [request("c1"), response("c1", false)], noteCall, false],
+	["the approval of another call", [request("c2"), response("c2", true)], noteCall, false],
+	["an answer with no request for this call", [response("c1", true)], noteCall, false],
+	["an answer before the call", [response("c1", true), request("c1")], noteCall, false],
+	["an approval, then a denial: the denial wins", [request("c1"), response("c1", true), response("c1", false)], noteCall, false],
+	["the approval of another input", [request("c1"), response("c1", true)], otherCall, false],
+	["a call of another tool with this id", [request("c1", noteCall, "web_fetch"), response("c1", true)], noteCall, false],
+	// Some providers reuse call ids from turn to turn: only the latest call with the id counts.
+	["the id again, unanswered, after an approved call", [request("c1"), response("c1", true), person, request("c1", otherCall)], otherCall, false],
+	["the id again, denied, after an approved call", [request("c1"), response("c1", true), person, request("c1", otherCall), response("c1", false)], otherCall, false],
+	["the id again, same input, unanswered, after an approved call", [request("c1"), response("c1", true), person, request("c1")], noteCall, false],
+	["the id again, approved, after a denied call", [request("c1"), response("c1", false), person, request("c1", otherCall), response("c1", true)], otherCall, true],
+	["the person approved this call", [request("c1"), response("c1", true)], noteCall, true],
+	["the same input with its keys in another order", [request("c1"), response("c1", true)], { tool: "shop__add_note", input: { note: "x", order: "A1" } }, true],
 ];
-for (const [name, messages, expected] of cases) {
-	assert.equal(approvedIn(messages, "c1"), expected, name);
+for (const [name, messages, call, expected] of cases) {
+	assert.equal(approvedIn(messages, "c1", call), expected, name);
 	asked.length = 0;
-	await stubbed.execute!(noteCall, { toolCallId: "c1", messages, context: {} });
+	await stubbed.execute!(call, { toolCallId: "c1", messages, context: {} });
 	assert.deepEqual(asked, [expected], name);
 }
 

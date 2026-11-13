@@ -45,21 +45,41 @@ function rewrite(part: Part): Part {
 }
 
 /**
- * True when the messages hold the person's approval of this exact call: a signed
- * approval request for the call, and an approving response to that request.
- * WorkflowAgent checks the request's signature, then runs the approved call with these
- * messages, and drops the two parts only after the call. A call that ran without
- * waiting for the person has neither part, so this is false.
+ * True when the messages hold the person's approval of this exact call. The call is the
+ * latest assistant message's tool-call with this id, which must be a connector_call
+ * with this input. That message must hold the approval request for the call, and a
+ * later tool message must answer it with approved. A denial wins over an approval.
+ * Some providers reuse call ids from turn to turn, so an approval of an earlier call
+ * with the same id does not count.
+ *
+ * WorkflowAgent checks the request's signature, then runs an approved call with the
+ * messages the run started with, and drops these parts only after the call. In the
+ * agent loop, a call the model just made runs with messages that hold no approval
+ * requests (the prompt drops them), so this is false for it.
  */
-export function approvedIn(messages: ModelMessage[], toolCallId: string): boolean {
-	const requests = new Set<string>();
-	for (const message of messages) {
-		if (message.role !== "assistant" || typeof message.content === "string") continue;
-		for (const part of message.content) {
-			if (part.type === "tool-approval-request" && part.toolCallId === toolCallId && !part.isAutomatic) requests.add(part.approvalId);
-		}
-	}
-	return messages.some(
-		(message) => message.role === "tool" && message.content.some((part) => part.type === "tool-approval-response" && part.approved === true && requests.has(part.approvalId)),
-	);
+export function approvedIn(messages: ModelMessage[], toolCallId: string, input: unknown): boolean {
+	let at = messages.length - 1;
+	while (at >= 0 && !holdsCall(messages[at]!, toolCallId)) at--;
+	const message = messages[at];
+	if (!message || message.role !== "assistant" || typeof message.content === "string") return false;
+	const call = message.content.find((part) => part.type === "tool-call" && part.toolCallId === toolCallId);
+	if (call?.type !== "tool-call" || call.toolName !== CONNECTOR_CALL || !sameData(call.input, input)) return false;
+	const requests = new Set(message.content.flatMap((part) => (part.type === "tool-approval-request" && part.toolCallId === toolCallId ? [part.approvalId] : [])));
+	const answers = messages
+		.slice(at + 1)
+		.flatMap((each) => (each.role === "tool" ? each.content : []))
+		.filter((part) => part.type === "tool-approval-response" && requests.has(part.approvalId));
+	return answers.length > 0 && answers.every((part) => part.type === "tool-approval-response" && part.approved === true);
+}
+
+const holdsCall = (message: ModelMessage, toolCallId: string) =>
+	message.role === "assistant" && typeof message.content !== "string" && message.content.some((part) => part.type === "tool-call" && part.toolCallId === toolCallId);
+
+/** Deep equality of JSON data, whatever the order of keys. */
+function sameData(a: unknown, b: unknown): boolean {
+	if (a === b) return true;
+	if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
+	const keysA = Object.keys(a);
+	const keysB = Object.keys(b);
+	return keysA.length === keysB.length && keysA.every((key) => Object.hasOwn(b, key) && sameData((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
 }

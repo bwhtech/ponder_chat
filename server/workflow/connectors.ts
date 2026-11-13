@@ -88,7 +88,7 @@ export function connectorTools(data: CatalogData, owner: string, call: CallStep 
 			execute: async (input, { toolCallId, messages }) => {
 				const checked = catalog.check(input);
 				if ("problem" in checked) return checked.problem;
-				return call(checked.tool.connectionId, checked.tool.tool, checked.input, owner, approvedIn(messages, toolCallId));
+				return call(checked.tool.connectionId, checked.tool.tool, checked.input, owner, approvedIn(messages, toolCallId, input));
 			},
 		}),
 	};

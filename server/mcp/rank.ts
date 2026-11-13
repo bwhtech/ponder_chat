@@ -39,7 +39,7 @@ export function rank<T extends Rankable>(query: string, tools: readonly T[]): T[
 	const terms = words(query);
 	const scoring = scoringTerms(terms);
 	return tools
-		.map((tool) => ({ tool, tier: tierOf(terms, tool), score: score(scoring, fields(tool)) }))
+		.map((tool) => ({ tool, tier: tierOf(terms, prepared(tool)), score: score(scoring, prepared(tool).fields) }))
 		.filter((entry) => entry.score > 0 || entry.tier < Tier.keyword)
 		.sort((a, b) => a.tier - b.tier || b.score - a.score || order(a.tool.connector.slug, b.tool.connector.slug) || order(a.tool.name, b.tool.name))
 		.map((entry) => entry.tool);
@@ -57,28 +57,49 @@ export function closestNames(name: string, tools: readonly Rankable[]): string[]
 
 /** Every word of a name or a query, lowercase, in any script: "订单" and "créer" are words too. */
 export function words(text: string): string[] {
-	return wholeWords(text.replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2").replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2"));
+	return wholeWords(
+		text
+			.normalize("NFC")
+			.replace(/(\p{Lu}+)(\p{Lu}\p{Ll})/gu, "$1 $2")
+			.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2"),
+	);
 }
 
-/** Words split only at spaces and punctuation, not at camelCase. Marks stay in their word, so Hindi and Thai words stay whole. */
+/**
+ * Words split only at spaces and punctuation, not at camelCase. Marks stay in their
+ * word, so Hindi words stay whole. A "word" of marks alone, such as the variation
+ * selector in "✏️", is dropped. Thai and Chinese have no spaces, so a phrase in them is
+ * one word: a query finds it only by its start.
+ */
 function wholeWords(text: string): string[] {
 	return text
 		.normalize("NFC")
 		.toLowerCase()
 		.split(/[^\p{L}\p{M}\p{N}]+/u)
-		.filter(Boolean);
+		.filter((word) => /[\p{L}\p{N}]/u.test(word));
 }
 
 const Tier = { exact: 0, exactWithoutSlug: 1, connector: 2, namePrefix: 3, keyword: 4 } as const;
 
-function tierOf(terms: string[], tool: Rankable) {
-	const full = words(tool.name);
-	const local = words(tool.tool);
+function tierOf(terms: string[], { full, local, slug, connectorName }: Prepared) {
 	if (sameWords(full, terms)) return Tier.exact;
 	if (sameWords(local, terms)) return Tier.exactWithoutSlug;
-	if (startsWithWholeWords(words(tool.connector.slug), terms) || startsWithWholeWords(words(tool.connector.name), terms)) return Tier.connector;
+	if (startsWithWholeWords(slug, terms) || startsWithWholeWords(connectorName, terms)) return Tier.connector;
 	if (startsWithWords(full, terms) || startsWithWords(local, terms)) return Tier.namePrefix;
 	return Tier.keyword;
+}
+
+/** A tool's words, split once for every search of the catalog (catalogs are recorded data, so a tool object never changes). */
+type Prepared = { full: string[]; local: string[]; slug: string[]; connectorName: string[]; fields: Field[] };
+const preparedTools = new WeakMap<Rankable, Prepared>();
+
+function prepared(tool: Rankable): Prepared {
+	let entry = preparedTools.get(tool);
+	if (!entry) {
+		entry = { full: words(tool.name), local: words(tool.tool), slug: words(tool.connector.slug), connectorName: words(tool.connector.name), fields: fields(tool) };
+		preparedTools.set(tool, entry);
+	}
+	return entry;
 }
 
 /** Words that say nothing about which tool the query wants. */
@@ -96,9 +117,9 @@ function fields(tool: Rankable): Field[] {
 	const properties = isObject(tool.inputSchema.properties) ? Object.entries(tool.inputSchema.properties) : [];
 	const propertyDescriptions = properties.flatMap(([, schema]) => (isObject(schema) && typeof schema.description === "string" ? [schema.description] : []));
 	return [
-		[meaningful(words(tool.tool)), 6],
+		[meaningful(joined(words(tool.tool))), 6],
 		[meaningful([...words(tool.connector.slug), ...prose(tool.connector.name)]), 4],
-		[meaningful(properties.flatMap(([key]) => words(key))), 3],
+		[meaningful(properties.flatMap(([key]) => joined(words(key)))), 3],
 		[meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), 2],
 		[meaningful(propertyDescriptions.flatMap(prose)), 1],
 		[meaningful(prose(tool.connector.server ?? "")), 1],
@@ -114,12 +135,23 @@ function score(terms: string[], fields: Field[]) {
 /** The query word starts the word ("repo" finds repositories), or is the word with an ending ("issues" finds issue). */
 const matches = (word: string, term: string) => word.startsWith(term) || formOf(word, term);
 
-const ENDINGS = ["s", "es", "d", "ed", "ing"];
-
-/** True when the term is the word with an ending: issue → issues, order → ordered, list → listing, create → creating. */
+/**
+ * True when the term is the word with an ending: id → ids, issue → issues, create →
+ * created, order → ordered, list → listing, create → creating. "d", "ed" and "ing" need
+ * a word of three letters or more, and "d" a word that ends in "e": short words with
+ * these endings are other words ("ad" and "add", "be" and "bing", "car" and "card").
+ */
 function formOf(word: string, term: string) {
-	if (word.length < 2 || !term.startsWith(word.endsWith("e") ? word.slice(0, -1) : word)) return false;
-	return ENDINGS.some((ending) => term === `${word}${ending}`) || (word.endsWith("e") && term === `${word.slice(0, -1)}ing`);
+	if (word.length < 2) return false;
+	if (term === `${word}s` || term === `${word}es`) return true;
+	if (word.length < 3) return false;
+	if (word.endsWith("e")) return term === `${word}d` || term === `${word.slice(0, -1)}ing`;
+	return term === `${word}ed` || term === `${word}ing`;
+}
+
+/** A name's words and each pair of them joined, so "github" finds searchGitHub and gitHubRepo. */
+function joined(list: string[]) {
+	return [...list, ...list.slice(1).map((word, index) => `${list[index]}${word}`)];
 }
 
 /** A tool's words without filler: "for" in a description must not match "forecast". */
