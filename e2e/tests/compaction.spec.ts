@@ -128,7 +128,8 @@ test("a reply whose tool calls grow too long is summarized between its steps", a
 	await fake.chat({
 		match: "STEP-WRITE",
 		steps: [
-			{ toolCalls: [{ name: "write_artifact", input: { id: "big-notes", kind: "document", title: "Big notes", content } }], delayMs: 0 },
+			// In a few pieces: see toolInputPieces (fake/script.ts).
+			{ toolCalls: [{ name: "write_artifact", input: { id: "big-notes", kind: "document", title: "Big notes", content } }], delayMs: 0, toolInputPieces: 10 },
 			{ text: "STEP-DONE: I wrote the notes." },
 		],
 	});
@@ -195,7 +196,8 @@ test("a reply that goes on after an approval is summarized when the approved cal
 	const note = `APPROVE-NOTE ${filler(28_000)}`;
 	await fake.chat({
 		match: "APPROVE-ADD",
-		steps: [{ toolCalls: [{ name: "connector_call", input: { tool: "shop__add_note", input: { order: "A1", note } } }] }, { text: "APPROVE-UNSUMMARIZED" }],
+		// In a few pieces: see toolInputPieces (fake/script.ts).
+		steps: [{ toolCalls: [{ name: "connector_call", input: { tool: "shop__add_note", input: { order: "A1", note } } }], toolInputPieces: 10 }, { text: "APPROVE-UNSUMMARIZED" }],
 		summarized: [{ text: "APPROVE-DONE" }],
 	});
 	await chat.send(page, "APPROVE-ADD put my notes on order A1");

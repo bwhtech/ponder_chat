@@ -12,6 +12,13 @@ export type Step = {
 	/** Tools the model calls. The agent runs them and calls the model again: the next step answers that call. */
 	/** `id` is the call's id, made up by the fake when left out. Some providers put the tool's name in it. */
 	toolCalls?: { name: string; input: unknown; id?: string }[];
+	/**
+	 * Streams each tool call's arguments in this many pieces, not 40 characters at a time.
+	 * For long arguments: the AI SDK parses the arguments so far again at each piece, in
+	 * Ponder's reply save and in the page, so 100 KB in 40-character pieces holds the
+	 * server's event loop for seconds and slows the tests that run beside it.
+	 */
+	toolInputPieces?: number;
 	/** Milliseconds between streamed pieces. Use a large value to keep a reply open, such as to test Stop. */
 	delayMs?: number;
 	/** Answers with this HTTP status and an error, in place of a reply. */
