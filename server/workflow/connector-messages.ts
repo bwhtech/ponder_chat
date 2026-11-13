@@ -1,4 +1,4 @@
-import type { ModelMessage } from "ai";
+import { isDeepEqualData, type ModelMessage } from "ai";
 import { CONNECTOR_CALL } from "../../shared/connectors.ts";
 
 /**
@@ -62,8 +62,9 @@ export function approvedIn(messages: ModelMessage[], toolCallId: string, input: 
 	while (at >= 0 && !holdsCall(messages[at]!, toolCallId)) at--;
 	const message = messages[at];
 	if (!message || message.role !== "assistant" || typeof message.content === "string") return false;
-	const call = message.content.find((part) => part.type === "tool-call" && part.toolCallId === toolCallId);
-	if (call?.type !== "tool-call" || call.toolName !== CONNECTOR_CALL || !sameData(call.input, input)) return false;
+	// The last call with the id in the message, as the SDK's collectToolApprovals takes it.
+	const call = [...message.content].reverse().find((part) => part.type === "tool-call" && part.toolCallId === toolCallId);
+	if (call?.type !== "tool-call" || call.toolName !== CONNECTOR_CALL || !isDeepEqualData(call.input, input)) return false;
 	const requests = new Set(message.content.flatMap((part) => (part.type === "tool-approval-request" && part.toolCallId === toolCallId ? [part.approvalId] : [])));
 	const answers = messages
 		.slice(at + 1)
@@ -75,11 +76,3 @@ export function approvedIn(messages: ModelMessage[], toolCallId: string, input: 
 const holdsCall = (message: ModelMessage, toolCallId: string) =>
 	message.role === "assistant" && typeof message.content !== "string" && message.content.some((part) => part.type === "tool-call" && part.toolCallId === toolCallId);
 
-/** Deep equality of JSON data, whatever the order of keys. */
-function sameData(a: unknown, b: unknown): boolean {
-	if (a === b) return true;
-	if (typeof a !== "object" || typeof b !== "object" || a === null || b === null || Array.isArray(a) !== Array.isArray(b)) return false;
-	const keysA = Object.keys(a);
-	const keysB = Object.keys(b);
-	return keysA.length === keysB.length && keysA.every((key) => Object.hasOwn(b, key) && sameData((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
-}

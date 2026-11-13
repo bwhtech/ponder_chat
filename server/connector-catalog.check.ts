@@ -85,6 +85,13 @@ const ads = { slug: "ads", name: "Ads" };
 const keep = { slug: "keep", name: "Keep" };
 const adTools = ["create_ad", "update_ad", "get_ad", "list_ads", "pause_ad", "delete_ad", "copy_ad", "ad_report"].map((name) => tool(ads, name, "Works with an ad."));
 assert.deepEqual(names(rank("add note", [...adTools, tool(keep, "create_note", "Creates a note.")])), ["keep__create_note"]);
+// A word and the start of the next one are not a match: "card" is not get_car_details, "todo" is not move_to_done.
+const lookalikes = [tool(shop, "get_car_details", ""), tool(shop, "list_car_drivers", ""), tool(shop, "move_to_done", ""), tool(shop, "export_to_docx", ""), tool(shop, "list_endpoints", ""), tool(shop, "ad_delivery_estimate", "")];
+for (const query of ["card", "todo", "listen", "add note", "top customers"]) assert.deepEqual(rank(query, lookalikes), [], query);
+assert.deepEqual(names(rank("card", [...lookalikes, tool(shop, "charge", "Charges a card.")])), ["shop__charge"]);
+// "fee" and "feed" are other words.
+assert.deepEqual(rank("feed", [tool(shop, "get_fee", "")]), []);
+assert.deepEqual(rank("seed", [tool(shop, "see_all", "")]), []);
 // Two words of a name joined: "github" finds searchGitHub and a gitHubRepo property.
 assert.equal(rank("github", [tool(shop, "searchGitHub", "")]).length, 1);
 assert.equal(rank("github", [tool(shop, "search", "", { type: "object", properties: { gitHubRepo: { type: "string" } } })]).length, 1);
@@ -295,6 +302,13 @@ const cases: [string, ModelMessage[], Call, boolean][] = [
 	["the id again, same input, unanswered, after an approved call", [request("c1"), response("c1", true), person, request("c1")], noteCall, false],
 	["the id again, approved, after a denied call", [request("c1"), response("c1", false), person, request("c1", otherCall), response("c1", true)], otherCall, true],
 	["the person approved this call", [request("c1"), response("c1", true)], noteCall, true],
+	// Two calls with the id in one message: the last one is the call, as the SDK takes it.
+	[
+		"the last of two calls with the id in one message",
+		[{ role: "assistant", content: [{ type: "tool-call", toolCallId: "c1", toolName: CONNECTOR_CALL, input: otherCall }, ...(request("c1").content as [])] }, response("c1", true)],
+		noteCall,
+		true,
+	],
 	["the same input with its keys in another order", [request("c1"), response("c1", true)], { tool: "shop__add_note", input: { note: "x", order: "A1" } }, true],
 ];
 for (const [name, messages, call, expected] of cases) {

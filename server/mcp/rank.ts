@@ -111,24 +111,27 @@ function scoringTerms(terms: string[]) {
 	return meaningful.length ? meaningful : terms;
 }
 
-type Field = [words: string[], weight: number];
+/** A field's words, its pairs of adjacent words joined (pairs), and its weight. */
+type Field = [words: string[], pairs: string[], weight: number];
 
 function fields(tool: Rankable): Field[] {
 	const properties = isObject(tool.inputSchema.properties) ? Object.entries(tool.inputSchema.properties) : [];
 	const propertyDescriptions = properties.flatMap(([, schema]) => (isObject(schema) && typeof schema.description === "string" ? [schema.description] : []));
 	return [
-		[meaningful(joined(words(tool.tool))), 6],
-		[meaningful([...words(tool.connector.slug), ...prose(tool.connector.name)]), 4],
-		[meaningful(properties.flatMap(([key]) => joined(words(key)))), 3],
-		[meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), 2],
-		[meaningful(propertyDescriptions.flatMap(prose)), 1],
-		[meaningful(prose(tool.connector.server ?? "")), 1],
+		[meaningful(words(tool.tool)), pairs(words(tool.tool)), 6],
+		[meaningful([...words(tool.connector.slug), ...prose(tool.connector.name)]), [], 4],
+		[meaningful(properties.flatMap(([key]) => words(key))), properties.flatMap(([key]) => pairs(words(key))), 3],
+		[meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), [], 2],
+		[meaningful(propertyDescriptions.flatMap(prose)), [], 1],
+		[meaningful(prose(tool.connector.server ?? "")), [], 1],
 	];
 }
 
 function score(terms: string[], fields: Field[]) {
 	let total = 0;
-	for (const term of terms) for (const [list, weight] of fields) if (list.some((word) => matches(word, term))) total += weight;
+	for (const term of terms) {
+		for (const [list, joinedPairs, weight] of fields) if (list.some((word) => matches(word, term)) || joinedPairs.some((pair) => pair === term || formOf(pair, term))) total += weight;
+	}
 	return total;
 }
 
@@ -145,13 +148,18 @@ function formOf(word: string, term: string) {
 	if (word.length < 2) return false;
 	if (term === `${word}s` || term === `${word}es`) return true;
 	if (word.length < 3) return false;
-	if (word.endsWith("e")) return term === `${word}d` || term === `${word.slice(0, -1)}ing`;
+	// "fee" and "feed", "see" and "seed" are other words.
+	if (word.endsWith("e")) return (term === `${word}d` && !(word.length === 3 && word.endsWith("ee"))) || term === `${word.slice(0, -1)}ing`;
 	return term === `${word}ed` || term === `${word}ing`;
 }
 
-/** A name's words and each pair of them joined, so "github" finds searchGitHub and gitHubRepo. */
-function joined(list: string[]) {
-	return [...list, ...list.slice(1).map((word, index) => `${list[index]}${word}`)];
+/**
+ * Each pair of a name's adjacent words joined, so "github" finds searchGitHub and
+ * gitHubRepo. A pair matches only the whole query word, or it with an ending: by its
+ * start, "card" would find get_car_details and "todo" move_to_done.
+ */
+function pairs(list: string[]) {
+	return list.slice(1).map((word, index) => `${list[index]}${word}`);
 }
 
 /** A tool's words without filler: "for" in a description must not match "forecast". */
