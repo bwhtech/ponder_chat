@@ -7,7 +7,9 @@ import { WEB_FETCH, WEB_FETCH_DESCRIPTION, WEB_SEARCH, WEB_SEARCH_DESCRIPTION, w
 import { needsFetchApproval } from "../search/trusted-pages.ts";
 import { callCost } from "../telemetry/cost.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
-import { connectorTools, connectorToolsStep } from "./connectors.ts";
+import { connectorNote } from "../mcp/catalog-note.ts";
+import { EMPTY_CATALOG } from "../mcp/catalog.ts";
+import { calledToolName, CONNECTOR_GUIDANCE, connectorCatalogStep, connectorTools } from "./connectors.ts";
 import { ChatModel } from "./model.ts";
 import type { Continued } from "./runs.ts";
 import { skillsGuidance, skillsStep, skillTools } from "./skills.ts";
@@ -61,14 +63,14 @@ export async function chatTurn(turn: ChatTurn) {
 		// logs its own failure as "reply degraded" (context-step.ts), so the catches stay quiet.
 		const memory = await recallMemoryStep(turn.threadId, turn.owner).catch(() => ({ guidance: "", recalled: "" }));
 		// The tools of the apps the person connected (server/mcp/), recorded by the step.
-		const connectors = await connectorToolsStep(turn.owner).catch(() => ({ specs: [], guidance: "" }));
+		const catalog = await connectorCatalogStep(turn.owner).catch(() => EMPTY_CATALOG);
 		// The skills admins turned on (server/skills.ts), recorded by the step. Without them the reply is still written.
 		const skills = await skillsStep().catch(() => []);
 		// Without it, every page waits for the person: safe, only slower.
 		const trustedPages = await trustedPagesStep(turn.threadId).catch(() => []);
 		const agent = new WorkflowAgent({
 			model: new ChatModel(turn.model.id),
-			instructions: [instructions(turn), skillsGuidance(skills), connectors.guidance, memory.guidance].filter(Boolean).join("\n\n"),
+			instructions: [instructions(turn), skillsGuidance(skills), catalog.connectors.length ? CONNECTOR_GUIDANCE : "", memory.guidance].filter(Boolean).join("\n\n"),
 			// A tool that waits for approval comes back approved in the messages the browser sends; the signature shows the model asked for it.
 			experimental_toolApprovalSecret: { environmentVariable: TOOL_APPROVAL_SECRET_ENV },
 			tools: {
@@ -93,10 +95,10 @@ export async function chatTurn(turn: ChatTurn) {
 						execute: (input) => runPythonStep(input, turn.threadId, turn.owner),
 					}),
 				}),
+				// connector_search and connector_call, when the person has a connector on. They don't change when connectors do.
+				...connectorTools(catalog, turn.owner),
 				// Changes only when an admin changes the skills.
 				...skillTools(skills),
-				// After our own tools, which never change, so more of the prompt stays cached.
-				...connectorTools(connectors.specs, turn.owner),
 			},
 			// Credits are charged from what each model call cost (steps.ts).
 			onStepEnd: async (step) => {
@@ -109,12 +111,12 @@ export async function chatTurn(turn: ChatTurn) {
 					cachedTokens: step.usage.inputTokenDetails?.cacheReadTokens ?? 0,
 					costUsd: callCost(step),
 					finishReason: step.finishReason,
-					toolCalls: step.toolCalls.map((call) => call.toolName),
+					toolCalls: step.toolCalls.map(calledToolName),
 				});
 			},
 		});
 		await agent.stream({
-			messages: await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled, skills),
+			messages: await loadModelMessages(turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectorNote(catalog)),
 			writable,
 			stopWhen: isStepCount(turn.maxSteps),
 			// The agent would end the stream as a finished reply even when the model failed; endReplyStream ends it.

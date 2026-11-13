@@ -8,13 +8,20 @@ export type ConnectorStatus = "connected" | "needs_sign_in" | "error";
 /** What Ponder does when the model calls a tool: call it, ask the person first, or leave it out. */
 export type Rule = "allow" | "ask" | "off";
 
+/**
+ * The two tools the model reaches connector tools with (server/workflow/connectors.ts).
+ * A call's input is { tool, input }, where tool is a ConnectorTool's modelName.
+ */
+export const CONNECTOR_SEARCH = "connector_search";
+export const CONNECTOR_CALL = "connector_call";
+
 export type ConnectorTool = {
 	name: string;
 	title: string | null;
 	description: string | null;
 	readOnly: boolean;
 	rule: Rule;
-	/** The name the model calls it by, such as linear__create_issue. */
+	/** Its name in the model's catalog, such as linear__create_issue. */
 	modelName: string;
 };
 

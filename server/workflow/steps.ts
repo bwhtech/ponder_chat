@@ -18,10 +18,18 @@ import type { Continued } from "./runs.ts";
  * (file-context.ts), the skills they chose with $name swapped for their instructions (skills.ts),
  * the reply text they cited marked as a quote (citations.ts), the reasoning of replies
  * another model wrote left out,
- * tool results of earlier turns trimmed, and what memory recalled added to the person's
- * latest message (context.ts).
+ * tool results of earlier turns trimmed, and what memory recalled and the person's
+ * connectors added to the person's latest message (context.ts, connector-messages.ts).
  */
-export async function loadModelMessages(threadId: string, owner: string, modelId: string, recalled: string, skills: ActiveSkill[] = []): Promise<ModelMessage[]> {
+export async function loadModelMessages(
+	threadId: string,
+	owner: string,
+	modelId: string,
+	recalled: string,
+	skills: ActiveSkill[] = [],
+	/** The <connectors> note (mcp/catalog-note.ts). */
+	connectors = "",
+): Promise<ModelMessage[]> {
 	"use step";
 	const { convertToModelMessages } = await import("ai");
 	const { loadThread } = await import("../db.ts");
@@ -31,13 +39,14 @@ export async function loadModelMessages(threadId: string, owner: string, modelId
 	const { addRecalledMemory, dropOtherModelsReasoning, trimOldToolResults } = await import("./context.ts");
 	const { skillPartText } = await import("./skills.ts");
 	const { citationPartText } = await import("./citations.ts");
+	const { addConnectorNote, connectorCallsInHistory } = await import("./connector-messages.ts");
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
 	const thread = dropOtherModelsReasoning(await loadThread(threadId), modelId);
 	const messages = await convertToModelMessages(await resolveFileParts(thread, owner, { pdfAsText }), {
 		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 	});
-	return addRecalledMemory(trimOldToolResults(messages), recalled);
+	return addConnectorNote(addRecalledMemory(trimOldToolResults(connectorCallsInHistory(messages)), recalled), connectors);
 }
 
 /** Memory's guidance for the instructions, and what it recalls for the person's latest message. */

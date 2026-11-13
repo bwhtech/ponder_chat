@@ -19,7 +19,7 @@ import { Hono } from "hono";
 import type { SignedInEnv } from "./auth.ts";
 import { sql } from "./db.ts";
 import { forgetClient } from "./mcp/client.ts";
-import { addConnector, callConnectorTool, changeConnector, completeSignIn, connectorToolsFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
+import { addConnector, callConnectorTool, changeConnector, completeSignIn, connectorCatalogFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
 import { freshCredentials } from "./mcp/oauth.ts";
 import { probe } from "./mcp/probe.ts";
 import { connectorsApi } from "./mcp/routes.ts";
@@ -279,23 +279,27 @@ try {
 			["check_open__create_item", "ask"],
 			["check_open__big", "allow"],
 		]);
-		assert.equal(await callConnectorTool(openId, "echo", { text: "hello" }, alice), "hello");
-		const big = await callConnectorTool(openId, "big", {}, alice);
+		assert.equal(await callConnectorTool(openId, "echo", { text: "hello" }, alice, false), "hello");
+		const big = await callConnectorTool(openId, "big", {}, alice, false);
 		assert.ok(big.length < MAX_RESULT_CHARS + 200);
 		await assert.rejects(addConnector(alice, ORIGIN, { name: "Again", url: `${base}/open/mcp`, transport: "http", auth: "none", headers: [] }), /already have/);
 	});
 
-	await check("the workflow's tools: rules decide which tools show and which ask first", async () => {
+	await check("the catalog: rules decide which tools are in it and which ask first", async () => {
 		await changeConnector(alice, openId, { rules: { big: "off" } });
-		const { specs, guidance } = await connectorToolsFor(alice);
-		assert.deepEqual(specs.map((spec) => [spec.name, spec.ask]), [
+		const catalog = await connectorCatalogFor(alice);
+		assert.deepEqual(catalog.tools.map((tool) => [tool.name, tool.ask]), [
 			["check_open__create_item", true],
 			["check_open__echo", false],
 		]);
-		assert.ok(guidance.includes("Check Open") && guidance.includes("Use echo to repeat text."));
-		assert.match(await callConnectorTool(openId, "big", {}, alice), /turned .* off/);
+		assert.deepEqual(catalog.connectors, [{ slug: "check_open", name: "Check Open", server: "Check Server", notes: "Use echo to repeat text.", tools: 2 }]);
+		assert.match(await callConnectorTool(openId, "big", {}, alice, false), /turned .* off/);
+		// A tool on "Ask first" runs only when the call says the person approved it.
+		assert.match(await callConnectorTool(openId, "create_item", { title: "x" }, alice, false), /did not approve this call, so it did not run/);
+		assert.equal(await callConnectorTool(openId, "create_item", { title: "x" }, alice, true), "created x");
+		assert.match(await callConnectorTool(openId, "no_such_tool", {}, alice, true), /has no tool named no_such_tool/);
 		await changeConnector(alice, openId, { rules: { big: null }, enabled: false });
-		assert.equal((await connectorToolsFor(alice)).specs.length, 0);
+		assert.deepEqual(await connectorCatalogFor(alice), { tools: [], connectors: [], leftOut: 0 });
 		await changeConnector(alice, openId, { enabled: true });
 	});
 
@@ -306,7 +310,7 @@ try {
 		assert.ok("connector" in added);
 		assert.deepEqual(added.connector.headerNames, ["x-api-key"]);
 		assert.ok(!JSON.stringify(await listConnectors(alice)).includes("right-key"), "the key reached the page");
-		assert.equal(await callConnectorTool(added.connector.id, "echo", { text: "keyed" }, alice), "keyed");
+		assert.equal(await callConnectorTool(added.connector.id, "echo", { text: "keyed" }, alice, false), "keyed");
 	});
 
 	async function signIn(user: string, input: { name: string; clientId?: string; clientSecret?: string }, query = "") {
@@ -327,7 +331,7 @@ try {
 		assert.equal(connection.status, "connected");
 		assert.equal(connection.tools.length, 3);
 		assert.ok(readCredentials(connection).client?.client_id.startsWith("dyn-"));
-		assert.equal(await callConnectorTool(id, "echo", { text: "signed in" }, alice), "signed in");
+		assert.equal(await callConnectorTool(id, "echo", { text: "signed in" }, alice, false), "signed in");
 		await assert.rejects(completeSignIn(alice, params), /expired or was used/);
 	});
 
@@ -349,16 +353,18 @@ try {
 		assert.equal(readCredentials((await getConnection(id, bob))!).tokens?.access_token, one.tokens?.access_token, "the new token was not saved");
 		mock.accessTtl = 3600;
 		forgetClient(id);
-		assert.equal(await callConnectorTool(id, "echo", { text: "refreshed" }, bob), "refreshed");
+		assert.equal(await callConnectorTool(id, "echo", { text: "refreshed" }, bob, false), "refreshed");
 	});
 
 	await check("refused tokens: the connection needs a new sign-in, and the model is told", async () => {
 		mock.revokeAll();
 		forgetClient(oauthId);
-		const text = await callConnectorTool(oauthId, "echo", { text: "x" }, alice);
+		const text = await callConnectorTool(oauthId, "echo", { text: "x" }, alice, false);
 		assert.match(text, /sign in again/);
 		assert.equal((await getConnection(oauthId, alice))!.status, "needs_sign_in");
-		assert.equal((await connectorToolsFor(alice)).specs.filter((spec) => spec.connectionId === oauthId).length, 0);
+		const catalog = await connectorCatalogFor(alice);
+		assert.equal(catalog.tools.filter((tool) => tool.connectionId === oauthId).length, 0);
+		assert.ok(catalog.connectors.some((connector) => connector.slug === "check_oauth" && connector.unavailable === "sign-in" && connector.tools === 0));
 	});
 
 	await check("OAuth with the person's own app and secret", async () => {
@@ -366,12 +372,12 @@ try {
 		const { id } = await signIn(bob, { name: "Check Own App", clientId: "own-app", clientSecret: "own-secret" }, "?own");
 		const connection = (await getConnection(id, bob))!;
 		assert.equal(connection.oauthClientId, "own-app");
-		assert.equal(await callConnectorTool(id, "echo", { text: "own app" }, bob), "own app");
+		assert.equal(await callConnectorTool(id, "echo", { text: "own app" }, bob, false), "own app");
 	});
 
 	await check("one person can't read, call, change or remove another's connection", async () => {
 		assert.equal(await getConnection(openId, bob), undefined);
-		assert.equal(await callConnectorTool(openId, "echo", { text: "x" }, bob), "This connector was removed.");
+		assert.equal(await callConnectorTool(openId, "echo", { text: "x" }, bob, false), "This connector was removed.");
 		await assert.rejects(changeConnector(bob, openId, { enabled: false }), /not found/);
 		assert.equal(await removeConnector(bob, openId), false);
 		assert.ok((await listConnectors(bob)).every((connector) => !connector.url.includes("/open/")));
@@ -385,7 +391,7 @@ try {
 			assert.ok(probed.ok && probed.auth === "none", JSON.stringify(probed));
 			const added = await addConnector(alice, ORIGIN, { name: "DeepWiki", url: "https://mcp.deepwiki.com/mcp", transport: probed.transport, auth: "none", headers: [] });
 			assert.ok("connector" in added && added.connector.tools.length > 0);
-			const text = await callConnectorTool(added.connector.id, "read_wiki_structure", { repoName: "frappe/frappe" }, alice);
+			const text = await callConnectorTool(added.connector.id, "read_wiki_structure", { repoName: "frappe/frappe" }, alice, true);
 			assert.ok(text.length > 100, text);
 		});
 	}

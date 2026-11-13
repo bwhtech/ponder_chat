@@ -2,13 +2,14 @@
 import { useChat } from "@ai-sdk/vue";
 import { WorkflowChatTransport } from "@ai-sdk/workflow/client";
 import { lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart, type UIMessage } from "ai";
-import { Alert, Button, toast } from "frappe-ui";
+import { Alert, Button } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me } from "./account";
 import { client } from "./api";
 import { useAttention } from "./attention";
 import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
-import { changeConnector, connectors, findTool, loadConnectors, toolTitle } from "./connectors/api";
+import { connectors, loadConnectors } from "./connectors/api";
+import { connectorLabel } from "./connectors/labels";
 import { useDraft } from "./drafts";
 import { fetchApprovalQuestion } from "./fetch-approval";
 import { canUndo } from "./memory";
@@ -184,22 +185,12 @@ function askedSkills(message: UIMessage) {
 	return chosenSkills(messages.value[messages.value.indexOf(message) - 1]);
 }
 
-// Connector tools (Settings, Connectors) show as "Linear · Create issue". When one waits
-// for approval, "Always allow" saves its rule, then approves.
+// Connector steps show as "Linear · Create issue", and a search as what it looked for
+// (connectors/labels.ts). When a call waits for approval, "Always allow" saves its rule, then approves.
 if (!connectors.value) void loadConnectors().catch(() => undefined);
-provideToolLabels((name) => {
+provideToolLabels((name, part) => {
 	if (name === "web_fetch") return { title: "Read a page", question: fetchApprovalQuestion(messages.value) };
-	const found = findTool(name);
-	if (!found) return undefined;
-	const { connector, tool } = found;
-	return {
-		title: `${connector.name} · ${toolTitle(tool)}`,
-		question: `Allow Ponder to use ${connector.name}: ${toolTitle(tool)}?`,
-		alwaysAllow: async () => {
-			await changeConnector(connector.id, { rules: { [tool.name]: "allow" } });
-			toast.success(`Ponder now uses ${toolTitle(tool)} in ${connector.name} without asking. You can change this in Settings, Connectors.`);
-		},
-	};
+	return connectorLabel(name, part);
 });
 
 /** The person answered a tool that waited for approval. The answer goes out by itself (sendAutomaticallyWhen). */

@@ -107,11 +107,14 @@ expect(JSON.stringify(call.messages)).toContain("pear,7");
 | `http://127.0.0.1:3599/key/mcp` | The header `Authorization: Bearer shop-key`. |
 | `http://127.0.0.1:3600/mcp` | OAuth, with dynamic client registration. Its sign-in page says yes at once. |
 
-The model calls a connector's tool by the name `<slug>__<tool>`, where the slug comes from the connector's name. For a connector named "Shop":
+The model calls a connector's tool through `connector_call`, with the tool's name `<slug>__<tool>`. The slug comes from the connector's name. For a connector named "Shop":
 
 ```ts
-await fake.chat({ match: order, steps: [{ toolCalls: [{ name: "shop__find_order", input: { order } }] }, { text: "It shipped." }] });
+const call = { name: "connector_call", input: { tool: "shop__find_order", input: { order } } };
+await fake.chat({ match: order, steps: [{ toolCalls: [call] }, { text: "It shipped." }] });
 ```
+
+To search first, add a step with `{ name: "connector_search", input: { query: "find order" } }`.
 
 `GET http://127.0.0.1:3599/__mcp/calls?match=<text>` lists the tool calls that the servers ran, with their arguments. All tests share the servers, so put a value that is unique to the test in the arguments, such as an order number, and match on it. `e2e/tests/connectors.spec.ts` has examples.
 

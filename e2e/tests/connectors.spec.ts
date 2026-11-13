@@ -7,9 +7,9 @@ import { chat, expect, randomIp, signIn, test, uniqueEmail } from "../fixtures.t
 
 /**
  * Connectors (Settings, Connectors) against the test MCP servers in e2e/mcp/server.ts:
- * adding one with no sign-in, with an API key and with OAuth, and the model using its
- * tools, with and without the person's approval. Each server's tools are find_order,
- * which only reads, and add_note.
+ * adding one with no sign-in, with an API key and with OAuth, and the model finding and
+ * using its tools through connector_search and connector_call, with and without the
+ * person's approval. Each server's tools are find_order, which only reads, and add_note.
  */
 const OPEN = `${e2e.mcpUrl}/open/mcp`;
 const KEY = `${e2e.mcpUrl}/key/mcp`;
@@ -22,6 +22,9 @@ const orderNumber = () => `A${randomBytes(3).toString("hex")}`;
 async function serverCalls(page: Page, order: string): Promise<McpCall[]> {
 	return (await page.request.get(`${e2e.mcpUrl}/__mcp/calls?match=${order}`)).json();
 }
+
+/** A model's call to a connector tool, through connector_call. */
+const call = (tool: string, input: Record<string, unknown>) => ({ name: "connector_call", input: { tool, input } });
 
 /** Adds the open server as "Shop" through the API, for tests about using it. */
 async function addShop(page: Page) {
@@ -83,7 +86,7 @@ test("signs in to a server with OAuth, then uses its tools", async ({ page, fake
 
 	// The token from the sign-in works for a tool call.
 	const order = orderNumber();
-	await fake.chat({ match: order, steps: [{ toolCalls: [{ name: "shop__find_order", input: { order } }] }, { text: "It shipped." }] });
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__find_order", { order })] }, { text: "It shipped." }] });
 	await page.goto("/");
 	await chat.send(page, `Where is order ${order}?`);
 	await expect(chat.reply(page)).toContainText("It shipped.");
@@ -93,18 +96,52 @@ test("signs in to a server with OAuth, then uses its tools", async ({ page, fake
 test("uses a tool that only reads without asking", async ({ page, fake }) => {
 	await addShop(page);
 	const order = orderNumber();
-	await fake.chat({ match: order, steps: [{ toolCalls: [{ name: "shop__find_order", input: { order } }] }, { text: "Your order shipped on 3 November." }] });
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__find_order", { order })] }, { text: "Your order shipped on 3 November." }] });
 
 	await page.goto("/");
 	await chat.send(page, `Where is order ${order}?`);
 	await expect(chat.reply(page)).toContainText("Your order shipped on 3 November.");
+	// The step is named after the tool that connector_call ran.
 	await expect(chat.reply(page).getByText("Shop · Find order")).toBeVisible();
 
 	expect(await serverCalls(page, order)).toEqual([expect.objectContaining({ server: "open", tool: "find_order", args: { order } })]);
 	const calls = await fake.calls(order);
-	expect(calls[0].tools).toEqual(expect.arrayContaining(["shop__find_order", "shop__add_note"]));
+	// Connector tools are not tools of their own: the model finds and calls them through two tools.
+	expect(calls[0].tools).toEqual(expect.arrayContaining(["connector_search", "connector_call"]));
+	expect(calls[0].tools.filter((name) => name.includes("__"))).toEqual([]);
+	// The note with the person's message names the connector and, with few tools, each tool's signature.
+	const sent = JSON.stringify(calls[0].messages);
+	expect(sent).toContain("<connectors>");
+	expect(sent).toContain("shop__find_order({ order: string })");
+	expect(calls[0].system).not.toContain("Shop");
 	// The model's second call got what the server returned.
 	expect(JSON.stringify(calls[1].messages)).toContain("2 blue mugs");
+});
+
+test("finds a tool with a search, then calls it", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({
+		match: order,
+		steps: [
+			{ toolCalls: [{ name: "connector_search", input: { query: "find order" } }] },
+			{ toolCalls: [call("shop__find_order", { order })] },
+			{ text: "Found it: 2 blue mugs." },
+		],
+	});
+
+	await page.goto("/");
+	await chat.send(page, `Look up order ${order}`);
+	await expect(chat.reply(page)).toContainText("Found it: 2 blue mugs.");
+	// Both steps read, so they fold as lookups.
+	await chat.reply(page).getByText("Looked up 2 things").click();
+	await expect(chat.reply(page).getByText("Searched connectors for “find order”")).toBeVisible();
+	await expect(chat.reply(page).getByText("Shop · Find order")).toBeVisible();
+
+	// The search gave the tool's exact name and signature.
+	const calls = await fake.calls(order);
+	expect(JSON.stringify(calls[1].messages)).toContain("shop__find_order({ order: string })");
+	expect(await serverCalls(page, order)).toHaveLength(1);
 });
 
 test("asks before a tool that changes something, and runs it once allowed", async ({ page, fake }) => {
@@ -112,12 +149,17 @@ test("asks before a tool that changes something, and runs it once allowed", asyn
 	const order = orderNumber();
 	await fake.chat({
 		match: order,
-		steps: [{ toolCalls: [{ name: "shop__add_note", input: { order, note: "Gift wrap" } }] }, { text: "I added the note." }],
+		steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }],
 	});
 
 	await page.goto("/");
 	await chat.send(page, `Add a gift-wrap note to order ${order}`);
 	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	// The card shows the real tool's input, not connector_call's.
+	const card = page.locator("[data-slot=confirmation]");
+	await card.getByText("Show details").click();
+	await expect(card).toContainText("Gift wrap");
+	await expect(card).not.toContainText("shop__add_note");
 	expect(await serverCalls(page, order)).toEqual([]);
 
 	await page.getByRole("button", { name: "Allow once" }).click();
@@ -130,7 +172,7 @@ test("does not run a tool that the person denies", async ({ page, fake }) => {
 	const order = orderNumber();
 	await fake.chat({
 		match: order,
-		steps: [{ toolCalls: [{ name: "shop__add_note", input: { order, note: "Rush" } }] }, { text: "OK, I left the order as it was." }],
+		steps: [{ toolCalls: [call("shop__add_note", { order, note: "Rush" })] }, { text: "OK, I left the order as it was." }],
 	});
 
 	await page.goto("/");
@@ -144,7 +186,7 @@ test("does not run a tool that the person denies", async ({ page, fake }) => {
 test("stops asking for a tool that the person always allows", async ({ page, fake }) => {
 	await addShop(page);
 	const order = orderNumber();
-	const steps = [{ toolCalls: [{ name: "shop__add_note", input: { order, note: "Fragile" } }] }, { text: "Noted." }];
+	const steps = [{ toolCalls: [call("shop__add_note", { order, note: "Fragile" })] }, { text: "Noted." }];
 	await fake.chat({ match: order, steps });
 
 	await page.goto("/");
@@ -156,6 +198,87 @@ test("stops asking for a tool that the person always allows", async ({ page, fak
 	await expect(chat.reply(page)).toContainText("Noted.");
 	await expect(page.getByRole("button", { name: "Always allow" })).toHaveCount(0);
 	expect(await serverCalls(page, order)).toHaveLength(2);
+	// "Always allow" saved the rule of the tool behind connector_call.
+	const [shop] = (await (await page.request.get("/api/connectors")).json()).connectors;
+	expect(shop.tools.find((tool: { name: string }) => tool.name === "add_note").rule).toBe("allow");
+});
+
+test("checks a call's input against the tool before it asks", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order })] }, { text: "Which note should I add?" }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a note to order ${order}`);
+	await expect(chat.reply(page)).toContainText("Which note should I add?");
+	await expect(page.getByRole("button", { name: "Allow once" })).toHaveCount(0);
+	expect(await serverCalls(page, order)).toEqual([]);
+	// The model read what was wrong, and the tool's signature.
+	const sent = JSON.stringify((await fake.calls(order))[1].messages);
+	expect(sent).toContain('missing the required property \\"note\\"');
+	expect(sent).toMatch(/Signature: shop__add_note\(\{ [^)]*note: string/);
+});
+
+test(`does not run an "Ask first" tool called by a padded name`, async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	for (const name of ["shop__add_note ", "\nshop__add_note"]) {
+		await fake.chat({ match: `${order} ${JSON.stringify(name)}`, steps: [{ toolCalls: [call(name, { order, note: "Padded" })] }, { text: "That did not work." }] });
+	}
+
+	await page.goto("/");
+	for (const name of ["shop__add_note ", "\nshop__add_note"]) {
+		await chat.send(page, `Add a note to order ${order} ${JSON.stringify(name)}`);
+		await expect(chat.reply(page)).toContainText("That did not work.");
+	}
+	// No approval was asked for, and the server ran nothing: the name is not the tool's.
+	await expect(page.getByRole("button", { name: "Allow once" })).toHaveCount(0);
+	expect(await serverCalls(page, order)).toEqual([]);
+	expect(JSON.stringify((await fake.calls(order))[1].messages)).toContain("No connector tool is named");
+});
+
+test("does not run a tool that the person turned off", async ({ page, fake }) => {
+	await addShop(page);
+	const [shop] = (await (await page.request.get("/api/connectors")).json()).connectors;
+	const off = await page.request.patch(`/api/connectors/${shop.id}`, { data: { rules: { find_order: "off" } } });
+	expect(off.ok(), await off.text()).toBe(true);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__find_order", { order })] }, { text: "I can't look that up." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Where is order ${order}?`);
+	await expect(chat.reply(page)).toContainText("I can't look that up.");
+	expect(await serverCalls(page, order)).toEqual([]);
+	const [first, second] = await fake.calls(order);
+	// The tool is not in the catalog: the note leaves it out, and the call gets an error.
+	expect(JSON.stringify(first.messages)).not.toContain("shop__find_order(");
+	expect(JSON.stringify(second.messages)).toContain('No connector tool is named \\"shop__find_order\\"');
+});
+
+test("keeps the instructions and tools the same when the person adds a connector", async ({ page, fake }) => {
+	await addShop(page);
+	const first = `Cache check ${orderNumber()}`;
+	await page.goto("/");
+	await chat.send(page, first);
+	await chat.idle(page);
+
+	const response = await page.request.post("/api/connectors", {
+		data: { name: "Back office", url: KEY, transport: "http", auth: "headers", headers: [{ name: "Authorization", value: `Bearer ${SHOP_KEY}` }] },
+	});
+	expect(response.ok(), await response.text()).toBe(true);
+	const second = `Cache check ${orderNumber()}`;
+	await page.goto("/");
+	await chat.send(page, second);
+	await chat.idle(page);
+
+	const [before] = await fake.calls(first);
+	const [after] = await fake.calls(second);
+	// The start of the prompt is the same, so the provider's cache still has it.
+	expect(after.system).toBe(before.system);
+	expect(after.tools).toEqual(before.tools);
+	// Only the note with the person's latest message names the new connector.
+	expect(JSON.stringify(before.messages)).not.toContain("back_office");
+	expect(JSON.stringify(after.messages.at(-1))).toContain("back_office__find_order");
 });
 
 test("does not give one person's connectors to another", async ({ page, browser, db, fake }) => {
@@ -171,7 +294,8 @@ test("does not give one person's connectors to another", async ({ page, browser,
 
 	const [call] = await fake.calls(message);
 	expect(call.tools).toContain("web_search");
-	expect(call.tools.filter((name) => name.startsWith("shop__"))).toEqual([]);
+	expect(call.tools).not.toContain("connector_call");
+	expect(JSON.stringify(call.messages)).not.toContain("<connectors>");
 	expect(await (await otherPage.request.get("/api/connectors")).json()).toEqual({ connectors: [] });
 	await other.close();
 });
