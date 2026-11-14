@@ -9,21 +9,34 @@ import assert from "node:assert/strict";
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import { readUIMessageStream, type UIMessage, type UIMessageChunk } from "ai";
 import { joinDeltas } from "./workflow/join-deltas.ts";
+import { ReadUntilError, replayReply } from "./workflow/replay.ts";
 import { toUIChunks } from "./workflow/reply-chunks.ts";
 
-/** What saveReply makes of these raw parts, with or without the join. */
-async function saved(parts: object[], join: boolean): Promise<UIMessage | undefined> {
-	const raw = new ReadableStream<ModelCallStreamPart>({
-		start(controller) {
-			for (const part of parts) controller.enqueue(part as ModelCallStreamPart);
-			controller.close();
+const base = (): UIMessage => ({ id: "msg-1", role: "assistant", parts: [] });
+
+/** The raw parts one by one; then, with `failure`, a read that fails, as a durable stream's can. */
+function rawStream(parts: object[], failure?: Error) {
+	let at = 0;
+	return new ReadableStream<ModelCallStreamPart>({
+		pull(controller) {
+			if (at < parts.length) controller.enqueue(parts[at++] as ModelCallStreamPart);
+			else if (failure) controller.error(failure);
+			else controller.close();
 		},
 	});
-	const chunks = raw.pipeThrough(toUIChunks());
-	const stream = join ? chunks.pipeThrough(joinDeltas()) : chunks;
+}
+
+/** What the SDK's reader makes of a stream, as saveReply did before the join. */
+async function read(stream: ReadableStream<UIMessageChunk>) {
 	let message: UIMessage | undefined;
-	for await (const each of readUIMessageStream({ message: { id: "msg-1", role: "assistant", parts: [] }, stream })) message = each;
+	for await (const each of readUIMessageStream({ message: base(), stream })) message = each;
 	return message;
+}
+
+/** What saveReply makes of these raw parts: with the join, through replayReply, as reply.ts calls it. */
+async function saved(parts: object[], join: boolean): Promise<UIMessage | undefined> {
+	const chunks = rawStream(parts).pipeThrough(toUIChunks());
+	return join ? replayReply(chunks, base()) : read(chunks);
 }
 
 const filler = (chars: number) => Array.from({ length: Math.ceil(chars / 5) }, (_, i) => `note${i % 97}`).join(" ").slice(0, chars);
@@ -142,6 +155,51 @@ async function same(name: string, parts: object[]) {
 	});
 	for await (const chunk of textSource.pipeThrough(joinDeltas())) textOut.push(chunk);
 	assert.deepEqual(textOut, [{ type: "text-start", id: "t1" }, { type: "text-delta", id: "t1", delta: "One two", providerMetadata: { fake: { n: 1 } } }]);
+}
+
+// --- A stream that fails to read. The save must not store the cut reply as if it were whole,
+// and what the replay keeps must never be less than the SDK's reader keeps without the join.
+{
+	const signed = { anthropic: { signature: "sig-1" } };
+	const cases = {
+		"text": [{ type: "text-start", id: "t" }, { type: "text-delta", id: "t", text: "hel" }, { type: "text-delta", id: "t", text: "lo" }],
+		"reasoning with its signature": [
+			{ type: "reasoning-start", id: "r" },
+			{ type: "reasoning-delta", id: "r", text: "Think" },
+			{ type: "reasoning-delta", id: "r", text: "ing.", providerMetadata: signed },
+		],
+		"a tool input": [{ type: "tool-input-start", id: "c1", toolName: "write_artifact" }, { type: "tool-input-delta", id: "c1", delta: '{"title":' }, { type: "tool-input-delta", id: "c1", delta: '"Half' }],
+	};
+	for (const [name, parts] of Object.entries(cases)) {
+		const failure = new Error("the durable stream could not be read");
+		// The save path: the replay rejects with the read error, so reply.ts writes nothing.
+		await assert.rejects(replayReply(rawStream(parts, failure).pipeThrough(toUIChunks()), base()), (error) => error === failure, `${name}: the save fails`);
+		// What the replay read before the failure, joined, is what the SDK's reader keeps unjoined: nothing held is lost.
+		const kept = new ReadUntilError(rawStream(parts, failure).pipeThrough(toUIChunks()));
+		const joined = await read(kept.stream.pipeThrough(joinDeltas()));
+		assert.ok(kept.failed && kept.error === failure, `${name}: the failure is recorded`);
+		assert.deepEqual(joined, await read(rawStream(parts, failure).pipeThrough(toUIChunks())), `${name}: no less than unjoined`);
+		// The step tries again and reads the stream from the start: read whole, the same parts save.
+		assert.ok((await replayReply(rawStream(parts).pipeThrough(toUIChunks()), base()))?.parts.length, `${name}: a retry saves`);
+	}
+	const text = (await read(new ReadUntilError(rawStream(cases.text, new Error("x")).pipeThrough(toUIChunks())).stream.pipeThrough(joinDeltas())))?.parts.find((part) => part.type === "text");
+	assert.equal((text as { text?: string } | undefined)?.text, "hello", "the buffered text is kept");
+	const reasoning = (await read(new ReadUntilError(rawStream(cases["reasoning with its signature"], new Error("x")).pipeThrough(toUIChunks())).stream.pipeThrough(joinDeltas())))?.parts.find((part) => part.type === "reasoning");
+	assert.deepEqual(reasoning && { text: reasoning.text, providerMetadata: reasoning.providerMetadata }, { text: "Thinking.", providerMetadata: signed }, "the buffered reasoning and its signature are kept");
+}
+
+// --- An error chunk is not a read error: a failed reply ends its stream with one, and is saved.
+{
+	const parts = [{ type: "text-start", id: "t" }, { type: "text-delta", id: "t", text: "So far" }, { type: "text-end", id: "t" }];
+	const chunks = rawStream(parts).pipeThrough(toUIChunks());
+	const withError = chunks.pipeThrough(
+		new TransformStream<UIMessageChunk, UIMessageChunk>({
+			flush: (controller) => controller.enqueue({ type: "error", errorText: "GLM 5.3 could not finish this reply." }),
+			transform: (chunk, controller) => controller.enqueue(chunk),
+		}),
+	);
+	const message = await replayReply(withError, base());
+	assert.equal((message?.parts.find((part) => part.type === "text") as { text?: string } | undefined)?.text, "So far", "a failed reply saves what it wrote");
 }
 
 // --- Speed: 10,000 pieces (400 KB) save in well under a second. Without the join, about 20 seconds.
