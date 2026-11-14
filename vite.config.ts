@@ -14,10 +14,11 @@ const fromFrappeUI = createRequire(new URL("node_modules/frappe-ui/package.json"
 compiler.registerTS(() => fromFrappeUI("typescript"));
 
 /**
- * Two pages, built one at a time: the chat (index.html), then the admin pages (admin.html,
- * served at /admin by server/app.ts) with PONDER_PAGE=admin (npm run build). Built apart,
- * each page's first chunks hold only its own code, and the chat, which has no router, gets
- * a stand-in for vue-router (web/no-router.ts) while /admin keeps the real one.
+ * Two pages, built one at a time (npm run build): the chat (index.html, PONDER_PAGE=chat),
+ * then the admin pages (admin.html, served at /admin by server/app.ts, PONDER_PAGE=admin).
+ * Built apart, each page's first chunks hold only its own code; the chat, which has no
+ * router, gets a stand-in for vue-router (web/no-router.ts) while /admin keeps the real one;
+ * and the chat's stylesheet has only the chat's classes (tailwind.config.js).
  */
 const adminBuild = process.env.PONDER_PAGE === "admin";
 
