@@ -26,6 +26,8 @@ export type CompactRequest = {
 	/** The <connectors> note: like `recalled`, it goes with the latest message, never into the summary. */
 	connectors: string;
 	skills: ActiveSkill[];
+	/** A reply that keeps its reasoning (workflow/context.ts), as the messages without a summary would. */
+	keepReasoningOf?: string;
 	ratio: number;
 	window: number | null;
 	/** The estimated text tokens of the instructions and the tools. */
@@ -54,7 +56,10 @@ export type CompactionDeps = {
 	/** True when another run replaced this one, or it was stopped. */
 	superseded(threadId: string, runId: string): Promise<boolean>;
 	writeSummary(input: { run: { threadId: string; user: string }; chatModel: string; previous: string | undefined; messages: UIMessage[]; ratio: number }): Promise<{ text: string; model: string }>;
-	modelMessages(thread: UIMessage[], options: { owner: string; modelId: string; recalled: string; skills: ActiveSkill[]; connectors: string }): Promise<ModelMessage[]>;
+	modelMessages(
+		thread: UIMessage[],
+		options: { owner: string; modelId: string; recalled: string; skills: ActiveSkill[]; connectors: string; keepReasoningOf?: string },
+	): Promise<ModelMessage[]>;
 	status(state: CompactionState): Promise<void>;
 	log(message: string): void;
 };
@@ -162,8 +167,8 @@ export class Compaction {
 	}
 
 	private async messagesWith(thread: UIMessage[], summary: Summary) {
-		const { owner, modelId, recalled, skills, connectors, mode } = this.request;
-		if (mode === "start") return this.deps.modelMessages(withSummary(thread, summary), { owner, modelId, recalled, skills, connectors });
+		const { owner, modelId, recalled, skills, connectors, keepReasoningOf, mode } = this.request;
+		if (mode === "start") return this.deps.modelMessages(withSummary(thread, summary), { owner, modelId, recalled, skills, connectors, keepReasoningOf });
 		// Between steps, only the summary message is new: the current turn is already in the prompt, memory and connector notes included.
 		const message = summaryMessage(thread.slice(0, summary.covers), thread.slice(summary.covers), summary);
 		return this.deps.modelMessages([message], { owner, modelId, recalled: "", skills, connectors: "" });

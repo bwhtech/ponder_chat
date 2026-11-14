@@ -106,7 +106,7 @@ export async function chatTurn(turn: ChatTurn) {
 		// A long chat is summarized before a call would go over the model's window (context-guard.ts).
 		const keep = turn.answeredBy ? turn.continued?.messageId : undefined;
 		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors, keep);
-		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors };
+		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors, keepReasoningOf: keep };
 		const guard = new ContextGuard(base, context, await toolTokens(tools), writable, turn.model.name);
 		// Each model call records its cost in `runs`, which credits are charged from (model-attempt.ts).
 		await runReply({

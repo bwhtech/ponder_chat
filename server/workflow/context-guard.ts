@@ -26,7 +26,7 @@ export class ContextOverLimitError extends Error {
 	override name = "ContextOverLimitError";
 }
 
-type Base = Pick<CompactRequest, "threadId" | "owner" | "runId" | "modelId" | "recalled" | "skills" | "connectors">;
+type Base = Pick<CompactRequest, "threadId" | "owner" | "runId" | "modelId" | "recalled" | "skills" | "connectors" | "keepReasoningOf">;
 /** A prompt with the instructions as its first, system message: the reply loop's messages, or the provider's prompt (the checks). */
 type Prompt = ModelMessage[] | LanguageModelV4Prompt;
 
