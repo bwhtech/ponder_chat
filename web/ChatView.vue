@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { FileUIPart, UIMessage } from "ai";
-import { Alert, Button } from "frappe-ui";
+import { Button } from "frappe-ui";
+import { Alert } from "./lazy-alert";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me } from "./account";
 import { client } from "./api";
@@ -20,8 +21,7 @@ import { chosenCitations, citationLabel, citationPart, findSource, resolveRange,
 import type { CiteAnchor } from "./cite/CitationChip.vue";
 import { markQuote, revealCitation } from "./cite/highlight";
 import { useCiteSelection } from "./cite/selection";
-import { useSkillPicker } from "./skills/picker";
-import SkillMenu from "./skills/SkillMenu.vue";
+import { SkillMenu, useSkillPicker } from "./skills/picker";
 import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skills/skills";
 import { summarizedThrough } from "./compaction";
 import { THREAD_CHANGED } from "../shared/replies";

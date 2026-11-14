@@ -1,5 +1,8 @@
-import { computed, nextTick, ref, watch, type Ref } from "vue";
+import { computed, defineAsyncComponent, nextTick, ref, watch, type Ref } from "vue";
 import { loadSkills, skills, type SkillOption } from "./skills";
+
+/** The $ menu over the message box: it shows only once $ is typed, so it loads then. */
+export const SkillMenu = defineAsyncComponent(() => import("./SkillMenu.vue"));
 
 /**
  * The $ menu of the message box. `$` at the start of a word opens it anywhere in the

@@ -2,7 +2,6 @@
 import { SidebarItem, SidebarLabel, Skeleton, TextInput } from "frappe-ui";
 import { dialog } from "./dialogs";
 import { computed, nextTick, reactive, ref, watch } from "vue";
-import { downloadThreadMarkdown } from "./export-markdown";
 import { excerptPieces, useThreadSearch } from "./thread-search";
 import { useThreads, type ThreadSummary } from "./threads";
 import ThreadMenu from "./ThreadMenu.vue";
@@ -73,7 +72,8 @@ const groups = computed(() => {
 function menu(thread: ThreadSummary) {
 	return [
 		{ label: "Rename", icon: "lucide-pencil", onClick: () => askRename(thread) },
-		{ label: "Export as Markdown", icon: "lucide-download", onClick: () => void downloadThreadMarkdown(thread.id, thread.title) },
+		// The export's code loads when it is chosen.
+		{ label: "Export as Markdown", icon: "lucide-download", onClick: () => void import("./export-markdown").then((module) => module.downloadThreadMarkdown(thread.id, thread.title)) },
 		{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: () => askDelete(thread) },
 	];
 }
