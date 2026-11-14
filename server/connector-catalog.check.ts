@@ -270,9 +270,10 @@ const crowd = new Catalog({
 	tools: Array.from({ length: 500 }, (_, i) => tool(shop, `tool_number_${i}`, "Does something with the records of an order, and returns them with their fields.", bigSchema)),
 });
 crowd.search("warm up");
-// A catalog near the 2 MB limit, with dense snake_case properties, and 16 query words
-// that match nothing: the worst case for the scoring. Each tool is indexed on the first
-// search (cold); later searches only look words up (warm).
+// A catalog of about 2.8 million characters, more than catalogFrom's 2 MB limit lets
+// through (it is built here as data, not by catalogFrom), with dense snake_case
+// properties, and 16 query words that match nothing: the worst case for the scoring. Each
+// tool is indexed on the first search (cold); later searches only look words up (warm).
 // Every word is distinct, so no word is shared between tools or fields.
 const dense = (i: number, j: number, k: number) => Array.from({ length: 8 }, (_, n) => `w${i}x${j}y${k}n${n}`).join("_");
 const denseTools = Array.from({ length: 500 }, (_, i) =>
@@ -387,6 +388,33 @@ asked.length = 0;
 // It fails, so the page shows a call that did not run, not a change. The sentence names the tool by its name only: a title is the server's text.
 await assert.rejects(Promise.resolve(withOff[CONNECTOR_CALL]!.execute!(offCall, { toolCallId: "c9", messages: [], context: {} })), /^Error: The person turned shop__old_tool off in Settings, Connectors, so this call did not run\./);
 assert.deepEqual(asked, [], "a tool that is off never reaches the call step");
+
+// Boundaries: 16 scored words count, the 17th does not.
+const wordsBefore = (count: number) => Array.from({ length: count }, (_, i) => `q${i}`).join(" ");
+assert.deepEqual(names(rank(`${wordsBefore(15)} invoice`, [tool(shop, "get_invoice", "")])), ["shop__get_invoice"], "the 16th word is scored");
+assert.deepEqual(rank(`${wordsBefore(16)} invoice`, [tool(shop, "get_invoice", "")]), [], "the 17th word is not");
+// A call name of 200 characters is looked up; one of 201 is refused first.
+const named200 = catalog.check({ tool: "a".repeat(200), input: {} });
+const named201 = catalog.check({ tool: "a".repeat(201), input: {} });
+assert.ok("problem" in named200 && /No connector tool is named/.test(named200.problem));
+assert.ok("problem" in named201 && /That is not a tool name/.test(named201.problem));
+
+// A server's text with a long run of combining marks: NFC sorts a run of marks in time
+// that grows with its square, so runs are cut before Ponder normalizes, and names and
+// titles are cut before they are ranked. Before, this title held up a search for 12.8 s.
+const marks = `a${"\u0301".repeat(50_000)}${"\u0323".repeat(50_000)}`;
+started = performance.now();
+const markWords = words(marks);
+const markCatalog = new Catalog({
+	...data,
+	tools: [
+		{ ...tool({ slug: "mark", name: marks, server: marks }, "x", marks, { type: "object", properties: { [marks]: { type: "string", description: marks } } }), title: marks },
+	],
+});
+markCatalog.search(wordsBefore(16));
+const markTook = performance.now() - started;
+assert.ok(markTook < 1_000, `a title of 100,000 combining marks took ${Math.round(markTook)} ms`);
+assert.ok(Array.from(markWords[0]!).length <= 9, "a letter keeps at most eight marks");
 
 // A long name the model writes, such as a run of capitals, is refused or cut before it is
 // split into words, ranked or repeated: it can't hold up the server.

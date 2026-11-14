@@ -380,7 +380,8 @@ function catalogTools(connection: Connection): CatalogTool[] {
 		.map((tool) => ({
 			name: modelToolName(connection.slug, tool.name),
 			tool: tool.name,
-			...(tool.title && { title: tool.title }),
+			// Tool lists saved before tools.ts cut titles may hold long ones.
+			...(tool.title && { title: tool.title.slice(0, MAX_SERVER_TEXT) }),
 			description: tool.description ?? "",
 			inputSchema: tool.inputSchema,
 			connector,
@@ -404,7 +405,13 @@ function catalogConnector(connection: Connection, tools: CatalogTool[]): Catalog
 	};
 }
 
-const serverName = (connection: Connection) => connection.serverInfo?.title ?? connection.serverInfo?.name ?? undefined;
+const serverName = (connection: Connection) => (connection.serverInfo?.title ?? connection.serverInfo?.name)?.slice(0, MAX_SERVER_TEXT);
+
+/** At most this much of a name or title that a server wrote goes into the catalog. */
+const MAX_SERVER_TEXT = 200;
+
+/** A tool's name for Ponder's own sentences: not its title, which the server wrote. */
+const toolLabel = (tool: string) => (tool.length > 64 ? `${tool.slice(0, 64)}…` : tool);
 
 /**
  * One tool call, for the model. Never throws: a failure is the result, so the model can
@@ -421,10 +428,10 @@ export async function callConnectorTool(connectionId: string, tool: string, inpu
 	if (!connection.enabled) return `${connection.name} is turned off in Settings, Connectors.`;
 	if (connection.status === "needs_sign_in") return needsSignIn(connection);
 	const info = connection.tools.find((each) => each.name === tool);
-	if (!info) return `${connection.name} has no tool named ${tool} now.`;
+	if (!info) return `${connection.name} has no tool named ${toolLabel(tool)} now.`;
 	const rule = ruleOf(connection, info);
-	if (rule === "off") return `The person turned ${info.title ?? tool} off in Settings, Connectors.`;
-	if (rule === "ask" && !approved) return `${info.title ?? tool} asks the person first, and they did not approve this call, so it did not run. Tell the person: it will ask them on their next message.`;
+	if (rule === "off") return `The person turned ${toolLabel(tool)} off in Settings, Connectors.`;
+	if (rule === "ask" && !approved) return `${toolLabel(tool)} asks the person first, and they did not approve this call, so it did not run. Tell the person: it will ask them on their next message.`;
 	try {
 		// The tool's name as its server gives it, never its input or result, nor the connector's name.
 		// Its HTTP requests are marked as MCP, and their host left out (tracing/http.ts).

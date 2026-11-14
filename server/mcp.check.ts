@@ -24,7 +24,8 @@ import { freshCredentials } from "./mcp/oauth.ts";
 import { probe } from "./mcp/probe.ts";
 import { connectorsApi } from "./mcp/routes.ts";
 import { getConnection, migrateConnectors, readCredentials, type Connection } from "./mcp/store.ts";
-import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor } from "./mcp/tools.ts";
+import { Catalog } from "./mcp/catalog.ts";
+import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor, toToolInfo } from "./mcp/tools.ts";
 import { guardedFetch, mcpUrlProblem } from "./net-guard.ts";
 import { seal, unseal } from "./secrets.ts";
 
@@ -287,7 +288,9 @@ try {
 
 	await check("the catalog stays within its limits, with the tools that are off counted", async () => {
 		const title = "T".repeat(11_000);
-		const listed = (name: string) => ({ name, title, description: "x".repeat(2_000), inputSchema: { type: "object" }, readOnly: true, destructive: false });
+		// Each tool on takes about 7,000 characters, so 300 of them pass the 2 MB limit.
+		const schema = { type: "object", properties: { note: { type: "string", description: "n".repeat(5_000) } } };
+		const listed = (name: string) => ({ name, title, description: "x".repeat(2_000), inputSchema: schema, readOnly: true, destructive: false });
 		const off = Array.from({ length: 700 }, (_, i) => listed(`off_${i}`));
 		const big = {
 			id: "limits", userId: alice, name: "Big", slug: "big", url: "https://big.example/mcp", transport: "http", auth: "none", status: "connected", enabled: true,
@@ -306,6 +309,33 @@ try {
 		// 200 tools that are off with 11,000-character titles add little.
 		const onlyOff = catalogFrom([{ ...big, tools: off.slice(0, 200) } as Connection]);
 		assert.ok(JSON.stringify(onlyOff).length < 20_000, String(JSON.stringify(onlyOff).length));
+		// The boundary: 499 and 500 tools that are off are all named; of 501, 500 are.
+		for (const [count, named] of [[499, 499], [500, 500], [501, 500]] as const) {
+			const short = Array.from({ length: count }, (_, i) => ({ ...listed(`off_${i}`), title: "Off", description: "" }));
+			const offCatalog = catalogFrom([{ ...big, tools: short, toolRules: Object.fromEntries(short.map((tool) => [tool.name, "off"])) } as Connection]);
+			assert.equal(offCatalog.off!.length, named, `${count} tools that are off`);
+		}
+	});
+
+	await check("a server's title with a long run of combining marks can't hold up a search", async () => {
+		// One read-only tool named x, whose title is a letter and 100,000 marks. NFC sorts a
+		// run of marks in time that grows with its square: this took 12.8 s before.
+		const title = `a${"\u0301".repeat(50_000)}${"\u0323".repeat(50_000)}`;
+		const info = toToolInfo({ name: "x", title, description: "", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } });
+		assert.ok((info.title ?? "").length <= 200, "a listed tool keeps at most 200 characters of its title");
+		const connection = {
+			id: "marks", userId: alice, name: "Marks", slug: "marks", url: "https://marks.example/mcp", transport: "http", auth: "none", status: "connected", enabled: true,
+			headerNames: [], oauthClientId: null, expiresAt: null, serverInfo: { title }, toolsCheckedAt: new Date(), lastError: null, lastUsedAt: null,
+			createdAt: new Date(), updatedAt: new Date(), sealed: null, toolRules: {},
+			// A tool list saved before titles were cut: the catalog cuts it too.
+			tools: [info, { ...info, name: "y", title }],
+		} as unknown as Connection;
+		const started = performance.now();
+		const catalog = catalogFrom([connection]);
+		new Catalog(catalog).search("z0 z1 z2 z3 z4 z5 z6 z7 z8 z9 z10 z11 z12 z13 z14 z15");
+		const took = performance.now() - started;
+		assert.ok(took < 1_000, `took ${Math.round(took)} ms`);
+		assert.ok(catalog.tools.every((tool) => (tool.title ?? "").length <= 200) && (catalog.connectors[0]!.server ?? "").length <= 200);
 	});
 
 	await check("the catalog: rules decide which tools are in it and which ask first", async () => {

@@ -65,8 +65,7 @@ export function closestNames(text: string, tools: readonly Rankable[]): string[]
 /** Every word of a name or a query, lowercase, in any script: "订单" and "créer" are words too. */
 export function words(text: string): string[] {
 	return wholeWords(
-		text
-			.normalize("NFC")
+		normalized(text)
 			// "HTTPServer": a space before the capital that starts a word. A lookahead, so a long run of capitals takes linear time.
 			.replace(/(\p{Lu})(?=\p{Lu}\p{Ll})/gu, "$1 ")
 			.replace(/([\p{Ll}\p{N}])(\p{Lu})/gu, "$1 $2"),
@@ -80,12 +79,23 @@ export function words(text: string): string[] {
  * one word: a query finds it only by its start.
  */
 function wholeWords(text: string): string[] {
-	return text
-		.normalize("NFC")
+	return normalized(text)
 		.toLowerCase()
 		// Zero-width joiners stay too: Persian writes some words with U+200C, and Hindi some conjuncts with U+200D.
 		.split(/[^\p{L}\p{M}\p{N}\u200C\u200D]+/u)
 		.filter((word) => /[\p{L}\p{N}]/u.test(word));
+}
+
+/** No real letter carries more marks than this: Vietnamese stacks two, Tibetan and some Indic conjuncts a few more. */
+const MAX_MARKS = 8;
+
+/**
+ * The text in NFC, with every run of combining marks cut to MAX_MARKS first. NFC sorts a
+ * run of marks, and sorting one long run takes time that grows with its square: a server
+ * could stall Ponder with one letter and 100,000 marks in a tool's title.
+ */
+function normalized(text: string) {
+	return text.replace(/\p{M}{9,}/gu, (run) => Array.from(run).slice(0, MAX_MARKS).join("")).normalize("NFC");
 }
 
 const Tier = { exact: 0, exactWithoutSlug: 1, connector: 2, namePrefix: 3, keyword: 4 } as const;
@@ -105,7 +115,7 @@ const preparedTools = new WeakMap<Rankable, Prepared>();
 function prepared(tool: Rankable): Prepared {
 	let entry = preparedTools.get(tool);
 	if (!entry) {
-		entry = { full: words(tool.name), local: words(tool.tool), slug: words(tool.connector.slug), connectorName: words(tool.connector.name), fields: fields(tool) };
+		entry = { full: words(tool.name), local: words(short(tool.tool)), slug: words(tool.connector.slug), connectorName: words(short(tool.connector.name)), fields: fields(tool) };
 		preparedTools.set(tool, entry);
 	}
 	return entry;
@@ -134,16 +144,25 @@ function field(list: string[], joinedPairs: string[], weight: number, name = fal
 	return { sorted: unique, words: new Set(unique), pairs: new Set(joinedPairs), weight, name };
 }
 
+/** At most this much of a name the server wrote is ranked: a tool's, a property's, a connector's, a server's, and a title. */
+const MAX_NAME_RANKED = 200;
+/** At most this much of a description is ranked: tools.ts keeps 2,000 characters of a tool's own. */
+const MAX_TEXT_RANKED = 2_000;
+
+const short = (text: string) => text.slice(0, MAX_NAME_RANKED);
+
 function fields(tool: Rankable): Field[] {
 	const properties = isObject(tool.inputSchema.properties) ? Object.entries(tool.inputSchema.properties) : [];
-	const propertyDescriptions = properties.flatMap(([, schema]) => (isObject(schema) && typeof schema.description === "string" ? [schema.description] : []));
+	const propertyDescriptions = properties.flatMap(([, schema]) => (isObject(schema) && typeof schema.description === "string" ? [schema.description.slice(0, MAX_TEXT_RANKED)] : []));
+	const toolWords = words(short(tool.tool));
+	const keyWords = properties.map(([key]) => words(short(key)));
 	return [
-		field(meaningful(words(tool.tool)), pairs(words(tool.tool)), 6, true),
-		field(meaningful([...words(tool.connector.slug), ...prose(tool.connector.name)]), [], 4),
-		field(meaningful(properties.flatMap(([key]) => words(key))), properties.flatMap(([key]) => pairs(words(key))), 3, true),
-		field(meaningful(prose(`${tool.title ?? ""} ${tool.description}`)), [], 2),
+		field(meaningful(toolWords), pairs(toolWords), 6, true),
+		field(meaningful([...words(tool.connector.slug), ...prose(short(tool.connector.name))]), [], 4),
+		field(meaningful(keyWords.flat()), keyWords.flatMap(pairs), 3, true),
+		field(meaningful(prose(`${short(tool.title ?? "")} ${tool.description.slice(0, MAX_TEXT_RANKED)}`)), [], 2),
 		field(meaningful(propertyDescriptions.flatMap(prose)), [], 1),
-		field(meaningful(prose(tool.connector.server ?? "")), [], 1),
+		field(meaningful(prose(short(tool.connector.server ?? ""))), [], 1),
 	];
 }
 

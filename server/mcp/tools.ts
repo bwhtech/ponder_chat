@@ -41,6 +41,7 @@ export const ruleOf = (connection: Pick<Connection, "toolRules">, tool: ToolInfo
 
 const MAX_SCHEMA_CHARS = 20_000;
 const MAX_DESCRIPTION_CHARS = 2_000;
+const MAX_TITLE_CHARS = 200;
 
 type ListedTool = {
 	name: string;
@@ -55,7 +56,7 @@ export function toToolInfo(tool: ListedTool): ToolInfo {
 	const schema = JSON.stringify(tool.inputSchema ?? {}).length > MAX_SCHEMA_CHARS ? { type: "object" } : tool.inputSchema;
 	return {
 		name: tool.name,
-		title: tool.title ?? tool.annotations?.title,
+		title: (tool.title ?? tool.annotations?.title)?.slice(0, MAX_TITLE_CHARS),
 		description: tool.description?.slice(0, MAX_DESCRIPTION_CHARS),
 		inputSchema: { type: "object", ...schema },
 		readOnly: tool.annotations?.readOnlyHint === true,
