@@ -28,6 +28,7 @@ class World {
 	supersededAt = Number.POSITIVE_INFINITY;
 	supersededChecks = 0;
 	fail = false;
+	kept: (string | undefined)[] = [];
 
 	constructor(public thread: UIMessage[]) {}
 
@@ -43,7 +44,7 @@ class World {
 				return { text: "SUMMARY", model: "deepseek/deepseek-v4.1-flash" };
 			},
 			// As thread-messages.ts builds them: the SDK's own conversion, and the <connectors> note with the latest message.
-			modelMessages: async (thread, { connectors }) => addConnectorNote(await convertToModelMessages(thread), connectors),
+			modelMessages: async (thread, { connectors, keepReasoningOf }) => (this.kept.push(keepReasoningOf), addConnectorNote(await convertToModelMessages(thread), connectors)),
 			status: async (state) => void this.states.push(state),
 			log: (message) => void this.logs.push(message),
 		};
@@ -80,6 +81,13 @@ const textOf = (messages: ModelMessage[]) => JSON.stringify(messages);
 	assert.deepEqual(world.states.map((state) => state.state), ["running", "done"]);
 	assert.equal(world.states.at(-1)?.through, world.thread[world.saved!.summary.covers - 1].id);
 	assert.ok(result.kind === "compacted" && textOf(result.messages).includes("SUMMARY") && textOf(result.messages).includes("CURRENT question"));
+}
+
+// --- A reply carried on after an approval keeps its reasoning in the messages built with the summary.
+{
+	const world = new World(longThread());
+	await run(world, { keepReasoningOf: "d" });
+	assert.deepEqual(world.kept, ["d"]);
 }
 
 // --- A step retried after its save: the saved summary is the result, and nothing is summarized again.

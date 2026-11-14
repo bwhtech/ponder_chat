@@ -2,13 +2,13 @@
 import { Avatar, Badge, Button, Select, SettingsRow, Skeleton, Switch, TextInput } from "frappe-ui";
 import { computed, ref } from "vue";
 import { creditValue, date, resetTime } from "../lib/format";
-import type { SettingsForm } from "../lib/settings-form";
+import { AUTO_COST_OPTIONS, type AutoCostTier, type SettingsForm } from "../lib/settings-form";
 import ListSkeleton from "./ListSkeleton.vue";
 import OpenRouterKeyDialog from "./OpenRouterKeyDialog.vue";
 import EmptyState from "../../EmptyState.vue";
 
 /**
- * The General settings: credits, how PDFs are read, long chats, the OpenRouter key and the admins. Save is the parent's,
+ * The General settings: credits, how PDFs are read, Auto, long chats, the OpenRouter key and the admins. Save is the parent's,
  * from `form`. Skeletons stand in for the values until they load; if they can't, an alert offers Retry.
  */
 const props = defineProps<{ form: SettingsForm }>();
@@ -67,6 +67,25 @@ const keyText = computed(() => {
 						:disabled="form.savingPdf"
 						aria-label="Read PDF text on this server"
 						@update:model-value="form.setPdfReading"
+					/>
+				</SettingsRow>
+			</section>
+
+			<section class="space-y-1">
+				<h2 class="text-base-semibold text-ink-gray-9">Auto</h2>
+				<SettingsRow
+					title="Cost level"
+					description="New chats start on Auto, which picks a model for each message. Low favours cheaper models, High stronger ones."
+				>
+					<Skeleton v-if="form.loading" class="h-7 w-48 rounded-4" />
+					<Select
+						v-else
+						:model-value="form.autoCostTier"
+						:options="AUTO_COST_OPTIONS"
+						:disabled="form.savingTier"
+						class="w-48"
+						aria-label="Auto cost level"
+						@update:model-value="(tier) => form.setAutoCostTier(tier as AutoCostTier)"
 					/>
 				</SettingsRow>
 			</section>

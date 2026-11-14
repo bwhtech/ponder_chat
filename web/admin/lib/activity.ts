@@ -1,6 +1,7 @@
 import { skillTitle } from "../../../shared/skill-file";
 import type { Activity } from "../api";
 import { credits, date } from "./format";
+import { AUTO_COST_OPTIONS } from "./settings-form";
 
 /**
  * An event of the admin activity log in plain words, for the Activity page: what the
@@ -54,6 +55,10 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"set-compaction-model": (before, after) => ({
 		text: "Changed the summary model",
 		details: [`${before.compactionModel} → ${after.compactionModel}`],
+	}),
+	"set-auto-cost-tier": (before, after) => ({
+		text: "Changed what Auto may spend",
+		details: [`${tierName(before.autoCostTier)} → ${tierName(after.autoCostTier)}`],
 	}),
 	"set-openrouter-key": () => ({ text: "Changed the OpenRouter key", details: [] }),
 	"create-skill": (_, after) => ({ text: `Created the skill ${skillName(after)}`, details: [] }),
@@ -125,6 +130,10 @@ function roleText(before: Fields, after: Fields) {
 
 function isAdminRole(role: unknown) {
 	return String(role ?? "").split(",").some((part) => part.trim() === "admin");
+}
+
+function tierName(tier: unknown) {
+	return AUTO_COST_OPTIONS.find((option) => option.value === tier)?.label ?? String(tier ?? "—");
 }
 
 function skillName(fields: Fields) {

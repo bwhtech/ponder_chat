@@ -1,5 +1,6 @@
 import type { UIMessage } from "ai";
 import { toast } from "frappe-ui";
+import { isAuto } from "../shared/auto-model";
 import { modelName } from "./models";
 import { CITATION_PART, type CitationPart } from "./cite/citations";
 
@@ -64,7 +65,7 @@ function pythonMarkdown(tool: ToolPart) {
 
 function replyModel(message: UIMessage) {
 	const id = (message.metadata as { model?: string } | undefined)?.model;
-	return id ? ` (${modelName(id) ?? id})` : "";
+	return id && !isAuto(id) ? ` (${modelName(id) ?? id})` : "";
 }
 
 function fileName(title: string) {

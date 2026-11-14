@@ -7,7 +7,7 @@ import { admin, unwrap, type Settings, type Viewer } from "./api";
  * page loads its own data.
  */
 export const viewer = ref<Viewer | null | undefined>(undefined);
-export const settings = reactive<Settings>({ defaultDailyCredits: 0, creditsPerUsd: 1000, pdfTextOnServer: true, compactionModel: "" });
+export const settings = reactive<Settings>({ defaultDailyCredits: 0, creditsPerUsd: 1000, pdfTextOnServer: true, compactionModel: "", autoCostTier: "medium" });
 export const counts = reactive({ pendingRequests: 0, invited: 0 });
 /** The settings dialog, on wider screens. Phones have the Settings page instead. */
 export const settingsOpen = ref(false);

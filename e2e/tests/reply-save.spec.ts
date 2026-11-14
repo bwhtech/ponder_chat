@@ -29,7 +29,9 @@ test("a reply with a 400 KB tool input in 10,000 pieces, then a long answer, sav
 
 	const threadId = randomUUID().slice(0, 8);
 	const message = { id: randomUUID(), role: "user", parts: [{ type: "text", text: "SAVE-BIG write it all down" }] };
-	const response = await page.request.post("/api/chat", { data: { id: threadId, messages: [message] }, timeout: 90_000 });
+	// A named model: Auto's window is the smallest of its models, and the fake gives GLM 5.3 a small one.
+	const data = { id: threadId, messages: [message], model: "deepseek/deepseek-v4.1-flash" };
+	const response = await page.request.post("/api/chat", { data, timeout: 90_000 });
 	expect(response.ok(), await response.text()).toBe(true);
 	const runId = response.headers()["x-workflow-run-id"];
 

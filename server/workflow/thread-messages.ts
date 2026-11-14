@@ -1,11 +1,11 @@
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
+import { modelWindow } from "../auto-router.ts";
 import { loadSummary, tokenRatio } from "../compaction/store.ts";
 import { withSummary } from "../compaction/summary.ts";
 import { estimate, type Estimate } from "../compaction/tokens.ts";
 import { loadThread } from "../db.ts";
 import { resolveFileParts } from "../file-context.ts";
 import { MODELS } from "../models.ts";
-import { contextWindow } from "../openrouter.ts";
 import { getSettings } from "../settings.ts";
 import type { ActiveSkill } from "../skills.ts";
 import { openAnswersSettled } from "./answered-again.ts";
@@ -22,6 +22,8 @@ export type MessageOptions = {
 	skills: ActiveSkill[];
 	/** The <connectors> note (mcp/catalog-note.ts). Like `recalled`, it goes with the latest message and is never summarized. */
 	connectors: string;
+	/** A reply that keeps its reasoning (context.ts, dropOtherModelsReasoning). */
+	keepReasoningOf?: string;
 };
 
 /** The messages of a reply's first model call, with what compaction decides from. */
@@ -46,7 +48,7 @@ export async function loadThreadContext(threadId: string, options: MessageOption
 		messages,
 		estimate: estimate(messages),
 		ratio: await tokenRatio(threadId, options.modelId),
-		window: (await contextWindow(options.modelId)) ?? null,
+		window: (await modelWindow(options.modelId)) ?? null,
 		...(summary && { through: thread[summary.covers - 1]?.id }),
 	};
 }
@@ -59,10 +61,10 @@ export async function loadThreadContext(threadId: string, options: MessageOption
  * recalled and the person's connectors added to the person's latest message (context.ts,
  * connector-messages.ts).
  */
-export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors }: MessageOptions): Promise<ModelMessage[]> {
+export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors, keepReasoningOf }: MessageOptions): Promise<ModelMessage[]> {
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
-	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId), owner, { pdfAsText });
+	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText });
 	const messages = await convertToModelMessages(resolved, {
 		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 	});

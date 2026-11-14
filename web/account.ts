@@ -2,7 +2,6 @@ import { createAuthClient } from "better-auth/vue";
 import { adminClient, emailOTPClient, magicLinkClient } from "better-auth/client/plugins";
 import { ref } from "vue";
 import { client, type Answer } from "./api";
-import { model } from "./models";
 
 /**
  * Who is signed in, and their credits for today. Sign-in is by email (server/auth.ts):
@@ -91,13 +90,12 @@ function keepCachesFor(userId: string) {
 	localStorage.setItem(CACHE_OWNER, userId);
 }
 
-// The drafts (drafts.ts) and the model picked (models.ts) are the person's too.
+// The drafts (drafts.ts) are the person's too. "ponder-chat:model" held the model picked
+// last, before new chats always started on Auto.
 function clearCaches() {
 	localStorage.removeItem("ponder-chat:threads");
 	localStorage.removeItem("ponder-chat:drafts:v1");
 	localStorage.removeItem("ponder-chat:model");
-	// models.ts read the last person's pick when the page loaded.
-	model.value = "";
 	localStorage.removeItem(CACHE_OWNER);
 	indexedDB?.deleteDatabase("ponder-chat");
 }

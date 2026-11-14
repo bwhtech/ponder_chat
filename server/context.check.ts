@@ -95,6 +95,40 @@ assert.deepEqual(
 	switched.map((message) => message.parts.map((part) => part.type)),
 	[["text"], ["text"], ["reasoning", "text"], ["reasoning", "text"]],
 );
+// The signed reasoning on a tool call's metadata goes too; its other OpenRouter metadata stays.
+const tooled = dropOtherModelsReasoning(
+	[
+		{
+			id: "t",
+			role: "assistant",
+			metadata: { model: "openrouter/auto" },
+			parts: [
+				{
+					type: "tool-web_fetch",
+					toolCallId: "x",
+					state: "output-available",
+					input: {},
+					output: {},
+					callProviderMetadata: { openrouter: { reasoning_details: [{ type: "reasoning.encrypted", data: "sig" }], keep: 1 } },
+				},
+			],
+		},
+	],
+	"openrouter/auto",
+);
+assert.deepEqual((tooled[0].parts[0] as { callProviderMetadata?: unknown }).callProviderMetadata, { openrouter: { keep: 1 } });
+// A reply carried on after an approval keeps its reasoning when the run goes back to its model.
+const carried = dropOtherModelsReasoning([reasoned("a", "openrouter/auto"), reasoned("b", "openrouter/auto")], "openrouter/auto", "b");
+assert.deepEqual(
+	carried.map((message) => message.parts.map((part) => part.type)),
+	[["text"], ["reasoning", "text"]],
+);
+// Under Auto the next model is not known, so even Auto's own replies drop their reasoning.
+const underAuto = dropOtherModelsReasoning([reasoned("a", "openrouter/auto"), reasoned("b", "anthropic/claude-haiku-5.5"), reasoned("c")], "openrouter/auto");
+assert.deepEqual(
+	underAuto.map((message) => message.parts.map((part) => part.type)),
+	[["text"], ["text"], ["reasoning", "text"]],
+);
 
 // Rate limits: the windows, the wait, and other people unaffected.
 const limit = new RateLimit([{ max: 2, ms: 60_000 }]);

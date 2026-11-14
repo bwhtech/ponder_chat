@@ -33,6 +33,8 @@ export type ModelResponse = {
 	finishReason: string;
 	/** The input tokens the provider reported, which the next call's estimate starts from (context-guard.ts). */
 	inputTokens: number;
+	/** Under Auto, the model on the list that answered: the reply's next calls go to it (loop.ts). */
+	answeredBy?: string;
 };
 
 /**

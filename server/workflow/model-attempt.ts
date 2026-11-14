@@ -2,6 +2,8 @@ import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { isStepCount, jsonSchema, streamText, tool, wrapLanguageModel, type TextStreamPart, type ToolSet } from "ai";
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
+import { isAuto } from "../../shared/auto-model.ts";
+import { answeringModel } from "../auto-router.ts";
 import { saveTokenRatio } from "../compaction/store.ts";
 import { measuredRatio } from "../compaction/tokens.ts";
 import { callCost } from "../telemetry/cost.ts";
@@ -95,7 +97,8 @@ class ModelAttempt {
 		const usage = this.usage(finish, toolCalls);
 		await this.record.finish(usage, { stopped: await runStopped(this.call.runId) });
 		await this.measureRatio(usage.inputTokens);
-		return { messages, toolCalls, finishReason: finish.finishReason, inputTokens: usage.inputTokens };
+		const answeredBy = isAuto(this.call.modelId) ? await answeringModel(finish.response.modelId) : undefined;
+		return { messages, toolCalls, finishReason: finish.finishReason, inputTokens: usage.inputTokens, ...(answeredBy && { answeredBy }) };
 	}
 
 	/**
@@ -123,7 +126,7 @@ class ModelAttempt {
 			this.started ??= this.record.start(id).catch((error) => console.warn("model-attempt: could not record a started call:", error));
 		};
 		return wrapLanguageModel({
-			model: new ChatModel(this.call.modelId),
+			model: new ChatModel(this.call.modelId, this.call.threadId),
 			middleware: {
 				specificationVersion: "v4",
 				wrapStream: async ({ doStream }) => {

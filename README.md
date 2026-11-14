@@ -88,7 +88,7 @@ After a reply, Ponder decides if you said something about yourself worth keeping
 
 ### Pick the model for each chat
 
-The model menu in the message box lists a short set of models from DeepSeek, Anthropic, OpenAI, Google and others. Only models with a Zero Data Retention endpoint show. Each reply names the model that wrote it. Bigger models use more of the day's credits.
+Each new chat starts on Auto: for each message, OpenRouter's Auto Router picks one of Ponder's models and a reasoning effort. The model menu in the message box also lists a short set of models from DeepSeek, Anthropic, OpenAI, Google and others. Only models with a Zero Data Retention endpoint show. A reply names the model that wrote it, except under Auto. Bigger models use more of the day's credits.
 
 ![The model menu opened from the message box, with DeepSeek V4.1 Flash selected and Claude Haiku, Sonnet and Opus listed below.](docs/images/models.webp)
 
@@ -202,7 +202,8 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 
 - Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link. Either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes. A code takes 3 wrong tries. A code is checked only by signing in with it: Better Auth's route that checks a code alone is off, and so are codes of any type other than sign-in.
 - Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
-- Models: the list is in `server/models.ts`, and it is also the allowlist. A request for any other model gets the default.
+- Models: the list is in `server/models.ts`, and it is also the allowlist. A request for any other model gets the default, Auto (`CHAT_DEFAULT_MODEL` changes it). Every new chat starts on Auto; an old chat keeps the model of its last reply.
+- Auto (`server/auto-router.ts`): `openrouter/auto` with the `auto-router` plugin. `allowed_models` holds only the models on the list with a ZDR endpoint, and `cost_tier` is the cost level that admins set in Settings, Auto (low, medium or high; medium by default). The chat's id goes as `session_id`, so OpenRouter keeps a chat on one model where it can. Its window is the smallest window of those models, every PDF gets the free parser, and the call carries Anthropic's cache marks. The replies of an Auto chat drop their reasoning on the next call, because the next model may differ. OpenRouter's decision model, which reads each message to pick the model, is not covered by the ZDR rule as far as its docs say.
 - Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter.ts`). The model menu shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
 - Chat names: a cheap model writes them. Search uses Postgres full-text search (`server/thread-search.ts`). Export to Markdown runs in the browser (`web/export-markdown.ts`).
 - Side panel (`web/side-panel/`): on a narrow screen the panel covers the page. pdf.js loads only the first time a PDF opens. A CSV or TSV file shows up to 2,000 rows. Cmd- or Ctrl-click still opens the file in a new tab.

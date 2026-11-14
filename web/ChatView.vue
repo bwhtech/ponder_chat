@@ -16,7 +16,8 @@ import { canUndo } from "./memory";
 import { MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { useThinking } from "./thinking";
 import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from "./message-queue";
-import { features, model, modelName, models } from "./models";
+import { isAuto } from "../shared/auto-model";
+import { defaultModel, features, modelName, models } from "./models";
 import { chosenCitations, citationLabel, citationPart, findSource, resolveRange, withComment, type Citation } from "./cite/citations";
 import CitationChip, { type CiteAnchor } from "./cite/CitationChip.vue";
 import CiteButton from "./cite/CiteButton.vue";
@@ -74,15 +75,13 @@ const emit = defineEmits<{
 }>();
 
 // The model for this chat: the one that wrote its last reply, so going back to a chat
-// brings back its model. A new chat starts on the model picked last (models.ts), and a
-// pick here becomes the one new chats start on.
-const threadModel = ref(lastReplyModel(props.initialMessages) ?? model.value);
-watch(threadModel, (id) => id && (model.value = id));
-// A model that left the list falls back to the one picked last.
+// brings back its model. A new chat starts on the default, Auto (models.ts).
+const threadModel = ref(lastReplyModel(props.initialMessages) ?? defaultModel.value);
+// A model that left the list, or a chat that opened before the list loaded, gets the default.
 watch(
 	models,
 	(options) => {
-		if (options.length && !options.some((option) => option.id === threadModel.value)) threadModel.value = model.value;
+		if (options.length && !options.some((option) => option.id === threadModel.value)) threadModel.value = defaultModel.value;
 	},
 	{ immediate: true },
 );
@@ -217,7 +216,7 @@ const suggestions = computed(() => [
 // A long thread shows its latest messages first; older ones render only when asked for.
 // The start always falls on the person's message, so no turn is cut.
 const PAGE = 12;
-/** The newest reply keeps its copy button in view; older ones show it on hover. The model name always shows. */
+/** The newest reply keeps its copy button in view; older ones show it on hover. The model name always shows, except under Auto. */
 const lastReplyId = computed(() => messages.value.findLast((message) => message.role === "assistant")?.id);
 /** Messages on screen when the thread opened: they do not animate in; later ones rise in (style.css). */
 const shownAtStart = new Set(props.initialMessages.map((message) => message.id));
@@ -480,10 +479,10 @@ function replyText(message: UIMessage) {
 	return message.parts.map((part) => (part.type === "text" ? part.text : "")).filter(Boolean).join("\n\n");
 }
 
-/** The model that wrote a reply, from the metadata the server attaches. */
+/** The model that wrote a reply, from the metadata the server attaches. None under Auto. */
 function replyModel(message: UIMessage) {
 	const id = replyModelId(message);
-	return id ? (modelName(id) ?? id) : undefined;
+	return id && !isAuto(id) ? (modelName(id) ?? id) : undefined;
 }
 
 function replyModelId(message: UIMessage) {
@@ -501,7 +500,7 @@ function replyModelId(message: UIMessage) {
 				<img src="/logo.png" alt="" class="size-11" />
 				<div class="space-y-2">
 					<p class="text-4xl-semibold text-ink-gray-9">What's on your mind?</p>
-					<p class="mx-auto max-w-sm text-balance text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything. Pick a model below; bigger models use more of your daily credits.</p>
+					<p class="mx-auto max-w-sm text-balance text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything. Auto picks a model for each message, or pick one below; bigger models use more of your daily credits.</p>
 				</div>
 			</ConversationEmptyState>
 		</Transition>

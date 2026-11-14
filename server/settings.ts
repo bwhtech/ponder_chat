@@ -20,7 +20,12 @@ export type Settings = {
 	pdfTextOnServer: boolean;
 	/** The model that writes the summary when a chat gets too long (compaction/summarize.ts). */
 	compactionModel: string;
+	/** How much Auto may spend on a request (auto-router.ts). */
+	autoCostTier: AutoCostTier;
 };
+
+export const AUTO_COST_TIERS = ["low", "medium", "high"] as const;
+export type AutoCostTier = (typeof AUTO_COST_TIERS)[number];
 
 /** Cheap, with a 1M-token window on every private (ZDR) endpoint. */
 export const DEFAULT_COMPACTION_MODEL = "deepseek/deepseek-v4.1-flash";
@@ -45,17 +50,20 @@ export async function migrateSettings() {
 		on conflict (id) do nothing`;
 	await sql`alter table settings add column if not exists pdf_text_on_server boolean not null default true`;
 	await sql`alter table settings add column if not exists compaction_model text`;
+	await sql`alter table settings add column if not exists auto_cost_tier text not null default 'medium'`;
 }
 
 export async function getSettings(): Promise<Settings> {
 	if (cached && Date.now() - cached.at < CACHE_MS) return cached.settings;
-	const [row] = await sql<{ default_daily_credits: number; credits_per_usd: number; pdf_text_on_server: boolean; compaction_model: string | null }[]>`
-		select default_daily_credits, credits_per_usd, pdf_text_on_server, compaction_model from settings where id = 1`;
+	const [row] = await sql<
+		{ default_daily_credits: number; credits_per_usd: number; pdf_text_on_server: boolean; compaction_model: string | null; auto_cost_tier: AutoCostTier }[]
+	>`select default_daily_credits, credits_per_usd, pdf_text_on_server, compaction_model, auto_cost_tier from settings where id = 1`;
 	const settings = {
 		defaultDailyCredits: row.default_daily_credits,
 		creditsPerUsd: row.credits_per_usd,
 		pdfTextOnServer: row.pdf_text_on_server,
 		compactionModel: row.compaction_model ?? DEFAULT_COMPACTION_MODEL,
+		autoCostTier: row.auto_cost_tier,
 	};
 	cached = { settings, at: Date.now() };
 	return settings;
@@ -76,6 +84,11 @@ export async function setPdfTextOnServer(on: boolean, by: string) {
 
 export async function setCompactionModel(model: string, by: string) {
 	await sql`update settings set compaction_model = ${model}, updated_by = ${by}, updated_at = now() where id = 1`;
+	cached = undefined;
+}
+
+export async function setAutoCostTier(tier: AutoCostTier, by: string) {
+	await sql`update settings set auto_cost_tier = ${tier}, updated_by = ${by}, updated_at = now() where id = 1`;
 	cached = undefined;
 }
 

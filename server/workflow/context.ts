@@ -1,4 +1,5 @@
 import type { ModelMessage, ToolResultPart, UIMessage } from "ai";
+import { isAuto } from "../../shared/auto-model.ts";
 
 /**
  * What the model reads of a thread, shaped to keep each call small and its start the
@@ -30,14 +31,43 @@ export function trimOldToolResults(messages: ModelMessage[]): ModelMessage[] {
  * this model, and OpenRouter sends a call that carries it to the provider that signed it:
  * after a switch from Claude, DeepSeek went only to Google, so when Google failed there
  * was no other provider to try. A reply with no model in its metadata keeps its reasoning.
+ * Under Auto every reply drops it: Auto may pick a model other than the one that wrote it.
+ *
+ * The signed reasoning is also in the OpenRouter metadata of the reply's tool calls and
+ * text, and the provider sends it from there too, so that goes as well.
+ *
+ * `keep` is the reply that a run carries on after an approval, when the run goes to the
+ * model that wrote it (replies.ts): it keeps its reasoning.
  */
-export function dropOtherModelsReasoning(messages: UIMessage[], modelId: string): UIMessage[] {
+export function dropOtherModelsReasoning(messages: UIMessage[], modelId: string, keep?: string): UIMessage[] {
 	return messages.map((message) => {
 		const writer = (message.metadata as { model?: unknown } | undefined)?.model;
-		if (message.role !== "assistant" || typeof writer !== "string" || writer === modelId) return message;
-		if (!message.parts.some((part) => part.type === "reasoning")) return message;
-		return { ...message, parts: message.parts.filter((part) => part.type !== "reasoning") };
+		if (message.role !== "assistant" || message.id === keep || typeof writer !== "string" || (writer === modelId && !isAuto(modelId))) return message;
+		return { ...message, parts: message.parts.filter((part) => part.type !== "reasoning").map(withoutReasoningDetails) };
 	});
+}
+
+type PartMetadata = { providerMetadata?: Record<string, unknown>; callProviderMetadata?: Record<string, unknown> };
+
+function withoutReasoningDetails(part: UIMessage["parts"][number]): UIMessage["parts"][number] {
+	const { providerMetadata, callProviderMetadata } = part as PartMetadata;
+	if (!hasReasoningDetails(providerMetadata) && !hasReasoningDetails(callProviderMetadata)) return part;
+	return {
+		...part,
+		...(providerMetadata && { providerMetadata: stripReasoningDetails(providerMetadata) }),
+		...(callProviderMetadata && { callProviderMetadata: stripReasoningDetails(callProviderMetadata) }),
+	} as UIMessage["parts"][number];
+}
+
+function hasReasoningDetails(metadata: Record<string, unknown> | undefined) {
+	const openrouter = metadata?.openrouter;
+	return typeof openrouter === "object" && openrouter !== null && "reasoning_details" in openrouter;
+}
+
+function stripReasoningDetails(metadata: Record<string, unknown>) {
+	if (!hasReasoningDetails(metadata)) return metadata;
+	const { reasoning_details: _dropped, ...openrouter } = metadata.openrouter as Record<string, unknown>;
+	return { ...metadata, openrouter };
 }
 
 /**

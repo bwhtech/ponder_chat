@@ -32,10 +32,12 @@ export async function loadModelMessages(
 	skills: ActiveSkill[] = [],
 	/** The <connectors> note (mcp/catalog-note.ts). */
 	connectors = "",
+	/** A reply that keeps its reasoning (context.ts). */
+	keepReasoningOf?: string,
 ): Promise<ThreadContext> {
 	"use step";
 	const { loadThreadContext } = await import("./thread-messages.ts");
-	const context = await loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors });
+	const context = await loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, keepReasoningOf });
 	if (context.through) await writeCompactionState(writable, { state: "done", through: context.through });
 	return context;
 }

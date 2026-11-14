@@ -90,6 +90,8 @@ export function fakeApp() {
 			messages,
 			tools: (body.tools ?? []).map((tool) => tool.function?.name ?? tool.type),
 			provider: body.provider,
+			plugins: body.plugins ?? [],
+			sessionId: body.session_id,
 			at: Date.now(),
 		});
 		const { step, key } = chatStep(messages, chats);
@@ -98,8 +100,9 @@ export function fakeApp() {
 		const fails = step.failFirst === undefined ? Boolean(step.error) : attempt <= step.failFirst;
 		const error = step.error ?? { status: 502, message: "Provider returned error" };
 		if (fails && step.breakAfter === undefined) return c.json({ error: { code: error.status, message: error.message } }, error.status as 400);
-		if (!body.stream) return c.json(textReply(body.model, step, promptTokens(body)));
-		return streamReply(body.model, step, c.req.raw.signal, promptTokens(body), fails ? { after: step.breakAfter!, error } : undefined);
+		const answering = answeringModel(body.model);
+		if (!body.stream) return c.json(textReply(answering, step, promptTokens(body)));
+		return streamReply(answering, step, c.req.raw.signal, promptTokens(body), fails ? { after: step.breakAfter!, error } : undefined);
 	});
 
 	app.get("/api/v1/generation", (c) => {
@@ -160,6 +163,8 @@ type Completion = {
 	model: string;
 	stream?: boolean;
 	provider?: unknown;
+	plugins?: unknown[];
+	session_id?: string;
 	messages?: Message[];
 	tools?: { type: string; function?: { name: string } }[];
 	response_format?: { json_schema?: { schema?: { properties?: Record<string, unknown> } } };
@@ -228,6 +233,13 @@ function streamReply(model: string, step: Step, signal: AbortSignal, prompt: num
 		}),
 		{ headers: { "content-type": "text/event-stream", "cache-control": "no-cache" } },
 	);
+}
+
+/** Auto answers as a model on Ponder's list, named with a date as OpenRouter may name it. */
+const AUTO_ANSWERS_AS = "anthropic/claude-haiku-5.5";
+
+function answeringModel(model: string) {
+	return model === "openrouter/auto" ? `${AUTO_ANSWERS_AS}-20261001` : model;
 }
 
 /** A few words at a time, as a model streams. */
