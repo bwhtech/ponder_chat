@@ -117,8 +117,8 @@ function widePreload(files: string[]) {
 	return files.map((href) => (href.endsWith(".css") ? `<link rel="stylesheet" crossorigin href="${href}" ${wide}>` : `<link rel="modulepreload" crossorigin href="${href}" ${wide}>`)).join("");
 }
 
-/** The modules a chat loads after its first screen (web/preload.ts, web/api.ts), by their source file. */
-const LATER = ["chat-sdk.ts", "transcript.ts", "api-client.ts"];
+/** The modules a chat loads after its first screen (web/preload.ts, web/api.ts, ChatView.vue), by their source file. */
+const LATER = ["chat-sdk.ts", "transcript.ts", "api-client.ts", "thinking.ts", "attention.ts"];
 /** The chats panel, which only a wide screen draws on its first screen (web/Workspace.vue). */
 const PANEL = ["ChatsPanel.vue"];
 

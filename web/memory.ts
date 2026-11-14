@@ -71,10 +71,8 @@ export async function undoSave(id: number) {
 	await unwrap(client.api.memory.saves[":id"].undo.$post({ param: { id: String(id) } }), "This could not be undone.");
 }
 
-/** Whether a save changed anything that can still be undone. */
-export function canUndo(save: MemorySave) {
-	return !save.undoneAt && !save.undoOf && save.operations.some((op) => op.status === "applied");
-}
+/** Whether a save changed anything that can still be undone (remembered-notes.ts). */
+export { canUndo } from "./remembered-notes";
 
 export const KIND_LABELS: Record<Memory["kind"], string> = {
 	fact: "About you",

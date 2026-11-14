@@ -4,10 +4,8 @@ import { toast } from "./toasts";
 import { provideFileViewer } from "frappe-ui-ai-elements";
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me, refreshCredits, signOut } from "./account";
-import { loadConnectors } from "./connectors/api";
 import { openSettings, settings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
-import { useCreditRequestWatch } from "./credit-request";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
 import { once } from "./once";
 import SidebarPlaceholder from "./SidebarPlaceholder.vue";
@@ -59,8 +57,11 @@ const sheetOpen = ref(false);
 const sheetUsed = ref(false);
 watch(sheetOpen, (open) => open && (sheetUsed.value = true));
 onMounted(() => afterLoad(() => !wide.value && void Promise.all([loadBottomSheet(), loadChatsPanel()]).catch(() => undefined)));
-// A request for more credits that waits for an answer: the page checks on it.
-useCreditRequestWatch();
+// A request for more credits that waits for an answer: the page checks on it (CreditRequestWatch.vue,
+// loaded then). It stays once mounted, to say when the answer comes.
+const CreditRequestWatch = defineAsyncComponent(() => import("./CreditRequestWatch.vue"));
+const requestWaited = ref(false);
+watch(() => me.value?.credits.request?.status === "pending", (pending) => pending && (requestWaited.value = true), { immediate: true });
 // Files in the chat (attachments, images from Python) open in the side panel.
 provideFileViewer(viewInPanel);
 // The main area shows the open chat, or the Memory page (?view=memory).
@@ -111,7 +112,7 @@ if (back.searchParams.get("settings") === "connectors") {
 	history.replaceState(null, "", back);
 	openSettings("connectors", id);
 	if (problem) toast.error(problem);
-	else if (id) void loadConnectors().then(() => toast.success("Connected"));
+	else if (id) void import("./connectors/api").then(({ loadConnectors }) => loadConnectors()).then(() => toast.success("Connected"));
 }
 
 // Memory, Admin (for admins), Settings, Theme and Sign out.
@@ -181,5 +182,6 @@ function onSaved() {
 		</BottomSheet>
 
 		<SettingsModal v-if="settingsUsed" />
+		<CreditRequestWatch v-if="requestWaited" />
 	</div>
 </template>

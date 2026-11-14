@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import { computed, onBeforeUnmount, ref, watch, type Ref } from "vue";
+import { computed, onScopeDispose, ref, watch, type Ref } from "vue";
 import { compacting } from "./compaction";
 import { waitingOnPerson } from "./message-queue";
 
@@ -10,6 +10,8 @@ import { waitingOnPerson } from "./message-queue";
  * it writes), after a tool returns, and between steps. It shows after a short quiet, so it
  * does not blink between the last word and the end of the run, and a long wait counts the
  * seconds, so it reads as work going on, not as stuck.
+ *
+ * Call from a chat's setup, or later in its scope (ChatView.vue starts it with the first reply).
  *
  * Text that stops streaming for a moment counts as quiet too. A model that writes a tool
  * call can send nothing for many seconds after its last word, while the text part still
@@ -41,7 +43,7 @@ export function useThinking(busy: Ref<boolean>, messages: Ref<UIMessage[]>) {
 		},
 		{ immediate: true },
 	);
-	onBeforeUnmount(clear);
+	onScopeDispose(clear);
 
 	// While the reply summarizes a long chat first (compaction.ts), it says so.
 	const doing = computed(() => (compacting(messages.value.at(-1)) ? "Compacting earlier messages" : "Thinking"));
@@ -77,7 +79,7 @@ function useStalled(value: () => string | undefined) {
 		},
 		{ immediate: true },
 	);
-	onBeforeUnmount(() => clearTimeout(timer));
+	onScopeDispose(() => clearTimeout(timer));
 	return stalled;
 }
 

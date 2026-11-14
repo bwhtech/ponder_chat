@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import { fetchThreadSaves, undoSave, type MemoryOperation, type MemorySave } from "./memory";
+import type { MemoryOperation, MemorySave } from "./memory";
 
 export type Remembered = { save: MemorySave; operations: MemoryOperation[] };
 
@@ -17,7 +17,9 @@ export function useRememberedNotes(threadId: string) {
 	const shown = new Set<number>();
 	let loaded = false;
 
+	// The calls to the server (memory.ts) load with the first: a new chat makes none.
 	async function load({ wait = false } = {}) {
+		const { fetchThreadSaves } = await import("./memory");
 		const notes = notesByMessage(await fetchThreadSaves(threadId, { wait }));
 		const ids = [...notes.values()].flat().map(({ save }) => save.id);
 		fresh.value = new Set(loaded ? ids.filter((id) => !shown.has(id)) : []);
@@ -28,13 +30,18 @@ export function useRememberedNotes(threadId: string) {
 
 	async function undo(save: MemorySave) {
 		try {
-			await undoSave(save.id);
+			await (await import("./memory")).undoSave(save.id);
 		} finally {
 			await load();
 		}
 	}
 
 	return { byMessage, fresh, load, undo };
+}
+
+/** Whether a save changed anything that can still be undone. */
+export function canUndo(save: MemorySave) {
+	return !save.undoneAt && !save.undoOf && save.operations.some((op) => op.status === "applied");
 }
 
 /** The saves that changed something, by the message they came from, oldest first. */
