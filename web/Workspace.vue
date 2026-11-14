@@ -149,7 +149,8 @@ function onSaved() {
 				</div>
 			</Sidebar>
 
-			<div class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
+			<!-- The page's main landmark, as on the sign-in page: the open chat or Memory. -->
+			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
 				<!-- The title sits in the same 720px column as the chat and Memory, so it shares their leading edge.
 				     On phones the icon buttons pull out by their inner padding, so their glyphs sit on that edge too. -->
 				<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
@@ -173,7 +174,7 @@ function onSaved() {
 					@refused="refreshCredits"
 					@open-memory="showMemory"
 				/>
-			</div>
+			</main>
 
 			<SidePanel v-if="panelUsed" />
 		</div>
