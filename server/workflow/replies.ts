@@ -1,14 +1,16 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import type { UIMessage } from "ai";
+import type { UIMessage, UIMessageChunk } from "ai";
 import { getRun, start } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
-import { deleteThread, saveThread, threadOwner } from "../db.ts";
+import { deleteThread, loadThread, saveThread, threadOwner, updateThread } from "../db.ts";
 import { settleModelCalls, stopModelCalls } from "../telemetry/model-calls.ts";
 import { pickModel } from "../models.ts";
 import { forgetPythonState } from "../python/state.ts";
 import { pythonReady } from "../startup.ts";
 import { forgetThread } from "../thread-cache.ts";
 import { linkToReply, recordReplySpan, tracingOn, withReplyTrace } from "../tracing/reply-trace.ts";
+import { approvalsUsedBy, forgetApprovalUses, releaseApprovals, useApprovals } from "./approval-uses.ts";
+import { answersIn, settledChunks, stillAsked, withUncertainOutcomes, type Answer } from "./answered-again.ts";
 import { chatTurn } from "./chat.ts";
 import { replyStream, saveReply } from "./reply.ts";
 import { activeRun, finishRun, forgetRuns, latestRun, setActiveRun, unfinishedRuns, withThreadLock, type Continued, type ThreadRun } from "./runs.ts";
@@ -27,7 +29,7 @@ const MAX_STEPS = Number(process.env.CHAT_MAX_STEPS ?? 10);
 
 export type Reply = { runId: string; stream: ReadableStream };
 export type Started = Reply & {
-	/** The same approval came twice, and this follows the run that carries it out. */
+	/** The same approval came twice, and this follows the run that carries it out, or carried it out. */
 	followed: boolean;
 };
 
@@ -36,7 +38,11 @@ export type Started = Reply & {
  * first, and keeps what it wrote. null when the thread is someone else's.
  *
  * After an approval, the page sends the thread again with no new message: the run then
- * carries on the last assistant message.
+ * carries on the last assistant message. Each answer is used once: it must answer a
+ * question that still waits in the saved thread, and its use is recorded before the run
+ * starts (approval-uses.ts). An answer sent again, such as from a second tab, starts
+ * nothing and saves nothing: the page gets the outcome, and reloads the thread
+ * (answeredAgain).
  */
 export async function startReply(input: { threadId: string; owner: string; messages: UIMessage[]; model?: string }): Promise<Started | null> {
 	const { threadId, owner, messages } = input;
@@ -48,20 +54,70 @@ export async function startReply(input: { threadId: string; owner: string; messa
 	const started = await withThreadLock(threadId, async () => {
 		const previous = await activeRun(threadId);
 		if (previous && sameContinuation(previous.continued, continued)) return { runId: previous.runId, model: previous.model, followed: true };
+		// Before anything is stopped or saved: the stale page's thread must not replace the saved one.
+		const asked = continued ? messages.at(-1)! : undefined;
+		const answers = asked ? answersIn(asked) : [];
+		if (asked && answers.length) {
+			const saved = (await loadThread(threadId)).find((message) => message.id === asked.id && message.role === "assistant");
+			if (!stillAsked(saved, answers) || !(await useApprovals(threadId, answers))) return answeredAgain(threadId, owner, asked, answers);
+		}
 		if (previous) await cancel(previous, owner);
 		// A continued run is a trace of its own that links to the run it carries on (server/tracing/reply-trace.ts).
 		const carriesOn = continued && tracingOn() ? (await latestRun(threadId))?.runId : undefined;
-		// The run reads the thread from the database, so it is saved first.
-		await saveThread(threadId, owner, messages);
-		const run = await start(chatTurn, [
-			{ threadId, owner, model: { id: model.id, name: model.name }, python, today: new Date().toDateString(), maxSteps: MAX_STEPS, continued },
-		]);
+		let run: { runId: string };
+		try {
+			// The run reads the thread from the database, so it is saved first.
+			await saveThread(threadId, owner, messages);
+			run = await start(chatTurn, [
+				{ threadId, owner, model: { id: model.id, name: model.name }, python, today: new Date().toDateString(), maxSteps: MAX_STEPS, continued },
+			]);
+		} catch (error) {
+			// No run carries the answers out, so the page may send them again.
+			if (answers.length) await releaseApprovals(threadId, answers).catch(() => undefined);
+			throw error;
+		}
+		if (answers.length) await approvalsUsedBy(threadId, answers, run.runId);
 		await setActiveRun(threadId, run.runId, model.id, continued);
 		recordReplySpan(run.runId, "chat.request", requested, Date.now(), { "ponder.continued": Boolean(continued) }, carriesOn ? [linkToReply(carriesOn)] : []);
 		return { runId: run.runId, model: model.id, followed: false };
 	});
 	// The run goes on if the request closes; the page reconnects with followReply.
-	return { ...started, stream: await withReplyTrace(started.runId, () => replyStream(started.runId, started.model, { continued })) };
+	const stream = "stream" in started ? started.stream : () => replyStream(started.runId, started.model, { continued });
+	return { runId: started.runId, followed: started.followed, stream: await withReplyTrace(started.runId, stream) };
+}
+
+/**
+ * What the page gets for answers that were used already, or that answer no question
+ * waiting in the saved thread: no run starts, and nothing it sent is saved.
+ *
+ * An approved call whose run stopped or failed before its result (Stop, a crash) may or
+ * may not have taken effect. It never runs again: when no run is going, the saved thread
+ * says so in its place. The page gets each answer's outcome, so it does not send its
+ * answers again, and a signal to load the thread as it is saved (THREAD_CHANGED).
+ */
+async function answeredAgain(threadId: string, owner: string, asked: UIMessage, answers: Answer[]) {
+	console.warn(`replies: thread ${threadId} answered approvals that were used already or are not asked; nothing runs`);
+	let messages = await loadThread(threadId);
+	if (!(await activeRun(threadId))) {
+		const at = messages.findIndex((message) => message.id === asked.id && message.role === "assistant");
+		const settled = at === -1 ? undefined : withUncertainOutcomes(messages[at]!, answers);
+		if (settled) {
+			messages = messages.map((message, index) => (index === at ? settled : message));
+			await updateThread(threadId, owner, messages);
+		}
+	}
+	const saved = messages.find((message) => message.id === asked.id && message.role === "assistant");
+	const latest = await latestRun(threadId);
+	return { runId: latest?.runId ?? asked.id, model: latest?.model ?? "", followed: true, stream: async () => chunkStream(settledChunks(saved, asked)) };
+}
+
+function chunkStream(chunks: UIMessageChunk[]) {
+	return new ReadableStream<UIMessageChunk>({
+		start(controller) {
+			for (const chunk of chunks) controller.enqueue(chunk);
+			controller.close();
+		},
+	});
 }
 
 /**
@@ -96,6 +152,7 @@ export async function deleteChat(threadId: string, owner: string): Promise<boole
 		if (run) await cancel(run, owner);
 		if (!(await deleteThread(threadId, owner))) return false;
 		await forgetRuns(threadId);
+		await forgetApprovalUses(threadId);
 		return true;
 	});
 	if (deleted) {

@@ -205,6 +205,29 @@ test("a run cancelled without saving its reply is finished as stopped, with no R
 	await expect(chat.stop(page)).toHaveCount(0);
 });
 
+test("an approval sent again after the runtime failed its run in the middle of the call runs nothing", async ({ page, fake }, testInfo) => {
+	const { person } = await setUp(page, fake, testInfo.title);
+	const order = `SLOW${randomBytes(3).toString("hex")}`;
+	const added = await page.request.post("/api/connectors", { data: { name: "Shop", url: `${e2e.mcpUrl}/open/mcp`, transport: "http", auth: "none" } });
+	expect(added.ok(), await added.text()).toBe(true);
+	await fake.chat({ match: order, steps: [{ toolCalls: [{ name: "connector_call", input: { tool: "shop__add_note", input: { order, note: "Gift wrap" } } }] }, { text: "I added the note." }] });
+	await page.goto("/");
+	await chat.send(page, `Add a note to order ${order}`);
+	const answer = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/chat");
+	await page.getByRole("button", { name: "Allow once" }).click();
+	const approved = (await answer).postDataJSON();
+	// The test server takes 6 seconds over a SLOW order, and records the call first (e2e/mcp/server.ts).
+	await expect.poll(() => serverCalls(page, order)).toHaveLength(1);
+
+	await endRun(person, { eventType: "run_failed", eventData: { error: new TextEncoder().encode("diverged"), errorCode: "REPLAY_DIVERGENCE" } });
+	await expect.poll(() => runOf(person), { timeout: 30_000 }).toEqual({ finished: true, failed: true, cancelled: false });
+	expect((await page.request.post("/api/chat", { data: approved })).ok()).toBe(true);
+
+	await page.waitForTimeout(7_000);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	expect(await runOf(person)).toEqual({ finished: true, failed: true, cancelled: false });
+});
+
 /** A signed-in person, and a reply that streams for about 15 seconds: it has written its first words. */
 async function startSlowReply(page: Page, fake: Fake, title: string) {
 	const { person, tag, words } = await setUp(page, fake, title);

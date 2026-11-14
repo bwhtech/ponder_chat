@@ -3,7 +3,8 @@ import type { Page } from "@playwright/test";
 import { e2e } from "../env.ts";
 import type { McpCall } from "../mcp/calls.ts";
 import { SHOP_KEY } from "../mcp/server.ts";
-import { chat, expect, randomIp, signIn, test, uniqueEmail } from "../fixtures.ts";
+import type { Step } from "../fake/script.ts";
+import { chat, expect, randomIp, signIn, test, uniqueEmail, type Fake } from "../fixtures.ts";
 
 /**
  * Connectors (Settings, Connectors) against the test MCP servers in e2e/mcp/server.ts:
@@ -25,6 +26,44 @@ async function serverCalls(page: Page, order: string): Promise<McpCall[]> {
 
 /** A model's call to a connector tool, through connector_call. */
 const call = (tool: string, input: Record<string, unknown>) => ({ name: "connector_call", input: { tool, input } });
+
+/** A chat whose model asks to run a tool on "Ask first", open in a second tab too. The second tab. */
+async function askInTwoTabs(page: Page, fake: Fake, order: string, steps: Step[]) {
+	await addShop(page);
+	await fake.chat({ match: order, steps });
+	await page.goto("/");
+	await chat.send(page, `Add a gift-wrap note to order ${order}`);
+	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	const other = await page.context().newPage();
+	await other.goto(page.url());
+	await expect(other.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	return other;
+}
+
+/** How many messages the page has sent from now on. A page that sends an answer again and again would show here. */
+function chatPosts(page: Page) {
+	let posts = 0;
+	page.on("request", (request) => {
+		if (request.method() === "POST" && new URL(request.url()).pathname === "/api/chat") posts++;
+	});
+	return () => posts;
+}
+
+async function savedMessages(page: Page, thread: string): Promise<unknown[]> {
+	return ((await (await page.request.get(`/api/threads/${thread}`)).json()) as { messages: unknown[] }).messages;
+}
+
+/** Waits until the chat's reply is saved and its run finished: the page goes idle a moment before. The chat's id. */
+async function replySaved(page: Page) {
+	const thread = new URL(page.url()).searchParams.get("t")!;
+	await expect
+		.poll(async () => {
+			const body = (await (await page.request.get(`/api/threads/${thread}`)).json()) as { running?: boolean };
+			return body.running;
+		})
+		.toBe(false);
+	return thread;
+}
 
 /** Adds the open server as "Shop" through the API, for tests about using it. */
 async function addShop(page: Page) {
@@ -204,6 +243,154 @@ test("runs the call the person allows, and not the one they deny, in the same re
 	await expect(chat.reply(page)).toContainText("I added one note.");
 	expect(await serverCalls(page, order)).toEqual([expect.objectContaining({ tool: "add_note", args: { order, note: "Gift wrap" } })]);
 	expect(JSON.stringify((await fake.calls(order))[1].messages)).toContain("The person denied this.");
+});
+
+test("an approval answered in two tabs runs the call once", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a gift-wrap note to order ${order}`);
+	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	// The same chat in a second tab, while the question waits.
+	const other = await page.context().newPage();
+	await other.goto(page.url());
+	await expect(other.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+
+	await page.getByRole("button", { name: "Allow once" }).click();
+	await expect(chat.reply(page)).toContainText("I added the note.");
+	await replySaved(page);
+	await other.getByRole("button", { name: "Allow once" }).click();
+	// The second tab shows what the first answer did, and sends nothing more.
+	await expect(chat.reply(other)).toContainText("I added the note.");
+	await chat.idle(other);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	// The saved reply is the one the first answer wrote.
+	await other.reload();
+	await expect(chat.reply(other)).toContainText("I added the note.");
+	expect(await serverCalls(page, order)).toHaveLength(1);
+});
+
+test("an approved chat sent again after its reply finished runs nothing again", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a gift-wrap note to order ${order}`);
+	const answer = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/chat");
+	await page.getByRole("button", { name: "Allow once" }).click();
+	const approved = (await answer).postDataJSON();
+	await expect(chat.reply(page)).toContainText("I added the note.");
+	const thread = await replySaved(page);
+
+	const again = await page.request.post("/api/chat", { data: approved });
+	expect(again.ok(), await again.text()).toBe(true);
+	// It answers with the reply that the first request started, and starts no run.
+	expect(await again.text()).toContain(`"type":"tool-output-available"`);
+	expect(await again.text()).toContain(`Added the note to order ${order}.`);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	const saved = (await (await page.request.get(`/api/threads/${thread}`)).json()) as { messages: { role: string }[]; running: boolean };
+	expect(saved.running).toBe(false);
+	expect(saved.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
+	expect(JSON.stringify(saved.messages)).toContain("I added the note.");
+	expect(await fake.calls(order)).toHaveLength(2);
+});
+
+test("Stop in the middle of an approved call, then the old card in another tab: no second call", async ({ page, fake }) => {
+	const order = `SLOW${orderNumber()}`;
+	const other = await askInTwoTabs(page, fake, order, [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }]);
+
+	await page.getByRole("button", { name: "Allow once" }).click();
+	// The test server takes 6 seconds over a SLOW order, and records the call first (e2e/mcp/server.ts).
+	await expect.poll(() => serverCalls(page, order)).toHaveLength(1);
+	await chat.stop(page).click();
+	await replySaved(page);
+	const posts = chatPosts(other);
+	await other.getByRole("button", { name: "Allow once" }).click();
+
+	// The second tab sends once. The saved thread says the call may or may not have taken effect.
+	const thread = new URL(page.url()).searchParams.get("t")!;
+	await expect.poll(async () => JSON.stringify(await savedMessages(page, thread))).toContain("may or may not have taken effect");
+	await chat.idle(other);
+	expect(posts()).toBe(1);
+	await expect.poll(() => serverCalls(page, order), { timeout: 10_000 }).toHaveLength(1);
+});
+
+test("an old card answered after Stop and a newer message runs nothing", async ({ page, fake }) => {
+	const order = `SLOW${orderNumber()}`;
+	const other = await askInTwoTabs(page, fake, order, [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }]);
+
+	await page.getByRole("button", { name: "Allow once" }).click();
+	await expect.poll(() => serverCalls(page, order)).toHaveLength(1);
+	await chat.stop(page).click();
+	await replySaved(page);
+	await fake.chat({ match: `Thanks ${order}`, steps: [{ text: "You are welcome." }] });
+	await chat.send(page, `Thanks ${order}`);
+	await expect(chat.reply(page)).toContainText("You are welcome.");
+	const thread = await replySaved(page);
+	const before = await savedMessages(page, thread);
+
+	await other.getByRole("button", { name: "Allow once" }).click();
+	// The second tab loads the thread as it is saved, with the newer reply.
+	await expect(chat.reply(other)).toContainText("You are welcome.");
+	await chat.idle(other);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	expect((await savedMessages(page, thread)).length).toBe(before.length);
+});
+
+test("an old card answered after Retry replaced the reply runs nothing, and the new reply stays", async ({ page, fake }) => {
+	const order = orderNumber();
+	const other = await askInTwoTabs(page, fake, order, [
+		{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] },
+		{ error: { status: 400, message: "The provider refused the request." } },
+	]);
+
+	await page.getByRole("button", { name: "Allow once" }).click();
+	await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+	await replySaved(page);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	await fake.chat({ match: order, steps: [{ text: "Recovered without another write." }] });
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(chat.reply(page)).toContainText("Recovered without another write.");
+	const thread = await replySaved(page);
+	const before = await savedMessages(page, thread);
+
+	await other.getByRole("button", { name: "Allow once" }).click();
+	await expect(chat.reply(other)).toContainText("Recovered without another write.");
+	await chat.idle(other);
+	expect(await serverCalls(page, order)).toHaveLength(1);
+	expect(await savedMessages(page, thread)).toEqual(before);
+});
+
+test("an old card answered after the chat was deleted runs nothing, and the chat stays deleted", async ({ page, fake }) => {
+	const order = orderNumber();
+	const other = await askInTwoTabs(page, fake, order, [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }]);
+	const thread = new URL(page.url()).searchParams.get("t")!;
+	expect((await page.request.delete(`/api/threads/${thread}`)).ok()).toBe(true);
+
+	await other.getByRole("button", { name: "Allow once" }).click();
+	await chat.idle(other);
+	expect(await serverCalls(page, order)).toEqual([]);
+	expect(await savedMessages(page, thread)).toEqual([]);
+});
+
+test("an approval sent again under another message id runs nothing", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order, note: "Gift wrap" })] }, { text: "I added the note." }] });
+	await page.goto("/");
+	await chat.send(page, `Add a gift-wrap note to order ${order}`);
+	const answer = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/chat");
+	await page.getByRole("button", { name: "Allow once" }).click();
+	const approved = (await answer).postDataJSON() as { messages: { id: string }[] };
+	await expect(chat.reply(page)).toContainText("I added the note.");
+	await replySaved(page);
+
+	approved.messages.at(-1)!.id = "crafted";
+	expect((await page.request.post("/api/chat", { data: approved })).ok()).toBe(true);
+	expect(await serverCalls(page, order)).toHaveLength(1);
 });
 
 test("keeps a question after a reload, and runs the call once allowed", async ({ page, fake }) => {
