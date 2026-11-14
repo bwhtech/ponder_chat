@@ -35,11 +35,14 @@ export function trimOldToolResults(messages: ModelMessage[]): ModelMessage[] {
  *
  * The signed reasoning is also in the OpenRouter metadata of the reply's tool calls and
  * text, and the provider sends it from there too, so that goes as well.
+ *
+ * `keep` is the reply that a run carries on after an approval, when the run goes to the
+ * model that wrote it (replies.ts): it keeps its reasoning.
  */
-export function dropOtherModelsReasoning(messages: UIMessage[], modelId: string): UIMessage[] {
+export function dropOtherModelsReasoning(messages: UIMessage[], modelId: string, keep?: string): UIMessage[] {
 	return messages.map((message) => {
 		const writer = (message.metadata as { model?: unknown } | undefined)?.model;
-		if (message.role !== "assistant" || typeof writer !== "string" || (writer === modelId && !isAuto(modelId))) return message;
+		if (message.role !== "assistant" || message.id === keep || typeof writer !== "string" || (writer === modelId && !isAuto(modelId))) return message;
 		return { ...message, parts: message.parts.filter((part) => part.type !== "reasoning").map(withoutReasoningDetails) };
 	});
 }

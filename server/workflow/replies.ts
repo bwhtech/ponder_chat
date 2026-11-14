@@ -4,6 +4,8 @@ import { getRun, start } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
 import { deleteThread, loadThread, saveThread, threadOwner, updateThread } from "../db.ts";
 import { settleModelCalls, stopModelCalls } from "../telemetry/model-calls.ts";
+import { isAuto } from "../../shared/auto-model.ts";
+import { lastAnsweringModel } from "../auto-router.ts";
 import { pickModel } from "../models.ts";
 import { forgetPythonState } from "../python/state.ts";
 import { pythonReady } from "../startup.ts";
@@ -68,8 +70,10 @@ export async function startReply(input: { threadId: string; owner: string; messa
 		try {
 			// The run reads the thread from the database, so it is saved first.
 			await saveThread(threadId, owner, messages);
+			// Under Auto, a reply carried on after an approval goes back to the model that wrote it.
+			const answeredBy = continued && isAuto(model.id) ? await lastAnsweringModel(threadId) : undefined;
 			run = await start(chatTurn, [
-				{ threadId, owner, model: { id: model.id, name: model.name }, python, today: new Date().toDateString(), maxSteps: MAX_STEPS, continued },
+				{ threadId, owner, model: { id: model.id, name: model.name }, python, today: new Date().toDateString(), maxSteps: MAX_STEPS, continued, answeredBy },
 			]);
 		} catch (error) {
 			// No run carries the answers out, so the page may send them again.

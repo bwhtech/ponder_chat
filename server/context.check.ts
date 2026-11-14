@@ -117,6 +117,12 @@ const tooled = dropOtherModelsReasoning(
 	"openrouter/auto",
 );
 assert.deepEqual((tooled[0].parts[0] as { callProviderMetadata?: unknown }).callProviderMetadata, { openrouter: { keep: 1 } });
+// A reply carried on after an approval keeps its reasoning when the run goes back to its model.
+const carried = dropOtherModelsReasoning([reasoned("a", "openrouter/auto"), reasoned("b", "openrouter/auto")], "openrouter/auto", "b");
+assert.deepEqual(
+	carried.map((message) => message.parts.map((part) => part.type)),
+	[["text"], ["reasoning", "text"]],
+);
 // Under Auto the next model is not known, so even Auto's own replies drop their reasoning.
 const underAuto = dropOtherModelsReasoning([reasoned("a", "openrouter/auto"), reasoned("b", "anthropic/claude-haiku-5.5"), reasoned("c")], "openrouter/auto");
 assert.deepEqual(

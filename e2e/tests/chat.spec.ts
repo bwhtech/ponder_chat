@@ -63,6 +63,18 @@ test("a new chat starts on Auto, which picks from Ponder's models", async ({ pag
 	expect(call.sessionId).toBe(new URL(page.url()).searchParams.get("t"));
 });
 
+test("an Auto reply stays on the model that answered, through its tool steps", async ({ page, fake }) => {
+	await fake.chat({ match: "pinned test", steps: [{ toolCalls: [{ name: "web_search", input: { query: "pinned" } }] }, { text: "Found it." }] });
+	await chat.send(page, "Search this, pinned test");
+	await expect(chat.reply(page)).toContainText("Found it.");
+	await chat.idle(page);
+
+	const calls = await fake.calls("pinned test");
+	// The second call carries the first call's tool call and its signed reasoning, so it goes to the model that wrote them.
+	expect(calls.map((call) => call.model)).toEqual(["openrouter/auto", "anthropic/claude-haiku-5.5"]);
+	expect(calls[1].plugins).not.toContainEqual(expect.objectContaining({ id: "auto-router" }));
+});
+
 test("asks the model the person picked", async ({ page, fake }) => {
 	await page.getByRole("button", { name: /Model/ }).click();
 	await page.getByRole("option", { name: /Claude Haiku 5\.5/ }).click();

@@ -38,10 +38,12 @@ export async function runReply(reply: Reply) {
 
 class ReplyLoop {
 	private messages: ModelMessage[];
+	private call: Reply["call"];
 	private readonly tools: ToolCalls;
 
 	constructor(private readonly reply: Reply) {
 		this.messages = reply.messages;
+		this.call = reply.call;
 		this.tools = new ToolCalls(reply.tools);
 	}
 
@@ -51,8 +53,11 @@ class ReplyLoop {
 		let measured = 0;
 		for (let step = 1; step <= this.reply.maxSteps; step++) {
 			const estimated = await this.keepInside(step === 1, measured);
-			const response = await modelCallStep({ ...this.reply.call, messages: this.messages, tools, estimated }, this.reply.writable);
+			const response = await modelCallStep({ ...this.call, messages: this.messages, tools, estimated }, this.reply.writable);
 			measured = response.inputTokens;
+			// Under Auto the rest of the reply stays on the model that answered, which needs its
+			// own signed reasoning back with its tool calls; another model could not take it.
+			if (response.answeredBy) this.call = { ...this.call, modelId: response.answeredBy };
 			this.messages = [...this.messages, ...response.messages];
 			if (!response.toolCalls.length) return;
 			if (!(await this.runToolCalls(response.toolCalls))) return;

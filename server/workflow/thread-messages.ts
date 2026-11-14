@@ -22,6 +22,8 @@ export type MessageOptions = {
 	skills: ActiveSkill[];
 	/** The <connectors> note (mcp/catalog-note.ts). Like `recalled`, it goes with the latest message and is never summarized. */
 	connectors: string;
+	/** A reply that keeps its reasoning (context.ts, dropOtherModelsReasoning). */
+	keepReasoningOf?: string;
 };
 
 /** The messages of a reply's first model call, with what compaction decides from. */
@@ -59,10 +61,10 @@ export async function loadThreadContext(threadId: string, options: MessageOption
  * recalled and the person's connectors added to the person's latest message (context.ts,
  * connector-messages.ts).
  */
-export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors }: MessageOptions): Promise<ModelMessage[]> {
+export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors, keepReasoningOf }: MessageOptions): Promise<ModelMessage[]> {
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
-	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId), owner, { pdfAsText });
+	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText });
 	const messages = await convertToModelMessages(resolved, {
 		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 	});

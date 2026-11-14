@@ -35,6 +35,11 @@ export type ChatTurn = {
 	maxSteps: number;
 	/** The assistant message this run carries on, after the person answered an approval (runs.ts). */
 	continued: Continued | null;
+	/**
+	 * Under Auto, for a run that carries on a reply: the model that answered the reply's
+	 * last call (replies.ts). The run goes to it, and the reply keeps its reasoning.
+	 */
+	answeredBy?: string;
 };
 
 /**
@@ -99,12 +104,13 @@ export async function chatTurn(turn: ChatTurn) {
 		// The <connectors> note goes with the latest message, as memory's does, and is never summarized.
 		const connectors = connectorNote(catalog);
 		// A long chat is summarized before a call would go over the model's window (context-guard.ts).
-		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors);
+		const keep = turn.answeredBy ? turn.continued?.messageId : undefined;
+		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors, keep);
 		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors };
 		const guard = new ContextGuard(base, context, await toolTokens(tools), writable, turn.model.name);
 		// Each model call records its cost in `runs`, which credits are charged from (model-attempt.ts).
 		await runReply({
-			call: { runId: workflowRunId, threadId: turn.threadId, owner: turn.owner, modelId: turn.model.id, instructions: system },
+			call: { runId: workflowRunId, threadId: turn.threadId, owner: turn.owner, modelId: turn.answeredBy ?? turn.model.id, instructions: system },
 			messages: await guard.initialMessages(system),
 			tools,
 			// Keeps each model call inside the model's window, between the reply's steps too.
