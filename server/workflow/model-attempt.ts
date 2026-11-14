@@ -123,7 +123,7 @@ class ModelAttempt {
 			this.started ??= this.record.start(id).catch((error) => console.warn("model-attempt: could not record a started call:", error));
 		};
 		return wrapLanguageModel({
-			model: new ChatModel(this.call.modelId),
+			model: new ChatModel(this.call.modelId, this.call.threadId),
 			middleware: {
 				specificationVersion: "v4",
 				wrapStream: async ({ doStream }) => {

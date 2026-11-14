@@ -90,6 +90,8 @@ export function fakeApp() {
 			messages,
 			tools: (body.tools ?? []).map((tool) => tool.function?.name ?? tool.type),
 			provider: body.provider,
+			plugins: body.plugins ?? [],
+			sessionId: body.session_id,
 			at: Date.now(),
 		});
 		const { step, key } = chatStep(messages, chats);
@@ -160,6 +162,8 @@ type Completion = {
 	model: string;
 	stream?: boolean;
 	provider?: unknown;
+	plugins?: unknown[];
+	session_id?: string;
 	messages?: Message[];
 	tools?: { type: string; function?: { name: string } }[];
 	response_format?: { json_schema?: { schema?: { properties?: Record<string, unknown> } } };

@@ -1,4 +1,5 @@
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
+import { isAuto } from "../../shared/auto-model.ts";
 import { turnsStart, WHOLE_TURNS } from "./context.ts";
 
 /**
@@ -21,8 +22,9 @@ import { turnsStart, WHOLE_TURNS } from "./context.ts";
  */
 const EPHEMERAL = { openrouter: { cacheControl: { type: "ephemeral" } } };
 
+/** Auto may pick a Claude model; providers that cache by themselves ignore the marks. */
 export function needsCacheMarks(modelId: string) {
-	return modelId.startsWith("anthropic/");
+	return modelId.startsWith("anthropic/") || isAuto(modelId);
 }
 
 export function withCacheMarks(prompt: LanguageModelV4Prompt): LanguageModelV4Prompt {

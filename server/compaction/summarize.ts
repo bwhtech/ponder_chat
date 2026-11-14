@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { generateText, type UIMessage } from "ai";
-import { availableModels } from "../models.ts";
-import { contextWindow, privateRouting } from "../openrouter.ts";
+import { isAuto } from "../../shared/auto-model.ts";
+import { autoRouterPlugin, modelWindow } from "../auto-router.ts";
+import { privateModels } from "../models.ts";
+import { privateRouting } from "../openrouter.ts";
 import { openRouter } from "../openrouter-key.ts";
 import { getSettings } from "../settings.ts";
 import { COMPACTION_FUNCTION_ID, runTelemetry, type RunContext } from "../telemetry.ts";
@@ -44,7 +46,7 @@ export async function writeSummary({ run, chatModel, previous, messages, ratio }
 	const room = Math.floor((limit - MAX_OUTPUT_TOKENS - corrected(SUMMARY_INSTRUCTIONS) - corrected(summaryPrompt(previous, "", nonce))) / Math.max(ratio, DEFAULT_RATIO));
 	const transcript = needed <= limit ? full : renderTranscript(messages, room, nonce);
 	const { text, finishReason } = await generateText({
-		model: (await openRouter())(model, { usage: { include: true }, provider: privateRouting }),
+		model: (await openRouter())(model, { usage: { include: true }, provider: privateRouting, ...(isAuto(model) && { plugins: [await autoRouterPlugin()] }) }),
 		instructions: SUMMARY_INSTRUCTIONS,
 		prompt: summaryPrompt(previous, transcript, nonce),
 		maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -61,12 +63,11 @@ export async function writeSummary({ run, chatModel, previous, messages, ratio }
 async function summaryModel(chatModel: string, needed: number) {
 	const chosen = (await getSettings()).compactionModel;
 	if (chosen === chatModel) return chatModel;
-	const { models } = await availableModels();
-	if (!models.some((model) => model.id === chosen)) return chatModel;
+	if (!(await privateModels()).some((model) => model.id === chosen)) return chatModel;
 	return (await roomFor(chosen)) >= needed ? chosen : chatModel;
 }
 
 /** The tokens one call to `model` may take: 90% of its window. */
 async function roomFor(model: string) {
-	return budgetFor(await contextWindow(model)).limit;
+	return budgetFor(await modelWindow(model)).limit;
 }

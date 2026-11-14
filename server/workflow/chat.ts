@@ -1,6 +1,7 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import { tool, type ToolSet } from "ai";
 import { getWorkflowMetadata, getWritable } from "workflow";
+import { isAuto } from "../../shared/auto-model.ts";
 import { ARTIFACT_GUIDANCE, artifactTools } from "../artifacts/schema.ts";
 import { RUN_PYTHON, RUN_PYTHON_DESCRIPTION, runPythonInput } from "../python/schema.ts";
 import { WEB_FETCH, WEB_FETCH_DESCRIPTION, WEB_SEARCH, WEB_SEARCH_DESCRIPTION, webFetchInput, webSearchInput } from "../search/schema.ts";
@@ -130,7 +131,8 @@ export async function chatTurn(turn: ChatTurn) {
 }
 
 function instructions({ model, today, python }: ChatTurn) {
-	return `You are Ponder, a helpful assistant. You run on ${model.name}. Today is ${today}.
+	const runsOn = isAuto(model.id) ? "a model that OpenRouter's Auto Router picks for each message" : model.name;
+	return `You are Ponder, a helpful assistant. You run on ${runsOn}. Today is ${today}.
 
 Answer clearly and directly. Use Markdown when it helps: lists, tables, and code blocks with a language. Keep answers as short as the question allows. If you are not sure, say so.
 

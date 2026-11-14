@@ -42,6 +42,27 @@ test("the field is empty once the message is sent", async ({ page }) => {
 	await expect(chat.field(page)).toHaveValue("");
 });
 
+test("a new chat starts on Auto, which picks from Ponder's models", async ({ page, fake }) => {
+	await expect(page.getByRole("button", { name: "Model: Auto" })).toBeVisible();
+	await chat.send(page, "Who answers this, auto test?");
+	await expect(chat.reply(page)).toContainText("You said:");
+	await chat.idle(page);
+	// Under Auto the reply names no model.
+	await expect(chat.reply(page).locator('[data-slot="reply-model"]')).toHaveCount(0);
+
+	const [call] = await fake.calls("auto test");
+	expect(call.model).toBe("openrouter/auto");
+	expect(call.system).toContain("You run on a model that OpenRouter's Auto Router picks");
+	expect(call.provider).toMatchObject({ zdr: true, data_collection: "deny" });
+	const router = call.plugins.find((plugin) => (plugin as { id: string }).id === "auto-router") as { allowed_models: string[]; cost_tier: string };
+	// Admins set it (admin.spec.ts changes it for a moment, so only its presence here).
+	expect(["low", "medium", "high"]).toContain(router.cost_tier);
+	expect(router.allowed_models).toContain("anthropic/claude-haiku-5.5");
+	expect(router.allowed_models).not.toContain("openrouter/auto");
+	// The chat is the session, so Auto keeps a chat on one model where it can.
+	expect(call.sessionId).toBe(new URL(page.url()).searchParams.get("t"));
+});
+
 test("asks the model the person picked", async ({ page, fake }) => {
 	await page.getByRole("button", { name: /Model/ }).click();
 	await page.getByRole("option", { name: /Claude Haiku 5\.5/ }).click();

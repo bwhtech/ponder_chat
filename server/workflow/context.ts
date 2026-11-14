@@ -1,4 +1,5 @@
 import type { ModelMessage, ToolResultPart, UIMessage } from "ai";
+import { isAuto } from "../../shared/auto-model.ts";
 
 /**
  * What the model reads of a thread, shaped to keep each call small and its start the
@@ -30,11 +31,12 @@ export function trimOldToolResults(messages: ModelMessage[]): ModelMessage[] {
  * this model, and OpenRouter sends a call that carries it to the provider that signed it:
  * after a switch from Claude, DeepSeek went only to Google, so when Google failed there
  * was no other provider to try. A reply with no model in its metadata keeps its reasoning.
+ * Under Auto every reply drops it: Auto may pick a model other than the one that wrote it.
  */
 export function dropOtherModelsReasoning(messages: UIMessage[], modelId: string): UIMessage[] {
 	return messages.map((message) => {
 		const writer = (message.metadata as { model?: unknown } | undefined)?.model;
-		if (message.role !== "assistant" || typeof writer !== "string" || writer === modelId) return message;
+		if (message.role !== "assistant" || typeof writer !== "string" || (writer === modelId && !isAuto(modelId))) return message;
 		if (!message.parts.some((part) => part.type === "reasoning")) return message;
 		return { ...message, parts: message.parts.filter((part) => part.type !== "reasoning") };
 	});

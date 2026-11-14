@@ -11,8 +11,8 @@ import { creditAnswerEmail, inviteEmail, sendEmail } from "../email.ts";
 import { decideRequest, grantCredits, pendingCount, type Decision } from "../extra-credits.ts";
 import { allow, disallow, setInviteCredits } from "../invites.ts";
 import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
-import { availableModels } from "../models.ts";
-import { getSettings, setCompactionModel, setPdfTextOnServer, updateSettings } from "../settings.ts";
+import { privateModels } from "../models.ts";
+import { AUTO_COST_TIERS, getSettings, setAutoCostTier, setCompactionModel, setPdfTextOnServer, updateSettings } from "../settings.ts";
 import { MAX_BODY } from "../../shared/skill-file.ts";
 import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult, type SkillDetail } from "../skills.ts";
 import { activityPage } from "./activity.ts";
@@ -183,7 +183,7 @@ export const adminApi = new Hono<Env>()
 			admins: await listAdmins(),
 			openRouterKey: await openRouterKeyStatus(),
 			// Only models with a private (ZDR) endpoint: another would fall back to the chat's own model.
-			models: (await availableModels()).models.map(({ id, name }) => ({ id, name })),
+			models: (await privateModels()).map(({ id, name }) => ({ id, name })),
 		}),
 	)
 
@@ -207,11 +207,20 @@ export const adminApi = new Hono<Env>()
 	// The model that writes a chat's summary when it gets too long (compaction/summarize.ts). A model with a private (ZDR) endpoint.
 	.put("/settings/compaction-model", body(z.object({ model: z.string() })), async (c) => {
 		const input = c.req.valid("json");
-		const { models } = await availableModels();
+		const models = await privateModels();
 		if (!models.some((model) => model.id === input.model)) return c.json({ error: "That model has no private endpoint now. Choose another." }, 400);
 		const before = { compactionModel: (await getSettings()).compactionModel };
 		await setCompactionModel(input.model, adminOf(c));
 		await record(c, "set-compaction-model", { before, after: { compactionModel: input.model } });
+		return c.json(await getSettings());
+	})
+
+	// How much Auto may spend on a request (auto-router.ts).
+	.put("/settings/auto-cost-tier", body(z.object({ tier: z.enum(AUTO_COST_TIERS) })), async (c) => {
+		const input = c.req.valid("json");
+		const before = { autoCostTier: (await getSettings()).autoCostTier };
+		await setAutoCostTier(input.tier, adminOf(c));
+		await record(c, "set-auto-cost-tier", { before, after: { autoCostTier: input.tier } });
 		return c.json(await getSettings());
 	})
 

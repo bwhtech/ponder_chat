@@ -1,11 +1,11 @@
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
+import { modelWindow } from "../auto-router.ts";
 import { loadSummary, tokenRatio } from "../compaction/store.ts";
 import { withSummary } from "../compaction/summary.ts";
 import { estimate, type Estimate } from "../compaction/tokens.ts";
 import { loadThread } from "../db.ts";
 import { resolveFileParts } from "../file-context.ts";
 import { MODELS } from "../models.ts";
-import { contextWindow } from "../openrouter.ts";
 import { getSettings } from "../settings.ts";
 import type { ActiveSkill } from "../skills.ts";
 import { openAnswersSettled } from "./answered-again.ts";
@@ -46,7 +46,7 @@ export async function loadThreadContext(threadId: string, options: MessageOption
 		messages,
 		estimate: estimate(messages),
 		ratio: await tokenRatio(threadId, options.modelId),
-		window: (await contextWindow(options.modelId)) ?? null,
+		window: (await modelWindow(options.modelId)) ?? null,
 		...(summary && { through: thread[summary.covers - 1]?.id }),
 	};
 }

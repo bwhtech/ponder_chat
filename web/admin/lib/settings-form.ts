@@ -5,8 +5,8 @@ import { settings } from "../store";
 import { creditValue, money } from "./format";
 
 /**
- * The General settings: the credit fields with their checks and Save, how PDFs are read
- * and the summary model (each saved as soon as it changes), the OpenRouter key's status, and the admins. The settings dialog (desktop) and the Settings page (phones)
+ * The General settings: the credit fields with their checks and Save, how PDFs are read,
+ * Auto's cost level and the summary model (each saved as soon as it changes), the OpenRouter key's status, and the admins. The settings dialog (desktop) and the Settings page (phones)
  * each make one, which loads the saved values. Reactive, so a template reads
  * `form.defaultCredits` and binds `v-model` to it.
  */
@@ -20,6 +20,8 @@ export function useSettingsForm() {
 	const savingPdf = ref(false);
 	const compactionModel = ref("");
 	const savingModel = ref(false);
+	const autoCostTier = ref<AutoCostTier>("medium");
+	const savingTier = ref(false);
 	const models = ref<{ label: string; value: string }[]>([]);
 	const saving = ref(false);
 	/** Until the saved values load, no control shows: a default there would read as the setting. */
@@ -47,10 +49,12 @@ export function useSettingsForm() {
 			creditsPerUsd: next.creditsPerUsd,
 			pdfTextOnServer: next.pdfTextOnServer,
 			compactionModel: next.compactionModel,
+			autoCostTier: next.autoCostTier,
 		};
 		Object.assign(settings, saved.value);
 		pdfTextOnServer.value = next.pdfTextOnServer;
 		compactionModel.value = next.compactionModel;
+		autoCostTier.value = next.autoCostTier;
 		defaultCredits.value = String(next.defaultDailyCredits);
 		perUsd.value = String(next.creditsPerUsd);
 	}
@@ -131,6 +135,26 @@ export function useSettingsForm() {
 		}
 	}
 
+	/** The select saves at once; a failure puts it back. */
+	async function setAutoCostTier(tier: AutoCostTier) {
+		if (!saved.value || tier === saved.value.autoCostTier) return;
+		const before = saved.value.autoCostTier;
+		autoCostTier.value = tier;
+		savingTier.value = true;
+		try {
+			const next = await unwrap(admin.settings["auto-cost-tier"].$put({ json: { tier } }));
+			if (saved.value) saved.value.autoCostTier = next.autoCostTier;
+			settings.autoCostTier = next.autoCostTier;
+			autoCostTier.value = next.autoCostTier;
+			toast.success("Auto cost level saved");
+		} catch (e) {
+			autoCostTier.value = before;
+			toast.error((e as Error).message);
+		} finally {
+			savingTier.value = false;
+		}
+	}
+
 	void load();
 	return reactive({
 		saved,
@@ -142,6 +166,8 @@ export function useSettingsForm() {
 		savingPdf,
 		compactionModel,
 		savingModel,
+		autoCostTier,
+		savingTier,
 		models,
 		saving,
 		loading,
@@ -153,7 +179,17 @@ export function useSettingsForm() {
 		save,
 		setPdfReading,
 		setCompactionModel,
+		setAutoCostTier,
 	});
 }
+
+export type AutoCostTier = Settings["autoCostTier"];
+
+/** How much Auto may spend on a request (server/auto-router.ts). */
+export const AUTO_COST_OPTIONS: { label: string; value: AutoCostTier }[] = [
+	{ label: "Low", value: "low" },
+	{ label: "Medium", value: "medium" },
+	{ label: "High", value: "high" },
+];
 
 export type SettingsForm = ReturnType<typeof useSettingsForm>;

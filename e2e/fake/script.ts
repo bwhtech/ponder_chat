@@ -84,7 +84,7 @@ export const SMALL_WINDOW = 40_000;
 export type SentEmail = { from: string; to: string; subject: string; text: string; html: string; at: number };
 
 /** A chat call as the fake received it, for tests that check what the model was sent. */
-export type ReceivedCall = { model: string; system: string; messages: unknown[]; tools: string[]; provider: unknown; at: number };
+export type ReceivedCall = { model: string; system: string; messages: unknown[]; tools: string[]; provider: unknown; plugins: unknown[]; sessionId?: string; at: number };
 
 /** A span that Ponder exported, as the fake received it (server/tracing/). */
 export type ReceivedSpan = {

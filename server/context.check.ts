@@ -95,6 +95,12 @@ assert.deepEqual(
 	switched.map((message) => message.parts.map((part) => part.type)),
 	[["text"], ["text"], ["reasoning", "text"], ["reasoning", "text"]],
 );
+// Under Auto the next model is not known, so even Auto's own replies drop their reasoning.
+const underAuto = dropOtherModelsReasoning([reasoned("a", "openrouter/auto"), reasoned("b", "anthropic/claude-haiku-5.5"), reasoned("c")], "openrouter/auto");
+assert.deepEqual(
+	underAuto.map((message) => message.parts.map((part) => part.type)),
+	[["text"], ["text"], ["reasoning", "text"]],
+);
 
 // Rate limits: the windows, the wait, and other people unaffected.
 const limit = new RateLimit([{ max: 2, ms: 60_000 }]);
