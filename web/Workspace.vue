@@ -13,7 +13,7 @@ import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
 import AccountMenu from "./AccountMenu.vue";
 import { once } from "./once";
-import { afterLoad, preloadChat } from "./preload";
+import { afterLoad, prefetchChat } from "./preload";
 import { closePanel, panelItem, viewInPanel } from "./side-panel/panel";
 import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
@@ -40,10 +40,10 @@ function settingsShortcut(event: KeyboardEvent) {
 }
 addEventListener("keydown", settingsShortcut);
 onBeforeUnmount(() => removeEventListener("keydown", settingsShortcut));
-// The chat's own code for replies (the AI SDK, and the Markdown, maths and code renderers) loads
-// once the page has loaded, its font and pictures too, so it never slows the first screen.
-// Typing a message or pointing at a chat loads it sooner (ChatView.vue, ThreadList.vue).
-onMounted(() => afterLoad(() => void preloadChat()));
+// The chat's own code for replies (the AI SDK, and the Markdown, maths and code renderers)
+// downloads once the page has loaded, its font and pictures too, so it never slows the first
+// screen. It runs when typing a message or pointing at a chat (preload.ts).
+onMounted(() => afterLoad(prefetchChat));
 // Tailwind's md: the sidebar shows from here; below it, the bottom sheet.
 const wideScreen = matchMedia("(min-width: 768px)");
 const wide = ref(wideScreen.matches);

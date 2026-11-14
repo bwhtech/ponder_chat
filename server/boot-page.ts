@@ -33,7 +33,7 @@ export async function bootPage(c: Context, next: Next) {
 	const body = new ReadableStream<Uint8Array>({
 		async start(controller) {
 			controller.enqueue(encoder.encode(page.head));
-			const data = await bootData(headers).catch((error: unknown) => {
+			const data = await bootData(headers, page.prefetch).catch((error: unknown) => {
 				// The page still works without it: it asks the API, as before.
 				console.error("boot page:", error);
 				return undefined;
@@ -52,6 +52,8 @@ export type BootData = {
 	models?: NonNullable<ReturnType<typeof cachedModels>>;
 	features?: { python: boolean };
 	skills?: { name: string; description: string }[];
+	/** The files of the chat's later code, for the page to prefetch once it has loaded (web/preload.ts). */
+	prefetch?: string[];
 };
 
 /** GET /api/me: who is signed in, their role (read from the database, not the cookie), and their credits for today. */
@@ -65,13 +67,13 @@ export async function skillOptions() {
 	return (await activeSkills()).map(({ name, description }) => ({ name, description }));
 }
 
-async function bootData(headers: Headers): Promise<BootData> {
+async function bootData(headers: Headers, prefetch: string[]): Promise<BootData> {
 	const session = await sessionOf(headers);
 	if (!session) return { me: null };
 	const [me, threads, skills] = await Promise.all([meOf(session.user), listThreads(session.user.id), skillOptions()]);
 	// Only what is ready now: the models wait for OpenRouter on a cold start, and the page asks for them itself then.
 	const python = await settled(pythonReady);
-	return { me, threads, skills, models: cachedModels(), features: python === undefined ? undefined : { python } };
+	return { me, threads, skills, models: cachedModels(), features: python === undefined ? undefined : { python }, prefetch };
 }
 
 /** The value of a promise that has settled, or undefined: never waits. */
@@ -84,14 +86,14 @@ function script(data: BootData) {
 	return `<script type="application/json" id="ponder-boot">${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
 }
 
-let cached: Promise<{ head: string; tail: string }> | undefined;
+let cached: Promise<{ head: string; tail: string; prefetch: string[] }> | undefined;
 
 /** dist/index.html, read once and cut after its head. A failed read is tried again on the next request. */
 function template() {
-	cached ??= readFile(join(WEB_BUILD, "index.html"), "utf8").then(
-		(html) => {
+	cached ??= Promise.all([readFile(join(WEB_BUILD, "index.html"), "utf8"), laterCode()]).then(
+		([html, prefetch]) => {
 			const at = html.indexOf("<body>");
-			return at < 0 ? { head: html, tail: "" } : { head: html.slice(0, at), tail: html.slice(at) };
+			return at < 0 ? { head: html, tail: "", prefetch } : { head: html.slice(0, at), tail: html.slice(at), prefetch };
 		},
 		(error: unknown) => {
 			cached = undefined;
@@ -99,4 +101,33 @@ function template() {
 		},
 	);
 	return cached;
+}
+
+/** The modules a chat loads after its first screen (web/preload.ts), by their source file. */
+const LATER = ["chat-sdk.ts", "transcript.ts"];
+
+type Manifest = Record<string, { file: string; imports?: string[]; css?: string[] }>;
+
+/**
+ * The files of the chat's later code (the AI SDK and the transcript) that its first page has not
+ * loaded already, from Vite's manifest. The page prefetches them once it has loaded: they
+ * download then, and run only when a chat needs them. Empty without a manifest.
+ */
+async function laterCode(): Promise<string[]> {
+	const manifest: Manifest | undefined = await readFile(join(WEB_BUILD, ".vite/manifest.json"), "utf8").then(
+		(text) => JSON.parse(text) as Manifest,
+		() => undefined,
+	);
+	if (!manifest) return [];
+	const closure = (keys: string[], seen = new Set<string>()) => {
+		for (const key of keys) {
+			if (seen.has(key) || !manifest[key]) continue;
+			seen.add(key);
+			closure(manifest[key].imports ?? [], seen);
+		}
+		return seen;
+	};
+	const first = closure(["index.html"]);
+	const files = [...closure(LATER)].filter((key) => !first.has(key)).flatMap((key) => [manifest[key]!.file, ...(manifest[key]!.css ?? [])]);
+	return [...new Set(files)].map((file) => `/${file}`);
 }

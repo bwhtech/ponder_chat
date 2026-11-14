@@ -38,6 +38,8 @@ export default defineConfig(({ command }) => ({
 		// the first versions with lab(); the JS target (es2022 with class static blocks) already needs Safari 16.4.
 		cssTarget: ["chrome111", "edge111", "firefox113", "safari16.4"],
 		rollupOptions: { input: adminBuild ? { admin: `${here}web/admin.html` } : { main: `${here}web/index.html` } },
+		// The chat's chunks by source file: the server reads which files to prefetch (server/boot-page.ts).
+		manifest: !adminBuild,
 	},
 }));
 
