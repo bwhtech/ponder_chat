@@ -499,7 +499,6 @@ function replyModelId(message: UIMessage) {
 </script>
 
 <template>
-	<!-- index.html holds a copy of the new chat's screen (#ponder-shell), shown before the code runs. Copy it again when this screen changes. -->
 	<div ref="area" class="relative min-h-0 flex-1">
 		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
 			<ConversationEmptyState
