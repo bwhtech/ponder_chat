@@ -24,7 +24,13 @@ const adminBuild = process.env.PONDER_PAGE === "admin";
 
 export default defineConfig(({ command }) => ({
 	root: "web",
-	plugins: [frappeui({ frappeProxy: false, jinjaBootData: false, buildConfig: false }), vue({ compiler }), adminPage(), lazyTooltipBubble()],
+	plugins: [
+		frappeui({ frappeProxy: false, jinjaBootData: false, buildConfig: false }),
+		// Nothing the chat draws uses Vue's Options API (data, methods, mixins): its build leaves that part of Vue out.
+		vue({ compiler, features: { optionsAPI: command !== "build" || adminBuild } }),
+		adminPage(),
+		lazyTooltipBubble(),
+	],
 	css: { postcss: here },
 	server: devServer(),
 	resolve: { alias: command === "build" && !adminBuild ? { "vue-router": `${here}web/no-router.ts` } : {} },
