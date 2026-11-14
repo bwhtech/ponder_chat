@@ -3,6 +3,8 @@ import { once } from "./once";
 import { toastsWanted } from "./toasts";
 
 type Parts = typeof import("./transcript");
+/** The transcript's components; it also exports functions (for quotes), which are not. */
+type PartName = { [K in keyof Parts]: Parts[K] extends (...args: never[]) => unknown ? never : K }[keyof Parts];
 
 /**
  * The transcript's chunk (transcript.ts), loaded once: by the first chat with messages, or
@@ -21,7 +23,7 @@ export const loadTranscript = once(() =>
  * component itself, so templates check its props. Made once, here, not per chat: after the
  * first load, a chat that opens renders its messages at once.
  */
-function part<K extends keyof Parts>(name: K): Parts[K] {
+function part<K extends PartName>(name: K): Parts[K] {
 	return defineAsyncComponent(() => loadTranscript().then((parts) => parts[name])) as unknown as Parts[K];
 }
 
@@ -36,7 +38,7 @@ export const MessageContent = part("MessageContent");
 export const MessageCopyAction = part("MessageCopyAction");
 export const MessageParts = part("MessageParts");
 export const CitationChip = part("CitationChip");
-export const CiteButton = part("CiteButton");
+export const CiteSelection = part("CiteSelection");
 export const CompactionDivider = part("CompactionDivider");
 export const SkillChip = part("SkillChip");
 export const ToolContext = part("ToolContext");
