@@ -1,6 +1,7 @@
-import { hc, type ClientResponse } from "hono/client";
+import type { ClientResponse } from "hono/client";
 import type { SuccessStatusCode } from "hono/utils/http-status";
 import type { ApiClient, AppType } from "#server/app";
+import { once } from "./once";
 
 /**
  * The typed API client. Its paths, inputs and answers come from the server's routes
@@ -8,8 +9,27 @@ import type { ApiClient, AppType } from "#server/app";
  * params go into the address as they are: encode them. Read the answer with unwrap():
  *
  *   const { threads } = await unwrap(client.api.threads.search.$get({ query: { q } }));
+ *
+ * The first page asks the API nothing (its data comes with it, boot.ts), so hono's client
+ * loads at the first request (api-client.ts): `client` notes the path, such as
+ * api.threads[":id"].$get, and calls it on the real client once that is here. Every call
+ * returns a promise either way.
  */
-export const client: ApiClient = hc<AppType>("/");
+const loadClient = once(() => import("./api-client").then(({ hc }) => hc<AppType>("/")));
+export const client = pathTo([]) as ApiClient;
+
+function pathTo(path: PropertyKey[]): unknown {
+	return new Proxy(() => {}, {
+		// Not a promise: `await client.api` must not wait for a "then".
+		get: (_, key) => (key === "then" ? undefined : pathTo([...path, key])),
+		apply: (_, __, args: unknown[]) =>
+			loadClient().then((real) => {
+				let target = real as unknown as Record<PropertyKey, unknown>;
+				for (const key of path.slice(0, -1)) target = target[key] as Record<PropertyKey, unknown>;
+				return (target[path.at(-1)!] as (...args: unknown[]) => unknown)(...args);
+			}),
+	});
+}
 
 /**
  * The JSON of a typed client call's successful answer. On a refusal it throws the server's
