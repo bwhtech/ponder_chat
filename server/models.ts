@@ -1,5 +1,5 @@
 import { AUTO_MODEL_ID } from "../shared/auto-model.ts";
-import { modelsWithZdr } from "./openrouter.ts";
+import { modelsWithZdr, modelsWithZdrNow } from "./openrouter.ts";
 
 /**
  * The models a person can pick in the chat, all through OpenRouter. A short list on
@@ -58,7 +58,19 @@ const DEFAULT_MODEL = process.env.CHAT_DEFAULT_MODEL ?? AUTO_MODEL.id;
  * only when at least one of them does, since it picks only from them.
  */
 export async function availableModels() {
-	const named = await privateModels();
+	return pickable(withZdr(await modelsWithZdr()));
+}
+
+/**
+ * The same, without waiting for OpenRouter, for the chat page's first screen (boot-page.ts).
+ * Undefined until OpenRouter's list has been read once since the start.
+ */
+export function cachedModels() {
+	const zdr = modelsWithZdrNow();
+	return zdr && pickable(withZdr(zdr));
+}
+
+function pickable(named: ChatModel[]) {
 	const models = named.length ? [AUTO_MODEL, ...named] : [];
 	const fallback = models.find((model) => model.id === DEFAULT_MODEL) ?? models[0] ?? AUTO_MODEL;
 	return { models, defaultModel: fallback.id };
@@ -78,6 +90,9 @@ export async function pickModel(id: unknown): Promise<ChatModel> {
  * that keeps data.
  */
 export async function privateModels() {
-	const zdr = await modelsWithZdr();
+	return withZdr(await modelsWithZdr());
+}
+
+function withZdr(zdr: Set<string> | undefined) {
 	return zdr ? MODELS.filter((model) => zdr.has(model.id)) : MODELS;
 }

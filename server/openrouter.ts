@@ -49,6 +49,15 @@ export async function modelsWithZdr(): Promise<Set<string> | undefined> {
 }
 
 /**
+ * The same list, but only as far as it is known now: never waits for OpenRouter.
+ * Undefined before the first read (just after a start). An old list starts a new read.
+ */
+export function modelsWithZdrNow(): Set<string> | undefined {
+	void zdrList();
+	return zdrModels?.ids;
+}
+
+/**
  * A model's context window in tokens: the smallest among its ZDR endpoints that replies
  * use, since OpenRouter may route a call to any of them. Undefined when it is not known.
  */
@@ -56,8 +65,20 @@ export async function contextWindow(modelId: string): Promise<number | undefined
 	return (await zdrList())?.windows.get(modelId);
 }
 
+let reading: Promise<typeof zdrModels> | undefined;
+
+/**
+ * The list, read again once it is an hour old. Until the new read ends, the old list
+ * answers: only the first request after a start waits for OpenRouter (GET /api/models
+ * took 160 ms at the median when each hour's first request waited). One read at a time.
+ */
 async function zdrList() {
 	if (zdrModels && Date.now() - zdrModels.at < REFRESH_MS) return zdrModels;
+	reading ??= readZdrList().finally(() => (reading = undefined));
+	return zdrModels ?? reading;
+}
+
+async function readZdrList() {
 	try {
 		const response = await fetch(ZDR_ENDPOINTS, { signal: AbortSignal.timeout(5_000) });
 		if (!response.ok) throw new Error(`HTTP ${response.status}`);
