@@ -140,7 +140,7 @@ function askDelete(thread: ThreadSummary) {
 			<!-- A group that starts while the page is open (the first chat today) fades in. -->
 			<TransitionGroup tag="div" class="flex flex-col gap-4 empty:hidden" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none" enter-from-class="opacity-0">
 				<div v-for="group in searching ? [] : groups" :key="group.label" class="space-y-0.5" data-slot="thread-group">
-					<SidebarLabel class="[&_h3]:text-xs-medium [&_h3]:text-ink-gray-5">{{ group.label }}</SidebarLabel>
+					<SidebarLabel class="[&_h3]:text-xs-medium [&_h3]:text-ink-gray-6">{{ group.label }}</SidebarLabel>
 					<!-- A new or newly active chat slides in at the top; the others move down. -->
 					<TransitionGroup
 						tag="div"
