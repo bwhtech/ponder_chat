@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { BottomSheet, Button, Sidebar, SidebarHeader, Skeleton, toast } from "frappe-ui";
+import { BottomSheet, Button, Sidebar, SidebarHeader, Skeleton } from "frappe-ui";
+import { toast } from "./toasts";
 import { provideFileViewer } from "frappe-ui-ai-elements";
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me, refreshCredits, signOut } from "./account";

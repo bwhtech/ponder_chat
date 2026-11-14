@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { Button, ToastProvider } from "frappe-ui";
+import { Button } from "frappe-ui";
 import { defineAsyncComponent, onBeforeUnmount, watch } from "vue";
 import { loadMe, me, meError } from "./account";
 import { dialogsWanted, loadDialogs } from "./dialogs";
+import { loadToasts, toastsWanted } from "./toasts";
 import { loadModels } from "./models";
 import { useThreads } from "./threads";
 import Workspace from "./Workspace.vue";
@@ -10,8 +11,10 @@ import EmptyState from "./EmptyState.vue";
 
 /** Sign-in first, then the workspace. Someone signed in never needs the sign-in page, so it loads only when shown. */
 const SignIn = defineAsyncComponent(() => import("./SignIn.vue"));
-// What frappe-ui's FrappeUIProvider mounts, but the dialogs' host only once a dialog opens (dialogs.ts).
+// What frappe-ui's FrappeUIProvider mounts, each only once it is needed: the dialogs' host
+// when a dialog opens (dialogs.ts), the toasts' host when a toast shows (toasts.ts).
 const Dialogs = defineAsyncComponent(() => loadDialogs().then((module) => module.Dialogs));
+const ToastsHost = defineAsyncComponent(() => loadToasts().then((module) => module.ToastsHost));
 const { init } = useThreads();
 let started = false;
 
@@ -35,8 +38,7 @@ watch(
 </script>
 
 <template>
-	<!-- Before the app, so toasts from its setup land (as in frappe-ui's FrappeUIProvider). -->
-	<ToastProvider />
+	<ToastsHost v-if="toastsWanted" />
 	<EmptyState v-if="me === undefined && meError" icon="lucide-wifi-off" title="Can't reach Ponder" :body="meError" alert class="h-dvh bg-surface-base">
 		<Button label="Try again" @click="retry" />
 	</EmptyState>

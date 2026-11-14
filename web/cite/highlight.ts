@@ -1,4 +1,4 @@
-import { toast } from "frappe-ui";
+import { toast } from "../toasts";
 import { nextTick } from "vue";
 import { findSource, resolveRange, type Citation } from "./citations";
 

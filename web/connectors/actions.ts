@@ -1,4 +1,4 @@
-import { toast } from "frappe-ui";
+import { toast } from "../toasts";
 import { dialog } from "../dialogs";
 import { loadConnectors, removeConnector, startSignIn, type Connector, type SignInMessage } from "./api";
 import { goToSignIn, openSignInWindow, waitForSignIn } from "./sign-in";

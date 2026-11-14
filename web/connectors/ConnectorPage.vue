@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Alert, Button, Dialog, Select, Switch, TextInput, toast } from "frappe-ui";
+import { Alert, Button, Dialog, Select, Switch, TextInput } from "frappe-ui";
+import { toast } from "../toasts";
 import { computed, ref } from "vue";
 import PanelBody from "../settings/PanelBody.vue";
 import PanelHeader from "../settings/PanelHeader.vue";

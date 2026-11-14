@@ -1,10 +1,20 @@
 import { defineAsyncComponent } from "vue";
 import { once } from "./once";
+import { toastsWanted } from "./toasts";
 
 type Parts = typeof import("./transcript");
 
-/** The transcript's chunk (transcript.ts), loaded once: by the first chat with messages, or ahead of time. */
-export const loadTranscript = once(() => import("./transcript"));
+/**
+ * The transcript's chunk (transcript.ts), loaded once: by the first chat with messages, or
+ * ahead of time. Some of its components show frappe-ui's toasts themselves, so the toasts'
+ * host mounts with it (toasts.ts).
+ */
+export const loadTranscript = once(() =>
+	import("./transcript").then((parts) => {
+		toastsWanted.value = true;
+		return parts;
+	}),
+);
 
 /**
  * One of the transcript's components, which renders once its chunk is here. Typed as the
