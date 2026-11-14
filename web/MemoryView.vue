@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Alert, Badge, Button, dialog, Dropdown, Skeleton, TabButtons } from "frappe-ui";
+import { Alert, Badge, Button, Dropdown, Skeleton, TabButtons } from "frappe-ui";
+import { dialog } from "./dialogs";
 import { onMounted, ref } from "vue";
 import { canUndo, fetchMemory, forgetMemory, KIND_LABELS, undoSave, updateMemory, type Memory, type MemoryOverview, type MemorySave } from "./memory";
 import { when } from "./dates";

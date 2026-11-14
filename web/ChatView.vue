@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import { useChat } from "@ai-sdk/vue";
-import { WorkflowChatTransport } from "@ai-sdk/workflow/client";
-import { lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart, type UIMessage } from "ai";
+import type { FileUIPart, UIMessage } from "ai";
 import { Alert, Button } from "frappe-ui";
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me } from "./account";
@@ -17,29 +15,27 @@ import { MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { useThinking } from "./thinking";
 import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from "./message-queue";
 import { isAuto } from "../shared/auto-model";
-import { defaultModel, features, modelName, models } from "./models";
+import { defaultModel, features, ModelSelector, modelName, models } from "./models";
 import { chosenCitations, citationLabel, citationPart, findSource, resolveRange, withComment, type Citation } from "./cite/citations";
-import CitationChip, { type CiteAnchor } from "./cite/CitationChip.vue";
-import CiteButton from "./cite/CiteButton.vue";
+import type { CiteAnchor } from "./cite/CitationChip.vue";
 import { markQuote, revealCitation } from "./cite/highlight";
 import { useCiteSelection } from "./cite/selection";
-import ArtifactPart from "./artifacts/ArtifactPart.vue";
-import RunPythonPart from "./RunPythonPart.vue";
 import { useSkillPicker } from "./skills/picker";
-import SkillChip from "./skills/SkillChip.vue";
 import SkillMenu from "./skills/SkillMenu.vue";
 import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skills/skills";
-import UseSkillPart from "./skills/UseSkillPart.vue";
-import WebToolPart from "./WebToolPart.vue";
-import CompactionDivider from "./CompactionDivider.vue";
 import { summarizedThrough } from "./compaction";
 import { THREAD_CHANGED } from "../shared/replies";
 import { useThreads } from "./threads";
 import { clockTime } from "./dates";
+import { useLazyChat } from "./lazy-chat";
+import { preloadChat } from "./preload";
+// The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
 import {
+	CitationChip,
+	CiteButton,
+	CompactionDivider,
 	Conversation,
 	ConversationContent,
-	ConversationEmptyState,
 	ConversationItem,
 	ConversationScrollButton,
 	Loader,
@@ -48,7 +44,11 @@ import {
 	MessageContent,
 	MessageCopyAction,
 	MessageParts,
-	ModelSelector,
+	SkillChip,
+	toolRenderers,
+} from "./transcript-parts";
+import {
+	ConversationEmptyState,
 	PromptInput,
 	PromptInputAttachButton,
 	PromptInputFooter,
@@ -93,9 +93,9 @@ function lastReplyModel(messages: UIMessage[]) {
 
 /** The server said the saved thread is ahead of this page (THREAD_CHANGED). */
 let threadChanged = false;
-const { messages, sendMessage, addToolApprovalResponse, status, error, stop, regenerate, resumeStream } = useChat({
+// The AI SDK loads beside the page (lazy-chat.ts); the messages show without it.
+const { messages, sendMessage, addToolApprovalResponse, status, error, stop, regenerate, resumeStream } = useLazyChat(({ WorkflowChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses }) => ({
 	id: props.threadId,
-	messages: props.initialMessages,
 	// Each reply is a durable workflow run on the server. When the connection drops before
 	// the reply ends (a server restart, a flaky network), the transport reconnects to the
 	// run and picks up where it left off. The model goes with every request.
@@ -119,7 +119,7 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 		void notes.load({ wait: true });
 	},
 	onError: () => emit("refused"),
-});
+}), props.initialMessages);
 
 /**
  * fetch for the transport: reconnecting to a reply (a GET) waits and tries again for up
@@ -145,7 +145,8 @@ const notes = useRememberedNotes(props.threadId);
 const { byMessage: remembered, fresh: newSaves, undo: undoRemembered } = notes;
 
 onMounted(() => {
-	void notes.load();
+	// A new chat has no replies, so nothing was remembered from it yet.
+	if (props.initialMessages.length) void notes.load();
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	if (props.running) void resumeStream();
 });
@@ -160,6 +161,8 @@ const creditNotice = computed(() => outOfCreditsNotice(me.value?.credits, refill
 const input = ref("");
 // What the person was writing in this chat comes back after a switch or a reload.
 useDraft(props.threadId, input);
+// Typing a message: the code to send it and show the reply loads now, if the page has not loaded it yet.
+watch(input, () => void preloadChat(), { once: true });
 const uploading = ref(false);
 const uploadError = ref("");
 // What the server can pass to the model; spreadsheets only when Python can read them.
@@ -169,7 +172,7 @@ const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,applica
 // A skill Ponder chose (use_skill) stays a line of its own, so the person sees which skill shaped the reply.
 // An artifact (write_artifact) is a card that opens it in the side panel.
 provideToolRenderers(
-	{ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart, use_skill: UseSkillPart, write_artifact: ArtifactPart },
+	toolRenderers,
 	{ foldable: ["web_search", "web_fetch"] },
 );
 
@@ -197,7 +200,12 @@ function askedSkills(message: UIMessage) {
 
 // Connector steps show as "Linear · Create issue", and a search as what it looked for
 // (connectors/labels.ts). When a call waits for approval, "Always allow" saves its rule, then approves.
-if (!connectors.value) void loadConnectors().catch(() => undefined);
+// Only a chat with messages shows connector steps: a new chat loads the connectors with its first message.
+watch(
+	() => messages.value.length > 0,
+	(some) => some && !connectors.value && void loadConnectors().catch(() => undefined),
+	{ immediate: true },
+);
 provideToolLabels((name, part) => {
 	if (name === "web_fetch") return { title: "Read a page", question: fetchApprovalQuestion(messages.value) };
 	return connectorLabel(name, part);

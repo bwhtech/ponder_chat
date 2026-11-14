@@ -1,4 +1,5 @@
-import { dialog, toast } from "frappe-ui";
+import { toast } from "frappe-ui";
+import { dialog } from "./dialogs";
 import { computed, onBeforeUnmount, watch } from "vue";
 import { type Credits, me, refreshCredits } from "./account";
 import { ApiError, client, unwrap } from "./api";

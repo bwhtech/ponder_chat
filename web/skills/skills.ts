@@ -1,6 +1,7 @@
 import type { UIMessage } from "ai";
 import { ref } from "vue";
 import { client, type Answer } from "../api";
+import { fromBoot } from "../boot";
 
 export { skillTitle } from "../../shared/skill-file";
 
@@ -17,6 +18,9 @@ export type SkillPart = { type: typeof SKILL_PART; data: { name: string } };
 export const skills = ref<SkillOption[]>([]);
 
 export async function loadSkills() {
+	// The first chat's list comes with the page (boot.ts).
+	const booted = fromBoot("skills");
+	if (booted) return void (skills.value = booted);
 	const response = await client.api.skills.$get().catch(() => undefined);
 	if (response?.ok) skills.value = (await response.json()).skills;
 }

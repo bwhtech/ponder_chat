@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import { BottomSheet, Button, Sidebar, SidebarHeader, Skeleton, toast } from "frappe-ui";
 import { provideFileViewer } from "frappe-ui-ai-elements";
-import { computed, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { me, refreshCredits, signOut } from "./account";
 import { loadConnectors } from "./connectors/api";
-import SettingsModal from "./settings/SettingsModal.vue";
-import { openSettings, type SettingsTab } from "./settings/state";
+import { openSettings, settings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
 import CreditMeter from "./CreditMeter.vue";
 import { useCreditRequestWatch } from "./credit-request";
-import MemoryView from "./MemoryView.vue";
 import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
-import { closePanel, viewInPanel } from "./side-panel/panel";
-import SidePanel from "./side-panel/SidePanel.vue";
+import { afterLoad, preloadChat } from "./preload";
+import { closePanel, panelItem, viewInPanel } from "./side-panel/panel";
 import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
 
@@ -22,7 +20,34 @@ import { useThreads } from "./threads";
  * the Memory page. The header at the top of the sidebar opens the account menu, as on /admin.
  */
 const { current, currentThread, messages, running, failed, loading, revision, refresh, open, start } = useThreads();
+// What the first page does not show loads when it opens: Settings, Memory and the side panel.
+const SettingsModal = defineAsyncComponent(() => import("./settings/SettingsModal.vue"));
+const MemoryView = defineAsyncComponent(() => import("./MemoryView.vue"));
+const SidePanel = defineAsyncComponent(() => import("./side-panel/SidePanel.vue"));
+// Each stays once it has opened, so it can play its closing transition.
+const settingsUsed = ref(false);
+const panelUsed = ref(false);
+watch(() => settings.open, (open) => open && (settingsUsed.value = true), { immediate: true });
+watch(panelItem, (item) => item && (panelUsed.value = true), { immediate: true });
+// Settings' own shortcut, Cmd+Shift+, (Ctrl+Shift+,), lives in its dialog. Until the dialog has loaded, this opens it.
+function settingsShortcut(event: KeyboardEvent) {
+	if (settingsUsed.value || !(event.metaKey || event.ctrlKey) || !event.shiftKey || event.code !== "Comma") return;
+	event.preventDefault();
+	openSettings();
+}
+addEventListener("keydown", settingsShortcut);
+onBeforeUnmount(() => removeEventListener("keydown", settingsShortcut));
+// The chat's own code for replies (the AI SDK, and the Markdown, maths and code renderers) loads
+// once the page has loaded, its font and pictures too, so it never slows the first screen.
+// Typing a message or pointing at a chat loads it sooner (ChatView.vue, ThreadList.vue).
+onMounted(() => afterLoad(() => void preloadChat()));
 const sheetOpen = ref(false);
+// Tailwind's md: the sidebar shows from here; below it, the bottom sheet.
+const wideScreen = matchMedia("(min-width: 768px)");
+const wide = ref(wideScreen.matches);
+const onWidth = () => (wide.value = wideScreen.matches);
+wideScreen.addEventListener("change", onWidth);
+onBeforeUnmount(() => wideScreen.removeEventListener("change", onWidth));
 // A request for more credits that waits for an answer: the page checks on it.
 useCreditRequestWatch();
 // Files in the chat (attachments, images from Python) open in the side panel.
@@ -107,7 +132,8 @@ function onSaved() {
 <template>
 	<div class="contents">
 		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
-			<Sidebar class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
+			<!-- Phones get the chats in the bottom sheet, so there the sidebar is not drawn at all, not only hidden. -->
+			<Sidebar v-if="wide" class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
 				<SidebarHeader title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" />
 				<div class="flex min-h-0 flex-1 flex-col px-2">
 					<ThreadList scroll :highlight="view === 'chat'" @select="pick" />
@@ -148,7 +174,7 @@ function onSaved() {
 				/>
 			</div>
 
-			<SidePanel />
+			<SidePanel v-if="panelUsed" />
 		</div>
 
 		<BottomSheet v-model:open="sheetOpen" title="Chats">
@@ -162,6 +188,6 @@ function onSaved() {
 			</div>
 		</BottomSheet>
 
-		<SettingsModal />
+		<SettingsModal v-if="settingsUsed" />
 	</div>
 </template>
