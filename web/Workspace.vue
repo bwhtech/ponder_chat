@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BottomSheet, Button, Sidebar, SidebarHeader, Skeleton } from "frappe-ui";
+import { Button, Sidebar, Skeleton } from "frappe-ui";
 import { toast } from "./toasts";
 import { provideFileViewer } from "frappe-ui-ai-elements";
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -11,6 +11,8 @@ import CreditMeter from "./CreditMeter.vue";
 import { useCreditRequestWatch } from "./credit-request";
 import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
+import AccountMenu from "./AccountMenu.vue";
+import { once } from "./once";
 import { afterLoad, preloadChat } from "./preload";
 import { closePanel, panelItem, viewInPanel } from "./side-panel/panel";
 import { useThemeMenu } from "./theme-menu";
@@ -42,13 +44,19 @@ onBeforeUnmount(() => removeEventListener("keydown", settingsShortcut));
 // once the page has loaded, its font and pictures too, so it never slows the first screen.
 // Typing a message or pointing at a chat loads it sooner (ChatView.vue, ThreadList.vue).
 onMounted(() => afterLoad(() => void preloadChat()));
-const sheetOpen = ref(false);
 // Tailwind's md: the sidebar shows from here; below it, the bottom sheet.
 const wideScreen = matchMedia("(min-width: 768px)");
 const wide = ref(wideScreen.matches);
 const onWidth = () => (wide.value = wideScreen.matches);
 wideScreen.addEventListener("change", onWidth);
 onBeforeUnmount(() => wideScreen.removeEventListener("change", onWidth));
+// The chats on a phone: a bottom sheet, loaded the first time it opens, or once the page has loaded on a narrow screen.
+const loadBottomSheet = once(() => import("./bottom-sheet").then((module) => module.BottomSheet));
+const BottomSheet = defineAsyncComponent(loadBottomSheet);
+const sheetOpen = ref(false);
+const sheetUsed = ref(false);
+watch(sheetOpen, (open) => open && (sheetUsed.value = true));
+onMounted(() => afterLoad(() => !wide.value && void loadBottomSheet().catch(() => undefined)));
 // A request for more credits that waits for an answer: the page checks on it.
 useCreditRequestWatch();
 // Files in the chat (attachments, images from Python) open in the side panel.
@@ -135,7 +143,7 @@ function onSaved() {
 		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
 			<!-- Phones get the chats in the bottom sheet, so there the sidebar is not drawn at all, not only hidden. -->
 			<Sidebar v-if="wide" class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
-				<SidebarHeader title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" />
+				<AccountMenu title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" />
 				<div class="flex min-h-0 flex-1 flex-col px-2">
 					<ThreadList scroll :highlight="view === 'chat'" @select="pick" />
 				</div>
@@ -179,9 +187,9 @@ function onSaved() {
 			<SidePanel v-if="panelUsed" />
 		</div>
 
-		<BottomSheet v-model:open="sheetOpen" title="Chats">
+		<BottomSheet v-if="sheetUsed" v-model:open="sheetOpen" title="Chats">
 			<div class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-				<SidebarHeader title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" class="-mx-1 -mt-2" />
+				<AccountMenu title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" class="-mx-1 -mt-2" />
 				<Button variant="outline" size="md" icon-left="lucide-square-pen" class="w-full !justify-start !px-2 bg-surface-base" @click="newThread">New chat</Button>
 				<ThreadList :highlight="view === 'chat'" @select="pick" />
 				<div v-if="me" class="border-t border-outline-gray-1 pt-2">
