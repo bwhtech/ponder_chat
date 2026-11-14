@@ -88,12 +88,16 @@ function script(data: BootData) {
 
 let cached: Promise<{ head: string; tail: string; prefetch: string[] }> | undefined;
 
-/** dist/index.html, read once and cut after its head. A failed read is tried again on the next request. */
+/**
+ * dist/index.html, read once and cut after its head. A failed read is tried again on the next
+ * request. On a wide screen the head also fetches the chats panel beside the first code.
+ */
 function template() {
-	cached ??= Promise.all([readFile(join(WEB_BUILD, "index.html"), "utf8"), laterCode()]).then(
-		([html, prefetch]) => {
-			const at = html.indexOf("<body>");
-			return at < 0 ? { head: html, tail: "", prefetch } : { head: html.slice(0, at), tail: html.slice(at), prefetch };
+	cached ??= Promise.all([readFile(join(WEB_BUILD, "index.html"), "utf8"), chunks()]).then(
+		([html, { later, panel }]) => {
+			const page = panel.length ? html.replace(/(\s*)<script type="module"/, `$1${widePreload(panel)}$1<script type="module"`) : html;
+			const at = page.indexOf("<body>");
+			return at < 0 ? { head: page, tail: "", prefetch: later } : { head: page.slice(0, at), tail: page.slice(at), prefetch: later };
 		},
 		(error: unknown) => {
 			cached = undefined;
@@ -103,22 +107,35 @@ function template() {
 	return cached;
 }
 
-/** The modules a chat loads after its first screen (web/preload.ts), by their source file. */
-const LATER = ["chat-sdk.ts", "transcript.ts"];
+/**
+ * The chats panel (web/ChatsPanel.vue) is its own chunk, since a phone draws it only in its
+ * bottom sheet. A wide screen draws it at once, so the page fetches it with the first code there,
+ * with links like the modulepreload links Vite writes. `media` keeps phones from fetching it.
+ */
+function widePreload(files: string[]) {
+	const wide = 'media="(min-width: 768px)"';
+	return files.map((href) => (href.endsWith(".css") ? `<link rel="stylesheet" crossorigin href="${href}" ${wide}>` : `<link rel="modulepreload" crossorigin href="${href}" ${wide}>`)).join("");
+}
+
+/** The modules a chat loads after its first screen (web/preload.ts, web/api.ts), by their source file. */
+const LATER = ["chat-sdk.ts", "transcript.ts", "api-client.ts"];
+/** The chats panel, which only a wide screen draws on its first screen (web/Workspace.vue). */
+const PANEL = ["ChatsPanel.vue"];
 
 type Manifest = Record<string, { file: string; imports?: string[]; css?: string[] }>;
 
 /**
- * The files of the chat's later code (the AI SDK and the transcript) that its first page has not
- * loaded already, from Vite's manifest. The page prefetches them once it has loaded: they
- * download then, and run only when a chat needs them. Empty without a manifest.
+ * From Vite's manifest, the files of these modules that the first page does not load already:
+ * `later`, the chat's later code (the AI SDK, the transcript and the API client), which the page
+ * prefetches once it has loaded, so it downloads then and runs only when a chat needs it; and
+ * `panel`, the chats panel's. Empty without a manifest.
  */
-async function laterCode(): Promise<string[]> {
+async function chunks(): Promise<{ later: string[]; panel: string[] }> {
 	const manifest: Manifest | undefined = await readFile(join(WEB_BUILD, ".vite/manifest.json"), "utf8").then(
 		(text) => JSON.parse(text) as Manifest,
 		() => undefined,
 	);
-	if (!manifest) return [];
+	if (!manifest) return { later: [], panel: [] };
 	const closure = (keys: string[], seen = new Set<string>()) => {
 		for (const key of keys) {
 			if (seen.has(key) || !manifest[key]) continue;
@@ -128,6 +145,11 @@ async function laterCode(): Promise<string[]> {
 		return seen;
 	};
 	const first = closure(["index.html"]);
-	const files = [...closure(LATER)].filter((key) => !first.has(key)).flatMap((key) => [manifest[key]!.file, ...(manifest[key]!.css ?? [])]);
-	return [...new Set(files)].map((file) => `/${file}`);
+	const panel = closure(PANEL);
+	// Each file once: what the panel brings is not fetched again with the later code.
+	const files = (keys: string[], loaded: Set<string>) => {
+		const own = [...closure(keys)].filter((key) => !loaded.has(key)).flatMap((key) => [manifest[key]!.file, ...(manifest[key]!.css ?? [])]);
+		return [...new Set(own)].map((file) => `/${file}`);
+	};
+	return { later: files(LATER, new Set([...first, ...panel])), panel: files(PANEL, first) };
 }

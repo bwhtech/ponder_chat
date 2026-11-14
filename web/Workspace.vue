@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Sidebar, Skeleton } from "frappe-ui";
+import { Button, Skeleton } from "frappe-ui";
 import { toast } from "./toasts";
 import { provideFileViewer } from "frappe-ui-ai-elements";
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -7,12 +7,10 @@ import { me, refreshCredits, signOut } from "./account";
 import { loadConnectors } from "./connectors/api";
 import { openSettings, settings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
-import CreditMeter from "./CreditMeter.vue";
 import { useCreditRequestWatch } from "./credit-request";
-import ThreadList from "./ThreadList.vue";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
-import AccountMenu from "./AccountMenu.vue";
 import { once } from "./once";
+import SidebarPlaceholder from "./SidebarPlaceholder.vue";
 import { afterLoad, prefetchChat } from "./preload";
 import { closePanel, panelItem, viewInPanel } from "./side-panel/panel";
 import { useThemeMenu } from "./theme-menu";
@@ -50,13 +48,17 @@ const wide = ref(wideScreen.matches);
 const onWidth = () => (wide.value = wideScreen.matches);
 wideScreen.addEventListener("change", onWidth);
 onBeforeUnmount(() => wideScreen.removeEventListener("change", onWidth));
-// The chats on a phone: a bottom sheet, loaded the first time it opens, or once the page has loaded on a narrow screen.
+// The chats (ChatsPanel.vue), their own chunk. A wide screen fetches it beside the first code
+// (boot-page.ts) and shows a sidebar of the same size until it is here, so nothing moves.
+const loadChatsPanel = once(() => import("./ChatsPanel.vue").then((module) => module.default));
+const ChatsPanel = defineAsyncComponent({ loader: loadChatsPanel, loadingComponent: SidebarPlaceholder, delay: 0 });
+// On a phone: a bottom sheet, loaded the first time it opens, or once the page has loaded on a narrow screen.
 const loadBottomSheet = once(() => import("./bottom-sheet").then((module) => module.BottomSheet));
 const BottomSheet = defineAsyncComponent(loadBottomSheet);
 const sheetOpen = ref(false);
 const sheetUsed = ref(false);
 watch(sheetOpen, (open) => open && (sheetUsed.value = true));
-onMounted(() => afterLoad(() => !wide.value && void loadBottomSheet().catch(() => undefined)));
+onMounted(() => afterLoad(() => !wide.value && void Promise.all([loadBottomSheet(), loadChatsPanel()]).catch(() => undefined)));
 // A request for more credits that waits for an answer: the page checks on it.
 useCreditRequestWatch();
 // Files in the chat (attachments, images from Python) open in the side panel.
@@ -142,20 +144,7 @@ function onSaved() {
 	<div class="contents">
 		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
 			<!-- Phones get the chats in the bottom sheet, so there the sidebar is not drawn at all, not only hidden. -->
-			<Sidebar v-if="wide" class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
-				<AccountMenu title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" />
-				<div class="flex min-h-0 flex-1 flex-col px-2">
-					<ThreadList scroll :highlight="view === 'chat'" @select="pick" />
-				</div>
-				<!-- The main action, under the list: always in the same place, however long the list grows.
-				     Its content starts on the sidebar's edges, like the search field: icon at 16px, label at 40px. -->
-				<div class="px-2 pb-3 pt-3">
-					<Button variant="outline" size="md" icon-left="lucide-square-pen" class="w-full !justify-start !px-2 bg-surface-base transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.98] motion-reduce:transform-none" @click="newThread">New chat</Button>
-				</div>
-				<div v-if="me" class="px-2 pb-2">
-					<CreditMeter :credits="me.credits" />
-				</div>
-			</Sidebar>
+			<ChatsPanel v-if="wide" :name="name" :menu="menu" :highlight="view === 'chat'" @select="pick" @new-chat="newThread" />
 
 			<!-- The page's main landmark, as on the sign-in page: the open chat or Memory. -->
 			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
@@ -188,14 +177,7 @@ function onSaved() {
 		</div>
 
 		<BottomSheet v-if="sheetUsed" v-model:open="sheetOpen" title="Chats">
-			<div class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-				<AccountMenu title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" class="-mx-1 -mt-2" />
-				<Button variant="outline" size="md" icon-left="lucide-square-pen" class="w-full !justify-start !px-2 bg-surface-base" @click="newThread">New chat</Button>
-				<ThreadList :highlight="view === 'chat'" @select="pick" />
-				<div v-if="me" class="border-t border-outline-gray-1 pt-2">
-					<CreditMeter :credits="me.credits" />
-				</div>
-			</div>
+			<ChatsPanel sheet :name="name" :menu="menu" :highlight="view === 'chat'" @select="pick" @new-chat="newThread" />
 		</BottomSheet>
 
 		<SettingsModal v-if="settingsUsed" />
