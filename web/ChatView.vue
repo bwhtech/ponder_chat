@@ -500,7 +500,7 @@ function replyModelId(message: UIMessage) {
 				<img src="/logo.png" alt="" class="size-11" />
 				<div class="space-y-2">
 					<p class="text-4xl-semibold text-ink-gray-9">What's on your mind?</p>
-					<p class="mx-auto max-w-sm text-balance text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything. Auto picks a model for each message, or pick one below; bigger models use more of your daily credits.</p>
+					<p class="mx-auto max-w-sm text-balance text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything.</p>
 				</div>
 			</ConversationEmptyState>
 		</Transition>
