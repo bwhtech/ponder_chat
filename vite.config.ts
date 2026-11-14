@@ -22,6 +22,10 @@ export default defineConfig({
 		outDir: "../dist",
 		emptyOutDir: true,
 		target: "es2022",
+		// frappe-ui's colours are lab(). For an older target the CSS carried each one twice, as a hex
+		// fallback and again under @supports (lab): 85 KB of the chat's first stylesheet. These are
+		// the first versions with lab(); the JS target (es2022 with class static blocks) already needs Safari 16.4.
+		cssTarget: ["chrome111", "edge111", "firefox113", "safari16.4"],
 		// Two pages: the chat (index.html) and the admin pages (admin.html, served at /admin by server/app.ts).
 		rollupOptions: { input: { main: `${here}web/index.html`, admin: `${here}web/admin.html` } },
 	},

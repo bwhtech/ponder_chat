@@ -1,0 +1,45 @@
+/*
+ * Inter for Latin text: frappe-ui's own Inter files (the same version and axes), cut down to
+ * Basic Latin, Latin-1 and Latin Extended-A. 70 KB instead of 264 KB, and 79 KB instead of
+ * 297 KB for italics. These faces come after frappe-ui's, so the browser picks them for the
+ * characters they cover and fetches frappe-ui's whole font only for other text, such as
+ * Greek or Cyrillic. Both names, as frappe-ui declares both. Made with fonttools:
+ *
+ *   pyftsubset node_modules/frappe-ui/src/fonts/Inter/Inter.var.woff2 \
+ *     --unicodes="U+0000-017F,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329" \
+ *     --layout-features='*' --flavor=woff2 --output-file=web/fonts/inter-latin.var.woff2
+ *
+ * and the same for Inter-Italic.var.woff2. Make them again when frappe-ui's Inter changes.
+ */
+@font-face {
+	font-family: "InterVar";
+	font-weight: 100 900;
+	font-display: swap;
+	font-style: normal;
+	src: url("./inter-latin.var.woff2") format("woff2");
+	unicode-range: U+0000-017F, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329;
+}
+@font-face {
+	font-family: "InterVar";
+	font-weight: 100 900;
+	font-display: swap;
+	font-style: italic;
+	src: url("./inter-latin-italic.var.woff2") format("woff2");
+	unicode-range: U+0000-017F, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329;
+}
+@font-face {
+	font-family: "Inter";
+	font-weight: 100 900;
+	font-display: swap;
+	font-style: normal;
+	src: url("./inter-latin.var.woff2") format("woff2");
+	unicode-range: U+0000-017F, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329;
+}
+@font-face {
+	font-family: "Inter";
+	font-weight: 100 900;
+	font-display: swap;
+	font-style: italic;
+	src: url("./inter-latin-italic.var.woff2") format("woff2");
+	unicode-range: U+0000-017F, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329;
+}

@@ -1,4 +1,6 @@
 @import "frappe-ui/style.css";
+/* After frappe-ui's fonts, so its Latin cut wins for Latin text (fonts/inter-latin.css). */
+@import "../fonts/inter-latin.css";
 /* Imported here, where Tailwind reads it, so that its utilities, such as ease-out-strong, also work with variants. */
 @import "frappe-ui-ai-elements/styles.css";
 @import "../base.css";
