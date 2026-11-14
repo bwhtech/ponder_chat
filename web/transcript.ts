@@ -15,11 +15,8 @@ export {
 	MessageCopyAction,
 	MessageParts,
 } from "frappe-ui-ai-elements";
-export { default as ArtifactPart } from "./artifacts/ArtifactPart.vue";
 export { default as CitationChip } from "./cite/CitationChip.vue";
 export { default as CiteButton } from "./cite/CiteButton.vue";
 export { default as CompactionDivider } from "./CompactionDivider.vue";
-export { default as RunPythonPart } from "./RunPythonPart.vue";
 export { default as SkillChip } from "./skills/SkillChip.vue";
-export { default as UseSkillPart } from "./skills/UseSkillPart.vue";
-export { default as WebToolPart } from "./WebToolPart.vue";
+export { default as ToolContext } from "./ToolContext.vue";

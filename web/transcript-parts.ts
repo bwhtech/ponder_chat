@@ -39,13 +39,5 @@ export const CitationChip = part("CitationChip");
 export const CiteButton = part("CiteButton");
 export const CompactionDivider = part("CompactionDivider");
 export const SkillChip = part("SkillChip");
+export const ToolContext = part("ToolContext");
 
-/** How a reply shows its tool calls (provideToolRenderers in ChatView.vue). */
-const WebToolPart = part("WebToolPart");
-export const toolRenderers = {
-	run_python: part("RunPythonPart"),
-	web_search: WebToolPart,
-	web_fetch: WebToolPart,
-	use_skill: part("UseSkillPart"),
-	write_artifact: part("ArtifactPart"),
-};

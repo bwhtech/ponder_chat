@@ -8,9 +8,7 @@ import { client } from "./api";
 import { useAttention } from "./attention";
 import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
 import { connectors, loadConnectors } from "./connectors/api";
-import { connectorLabel } from "./connectors/labels";
 import { useDraft } from "./drafts";
-import { fetchApprovalQuestion } from "./fetch-approval";
 import { canUndo } from "./memory";
 import { MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { useThinking } from "./thinking";
@@ -45,7 +43,7 @@ import {
 	MessageCopyAction,
 	MessageParts,
 	SkillChip,
-	toolRenderers,
+	ToolContext,
 } from "./transcript-parts";
 import {
 	ConversationEmptyState,
@@ -57,8 +55,6 @@ import {
 	PromptInputSubmit,
 	PromptInputTextarea,
 	PromptInputTools,
-	provideToolLabels,
-	provideToolRenderers,
 	Suggestion,
 	Suggestions,
 } from "frappe-ui-ai-elements";
@@ -167,14 +163,6 @@ const uploading = ref(false);
 const uploadError = ref("");
 // What the server can pass to the model; spreadsheets only when Python can read them.
 const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
-// A Python run shows its code, what it printed, and the files it made.
-// Searches and page reads are one line each, so they fold with the steps around them.
-// A skill Ponder chose (use_skill) stays a line of its own, so the person sees which skill shaped the reply.
-// An artifact (write_artifact) is a card that opens it in the side panel.
-provideToolRenderers(
-	toolRenderers,
-	{ foldable: ["web_search", "web_fetch"] },
-);
 
 // Skills: $name in the message box opens the menu (skills/picker.ts); a chosen skill is a chip until the message goes out.
 const composer = ref<HTMLElement | null>(null);
@@ -198,18 +186,14 @@ function askedSkills(message: UIMessage) {
 	return chosenSkills(messages.value[messages.value.indexOf(message) - 1]);
 }
 
-// Connector steps show as "Linear · Create issue", and a search as what it looked for
-// (connectors/labels.ts). When a call waits for approval, "Always allow" saves its rule, then approves.
-// Only a chat with messages shows connector steps: a new chat loads the connectors with its first message.
+// The replies' tool steps show and label themselves through ToolContext.vue, in the transcript.
+// When a call waits for approval, "Always allow" saves its rule, then approves. Only a chat with
+// messages shows connector steps: a new chat loads the connectors with its first message.
 watch(
 	() => messages.value.length > 0,
 	(some) => some && !connectors.value && void loadConnectors().catch(() => undefined),
 	{ immediate: true },
 );
-provideToolLabels((name, part) => {
-	if (name === "web_fetch") return { title: "Read a page", question: fetchApprovalQuestion(messages.value) };
-	return connectorLabel(name, part);
-});
 
 /** The person answered a tool that waited for approval. The answer goes out by itself (sendAutomaticallyWhen). */
 function answerApproval(id: string, approved: boolean) {
@@ -512,108 +496,110 @@ function replyModelId(message: UIMessage) {
 				</div>
 			</ConversationEmptyState>
 		</Transition>
-		<Conversation v-if="!landing">
-			<ConversationContent class="mx-auto w-full max-w-[720px] px-4 pb-8 pt-8 sm:px-5">
-				<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">
-					<Button variant="ghost" size="sm" icon-left="lucide-chevrons-up" @click="showEarlier">
-						Show earlier messages ({{ firstShown }})
-					</Button>
-				</ConversationItem>
-				<ConversationItem
-					v-for="message in shownMessages"
-					:key="message.id"
-					:message-id="message.id"
-					:scroll-anchor="message.role === 'user'"
-					:data-new="shownAtStart.has(message.id) ? undefined : message.role"
-				>
-					<Message :from="message.role">
-						<MessageContent :bare="message.role === 'user'">
-							<div v-if="chosenSkills(message).length || chosenCitations(message).length" data-slot="message-skills" class="flex max-w-full flex-wrap justify-end gap-1.5 self-end">
-								<SkillChip v-for="name in chosenSkills(message)" :key="name" :name="name" />
-								<CitationChip v-for="(citation, index) in chosenCitations(message)" :key="`quote-${index}`" :citation="citation" @reveal="revealQuote(citation)" />
-							</div>
-							<p
-								v-for="name in askedSkills(message)"
-								:key="name"
-								data-slot="asked-skill"
-								class="flex items-center gap-1.5 text-p-sm text-ink-gray-6"
-							>
-								<span class="lucide-sparkles size-3.5 shrink-0" aria-hidden="true" />
-								<span>Used skill <span class="text-ink-gray-7">{{ skillTitle(name) }}</span> · You asked for it</span>
-							</p>
-							<!-- The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). -->
-							<div class="contents" :data-cite-source="message.role === 'assistant' && !isStreaming(message) ? message.id : undefined">
-							<MessageParts
-								:message="message"
-								:streaming="isStreaming(message)"
-								@approve="answerApproval($event, true)"
-								@deny="answerApproval($event, false)"
-							/>
-							</div>
-							<Loader v-if="thinking && message === lastMessage && message.role === 'assistant'" :text="thinkingText" />
-							<MessageActions
-								v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
-								data-reply-actions
-							>
-								<MessageCopyAction
-									:value="replyText(message)"
-									:class="{ 'opacity-0 transition-opacity duration-150 ease-out-strong focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100': message.id !== lastReplyId }"
-								/>
-								<span v-if="replyModel(message)" class="pr-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
-							</MessageActions>
-							<div
-								v-for="{ save, operations } in remembered.get(message.id) ?? []"
-								:key="save.id"
-								data-slot="memory-saved"
-								:data-new="newSaves.has(save.id) || undefined"
-								class="-ml-1 -mt-3 flex flex-wrap items-start gap-x-1 [@media(pointer:coarse)]:mt-0 [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:gap-x-2"
-							>
-								<div class="min-w-0">
-									<button
-										v-for="op in operations"
-										:key="op.memoryId + op.op"
-										type="button"
-										data-slot="memory-note"
-										class="flex w-fit max-w-full items-start gap-2 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-6 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
-										:class="{ 'line-through': save.undoneAt }"
-										title="Open Memory"
-										@click="emit('openMemory')"
-									>
-										<span class="lucide-bookmark mt-0.5 size-4 shrink-0" aria-hidden="true" />
-										<span class="min-w-0"><span class="text-ink-gray-7">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
-									</button>
+		<ToolContext v-if="!landing" :messages="messages">
+			<Conversation>
+				<ConversationContent class="mx-auto w-full max-w-[720px] px-4 pb-8 pt-8 sm:px-5">
+					<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">
+						<Button variant="ghost" size="sm" icon-left="lucide-chevrons-up" @click="showEarlier">
+							Show earlier messages ({{ firstShown }})
+						</Button>
+					</ConversationItem>
+					<ConversationItem
+						v-for="message in shownMessages"
+						:key="message.id"
+						:message-id="message.id"
+						:scroll-anchor="message.role === 'user'"
+						:data-new="shownAtStart.has(message.id) ? undefined : message.role"
+					>
+						<Message :from="message.role">
+							<MessageContent :bare="message.role === 'user'">
+								<div v-if="chosenSkills(message).length || chosenCitations(message).length" data-slot="message-skills" class="flex max-w-full flex-wrap justify-end gap-1.5 self-end">
+									<SkillChip v-for="name in chosenSkills(message)" :key="name" :name="name" />
+									<CitationChip v-for="(citation, index) in chosenCitations(message)" :key="`quote-${index}`" :citation="citation" @reveal="revealQuote(citation)" />
 								</div>
-								<button
-									v-if="canUndo(save)"
-									type="button"
-									data-slot="memory-undo"
-									class="touch-target rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-7 underline decoration-outline-gray-3 underline-offset-2 hover:bg-surface-gray-2 hover:decoration-current hover:text-ink-gray-8 active:bg-surface-gray-3"
-									@click="undoRemembered(save)"
+								<p
+									v-for="name in askedSkills(message)"
+									:key="name"
+									data-slot="asked-skill"
+									class="flex items-center gap-1.5 text-p-sm text-ink-gray-6"
 								>
-									Undo
-								</button>
-								<span v-else-if="save.undoneAt" class="px-1 py-0.5 text-p-sm text-ink-gray-5">Undone</span>
-							</div>
-						</MessageContent>
-					</Message>
-					<CompactionDivider v-if="message.id === summarized" />
-				</ConversationItem>
-				<ConversationItem v-if="thinkingAlone">
-					<Message from="assistant">
-						<MessageContent><Loader :text="thinkingText" /></MessageContent>
-					</Message>
-				</ConversationItem>
-				<ConversationItem v-if="(error || failedBefore) && !outOfCredits">
-					<Alert
-						theme="red"
-						title="Something went wrong"
-						:description="error?.message ?? 'The last reply did not finish. Retry, or choose another model.'"
-						:primary-action="{ label: 'Retry', onClick: () => regenerate() }"
-					/>
-				</ConversationItem>
-			</ConversationContent>
-			<ConversationScrollButton />
-		</Conversation>
+									<span class="lucide-sparkles size-3.5 shrink-0" aria-hidden="true" />
+									<span>Used skill <span class="text-ink-gray-7">{{ skillTitle(name) }}</span> · You asked for it</span>
+								</p>
+								<!-- The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). -->
+								<div class="contents" :data-cite-source="message.role === 'assistant' && !isStreaming(message) ? message.id : undefined">
+								<MessageParts
+									:message="message"
+									:streaming="isStreaming(message)"
+									@approve="answerApproval($event, true)"
+									@deny="answerApproval($event, false)"
+								/>
+								</div>
+								<Loader v-if="thinking && message === lastMessage && message.role === 'assistant'" :text="thinkingText" />
+								<MessageActions
+									v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
+									data-reply-actions
+								>
+									<MessageCopyAction
+										:value="replyText(message)"
+										:class="{ 'opacity-0 transition-opacity duration-150 ease-out-strong focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100': message.id !== lastReplyId }"
+									/>
+									<span v-if="replyModel(message)" class="pr-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
+								</MessageActions>
+								<div
+									v-for="{ save, operations } in remembered.get(message.id) ?? []"
+									:key="save.id"
+									data-slot="memory-saved"
+									:data-new="newSaves.has(save.id) || undefined"
+									class="-ml-1 -mt-3 flex flex-wrap items-start gap-x-1 [@media(pointer:coarse)]:mt-0 [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:gap-x-2"
+								>
+									<div class="min-w-0">
+										<button
+											v-for="op in operations"
+											:key="op.memoryId + op.op"
+											type="button"
+											data-slot="memory-note"
+											class="flex w-fit max-w-full items-start gap-2 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-6 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
+											:class="{ 'line-through': save.undoneAt }"
+											title="Open Memory"
+											@click="emit('openMemory')"
+										>
+											<span class="lucide-bookmark mt-0.5 size-4 shrink-0" aria-hidden="true" />
+											<span class="min-w-0"><span class="text-ink-gray-7">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
+										</button>
+									</div>
+									<button
+										v-if="canUndo(save)"
+										type="button"
+										data-slot="memory-undo"
+										class="touch-target rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-7 underline decoration-outline-gray-3 underline-offset-2 hover:bg-surface-gray-2 hover:decoration-current hover:text-ink-gray-8 active:bg-surface-gray-3"
+										@click="undoRemembered(save)"
+									>
+										Undo
+									</button>
+									<span v-else-if="save.undoneAt" class="px-1 py-0.5 text-p-sm text-ink-gray-5">Undone</span>
+								</div>
+							</MessageContent>
+						</Message>
+						<CompactionDivider v-if="message.id === summarized" />
+					</ConversationItem>
+					<ConversationItem v-if="thinkingAlone">
+						<Message from="assistant">
+							<MessageContent><Loader :text="thinkingText" /></MessageContent>
+						</Message>
+					</ConversationItem>
+					<ConversationItem v-if="(error || failedBefore) && !outOfCredits">
+						<Alert
+							theme="red"
+							title="Something went wrong"
+							:description="error?.message ?? 'The last reply did not finish. Retry, or choose another model.'"
+							:primary-action="{ label: 'Retry', onClick: () => regenerate() }"
+						/>
+					</ConversationItem>
+				</ConversationContent>
+				<ConversationScrollButton />
+			</Conversation>
+		</ToolContext>
 	</div>
 
 	<footer ref="footer" class="scroll-gutter-match flex shrink-0 flex-col gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
