@@ -33,11 +33,14 @@ function leanIcons() {
 }
 leanIcons.postcss = true;
 
-/** The SVG without the comment, the class names and the width and height (the viewBox sizes it). */
+/**
+ * The SVG without the comment, and without the class names, width and height of its root
+ * <svg> (the viewBox sizes it). Only the root's: a <rect> needs its own width and height.
+ */
 function leanSvg(svg) {
 	return svg
 		.replace(/<!--[\s\S]*?-->/g, "")
-		.replace(/\s(class|width|height)="[^"]*"/g, "")
+		.replace(/<svg\b[^>]*>/, (root) => root.replace(/\s(class|width|height)="[^"]*"/g, ""))
 		.replace(/\s+/g, " ")
 		.replace(/\s*(\/?>)\s*/g, "$1")
 		.trim();
