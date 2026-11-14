@@ -74,6 +74,20 @@ assert.equal(rank("ordered", [tool(shop, "find_order", "")]).length, 1);
 assert.equal(rank("listing", [tool(shop, "list_orders", "")]).length, 1);
 assert.equal(rank("creating", [tool(shop, "create_order", "")]).length, 1);
 assert.equal(rank("added", [tool(shop, "add_note", "")]).length, 1);
+// A doubled consonant in words of up to six letters, in names only: in prose, "canned" is not "can".
+for (const [query, name] of [["committed", "commit"], ["submitted", "submit"], ["formatted", "format"], ["cancelled", "cancel"]]) {
+	assert.equal(rank(query!, [tool(shop, `${name}_it`, "")]).length, 1, `${query} → ${name}`);
+}
+for (const [query, text] of [["canned", "You can add one."], ["herring", "Shows her orders."], ["butted", "Lists them, but not all."]]) {
+	assert.deepEqual(rank(query!, [tool(shop, "other", text!)]), [], `${query} in "${text}"`);
+}
+assert.equal(rank("shipping", [tool(shop, "other", "", { type: "object", properties: { ship_to: { type: "string" } } })]).length, 1, "a property's name counts as a name");
+// An exact name with a repeated word ranks first: the tiers see the query's words as they are.
+const repeated = [tool(shop, "list_items", ""), tool(shop, "list_list_items", ""), tool(shop, "get_order_by_id", ""), tool(shop, "get_order_by_order_id", "")];
+assert.equal(names(rank("shop__list_list_items", repeated))[0], "shop__list_list_items");
+assert.equal(names(rank("get_order_by_order_id", repeated))[0], "shop__get_order_by_order_id");
+// Filler words don't use up the scored words: a long sentence still finds its last word.
+assert.deepEqual(names(rank("can you please help me to look up and find the details of the most recent one for my account and then show me the invoice", [tool(shop, "get_invoice", ""), tool(shop, "other", "")])), ["shop__get_invoice"]);
 assert.equal(rank("created", [tool(shop, "create_order", "")]).length, 1);
 // Short words with these endings are other words: "add" is not "ad", "bing" is not "be".
 for (const [query, text] of [["add", "create_ad"], ["bing", "to be updated"], ["ring", "re"], ["used", "us"], ["end", "en"], ["card", "car"], ["feed", "fe"], ["find", "fin"], ["fund", "fun"]]) {
@@ -92,6 +106,14 @@ assert.deepEqual(names(rank("card", [...lookalikes, tool(shop, "charge", "Charge
 // "fee" and "feed" are other words.
 assert.deepEqual(rank("feed", [tool(shop, "get_fee", "")]), []);
 assert.deepEqual(rank("seed", [tool(shop, "see_all", "")]), []);
+// More forms: a doubled consonant, a "y" that turns into "ie", and "ee" words.
+for (const [query, name] of [["shipping", "ship"], ["shipped", "ship"], ["running", "run"], ["stopped", "stop"], ["planned", "plan"], ["categories", "category"], ["copied", "copy"], ["copies", "copy"], ["copying", "copy"], ["seeing", "see"], ["agreeing", "agree"], ["agreed", "agree"], ["played", "play"]]) {
+	assert.equal(rank(query!, [tool(shop, `${name}_it`, "")]).length, 1, `${query} → ${name}`);
+}
+// And words that only look like forms.
+for (const [query, name] of [["being", "bee"], ["incoming", "income"], ["hopped", "hope"], ["listted", "list"], ["sheeing", "she"], ["toies", "toy"]]) {
+	assert.deepEqual(rank(query!, [tool(shop, `${name}_it`, "")]), [], `${query} is not ${name}`);
+}
 // Two words of a name joined: "github" finds searchGitHub and a gitHubRepo property.
 assert.equal(rank("github", [tool(shop, "searchGitHub", "")]).length, 1);
 assert.equal(rank("github", [tool(shop, "search", "", { type: "object", properties: { gitHubRepo: { type: "string" } } })]).length, 1);
@@ -112,6 +134,9 @@ assert.deepEqual(words("cre\u0301er"), words("créer"));
 assert.deepEqual(words("cafe\u0301Bar"), ["café", "bar"]);
 // A "word" of marks alone is not a word.
 assert.deepEqual(words("✏️ Edit"), ["edit"]);
+// Zero-width joiners stay in their word: Persian "می‌خواهم", and a Hindi conjunct.
+assert.deepEqual(words("می\u200Cخواهم"), ["می\u200Cخواهم"]);
+assert.deepEqual(words("क्\u200Dष"), ["क्\u200Dष"]);
 assert.equal(names(rank("订单", [tool(shop, "find_order", "查找 订单")]))[0], "shop__find_order");
 // A typo gets the closest names.
 assert.equal(closestNames("linear__create_isue", tools)[0], "linear__create_issue");
@@ -236,6 +261,41 @@ const given = connectorTools(data, "ana");
 assert.deepEqual(Object.keys(given), ["connector_search", "connector_call"]);
 const options = { toolCallId: "c1", messages: [], context: {} };
 const search = given.connector_search as Tool<{ query: string; limit?: number }>;
+// A query is at most 300 characters, and only its first 16 distinct words are scored: a huge query can't block the server.
+const querySchema = asSchema(search.inputSchema);
+assert.equal((await querySchema.validate!({ query: "x".repeat(300) })).success, true);
+assert.equal((await querySchema.validate!({ query: "x".repeat(301) })).success, false);
+const crowd = new Catalog({
+	...data,
+	tools: Array.from({ length: 500 }, (_, i) => tool(shop, `tool_number_${i}`, "Does something with the records of an order, and returns them with their fields.", bigSchema)),
+});
+crowd.search("warm up");
+// A catalog of about 2.8 million characters, more than catalogFrom's 2 MB limit lets
+// through (it is built here as data, not by catalogFrom), with dense snake_case
+// properties, and 16 query words that match nothing: the worst case for the scoring. Each
+// tool is indexed on the first search (cold); later searches only look words up (warm).
+// Every word is distinct, so no word is shared between tools or fields.
+const dense = (i: number, j: number, k: number) => Array.from({ length: 8 }, (_, n) => `w${i}x${j}y${k}n${n}`).join("_");
+const denseTools = Array.from({ length: 500 }, (_, i) =>
+	tool(shop, `dense_${i}`, "d", { type: "object", properties: Object.fromEntries(Array.from({ length: 25 }, (_, j) => [dense(i, j, 0), { type: "string", description: dense(i, j, 1).replaceAll("_", " ") }])) }),
+);
+assert.ok(JSON.stringify(denseTools).length > 1_900_000, String(JSON.stringify(denseTools).length));
+const denseCatalog = new Catalog({ ...data, tools: denseTools });
+const nothing = Array.from({ length: 16 }, (_, i) => `z${i}`).join(" ");
+let started = performance.now();
+denseCatalog.search(nothing);
+const cold = performance.now() - started;
+started = performance.now();
+for (let i = 0; i < 5; i++) denseCatalog.search(nothing);
+const warm = (performance.now() - started) / 5;
+assert.ok(cold < 500, `a cold search of a 2 MB catalog took ${Math.round(cold)} ms`);
+assert.ok(warm < 100, `a warm search of a 2 MB catalog took ${Math.round(warm)} ms`);
+for (const huge of [Array.from({ length: 2_000 }, (_, i) => `word${i}`).join(" "), "a".repeat(100_000), `${"shop_".repeat(20_000)}__x`]) {
+	const started = performance.now();
+	crowd.search(huge);
+	const took = performance.now() - started;
+	assert.ok(took < 500, `a ${huge.length}-character query took ${Math.round(took)} ms`);
+}
 const searched = (await search.execute!({ query: "find order" }, options)) as { results: { tool: string }[] };
 assert.equal(searched.results[0]!.tool, "shop__find_order");
 const call = given.connector_call as Tool<{ tool: string; input?: Record<string, unknown> }>;
@@ -317,6 +377,56 @@ for (const [name, messages, call, expected] of cases) {
 	await stubbed.execute!(call, { toolCallId: "c1", messages, context: {} });
 	assert.deepEqual(asked, [expected], name);
 }
+
+// A tool the person turned off: a call to it passes the check, asks nothing, never runs,
+// and the model reads that it is off. Such as one turned off while its approval waited.
+const withOff = connectorTools({ ...data, off: [{ name: "shop__old_tool" }] }, "ana", stub);
+const offCall = { tool: "shop__old_tool", input: { anything: 1 } };
+assert.equal((await asSchema(withOff[CONNECTOR_CALL]!.inputSchema).validate!(offCall)).success, true);
+assert.equal(await (withOff[CONNECTOR_CALL]!.needsApproval as (input: unknown, options: unknown) => boolean)(offCall, options), false);
+asked.length = 0;
+// It fails, so the page shows a call that did not run, not a change. The sentence names the tool by its name only: a title is the server's text.
+await assert.rejects(Promise.resolve(withOff[CONNECTOR_CALL]!.execute!(offCall, { toolCallId: "c9", messages: [], context: {} })), /^Error: The person turned shop__old_tool off in Settings, Connectors, so this call did not run\./);
+assert.deepEqual(asked, [], "a tool that is off never reaches the call step");
+
+// Boundaries: 16 scored words count, the 17th does not.
+const wordsBefore = (count: number) => Array.from({ length: count }, (_, i) => `q${i}`).join(" ");
+assert.deepEqual(names(rank(`${wordsBefore(15)} invoice`, [tool(shop, "get_invoice", "")])), ["shop__get_invoice"], "the 16th word is scored");
+assert.deepEqual(rank(`${wordsBefore(16)} invoice`, [tool(shop, "get_invoice", "")]), [], "the 17th word is not");
+// A call name of 200 characters is looked up; one of 201 is refused first.
+const named200 = catalog.check({ tool: "a".repeat(200), input: {} });
+const named201 = catalog.check({ tool: "a".repeat(201), input: {} });
+assert.ok("problem" in named200 && /No connector tool is named/.test(named200.problem));
+assert.ok("problem" in named201 && /That is not a tool name/.test(named201.problem));
+
+// A server's text with a long run of combining marks: NFC sorts a run of marks in time
+// that grows with its square, so runs are cut before Ponder normalizes, and names and
+// titles are cut before they are ranked. Before, this title held up a search for 12.8 s.
+const marks = `a${"\u0301".repeat(50_000)}${"\u0323".repeat(50_000)}`;
+started = performance.now();
+const markWords = words(marks);
+const markCatalog = new Catalog({
+	...data,
+	tools: [
+		{ ...tool({ slug: "mark", name: marks, server: marks }, "x", marks, { type: "object", properties: { [marks]: { type: "string", description: marks } } }), title: marks },
+	],
+});
+markCatalog.search(wordsBefore(16));
+const markTook = performance.now() - started;
+assert.ok(markTook < 1_000, `a title of 100,000 combining marks took ${Math.round(markTook)} ms`);
+assert.ok(Array.from(markWords[0]!).length <= 9, "a letter keeps at most eight marks");
+
+// A long name the model writes, such as a run of capitals, is refused or cut before it is
+// split into words, ranked or repeated: it can't hold up the server.
+const capitals = "A".repeat(100_000);
+started = performance.now();
+words(capitals);
+const checkedLong = catalog.check({ tool: capitals, input: {} });
+closestNames(capitals, tools);
+const longTook = performance.now() - started;
+assert.ok(longTook < 200, `a 100,000-capital name took ${Math.round(longTook)} ms`);
+assert.ok("problem" in checkedLong && checkedLong.problem.length < 200, "the error does not repeat the name");
+assert.ok("problem" in catalog.check({ tool: `${"A".repeat(150)}__x`, input: {} }) && !(catalog.check({ tool: `${"A".repeat(150)}__x`, input: {} }) as { problem: string }).problem.includes("A".repeat(101)));
 
 // Telemetry names the real tool.
 assert.equal(calledToolName({ toolName: "connector_call", input: good }), "shop__find_order");

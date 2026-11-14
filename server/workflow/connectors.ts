@@ -1,7 +1,8 @@
 import { jsonSchema, tool, type ToolSet } from "ai";
 import { z } from "zod";
 import { CONNECTOR_CALL, CONNECTOR_SEARCH } from "../../shared/connectors.ts";
-import { Catalog, MAX_LIMIT, type CatalogData } from "../mcp/catalog.ts";
+import { Catalog, MAX_LIMIT, MAX_TOOL_NAME, offText, type CatalogData } from "../mcp/catalog.ts";
+import { MAX_QUERY_CHARS } from "../mcp/rank.ts";
 import { approvedIn } from "./connector-messages.ts";
 import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
 
@@ -58,7 +59,7 @@ export function connectorTools(data: CatalogData, owner: string, call: CallStep 
 		[CONNECTOR_SEARCH]: tool({
 			description: `Search the tools of the apps the person connected (connectors), named in the <connectors> note. It searches only those tools, not the web. Each result has the tool's exact name and its signature: call it with ${CONNECTOR_CALL}. The query can be words for what you need, such as "create issue"; a tool's exact name; or a connector's slug and two underscores, such as "linear__", which lists that connector's tools.`,
 			inputSchema: z.object({
-				query: z.string().min(1).describe('Words for what you need, such as "list open issues"; a tool\'s exact name; or "<slug>__" for one connector\'s tools.'),
+				query: z.string().min(1).max(MAX_QUERY_CHARS, `The query can have at most ${MAX_QUERY_CHARS} characters.`).describe(`Words for what you need, such as "list open issues"; a tool's exact name; or "<slug>__" for one connector's tools. At most ${MAX_QUERY_CHARS} characters.`),
 				limit: z.number().int().min(1).max(MAX_LIMIT).optional().describe("At most this many results, best first. 8 when left out."),
 			}),
 			execute: async ({ query, limit }) => catalog.search(query, limit),
@@ -69,7 +70,7 @@ export function connectorTools(data: CatalogData, owner: string, call: CallStep 
 				{
 					type: "object",
 					properties: {
-						tool: { type: "string", description: "The tool's exact name, such as linear__create_issue." },
+						tool: { type: "string", maxLength: MAX_TOOL_NAME, description: "The tool's exact name, such as linear__create_issue." },
 						input: { type: "object", description: "The tool's input, fitting its signature. {} when left out." },
 					},
 					required: ["tool"],
@@ -83,11 +84,13 @@ export function connectorTools(data: CatalogData, owner: string, call: CallStep 
 					},
 				},
 			),
-			// The same exact-name lookup as the check. A name it does not find asks: the check refuses that call anyway.
-			needsApproval: (input) => catalog.get(input.tool)?.ask ?? true,
+			// The same exact-name lookup as the check. A tool that is off never runs, so it asks nothing. A name it does not find asks: the check refuses that call anyway.
+			needsApproval: (input) => (catalog.isOff(input.tool) ? false : (catalog.get(input.tool)?.ask ?? true)),
 			execute: async (input, { toolCallId, messages }) => {
 				const checked = catalog.check(input);
 				if ("problem" in checked) return checked.problem;
+				// A failed call, not a result: the page then shows that it did not run, and does not count it as a change.
+				if ("off" in checked) throw new Error(offText(checked.off));
 				return call(checked.tool.connectionId, checked.tool.tool, checked.input, owner, approvedIn(messages, toolCallId, input)).catch(interruptedOrThrow);
 			},
 		}),

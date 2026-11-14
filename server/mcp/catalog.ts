@@ -1,4 +1,4 @@
-import { closestNames, rank, type Rankable } from "./rank.ts";
+import { closestNames, MAX_QUERY_CHARS, rank, type Rankable } from "./rank.ts";
 import { signature } from "./signature.ts";
 import { inputProblems } from "./validate.ts";
 
@@ -40,7 +40,15 @@ export type CatalogData = {
 	connectors: CatalogConnector[];
 	/** Tools that are on but over the limit, left out. */
 	leftOut: number;
+	/**
+	 * The tools the person turned off, by name, so a call to one says so: such as one the
+	 * person turned off while its approval waited. Older recorded runs have none.
+	 */
+	off?: OffTool[];
 };
+
+/** A tool the person turned off, by name only: its title is the server's text, and the model reads Ponder's sentence about it. */
+export type OffTool = { name: string };
 
 export const EMPTY_CATALOG: CatalogData = { tools: [], connectors: [], leftOut: 0 };
 
@@ -73,14 +81,17 @@ const MAX_RESULT_DESCRIPTION = 600;
 /** At most this much of a search's output, in characters of JSON: results past it count as remaining. */
 const MAX_OUTPUT_CHARS = 20_000;
 
-/** The result of checking a connector_call: the tool and its input, or what the model should read. */
-export type Checked = { tool: CatalogTool; input: Record<string, unknown> } | { problem: string };
+/** The result of checking a connector_call: the tool and its input; a tool the person turned off, which never runs; or what the model should read. */
+export type Checked = { tool: CatalogTool; input: Record<string, unknown> } | { off: OffTool } | { problem: string };
 
 export class Catalog {
 	private byName: Map<string, CatalogTool>;
 
+	private offByName: Map<string, OffTool>;
+
 	constructor(readonly data: CatalogData) {
 		this.byName = new Map(data.tools.map((tool) => [tool.name, tool]));
+		this.offByName = new Map((data.off ?? []).map((tool) => [tool.name, tool]));
 	}
 
 	/** True when the person has a connector that is on: then the model gets the two catalog tools. */
@@ -92,7 +103,9 @@ export class Catalog {
 		return this.byName.get(name);
 	}
 
-	search(query: string, limit = DEFAULT_LIMIT): SearchOutput {
+	search(text: string, limit = DEFAULT_LIMIT): SearchOutput {
+		// connector_search refuses a longer query; this keeps the scope's pattern and the ranker short for any caller.
+		const query = text.slice(0, MAX_QUERY_CHARS);
 		const count = Math.min(Math.max(Math.trunc(limit) || DEFAULT_LIMIT, 1), MAX_LIMIT);
 		const unavailable = this.data.connectors.filter((connector) => connector.unavailable).map(unavailableLine);
 		const scoped = this.scope(query);
@@ -110,8 +123,11 @@ export class Catalog {
 	/** Finds the tool by its exact name, and checks the input against its schema. */
 	check(call: { tool?: unknown; input?: unknown }): Checked {
 		if (typeof call.tool !== "string" || !call.tool) return { problem: "Name the tool to call, as connector_search returns it." };
+		if (call.tool.length > MAX_TOOL_NAME) return { problem: `That is not a tool name: a name has at most 64 characters. Find tools with connector_search.` };
 		// The exact name only: needsApproval looks the tool up by the same name, so a padded name must not find it here.
 		const tool = this.get(call.tool);
+		const off = this.offByName.get(call.tool);
+		if (!tool && off) return { off };
 		if (!tool) return { problem: this.unknown(call.tool) };
 		const input = call.input ?? {};
 		if (typeof input !== "object" || Array.isArray(input)) return { problem: `The input for ${tool.name} must be an object. Signature: ${signature(tool.name, tool.inputSchema)}` };
@@ -120,7 +136,14 @@ export class Catalog {
 		return { tool, input: input as Record<string, unknown> };
 	}
 
-	private unknown(name: string) {
+	/** True when the person turned this tool off: a call to it never runs, so it asks nothing. */
+	isOff(name: string) {
+		return !this.byName.has(name) && this.offByName.has(name);
+	}
+
+	private unknown(text: string) {
+		// The model wrote the name: a long one is cut before it is ranked or repeated.
+		const name = text.length > MAX_NAME_SHOWN ? `${text.slice(0, MAX_NAME_SHOWN)}…` : text;
 		const slug = name.includes("__") ? name.slice(0, name.indexOf("__")) : undefined;
 		const connector = this.data.connectors.find((each) => each.slug === slug);
 		if (connector?.unavailable) return `${unavailableText(connector)} Tell the person, and don't try its tools again in this reply.`;
@@ -175,3 +198,12 @@ function toResult(tool: CatalogTool): SearchResult {
 		asksFirst: tool.ask,
 	};
 }
+
+/** What the model reads for a call to a tool the person turned off. */
+export const offText = (tool: OffTool) => `The person turned ${tool.name} off in Settings, Connectors, so this call did not run. Tell them, and don't try it again in this reply.`;
+
+/** Real tool names have at most 64 characters (tools.ts). A longer name is refused before it is looked up or ranked. */
+export const MAX_TOOL_NAME = 200;
+
+/** At most this much of a tool name the model wrote goes back to it in an error. */
+const MAX_NAME_SHOWN = 100;

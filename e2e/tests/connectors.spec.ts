@@ -430,6 +430,30 @@ test("stops asking for a tool that the person always allows", async ({ page, fak
 	expect(shop.tools.find((tool: { name: string }) => tool.name === "add_note").rule).toBe("allow");
 });
 
+test("does not run a call that the person allows after turning its tool off", async ({ page, fake }) => {
+	await addShop(page);
+	const order = orderNumber();
+	await fake.chat({ match: order, steps: [{ toolCalls: [call("shop__add_note", { order, note: "Late" })] }, { text: "That tool is off now." }] });
+
+	await page.goto("/");
+	await chat.send(page, `Add a late note to order ${order}`);
+	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
+	// While the approval waits, the person turns the tool off in another tab.
+	const [shop] = (await (await page.request.get("/api/connectors")).json()).connectors;
+	const off = await page.request.patch(`/api/connectors/${shop.id}`, { data: { rules: { add_note: "off" } } });
+	expect(off.ok(), await off.text()).toBe(true);
+	await page.getByRole("button", { name: "Allow once" }).click();
+	await expect(chat.reply(page)).toContainText("That tool is off now.");
+
+	expect(await serverCalls(page, order)).toEqual([]);
+	// The model reads a short reason, not an input error or the SDK's error names.
+	const sent = JSON.stringify((await fake.calls(order))[1].messages);
+	expect(sent).not.toMatch(/AI_\w+Error|Type validation failed|Invalid input for|Closest tools/);
+	expect(sent).toContain("The person turned shop__add_note off in Settings, Connectors, so this call did not run.");
+	// The page shows a call that did not run, not a change.
+	await expect(chat.reply(page)).not.toContainText("change");
+});
+
 test("checks a call's input against the tool before it asks", async ({ page, fake }) => {
 	await addShop(page);
 	const order = orderNumber();
@@ -491,9 +515,9 @@ test("does not run a tool that the person turned off", async ({ page, fake }) =>
 	await expect(chat.reply(page)).toContainText("I can't look that up.");
 	expect(await serverCalls(page, order)).toEqual([]);
 	const [first, second] = await fake.calls(order);
-	// The tool is not in the catalog: the note leaves it out, and the call gets an error.
+	// The tool is not in the catalog: the note leaves it out, and the call says it is off.
 	expect(JSON.stringify(first.messages)).not.toContain("shop__find_order(");
-	expect(JSON.stringify(second.messages)).toContain('No connector tool is named \\"shop__find_order\\"');
+	expect(JSON.stringify(second.messages)).toContain("The person turned shop__find_order off in Settings, Connectors, so this call did not run.");
 });
 
 test("keeps the instructions and tools the same when the person adds a connector", async ({ page, fake }) => {
