@@ -14,6 +14,8 @@ import { getSettings } from "./settings.ts";
  */
 export async function autoRouterPlugin() {
 	const [models, { autoCostTier }] = await Promise.all([privateModels(), getSettings()]);
+	// OpenRouter reads an empty list as every model, so Auto does not run without one.
+	if (!models.length) throw new Error("No model has a private endpoint now, so Auto can't run. Try again later.");
 	return { id: "auto-router" as const, allowed_models: models.map((model) => model.id), cost_tier: autoCostTier };
 }
 
