@@ -257,7 +257,8 @@ app.use("/assets/*", async (c, next) => {
 	await next();
 	if (c.res.status === 200) c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
 });
-app.use("/*", serveStatic({ root: WEB_BUILD }));
+// The build keeps brotli and gzip copies of its text files, at the highest levels (scripts/compress-web.ts).
+app.use("/*", serveStatic({ root: WEB_BUILD, precompressed: true }));
 
 // An unknown API address answers in the API's shape. Any other is Hono's own 404, as before.
 app.notFound((c) => (c.req.path.startsWith("/api/") ? c.json({ error: "Not found" }, 404) : c.text("404 Not Found", 404)));
