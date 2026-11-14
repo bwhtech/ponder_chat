@@ -18,7 +18,7 @@ const refill = computed(() => `Refills ${fromNow(props.credits.resetsAt)}`);
 			<span class="text-ink-gray-6">Credits left</span>
 			<span class="tabular-nums text-ink-gray-8">
 				<span :class="credits.remaining <= 0 ? 'text-ink-red-6' : low ? 'text-ink-amber-6' : ''">{{ creditCount(credits.remaining) }}</span>
-				<span class="text-ink-gray-5"> / {{ creditCount(credits.limit) }}</span>
+				<span class="text-ink-gray-6"> / {{ creditCount(credits.limit) }}</span>
 			</span>
 		</div>
 		<div

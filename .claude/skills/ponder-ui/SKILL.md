@@ -28,8 +28,8 @@ These rules took the chat and /admin from 6.5 to 10/10 in two design councils. F
 
 - gray-9 for page and section headings.
 - gray-8 for primary content and values.
-- gray-6 for content text: row metadata, emails, descriptions, intros, empty-list lines and status text such as "Not saved".
-- gray-5 for field help text, footnotes, xs timestamps and "/ limit" denominators.
+- gray-6 for content text: row metadata, emails, descriptions, intros, empty-list lines, status text such as "Not saved", the chat list's group labels and the "/ limit" denominators.
+- gray-5 for field help text, footnotes and xs timestamps. It is below 4.5:1 on white and on the sidebar, so Lighthouse flags it on text people need to read.
 - gray-4 only for icons and the "—" placeholder.
 - One red for errors and empty credits: `text-ink-red-6`. Use amber for "running low".
 
