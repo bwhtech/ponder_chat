@@ -24,7 +24,7 @@ const adminBuild = process.env.PONDER_PAGE === "admin";
 
 export default defineConfig(({ command }) => ({
 	root: "web",
-	plugins: [frappeui({ frappeProxy: false, jinjaBootData: false, buildConfig: false }), vue({ compiler }), adminPage()],
+	plugins: [frappeui({ frappeProxy: false, jinjaBootData: false, buildConfig: false }), vue({ compiler }), adminPage(), lazyTooltipBubble()],
 	css: { postcss: here },
 	server: devServer(),
 	resolve: { alias: command === "build" && !adminBuild ? { "vue-router": `${here}web/no-router.ts` } : {} },
@@ -58,6 +58,23 @@ function devServer() {
 		host: "127.0.0.1",
 		allowedHosts: hosts.filter(Boolean),
 		proxy: Object.fromEntries(["/api", "/health", "/oauth"].map((path) => [path, { target: api, changeOrigin: false }])),
+	};
+}
+
+/**
+ * In the chat's build, frappe-ui's Button and Tooltip get web/LazyTooltipBubble.vue in place of
+ * their TooltipBubble.vue, which loads the real one the first time a tooltip opens. Should
+ * frappe-ui rename the file, nothing matches and the real one is bundled as before.
+ */
+function lazyTooltipBubble(): Plugin {
+	return {
+		name: "ponder:lazy-tooltip-bubble",
+		apply: "build",
+		enforce: "pre",
+		resolveId(source, importer) {
+			if (adminBuild || !importer?.includes("/node_modules/frappe-ui/src/components/") || !source.endsWith("/TooltipBubble.vue")) return null;
+			return `${here}web/LazyTooltipBubble.vue`;
+		},
 	};
 }
 
