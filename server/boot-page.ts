@@ -38,7 +38,10 @@ export async function bootPage(c: Context, next: Next) {
 				console.error("boot page:", error);
 				return undefined;
 			});
-			controller.enqueue(encoder.encode(data ? page.tail.replace("</body>", `${script(data)}</body>`) : page.tail));
+			let tail = page.tail;
+			if (data && showsShell(c, data)) tail = tail.replace('<div id="app"></div>', `<div id="app">${shellFor(page.shell, data)}</div>`);
+			if (data) tail = tail.replace("</body>", `${script(data)}</body>`);
+			controller.enqueue(encoder.encode(tail));
 			controller.close();
 		},
 	});
@@ -79,19 +82,41 @@ async function settled<T>(promise: Promise<T>): Promise<T | undefined> {
 	return Promise.race([promise, Promise.resolve(undefined)]);
 }
 
+/**
+ * The new chat's first screen as plain HTML (#ponder-shell in index.html), so the page shows
+ * it as soon as the styles arrive, before its code runs. Only where Vue draws that screen:
+ * for someone signed in, with credits left, on a new chat (not ?t=, a chat, or ?view=memory).
+ */
+function showsShell(c: Context, data: BootData) {
+	return Boolean(data.me && data.me.credits.remaining > 0 && !c.req.query("t") && !c.req.query("view"));
+}
+
+/** The shell, with what ChatView.vue writes differently for this person: the placeholder and the last suggestion. */
+function shellFor(shell: string, data: BootData) {
+	let html = shell;
+	if (!data.skills?.length) html = html.replace("Message Ponder Chat. Type $ for skills", "Message Ponder Chat");
+	if (data.features?.python) html = html.replace("Plan a 3-day trip on a small budget", "Chart compound interest over 20 years");
+	return html;
+}
+
 /** JSON in a script tag that never runs. "<" is escaped, so a chat's title cannot close the tag. */
 function script(data: BootData) {
 	return `<script type="application/json" id="ponder-boot">${JSON.stringify(data).replace(/</g, "\\u003c")}</script>`;
 }
 
-let cached: Promise<{ head: string; tail: string }> | undefined;
+let cached: Promise<{ head: string; tail: string; shell: string }> | undefined;
+
+/** The shell in index.html, with the comment before it: taken out of the page, and put in #app when it fits. */
+const SHELL = /\s*<!--(?:(?!-->)[\s\S])*-->\s*<template id="ponder-shell">([\s\S]*?)<\/template>/;
 
 /** dist/index.html, read once and cut after its head. A failed read is tried again on the next request. */
 function template() {
 	cached ??= readFile(join(WEB_BUILD, "index.html"), "utf8").then(
 		(html) => {
-			const at = html.indexOf("<body>");
-			return at < 0 ? { head: html, tail: "" } : { head: html.slice(0, at), tail: html.slice(at) };
+			const shell = SHELL.exec(html)?.[1]?.trim() ?? "";
+			const page = html.replace(SHELL, "");
+			const at = page.indexOf("<body>");
+			return at < 0 ? { head: page, tail: "", shell } : { head: page.slice(0, at), tail: page.slice(at), shell };
 		},
 		(error: unknown) => {
 			cached = undefined;

@@ -43,6 +43,138 @@
 	</head>
 	<body>
 		<div id="app"></div>
+		<!--
+			The new chat's first screen as plain HTML: the server puts it in #app for someone signed in
+			(server/boot-page.ts), and it shows as soon as the styles arrive, before the code has
+			loaded and run. Vue empties #app when it mounts and draws the same screen in its place.
+			It is a copy of what Workspace.vue and ChatView.vue draw for a new chat on a wide screen,
+			taken from the page, without the sidebar's content. Copy it again when that screen
+			changes: a stale copy shows for a moment, then the page jumps. inert, so nothing in it
+			takes a click or the focus.
+		-->
+		<template id="ponder-shell">
+			<div class="contents" inert aria-hidden="true">
+				<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
+					<nav
+						data-slot="sidebar"
+						aria-label="Chats"
+						class="flex h-full flex-shrink-0 flex-col overflow-x-hidden bg-surface-sidebar transition-[width] duration-300 ease-in-out hidden border-r border-outline-gray-1 md:flex"
+						style="width: 16rem"
+					></nav>
+					<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
+						<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
+							<div class="scroll-gutter-match flex items-center gap-2">
+								<button
+									type="button"
+									aria-label="Chats"
+									class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-[''] inline-flex items-center justify-center gap-2 transition-colors shrink-0 text-ink-gray-8 bg-transparent hover:bg-surface-gray-3 active:bg-surface-gray-4 h-7 w-7 rounded-4"
+								>
+									<span class="lucide-panel-left size-4" aria-hidden="true"></span>
+								</button>
+								<h1 class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9 md:sr-only">New chat</h1>
+								<button
+									type="button"
+									aria-label="New chat"
+									class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-[''] inline-flex items-center justify-center gap-2 transition-colors shrink-0 text-ink-gray-8 bg-transparent hover:bg-surface-gray-3 active:bg-surface-gray-4 h-7 w-7 rounded-4"
+								>
+									<span class="lucide-square-pen size-4" aria-hidden="true"></span>
+								</button>
+							</div>
+						</header>
+						<div class="relative min-h-0 flex-1">
+							<div data-slot="conversation-empty-state" class="flex size-full flex-col items-center justify-center gap-3 p-8 text-center gap-4 !pb-8 sm:!justify-end sm:!pb-6">
+								<img src="/logo.png" alt="" class="size-11" />
+								<div class="space-y-2">
+									<p class="text-4xl-semibold text-ink-gray-9">What's on your mind?</p>
+									<p class="mx-auto max-w-sm text-balance text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything.</p>
+								</div>
+							</div>
+						</div>
+						<footer class="scroll-gutter-match flex shrink-0 flex-col gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+							<div
+								data-slot="suggestions"
+								class="scroll-fade-x scrollbar-none flex w-full min-w-0 gap-2 overflow-x-auto overscroll-x-contain data-[wrap]:flex-wrap data-[wrap]:overflow-visible data-[wrap]:[mask-image:none] -mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]"
+							>
+								<button
+									type="button"
+									data-slot="suggestion"
+									class="shrink-0 rounded-full px-2.5 font-normal !text-ink-gray-6 max-sm:h-8 hover:!text-ink-gray-8 relative after:absolute after:inset-0 after:content-[''] [@media(pointer:coarse)]:after:-inset-y-1.5 sm:[@media(pointer:coarse)]:after:-inset-y-2 transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.97] motion-reduce:transform-none inline-flex items-center justify-center gap-2 transition-colors shrink-0 text-ink-gray-8 bg-surface-base border border-outline-gray-2 hover:border-outline-gray-3 active:border-outline-gray-3 active:bg-surface-gray-4 h-7 text-base px-2 rounded-4"
+								>
+									<span class="truncate leading-tighter">Explain a concept like I'm new to it</span></button
+								><button
+									type="button"
+									data-slot="suggestion"
+									class="shrink-0 rounded-full px-2.5 font-normal !text-ink-gray-6 max-sm:h-8 hover:!text-ink-gray-8 relative after:absolute after:inset-0 after:content-[''] [@media(pointer:coarse)]:after:-inset-y-1.5 sm:[@media(pointer:coarse)]:after:-inset-y-2 transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.97] motion-reduce:transform-none inline-flex items-center justify-center gap-2 transition-colors shrink-0 text-ink-gray-8 bg-surface-base border border-outline-gray-2 hover:border-outline-gray-3 active:border-outline-gray-3 active:bg-surface-gray-4 h-7 text-base px-2 rounded-4"
+								>
+									<span class="truncate leading-tighter">Help me write a polite follow-up email</span></button
+								><button
+									type="button"
+									data-slot="suggestion"
+									class="shrink-0 rounded-full px-2.5 font-normal !text-ink-gray-6 max-sm:h-8 hover:!text-ink-gray-8 relative after:absolute after:inset-0 after:content-[''] [@media(pointer:coarse)]:after:-inset-y-1.5 sm:[@media(pointer:coarse)]:after:-inset-y-2 transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.97] motion-reduce:transform-none inline-flex items-center justify-center gap-2 transition-colors shrink-0 text-ink-gray-8 bg-surface-base border border-outline-gray-2 hover:border-outline-gray-3 active:border-outline-gray-3 active:bg-surface-gray-4 h-7 text-base px-2 rounded-4"
+								>
+									<span class="truncate leading-tighter">Plan a 3-day trip on a small budget</span>
+								</button>
+							</div>
+							<div class="relative">
+								<form
+									data-slot="prompt-input"
+									data-status="ready"
+									class="flex w-full min-w-0 flex-col rounded-7 border border-outline-gray-2 bg-surface-base shadow-sm transition-[border-color,box-shadow] duration-150 ease-out-strong focus-within:border-outline-gray-3 dark:bg-surface-gray-1 data-[dragging]:border-outline-gray-4 data-[dragging]:bg-surface-gray-1"
+								>
+									<div data-slot="prompt-input-textarea" class="flex min-w-0">
+										<textarea
+											placeholder="Message Ponder Chat. Type $ for skills"
+											tabindex="-1"
+											class="text-p-sm rounded-4 min-h-10 py-1.5 px-2.5 border-0 bg-transparent focus:ring-0 focus-visible:outline-none text-ink-gray-8 transition-colors w-full block !min-h-12 w-full resize-none !border-0 !bg-transparent !px-3.5 !pt-3 !text-p-md !tracking-normal !shadow-none !ring-0 focus-visible:!outline-none"
+											rows="1"
+											data-slot="control"
+											data-size="md"
+											data-variant="ghost"
+											aria-label="Message"
+											enterkeyhint="send"
+											style="height: 48px"
+										></textarea>
+									</div>
+									<div data-slot="prompt-input-footer" class="flex min-w-0 items-center justify-between gap-1 px-2 pb-2">
+										<div data-slot="prompt-input-tools" class="flex min-w-0 items-center gap-1 [@media(pointer:coarse)]:gap-2">
+											<button
+												type="button"
+												data-slot="trigger"
+												aria-label="Attach files"
+												class="relative text-ink-gray-6 after:absolute after:-inset-x-1 after:-inset-y-2 after:content-[''] [@media(pointer:coarse)]:after:-inset-x-2 inline-flex items-center justify-center gap-2 transition-colors shrink-0 text-ink-gray-8 bg-transparent hover:bg-surface-gray-3 active:bg-surface-gray-4 h-7 w-7 rounded-4"
+											>
+												<span class="lucide-paperclip size-4" aria-hidden="true"></span>
+											</button>
+											<div class="contents">
+												<div dir="ltr" class="contents">
+													<button
+														type="button"
+														aria-label="Model: Auto"
+														class="min-w-0 max-w-full !text-ink-gray-6 hover:!text-ink-gray-8 relative after:absolute after:inset-0 after:content-[''] [@media(pointer:coarse)]:after:-inset-y-2 inline-flex items-center justify-center gap-2 transition-colors shrink-0 text-ink-gray-8 bg-transparent hover:bg-surface-gray-3 active:bg-surface-gray-4 h-7 text-base px-2 rounded-4"
+													>
+														<span class="truncate leading-tighter">Auto</span><span class="lucide-chevron-down size-4" aria-hidden="true"></span>
+													</button>
+												</div>
+											</div>
+										</div>
+										<button
+											type="submit"
+											disabled=""
+											data-slot="prompt-input-submit"
+											aria-label="Send"
+											class="relative rounded-full after:absolute after:-inset-1.5 after:content-[''] transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.96] motion-reduce:transform-none [&amp;_.lucide-square]:size-3 [&amp;_.lucide-square]:bg-current inline-flex items-center justify-center gap-2 transition-colors shrink-0 bg-surface-gray-2 text-ink-gray-4 h-8 w-8 rounded-4"
+										>
+											<span class="lucide-arrow-up size-4.5" aria-hidden="true"></span>
+										</button>
+									</div>
+								</form>
+							</div>
+						</footer>
+						<div class="hidden flex-1 sm:block" aria-hidden="true"></div>
+					</main>
+				</div>
+			</div>
+		</template>
 		<script type="module" src="./main.ts"></script>
 	</body>
 </html>
