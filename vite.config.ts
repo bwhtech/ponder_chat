@@ -13,23 +13,32 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const fromFrappeUI = createRequire(new URL("node_modules/frappe-ui/package.json", import.meta.url));
 compiler.registerTS(() => fromFrappeUI("typescript"));
 
-export default defineConfig({
+/**
+ * Two pages, built one at a time: the chat (index.html), then the admin pages (admin.html,
+ * served at /admin by server/app.ts) with PONDER_PAGE=admin (npm run build). Built apart,
+ * each page's first chunks hold only its own code, and the chat, which has no router, gets
+ * a stand-in for vue-router (web/no-router.ts) while /admin keeps the real one.
+ */
+const adminBuild = process.env.PONDER_PAGE === "admin";
+
+export default defineConfig(({ command }) => ({
 	root: "web",
 	plugins: [frappeui({ frappeProxy: false, jinjaBootData: false, buildConfig: false }), vue({ compiler }), adminPage()],
 	css: { postcss: here },
 	server: devServer(),
+	resolve: { alias: command === "build" && !adminBuild ? { "vue-router": `${here}web/no-router.ts` } : {} },
 	build: {
 		outDir: "../dist",
-		emptyOutDir: true,
+		// The admin build goes second, beside the chat's files.
+		emptyOutDir: !adminBuild,
 		target: "es2022",
 		// frappe-ui's colours are lab(). For an older target the CSS carried each one twice, as a hex
 		// fallback and again under @supports (lab): 85 KB of the chat's first stylesheet. These are
 		// the first versions with lab(); the JS target (es2022 with class static blocks) already needs Safari 16.4.
 		cssTarget: ["chrome111", "edge111", "firefox113", "safari16.4"],
-		// Two pages: the chat (index.html) and the admin pages (admin.html, served at /admin by server/app.ts).
-		rollupOptions: { input: { main: `${here}web/index.html`, admin: `${here}web/admin.html` } },
+		rollupOptions: { input: adminBuild ? { admin: `${here}web/admin.html` } : { main: `${here}web/index.html` } },
 	},
-});
+}));
 
 /**
  * `npm run dev` (scripts/dev.ts): Vite serves the pages and sends the server's paths to
