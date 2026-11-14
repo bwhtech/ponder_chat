@@ -14,6 +14,7 @@ import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import { displayName } from "./admin/people.ts";
 import { appOrigin, auth, type SignedInEnv } from "./auth.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
+import { sessionOf } from "./session-cache.ts";
 import { creditStatus } from "./credits.ts";
 import { askForCredits } from "./extra-credits.ts";
 import { listThreads, renameThread, sql } from "./db.ts";
@@ -86,7 +87,7 @@ app.get("/oauth/mcp/callback", oauthCallback);
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 app.use("/api/*", async (c, next) => {
-	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	const session = await sessionOf(c.req.raw.headers);
 	if (!session) return c.json({ error: "Sign in first." }, 401);
 	c.set("user", session.user);
 	await next();

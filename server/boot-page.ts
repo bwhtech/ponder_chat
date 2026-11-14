@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Context, Next } from "hono";
-import { auth, type SignedIn } from "./auth.ts";
+import type { SignedIn } from "./auth.ts";
 import { roleOf } from "./admins.ts";
 import { creditStatus } from "./credits.ts";
 import { listThreads } from "./db.ts";
 import { cachedModels } from "./models.ts";
+import { sessionOf } from "./session-cache.ts";
 import { activeSkills } from "./skills.ts";
 import { pythonReady } from "./startup.ts";
 import { WEB_BUILD } from "./web-build.ts";
@@ -65,7 +66,7 @@ export async function skillOptions() {
 }
 
 async function bootData(headers: Headers): Promise<BootData> {
-	const session = await auth.api.getSession({ headers });
+	const session = await sessionOf(headers);
 	if (!session) return { me: null };
 	const [me, threads, skills] = await Promise.all([meOf(session.user), listThreads(session.user.id), skillOptions()]);
 	// Only what is ready now: the models wait for OpenRouter on a cold start, and the page asks for them itself then.
