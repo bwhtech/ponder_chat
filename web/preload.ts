@@ -15,7 +15,9 @@ export function preloadChat() {
 
 /**
  * Downloads the chat's later code, without running it: the server lists its files (boot.ts).
- * Without the list (npm run dev), it loads the code instead.
+ * The list also has what a first tap waits for (settings, memory, the side panel, a dialog, the
+ * model menu), and for an admin the /admin page's files, so those open from the cache.
+ * Without the list (npm run dev), it loads the chat's later code instead.
  */
 export function prefetchChat() {
 	const files = fromBoot("prefetch");
