@@ -2,6 +2,9 @@ import { randomUUID } from "node:crypto";
 import { context, isSpanContextValid, propagation, trace, TraceFlags, type Context } from "@opentelemetry/api";
 import type { SpanExporter } from "@opentelemetry/sdk-trace";
 import type { Telemetry } from "ai";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as PonderConfig from "../config.ts";
 import { listenToHttp } from "./http.ts";
 import { addTraceIdToLogs } from "./logs.ts";
 import { PrivacyExporter } from "./privacy.ts";
@@ -10,15 +13,18 @@ import { setTracingState, tracingState, type TracingState } from "./state.ts";
 /**
  * Tracing: each reply is one trace, sent with OTLP over HTTP to OTEL_EXPORTER_OTLP_ENDPOINT
  * (Jaeger on the same machine: deploy/jaeger.yaml). Without it, tracing is off: nothing
- * here is loaded, and the spans that Workflow and span.ts start record nothing.
+ * here is loaded, and the spans that Workflow and Ponder start record nothing.
  *
  * Only what Ponder needs: a tracer provider, a batch of spans, an exporter. No automatic
  * instrumentations, no module hooks. Workflow (@workflow/core) makes its own spans once a
  * provider is registered. The AI SDK makes its own through @ai-sdk/otel (telemetry/Telemetry.ts).
  * HTTP spans come from http.ts. One reply is one trace through reply-trace.ts.
  */
-export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT, exporter?: SpanExporter): Promise<TracingState | undefined> {
-	if (!endpoint || tracingState()) return tracingState();
+export async function startTracing(endpoint?: string, exporter?: SpanExporter): Promise<TracingState | undefined> {
+	if (tracingState()) return tracingState();
+	const config = settings();
+	endpoint ??= Option.getOrUndefined(config.otlpEndpoint);
+	if (!endpoint) return undefined;
 	// Before anything is registered, so a wrong setting leaves tracing off and nothing half set.
 	const url = tracesUrl(endpoint);
 	const [{ TracerProvider, BatchSpanProcessor }, { AsyncLocalStorageContextManager }, { W3CTraceContextPropagator }, { resourceFromAttributes }, { OTLPTraceExporter }, { OpenTelemetry, OpenTelemetryIdGenerator }] =
@@ -41,7 +47,7 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 		idGenerator: ids,
 		sampler: ids,
 		resource: resourceFromAttributes({
-			"service.name": process.env.OTEL_SERVICE_NAME || "ponder-chat",
+			"service.name": config.otelServiceName,
 			// Tells the processes apart, such as the one that crashed and the one that went on.
 			"service.instance.id": randomUUID(),
 		}),
@@ -52,7 +58,7 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 				exporter: new PrivacyExporter(exporter ?? new OTLPTraceExporter({ url: url.href, timeoutMillis: EXPORT_TIMEOUT_MS })),
 				exportTimeoutMillis: EXPORT_TIMEOUT_MS,
 				// How long spans wait to be sent in one batch. The e2e tests make it short.
-				scheduledDelayMillis: Number(process.env.OTEL_BSP_SCHEDULE_DELAY) || 2_000,
+				scheduledDelayMillis: config.otelBatchDelayMs,
 			}),
 		],
 	});
@@ -71,7 +77,7 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 			usage: true,
 		}),
 	);
-	const stopListening = listenToHttp(url.origin);
+	const stopListening = listenToHttp(url.origin, config.openRouterBaseUrl);
 	addTraceIdToLogs();
 	const state: TracingState = {
 		ids,
@@ -89,6 +95,15 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 }
 
 const EXPORT_TIMEOUT_MS = 2_000;
+
+/**
+ * The settings, read through PonderConfig as the app's runtime reads them, but on their
+ * own: tracing starts before the runtime is built (plugins/tracing.ts), so the tracer is
+ * registered before anything makes a span. Reading the environment can't fail or wait.
+ */
+function settings() {
+	return Effect.runSync(PonderConfig.PonderConfig.use(Effect.succeed).pipe(Effect.provide(PonderConfig.layer)));
+}
 
 /**
  * The name of the span that @effect/sql-pg makes for a statement: the client's database
@@ -120,7 +135,8 @@ export function tracesUrl(endpoint: string): URL {
 /**
  * Sends the spans still in the batch, for at most `timeoutMs`. Called on SIGTERM
  * (startup.ts) after the database is closed, so a collector that is down or hangs never
- * holds up the stop: the spans that are left are lost.
+ * holds up the stop: the spans that are left are lost. The app's runtime is disposed by
+ * then, so this is plain code: a timer, and the console for its two lines.
  */
 export async function stopTracing(timeoutMs = 2_000) {
 	const state = tracingState();

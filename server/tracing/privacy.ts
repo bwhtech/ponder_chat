@@ -90,7 +90,7 @@ const TEXT_KEYS = new Set([
 	"server.address",
 	"error.type",
 	"error.category",
-	// Ponder's own (span.ts callers).
+	// Ponder's own attributes (Tracing.annotate, reply-trace.ts).
 	"ponder.outcome",
 	"ponder.peer",
 	"ponder.content_type",

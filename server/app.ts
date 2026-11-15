@@ -24,19 +24,16 @@ import { memoryApi } from "./memory/routes.ts";
 import * as Models from "./models/Models.ts";
 import type { LimitName } from "./limits/RateLimits.ts";
 import { limitPerPerson } from "./rate-limit.ts";
+import * as Sandbox from "./python/pyodide.ts";
 import { searchThreads } from "./thread-search.ts";
 import * as Database from "./runtime/Database.ts";
 import { route } from "./runtime/route.ts";
-import { runPromise } from "./runtime/runtime.ts";
-import { pythonReady } from "./startup.ts";
-import { isFirstMessage, nameThread } from "./thread-title.ts";
 import { threadResponse } from "./thread-cache.ts";
 import * as Threads from "./threads/Threads.ts";
 import * as Runs from "./telemetry/Runs.ts";
-import { recordReplySpan, withReplyTrace } from "./tracing/reply-trace.ts";
 import { validate } from "./validate.ts";
 import { WEB_BUILD } from "./web-build.ts";
-import { deleteChat, followReply, startReply, stopReply, whenReplyFinished } from "./workflow/replies.ts";
+import * as Replies from "./workflow/replies.ts";
 
 /**
  * The HTTP API, served by Nitro (nitro.config.ts), which also compiles the chat workflow
@@ -130,7 +127,7 @@ const api = app
 	.route("/api/connectors", connectorsApi)
 
 	// Whether the chat can run Python, for the attach button.
-	.get("/api/features", async (c) => c.json({ python: await pythonReady }))
+	.get("/api/features", (c) => route(c, Effect.map(Sandbox.Sandbox.use((sandbox) => sandbox.ready), (python) => c.json({ python }))))
 
 	// The models a person can pick (only those with Zero Data Retention), and the one picked when they have not chosen.
 	.get("/api/models", (c) =>
@@ -192,50 +189,78 @@ const api = app
 	)
 
 	// A reply still running stops first (workflow/replies.ts).
-	.delete("/api/threads/:id", async (c) =>
-		(await deleteChat(c.req.param("id"), userOf(c))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404),
+	.delete("/api/threads/:id", (c) =>
+		route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.remove(c.req.param("id"), userOf(c))),
+				(deleted) => (deleted ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404)),
+			),
+		),
 	)
 
 	.get("/api/threads/:id", (c) => route(c, threadResponse(c, c.req.param("id"), userOf(c))))
 
 	// A run with no messages fails before it writes, and its stream would never close, so chatBody refuses it.
-	.post("/api/chat", perPerson("chat", { plain: true }), validate("json", chatBody, { error: "Nothing to send.", plain: true }), async (c) => {
+	// The chat transport shows the response text as the error, so its errors are plain text.
+	// The chat routes answer a stream, so their type is Response, as it always was: the chat transport reads them.
+	.post("/api/chat", perPerson("chat", { plain: true }), validate("json", chatBody, { error: "Nothing to send.", plain: true }), (c): Promise<Response> => {
 		const body = c.req.valid("json");
-		// The chat transport shows the response text as the error, so this one is plain text.
-		const checking = Date.now();
-		const credits = await route(c, Credits.Credits.use((credits) => credits.status(userOf(c))));
-		const checked = Date.now();
-		if (credits.remaining <= 0) return c.text(outOfCredits(credits.resetsAt), 402);
-		const reply = await startReply({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model });
-		if (!reply) return c.json({ error: "Not found" }, 404);
-		// Measured before the run had an id, so recorded into its trace now (server/tracing/reply-trace.ts).
-		if (!reply.followed) recordReplySpan(reply.runId, "credits.check", checking, checked);
-		// A new thread gets a name from a cheap model while the reply is written (thread-title.ts).
-		if (!reply.followed && isFirstMessage(body.messages)) withReplyTrace(reply.runId, () => void runPromise(nameThread({ threadId: body.id, user: userOf(c) }, body.messages)));
-		return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
+		return route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.start({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model })),
+				(reply) => createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } }),
+			),
+			{
+				OutOfCredits: (error, c) => c.text(error.message, 402),
+				ThreadNotYours: (_, c) => c.json({ error: "Not found" }, 404),
+			},
+		);
 	})
 
 	// A reply, from its start or from `startIndex` (the UI chunks the page already has).
 	// :id is the thread (a reloaded page) or the run (WorkflowChatTransport after a dropped
 	// connection). 204 when the thread has no run.
-	.get("/api/chat/:id/stream", validate("query", streamQuery), async (c) => {
-		const reply = await followReply(c.req.param("id"), userOf(c), c.req.valid("query").startIndex);
-		if (!reply) return c.body(null, 204);
-		return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
-	})
+	.get("/api/chat/:id/stream", validate("query", streamQuery), (c): Promise<Response> =>
+		route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.follow(c.req.param("id"), userOf(c), c.req.valid("query").startIndex)),
+				Option.match({
+					onNone: () => c.body(null, 204),
+					onSome: (reply) => createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } }),
+				}),
+			),
+		),
+	)
 
 	// Stop: closing the request does not end a run; this does.
-	.post("/api/chat/:id/stop", async (c) => c.json({ stopped: await stopReply(c.req.param("id"), userOf(c)) }))
+	.post("/api/chat/:id/stop", (c) =>
+		route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.stop(c.req.param("id"), userOf(c))),
+				(stopped) => c.json({ stopped }),
+			),
+		),
+	)
 
 	// Memory (server/memory/routes.ts): what Ponder remembers about the person, and the decisions behind it.
 	.route("/api/memory", memoryApi)
 
 	// A chat's memory decisions. With ?wait=1, first waits for the reply to be saved and its memory save to end.
-	.get("/api/threads/:id/memory", validate("query", memoryQuery), async (c) => {
+	.get("/api/threads/:id/memory", validate("query", memoryQuery), (c) => {
 		const threadId = c.req.param("id");
 		const wait = Boolean(c.req.valid("query").wait);
-		if (wait) await whenReplyFinished(threadId);
-		return route(c, Effect.map(Memory.Memory.use((memory) => memory.threadSaves(userOf(c), threadId, { settle: wait })), (saves) => c.json({ saves })));
+		const saved = wait ? Replies.Replies.use((replies) => replies.whenFinished(threadId)) : Effect.void;
+		return route(
+			c,
+			saved.pipe(
+				Effect.andThen(Memory.Memory.use((memory) => memory.threadSaves(userOf(c), threadId, { settle: wait }))),
+				Effect.map((saves) => c.json({ saves })),
+			),
+		);
 	})
 
 	// The upload is a form, read by the route: a form validator would read the body
@@ -318,6 +343,8 @@ app.notFound((c) => (c.req.path.startsWith("/api/") ? c.json({ error: "Not found
 app.onError((error, c) => {
 	// A refusal that a route or middleware threw carries its own answer.
 	if (error instanceof HTTPException) return error.getResponse();
+	// The console, as Effect's logger writes it: Hono calls this without waiting, and the
+	// error may be the runtime's own, such as one that could not be built.
 	console.error(`request failed: ${c.req.method} ${c.req.path}:`, error);
 	const message = "Something went wrong. Try again.";
 	if (isChat(c.req.path)) return c.text(message, 500);
@@ -329,11 +356,6 @@ export default app;
 /** The chat routes answer in plain text: the chat transport shows the response text as the error. */
 function isChat(path: string) {
 	return path === "/api/chat" || path.startsWith("/api/chat/");
-}
-
-function outOfCredits(resetsAt: string) {
-	const hours = Math.max(1, Math.ceil((new Date(resetsAt).getTime() - Date.now()) / 3_600_000));
-	return `You have used today's credits. They refill in about ${hours} hour${hours === 1 ? "" : "s"}.`;
 }
 
 const INLINE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json"]);

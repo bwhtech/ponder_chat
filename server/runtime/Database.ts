@@ -5,7 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
-import type { SqlError } from "effect/sql/SqlError";
+import { isSqlError, type SqlError } from "effect/sql/SqlError";
 import * as PonderConfig from "../config.ts";
 
 /**
@@ -18,8 +18,8 @@ import * as PonderConfig from "../config.ts";
  * old pool did. Notices ("already exists, skipping" from the migrations) are dropped by
  * the client, as `onnotice: () => {}` did.
  *
- * Until Phase 3, db.ts's postgres.js pool runs next to this one, for the modules not on
- * Effect yet: two pools, up to 20 connections.
+ * The only pool of the server's own code (better-auth and Workflow keep theirs). The
+ * workflow worker's lock holds one of its connections for as long as the server runs (startup.ts).
  */
 export const layer = Layer.unwrap(
 	Effect.gen(function* () {
@@ -71,4 +71,13 @@ export function pgCode(error: SqlError): string | undefined {
 export function sqlMessage(error: SqlError): string {
 	const cause = error.reason.cause;
 	return Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message) ? cause.message : error.message;
+}
+
+/**
+ * A failure's text for a log line: Postgres's own message for a SqlError (sqlMessage), else
+ * the error's message, else the value. What `error instanceof Error ? error.message : error` printed.
+ */
+export function problem(error: unknown): unknown {
+	if (isSqlError(error)) return sqlMessage(error);
+	return error instanceof Error ? error.message : error;
 }

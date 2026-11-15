@@ -65,6 +65,12 @@ export class Sandbox extends Context.Service<
 		readonly enabled: boolean;
 		/** Checks at start-up that Deno and the cached packages are there. Turns Python off with a log line if not. */
 		readonly check: Effect.Effect<boolean>;
+		/** Whether Python is on: the start-up check's answer, once it has one. /api/features and the replies wait for it. */
+		readonly ready: Effect.Effect<boolean>;
+		/** The check's answer, or none while it runs: the chat page's first screen does not wait (boot-page.ts). */
+		readonly readyNow: Effect.Effect<Option.Option<boolean>>;
+		/** Python is off for this start, because start-up failed before the check (startup.ts): nothing waits for it forever. */
+		readonly turnOff: Effect.Effect<void>;
 		/**
 		 * Runs the code in a new process, in its turn. A run that fails, or that the server
 		 * stops, is a reply with `ok: false`, not a failure. Interrupting the run ends its process.
@@ -83,7 +89,9 @@ const make = Effect.gen(function* () {
 	// first. A PYTHON_MAX_RUNS that is not a number never held a run back before.
 	const slots = yield* Semaphore.make(Number.isNaN(config.pythonMaxRuns) ? Number.POSITIVE_INFINITY : config.pythonMaxRuns);
 
-	const check = Effect.gen(function* () {
+	const answer = yield* Deferred.make<boolean>();
+
+	const checkNow = Effect.gen(function* () {
 		if (!config.pythonEnabled) return false;
 		const files = yield* Effect.tryPromise(async () => {
 			await readFile(`${dir}node_modules/pyodide/pyodide.asm.wasm`);
@@ -97,6 +105,7 @@ const make = Effect.gen(function* () {
 		if (Option.isNone(version)) yield* Effect.logWarning(`python: Deno was not found (${deno}). Set PONDER_DENO. Python is off.`);
 		return Option.isSome(version);
 	});
+	const check = Effect.tap(checkNow, (on) => Deferred.succeed(answer, on));
 
 	const runNow = (request: RunRequest) =>
 		Effect.gen(function* () {
@@ -170,7 +179,14 @@ const make = Effect.gen(function* () {
 		);
 	});
 
-	return Sandbox.of({ enabled: config.pythonEnabled, check, run });
+	return Sandbox.of({
+		enabled: config.pythonEnabled,
+		check,
+		ready: Deferred.await(answer),
+		readyNow: Effect.flatMap(Deferred.isDone(answer), (done) => (done ? Effect.map(Deferred.await(answer), Option.some) : Effect.succeedNone)),
+		turnOff: Effect.asVoid(Deferred.succeed(answer, false)),
+		run,
+	});
 });
 
 export const layer = Layer.effect(Sandbox, make);

@@ -9,16 +9,16 @@ Effect is `effect` 4.1.1. The agent docs in `~/src/t3code/.repos/effect-smol/` a
 | File | What it holds |
 | --- | --- |
 | `server/runtime/layer.ts` | The app's layer: every service. Add a new service here. |
-| `server/runtime/runtime.ts` | The one `ManagedRuntime`, on `globalThis`. `runPromise` for code that is not on Effect yet. `dispose` for SIGTERM. |
+| `server/runtime/runtime.ts` | The one `ManagedRuntime`, on `globalThis`. `runPromise` for the edges that are not a route, a step or a script (startup.ts, check scripts). `dispose` for SIGTERM. |
 | `server/runtime/route.ts` | `route(c, effect, errors?)`: the boundary for Hono routes. |
 | `server/runtime/step.ts` | `runStep(effect, rules?)`: the boundary for workflow steps. |
 | `server/runtime/main.ts` | `runMain(effect)`: the boundary for scripts. |
-| `server/runtime/Database.ts` | The `PgClient` layer (one pool), `ping`, and `pgCode` and `sqlMessage` for a `SqlError`. |
+| `server/runtime/Database.ts` | The `PgClient` layer (one pool), `ping`, and `pgCode`, `sqlMessage` and `problem` (a failure's text for a log line). |
 | `server/runtime/Http.ts` | Effect's `HttpClient` on fetch, with its own spans off, and `requestProblem` for log lines. |
 | `server/config.ts` | `PonderConfig`: every environment variable. |
-| `server/tracing/Tracing.ts` | Effect's tracer on Ponder's OpenTelemetry provider, and `annotate`. |
+| `server/tracing/Tracing.ts` | Effect's tracer on Ponder's OpenTelemetry provider, `annotate`, and `errorType` for `error.type`. |
 | `server/tracing/Logger.ts` | Effect's logger, in Ponder's console format. |
-| `server/db.ts` | **Temporary.** The postgres.js `sql` for modules not on Effect yet. Phase 3 removes it. |
+| `server/tracing/reply-trace.ts` | One trace per reply: `inReplyTrace(runId)` for Effect code, and the plain OpenTelemetry spans with given times (see "Tracing"). |
 
 The platform services (Phase 1). Each module has its service, its errors, and the pure helpers that go with it:
 
@@ -51,14 +51,14 @@ Plain modules, with no I/O and no environment: `server/hosts.ts` (`isLocalHost`,
 7. **Time and waits.** `Clock`, `DateTime`, `Duration`, `Effect.sleep`, `Effect.timeout`, `Schedule`. No `setTimeout`, `Date.now()` or `new AbortController()` in services. For `fetch` or the AI SDK, use the signal of `Effect.tryPromise((signal) => ...)`.
 8. **Resources.** Close what must be closed with `Effect.acquireRelease` or `Effect.ensuring`, in a `Scope`.
 9. **Logs.** `Effect.logWarning`, `Effect.logError`, `Effect.log`: not `console.*`. Keep the text of the line as it was. See "Logging".
-10. **Configuration.** Read environment variables only through `PonderConfig`. No `process.env` in other modules (the old modules still have theirs until their phase).
+10. **Configuration.** Read environment variables only through `PonderConfig`. No `process.env` in other modules. `tracing/setup.ts` reads `PonderConfig` on its own, before the runtime exists.
 11. **Database.** `PgClient` from `@effect/sql-pg` (it is also `SqlClient`). Decode rows with `SqlSchema` and `Schema`. Work that must happen together goes in `sql.withTransaction`. Keep the SQL text.
-12. **Boundaries.** Run effects only through `server/runtime/`: `route`, `runStep`, `runMain`, and `runPromise` for unconverted callers. No `runPromise` in a service, a repository or a layer.
+12. **Boundaries.** Run effects only through `server/runtime/`: `route`, `runStep`, `runMain`, and `runPromise` for the other edges (startup.ts, check scripts). No `runPromise` in a service, a repository or a layer.
 13. **One runtime**, on `globalThis` (see "Runtime").
 14. **Tracing** goes to the provider of `server/tracing/setup.ts` (see "Tracing").
 15. **Tests.** `*.test.ts` with `@effect/vitest`. Test layers only for outside systems. No mocks of the logic under test, no sleeps or polling. The `*.check.ts` scripts stay and must pass.
 16. **Comments** say why, in short plain sentences. Move them with the code.
-17. **No shims.** Update every caller of a moved function. The only deliberate exceptions: `server/db.ts`'s `sql` (until Phase 3), `runPromise` in `runtime.ts` (until the last caller is on Effect), and `Telemetry`'s `Effect.runPromiseWith` for the AI SDK's callbacks into `RunRecorder`, on the services of its layer.
+17. **No shims.** Update every caller of a moved function. The deliberate exceptions are the boundaries: `runPromise` in `runtime.ts` for startup.ts and the check scripts, and `Effect.runPromiseWith` where a library calls Ponder back with a plain function: `Telemetry` (the AI SDK's `RunRecorder`), `Auth` (Better Auth's hooks) and `ConnectorOAuth` (@ai-sdk/mcp's OAuth provider).
 
 ## A service module
 
@@ -88,7 +88,7 @@ const make = Effect.gen(function* () {
 		execute: (id) => sql`select owner from threads where id = ${id}`,
 	});
 
-	// The span's name and attribute are the ones span.ts gave it: tracing.spec.ts looks for them.
+	// The span's name and attribute are the ones it had before Effect: tracing.spec.ts looks for them.
 	const load = Effect.fn("thread.load")(function* (id: string) {
 		const row = yield* findMessages(id).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 		const messages = Option.match(row, { onNone: (): UIMessage[] => [], onSome: (found) => found.messages });
@@ -137,7 +137,7 @@ const steps = config.maxSteps; // CHAT_MAX_STEPS, default 10
 
 - The layer reads the environment once, when the runtime is built. Some modules read `process.env` at each call before (notify.ts, secrets.ts, net-guard.ts, tracing/http.ts). On `PonderConfig`, they see the value at start: `NOTIFY_URL`, the keys of `Secrets` and `MCP_ALLOW_PRIVATE_NETWORKS` (`NetGuard`) are read once. Nothing changes the environment in production, and the e2e server gets its environment before it starts. A check script that sets `process.env` must do it before the runtime is built: `server/mcp.check.ts` sets `MCP_ALLOW_PRIVATE_NETWORKS=1` at its top, and checks the strict guard on a `NetGuard` layer of its own (`PonderConfig.layerFromEnv({})`).
 - Empty values keep the old rule of each module: `X ?? default` kept `""`; `X || default` and `if (!X)` did not. The field's comment says "Empty = missing" for the second kind.
-- `PONDER_TOOL_APPROVAL_SECRET`: the field is what the operator set. startup.ts still derives it from `BETTER_AUTH_SECRET` and writes it to `process.env` for workflow/approvals.ts. Phase 3 moves this to a value in the runtime.
+- `PONDER_TOOL_APPROVAL_SECRET`: the field is what the operator set. `toolApprovalSecret` (`server/workflow/approval-secret.ts`) gives it, or one derived from `BETTER_AUTH_SECRET`; the approval steps read it through `runStep`, and startup checks it once.
 - Tests: `PonderConfig.layerFromEnv({ DATABASE_URL: url })`.
 - To add a variable: add the field with its comment, read it with `raw("NAME")` in `make`, and add a case to `server/config.test.ts`.
 
@@ -172,7 +172,7 @@ Differences from postgres.js that later phases must handle:
 - **The client reads only `DATABASE_URL`.** postgres.js also read `PGUSER`, `PGPASSWORD`, `PGHOST` and the others, and treated `sslmode=require` as "encrypt, but don't verify the certificate". Here `sslmode=require` verifies it. Every Ponder deployment puts the user and password in `DATABASE_URL` and connects to 127.0.0.1 without TLS, so neither matters today. A deployment that needs them must say so in `DATABASE_URL`, or pass `ssl` options in the layer.
 - **Interrupting a query waits for the client to cancel it** on the server: seconds, on a hung connection. A deadline that a person waits on runs the query in a fiber of its own, as `Database.pingWithin` does for /health.
 
-Until Phase 3 two pools run: postgres.js (`server/db.ts`) and `PgClient`. Up to 20 connections, plus better-auth's 5 and Workflow's own.
+postgres.js is gone from the server: `PgClient` is its only pool (10), plus better-auth's 5 and Workflow's own. The workflow worker's lock (startup.ts) holds one of the 10 for as long as the server runs. The `postgres` package stays in `package.json` for the e2e tests and `scripts/demo/seed.ts`.
 
 ## Outbound HTTP
 
@@ -219,6 +219,34 @@ Until Phase 3 two pools run: postgres.js (`server/db.ts`) and `PgClient`. Up to 
 - Hono middleware stays middleware and calls the services through `route` (the session check in app.ts, `requireAdmin`, `limitPerPerson` in `server/rate-limit.ts`).
 - Credits read the day from `Clock`; the tests give a fixed wall clock (`server/credits/Credits.test.ts`). The rate-limit windows run on `Clock` too (`TestClock` in `server/limits/RateLimits.test.ts`).
 - The tests that need `users` run in a schema of their own: `?options=-csearch_path=<schema>` on `TEST_DATABASE_URL`, dropped at the end. Other test files make and drop a `users` table of another shape at the same time.
+
+## The reply engine
+
+`server/workflow/` holds two kinds of code.
+
+- **Workflow code**, which the `"use workflow"` body (`chat.ts`) loads statically, and Workflow DevKit replays in its sandbox: `chat.ts`, `loop.ts`, `approvals.ts`, `connectors.ts`, `connector-messages.ts`, `context.ts`, `context-guard.ts`, `context-step.ts`, `model-call.ts`, `model-errors.ts`, `reply-chunks.ts`, `skills.ts`, `steps.ts`, `stream-parts.ts`, `tool-calls.ts`, and the pure shared and schema modules they import. Their top level stays plain TypeScript: no Effect, no Node modules. Only the bodies of their `"use step"` functions run in Node: they load the runtime with `await import("../runtime/step.ts")` and call `runStep`. A plain helper in these files is in the workflow's bundle, so it must not import Node code even with `await import`: `contextStep` logs with `console.*` for that reason, and the approval steps load the secret inside the step body. Check the list with the static imports of `chat.ts` before you add one.
+- **Node code**, run from steps, routes and startup: services and Effect functions.
+
+| Module | What it holds |
+| --- | --- |
+| `runs.ts` | `ThreadRuns`: each thread's latest run (`thread_runs`), and `withLock`, the in-process lock of a thread (a `Semaphore` per thread with work waiting). |
+| `approval-uses.ts` | `ApprovalUses`: each approval answer used once (`approval_uses`), in a transaction. |
+| `WorkflowRuns.ts` | `WorkflowRuns`: Workflow's runtime API (`start`, `status`, `cancel`, `readable`, `endStream`). The seam that tests replace. A run that can't start or a stream that can't be read is a defect, thrown as itself; a cancel and the end of a stream fail with `WorkflowFailed`, which callers log. |
+| `replies.ts` | `Replies`: `start` (with the credit check and the title), `follow`, `stop`, `remove`, `whenFinished`, `finishEndedRuns`. Fails with `OutOfCredits` (402, its message is the text the chat shows) and `ThreadNotYours` (404). |
+| `reply.ts` | `replyStream`, `saveReply` (span `reply.save`), and the run's last steps: `saveRunReply`, `finishFailedRun`. |
+| `model.ts` | `ChatModels`: the OpenRouter model of one attempt, with the key and Auto's plugin read then. A test gives a fake model. |
+| `model-attempt.ts` | `run`: one attempt at a model call (below). |
+| `thread-messages.ts` | `loadThreadContext`, `modelMessages`. |
+| `sweep.ts` | `sweeps`, which startup forks. |
+| `approval-secret.ts` | `toolApprovalSecret`. |
+
+Pure modules stay plain: `answered-again.ts`, `cache.ts`, `join-deltas.ts`, `citations.ts`, `replay.ts`, `tool-spans.ts`.
+
+**The model attempt** (`model-attempt.ts`). The AI SDK's `streamText` stays: `Stream.fromAsyncIterable` reads its `fullStream`, and its `abortSignal` is `Effect.abortSignal` in the attempt's stream scope, so a stall, a failure or an interruption aborts the request. The watchdog is a stall timeout on that stream (`stallsAfter`, with `Stream.transformPull`): each pull waits until a deadline, which is FIRST_CHUNK_MS from the start of the attempt, then NEXT_CHUNK_MS from the last part of the model's output. streamText's own start parts do not move it, as they did not move the watchdog. The failure is `ModelStalledError`, with the same text. `TestClock` moves it in `model-attempt.test.ts`.
+
+The `runs` row: `ModelCalls.record` before the stream, `start` in a fiber of the attempt's scope as soon as OpenRouter names the call (a `Deferred` that the stream's tap completes), `finish` on success, and on failure `fail` and the log line. An interruption records nothing, as a crash: the next attempt settles the row.
+
+**Errors to Workflow.** `classifyModelError` (model-errors.ts, unchanged) decides. The attempt fails with `ModelCallRetry` (`reason`, `afterMs`) or `ModelCallFatal` (`reason`), whose message is the reason. `runStep` with `rules` throws them as `RetryableError(reason, { retryAfter: afterMs })` and `FatalError(reason)`, as the step threw before. A database failure before the call (the row, the earlier attempts) is thrown as it is, as before. A `SqlError` inside the attempt is classified with Postgres's own message.
 
 ## Errors of a service, and their messages
 
@@ -288,19 +316,17 @@ Runs the program on the app's runtime, prints a failure's Cause and sets exit co
 
 A library that calls Ponder back, such as the AI SDK's telemetry (`RunRecorder`), gets a plain function. The service that makes it takes its layer's context (`yield* Effect.context<never>()`) and runs the callback's effect on it, with the runtime's pool, logger and tracer (`server/telemetry/Telemetry.ts`). The effect handles its own failures: the callback never rejects.
 
-### Code not on Effect yet: `runPromise(effect)`
+### Other edges: `runPromise(effect)`
 
-From `server/runtime/runtime.ts`. A failure rejects with the error itself, not a wrapper:
+From `server/runtime/runtime.ts`. A failure rejects with the error itself, not a wrapper. It is for the edges that are not a route, a step or a script: `startup.ts` (the Nitro plugin and its SIGTERM handler), the check scripts, and `scripts/demo/seed.ts`. Nothing else in `server/` calls it.
 
-```ts
-const messages = await runPromise(Threads.Threads.use((threads) => threads.load(threadId)));
-```
-
-Use it only in a module that is not converted yet. When you convert a module, its calls become `yield*`.
+Hono middleware calls services through `route` (the session check in app.ts, `requireAdmin`, `limitPerPerson`). Nitro's flow middleware (`tracing/flow-middleware.ts`) runs no effect: it is plain OpenTelemetry. `app.onError` logs with `console.error`: Hono calls it without waiting, and the error may be the runtime's own.
 
 ## Runtime
 
-`runtime()` builds one `ManagedRuntime` from `layer.ts` on first use, and keeps it at `globalThis[Symbol.for("ponder.runtime")]`. The Nitro build can hold more than one copy of a module (the routes, the plugins and the steps), and all copies must share one runtime and one pool. The first migration in `startup.ts` builds it. On SIGTERM, `startup.ts` stops in this order: the sweeps, the workflow worker, `dispose()` (the Effect pool), postgres.js's `sql.end`, then the last spans. A disposed runtime stays in place, so a late call fails instead of opening a new pool.
+`runtime()` builds one `ManagedRuntime` from `layer.ts` on first use, and keeps it at `globalThis[Symbol.for("ponder.runtime")]`. The Nitro build can hold more than one copy of a module (the routes, the plugins and the steps), and all copies must share one runtime and one pool. The first migration in `startup.ts` builds it. A disposed runtime stays in place, so a late call fails instead of opening a new pool.
+
+Start-up (`startup.ts`): the migrations (one effect), then the worker's lock (`becomeTheOnlyWorker`: a connection reserved in a `Scope` of its own, which waits on `pg_advisory_lock` while an older server stops), `releaseDeadWorkers`, the Postgres World's worker, and the sweeps, forked on the runtime (`workflow/sweep.ts`: each job repeats on `Schedule.fixed`, so a slow run is never started twice). On SIGTERM it stops in this order, as before: the sweeps (the fiber is interrupted), the workflow worker, the lock's scope (its connection goes back to the pool), `dispose()` (the pool, and with it the lock), then the last spans (`stopTracing`, 2 seconds at most). The 10-second deadline is a plain timer: the runtime is disposed on the way. Python's start-up check is a `Deferred` in `Sandbox` (`ready`, `readyNow`, `turnOff` when the migrations fail), not a module-level promise.
 
 ## Tracing
 
@@ -308,11 +334,14 @@ Use it only in a module that is not converted yet. When you convert a module, it
 
 - An Effect span with no Effect parent takes the active OpenTelemetry span as its parent (a step inside a reply, an HTTP request). Code run inside an Effect span, such as `Effect.tryPromise(() => streamText(...))`, sees that span as active, so the AI SDK's spans nest under it.
 - A span name must be on `KNOWN_NAMES` in `privacy.ts`, or it is sent as `"span"`. `Service.operation` names (`Threads.list`) and `sql.transaction` are on it. Ponder's older names (`thread.load`, `reply.save`) are listed one by one: keep them.
-- A failed span gets `error.type` from the error's code, else its tag, else its class name (`span.ts`'s `errorType`). For a `SqlError` it is the Postgres or socket code, as with postgres.js. Never the message. An interrupted span is not failed.
-- A failed Effect span also has an `exception` event; `privacy.ts` keeps only its type. A span that ends well has status OK (span.ts left it unset).
+- A failed span gets `error.type` from the error's code, else its tag, else its class name (`errorType` in `Tracing.ts`). For a `SqlError` it is the Postgres or socket code, as with postgres.js. Never the message. An interrupted span is not failed.
+- A failed Effect span also has an `exception` event; `privacy.ts` keeps only its type. A span that ends well has status OK (the old span.ts left it unset).
 - Attributes: `yield* Tracing.annotate({ "ponder.messages": n })`. Undefined values are left out. Counts, sizes, ids and outcomes only.
 - Effect's SQL client makes a span for each statement, named `"postgres"`. The sampler in `setup.ts` drops it: postgres.js made none, and Ponder's own spans say enough. `Database.test.ts` checks the name.
 - Do not set `Statement.SpanPropagationEnabled`: it would hang driver spans under the dropped statement spans.
+- **One trace per reply.** Effect code that works for a reply outside its steps (Stop, a follow, the sweep's save, the title) runs under `inReplyTrace(runId)` (`reply-trace.ts`): the reply's root, as an external span, is the parent of its spans and the active OpenTelemetry span while it runs, so Workflow's and the AI SDK's spans join it too. With tracing off it does nothing.
+- **No new parent spans in a reply's trace.** Code that runs inside a reply's trace and calls code with existing spans (`reply.save`, `thread.load`, `file_context.resolve`, the AI SDK's `chat <model>`) is `Effect.fnUntraced`: the model attempt, `loadThreadContext`, `modelMessages`, `replyStream`, the Stop and sweep paths in `replies.ts`. A new `Service.operation` span is fine as a leaf (`ThreadRuns.finish`, `ApprovalUses.use`), or outside a trace, where the sampler drops it (`Replies.start`).
+- **What stays plain OpenTelemetry**, and why: `setup.ts` (the provider; it runs before the runtime), `http.ts` (diagnostics-channel listeners, called by undici with no fiber), `privacy.ts` (the exporter), `logs.ts` (the console hook), `flow-middleware.ts` (Nitro middleware: `next` runs the whole delivery), and in `reply-trace.ts` the spans with given times: the reply's root (`endReplyTrace`, with ids from the run id), `recordReplySpan` (`chat.request`, `credits.check`, `queue.wait`: measured before the run id was known, or from the queue's timestamp) and `recordSpan` (the `execute_tool` spans that the workflow measured, sent by `writePartsStep`). An Effect span starts and ends when its effect runs, so it can't take those times. span.ts is gone.
 
 ## Logging
 
@@ -357,7 +386,7 @@ describe.skipIf(!url)("Threads", () => {
 | The web app (`web/`) | Out of scope. |
 | Pure functions | A slug or a prompt string stays a plain function. |
 | `*-worker.ts` files | A worker is its own program; the parent calls it through Effect. |
-| `server/tracing/setup.ts`, `privacy.ts`, `reply-trace.ts`, `http.ts` | Effect's spans go through them; Phase 3 decides what moves. |
+| `server/tracing/setup.ts`, `privacy.ts`, `http.ts`, `logs.ts`, `flow-middleware.ts`, and the plain spans of `reply-trace.ts` | Effect's spans go through them; see "Tracing" for why each stays plain OpenTelemetry. |
 
 ## How to migrate a module
 
@@ -368,6 +397,6 @@ describe.skipIf(!url)("Threads", () => {
 5. Replace postgres.js calls with `PgClient` (see "Database" for the differences). Decode rows with `SqlSchema`.
 6. Replace `setTimeout`, `AbortController`, `Date.now()`, `console.*` and `.catch(() => undefined)` with Effect's own (rules 7 to 9).
 7. Add the layer to `server/runtime/layer.ts`.
-8. Update every caller. Effect callers `yield*` it. Routes use `route`, steps use `runStep` (loaded inside the step), scripts use `runMain`. Other unconverted callers use `runPromise`. Delete the old functions and the module's `sql` import from `db.ts`. No Promise copies.
+8. Update every caller. Effect callers `yield*` it. Routes use `route`, steps use `runStep` (loaded inside the step), scripts use `runMain`, startup and the check scripts `runPromise`. Delete the old functions. No Promise copies.
 9. Write a `*.test.ts` with `@effect/vitest`, with test layers only for outside systems. Add it to `typecheck:server`.
 10. Run `npm run typecheck`, `npm run typecheck:server`, `npm run typecheck:e2e`, `npm run test` (with `TEST_DATABASE_URL`), and the `*.check.ts` scripts of the area.

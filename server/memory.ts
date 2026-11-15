@@ -80,7 +80,7 @@ const make = Effect.gen(function* () {
 	const scope = (user: string, threadId = "") => memoryScope({ threadId, user });
 	const prompt = readExtractPrompt.pipe(Effect.provideService(PonderConfig.PonderConfig, config));
 
-	// The span's name and attribute are the ones span.ts gave it.
+	// The span's name and attribute are the ones it had before Effect.
 	const recall = Effect.fn("memory.recall")(function* (ctx: MemoryContext, messages: UIMessage[]) {
 		const recalled = yield* middleware.recall(ctx, messages);
 		// The count of memories recalled (postgres.ts numbers each one), never their text.

@@ -5,7 +5,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type { Context as HonoContext } from "hono";
 import * as Threads from "./threads/Threads.ts";
-import { latestRun } from "./workflow/runs.ts";
+import * as ThreadRuns from "./workflow/runs.ts";
 
 /**
  * GET /api/threads/:id, cached. A thread's version is its updated_at plus whether a
@@ -48,8 +48,7 @@ export const threadResponse = Effect.fn("ThreadCache.respond")(function* (c: Hon
 	const threads = yield* Threads.Threads;
 	const cache = yield* ThreadCache;
 	const updatedAt = Option.getOrNull(yield* threads.updatedAt(id, owner));
-	// workflow/runs.ts is not on Effect yet. Its failure answers 500, as before.
-	const run = yield* Effect.promise(() => latestRun(id));
+	const run = Option.getOrUndefined(yield* ThreadRuns.ThreadRuns.use((runs) => runs.latest(id)));
 	const running = Boolean(run && !run.finished);
 	// The model kept erroring: the page offers Retry (workflow/chat.ts).
 	const failed = Boolean(run?.finished && run.failed);

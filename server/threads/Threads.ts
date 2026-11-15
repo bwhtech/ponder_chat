@@ -122,7 +122,7 @@ const make = Effect.gen(function* () {
 			order by updated_at desc limit 200`,
 	});
 
-	// The span's name and attribute are the ones span.ts gave it: tracing.spec.ts looks for them.
+	// The span's name and attribute are the ones it had before Effect: tracing.spec.ts looks for them.
 	const load = Effect.fn("thread.load")(function* (id: string) {
 		const row = yield* findMessages(id).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 		const messages = Option.match(row, { onNone: (): UIMessage[] => [], onSome: (found) => found.messages });

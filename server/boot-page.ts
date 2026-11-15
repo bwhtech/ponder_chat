@@ -8,7 +8,7 @@ import * as Models from "./models/Models.ts";
 import * as Accounts from "./people/Accounts.ts";
 import { route } from "./runtime/route.ts";
 import * as Skills from "./skills.ts";
-import { pythonReady } from "./startup.ts";
+import * as Sandbox from "./python/pyodide.ts";
 import * as Threads from "./threads/Threads.ts";
 import * as WebBuild from "./web-build.ts";
 
@@ -81,15 +81,10 @@ const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetc
 		{ concurrency: "unbounded" },
 	);
 	// Only what is ready now: the models wait for OpenRouter on a cold start, and the page asks for them itself then.
-	const python = yield* Effect.promise(() => settled(pythonReady));
+	const python = Option.getOrUndefined(yield* Sandbox.Sandbox.use((sandbox) => sandbox.readyNow));
 	const models = Option.getOrUndefined(yield* Models.Models.use((models) => models.cached));
 	return { me, threads, skills, models, features: python === undefined ? undefined : { python }, prefetch } satisfies BootData;
 });
-
-/** The value of a promise that has settled, or undefined: never waits. */
-async function settled<T>(promise: Promise<T>): Promise<T | undefined> {
-	return Promise.race([promise, Promise.resolve(undefined)]);
-}
 
 /** JSON in a script tag that never runs. "<" is escaped, so a chat's title cannot close the tag. */
 function script(data: BootData) {

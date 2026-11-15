@@ -29,6 +29,11 @@ import * as Telemetry from "../telemetry/Telemetry.ts";
 import * as Threads from "../threads/Threads.ts";
 import * as Logger from "../tracing/Logger.ts";
 import * as Tracing from "../tracing/Tracing.ts";
+import * as ApprovalUses from "../workflow/approval-uses.ts";
+import * as ChatModels from "../workflow/model.ts";
+import * as Replies from "../workflow/replies.ts";
+import * as ThreadRuns from "../workflow/runs.ts";
+import * as WorkflowRuns from "../workflow/WorkflowRuns.ts";
 import * as Database from "./Database.ts";
 import * as Http from "./Http.ts";
 
@@ -39,8 +44,28 @@ import * as Http from "./Http.ts";
  * Tracing and the logger come last, so every layer above, and every effect the runtime
  * runs, logs and traces through them.
  */
-export const layer = Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer).pipe(
-	Layer.provideMerge(Layer.mergeAll(Threads.layer, AutoRouter.layer, ModelCalls.layer, Telemetry.layer, Memory.layer, CompactionStore.layer, Mcp.layer, Files.layer, Sandbox.layer, PythonState.layer, Skills.layer, ThreadCache.layer, People.layer)),
+export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer).pipe(
+	Layer.provideMerge(Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer)),
+	Layer.provideMerge(
+		Layer.mergeAll(
+			Threads.layer,
+			AutoRouter.layer,
+			ModelCalls.layer,
+			Telemetry.layer,
+			Memory.layer,
+			CompactionStore.layer,
+			Mcp.layer,
+			Files.layer,
+			Sandbox.layer,
+			PythonState.layer,
+			Skills.layer,
+			ThreadCache.layer,
+			People.layer,
+			ThreadRuns.layer,
+			ApprovalUses.layer,
+			WorkflowRuns.layer,
+		),
+	),
 	Layer.provideMerge(Layer.mergeAll(Models.layer, OpenRouterKey.layer, Runs.layer)),
 	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer, Settings.layer, NetGuard.layer, ObjectStore.layer, Mailer.layer, Notify.layer, PdfText.layer)),
 	Layer.provideMerge(Layer.mergeAll(Database.layer, Http.layer)),
@@ -48,7 +73,7 @@ export const layer = Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBac
 	Layer.provideMerge(Layer.mergeAll(Tracing.layer, Logger.layer)),
 );
 
-/** What an effect run by the runtime (route, runStep, runMain, runPromise) may require. */
+/** What an effect run by the runtime (route, runStep, runMain, the boundaries' runPromise) may require. */
 export type Services = Layer.Success<typeof layer>;
 
 /** How building the layer can fail: a bad config value, or the database client's setup. */

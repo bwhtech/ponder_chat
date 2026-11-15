@@ -36,8 +36,9 @@ export async function loadModelMessages(
 	keepReasoningOf?: string,
 ): Promise<ThreadContext> {
 	"use step";
+	const { runStep } = await import("../runtime/step.ts");
 	const { loadThreadContext } = await import("./thread-messages.ts");
-	const context = await loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, keepReasoningOf });
+	const context = await runStep(loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, keepReasoningOf }));
 	if (context.through) await writeCompactionState(writable, { state: "done", through: context.through });
 	return context;
 }
@@ -128,17 +129,17 @@ export async function saveReplyStep(
 	continued: Continued | null = null,
 ) {
 	"use step";
-	const { saveReply } = await import("./reply.ts");
-	await settleModelCalls(threadId, runId);
-	await saveReply(threadId, owner, runId, model, { failed, continued });
+	const { runStep } = await import("../runtime/step.ts");
+	const { saveRunReply } = await import("./reply.ts");
+	await runStep(saveRunReply(threadId, owner, runId, model, { failed, continued }));
 }
 
 /** Marks the run finished, and failed, when saving its reply failed, so the thread does not look busy forever. */
 export async function finishRunStep(threadId: string, runId: string, model: string, continued: Continued | null = null) {
 	"use step";
-	const { finishRun } = await import("./runs.ts");
-	await settleModelCalls(threadId, runId);
-	await finishRun(threadId, runId, model, { failed: true, continued });
+	const { runStep } = await import("../runtime/step.ts");
+	const { finishFailedRun } = await import("./reply.ts");
+	await runStep(finishFailedRun(threadId, runId, model, continued));
 }
 
 /**
@@ -155,14 +156,4 @@ export async function endReplyStream(writable: WritableStream<ModelCallStreamPar
 		writer.releaseLock();
 	}
 	await writable.close();
-}
-
-/**
- * Settles the run's model calls that a crash cut short on their last attempt (telemetry/ModelCalls.ts):
- * nothing ran again to settle them. They are not charged, and the sweep gets their cost.
- */
-async function settleModelCalls(threadId: string, runId: string) {
-	const { runStep } = await import("../runtime/step.ts");
-	const ModelCalls = await import("../telemetry/ModelCalls.ts");
-	await runStep(ModelCalls.ModelCalls.use((calls) => calls.settle(threadId, runId))).catch((error) => console.warn(`steps: could not settle the model calls of run ${runId}:`, error));
 }

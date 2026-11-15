@@ -1,6 +1,6 @@
 import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { context, createContextKey, SpanKind, SpanStatusCode, trace, type Context, type Span } from "@opentelemetry/api";
-import { errorType } from "./span.ts";
+import { errorType } from "./Tracing.ts";
 
 /**
  * A span for each HTTP request Ponder makes: OpenRouter, MCP servers, web_fetch, search.
@@ -34,9 +34,12 @@ const SUPPRESSED = createContextKey("OpenTelemetry SDK Context Key SUPPRESS_TRAC
 const isTracingSuppressed = (active: Context) => active.getValue(SUPPRESSED) === true;
 const spans = new WeakMap<object, Span>();
 
-/** Starts listening. Returns the function that stops it. */
-export function listenToHttp(skipOrigin: string): () => void {
-	const openRouterHost = hostOf(process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api");
+/**
+ * Starts listening. Returns the function that stops it. `openRouterBaseUrl` is
+ * PonderConfig's; an empty one counts as missing here, as it always did.
+ */
+export function listenToHttp(skipOrigin: string, openRouterBaseUrl: string): () => void {
+	const openRouterHost = hostOf(openRouterBaseUrl || "https://openrouter.ai/api");
 	const listeners: Record<string, (message: unknown) => void> = {
 		"undici:request:create": (message) => {
 			const { request } = message as { request: UndiciRequest };

@@ -12,6 +12,7 @@ import { context, SpanKind, SpanStatusCode, trace, TraceFlags } from "@opentelem
 import { InMemorySpanExporter, SimpleSpanProcessor, TracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace";
 import { registerTelemetry, stepCountIs, streamText, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
+import * as OtelTracer from "@effect/opentelemetry/OtelTracer";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -23,7 +24,6 @@ import { endReplyTrace, linkToReply, recordReplySpan, replyIds, runStartTime, wi
 import * as Logger from "./tracing/Logger.ts";
 import { SQL_STATEMENT_SPAN, startTracing, tracesUrl, withoutContent } from "./tracing/setup.ts";
 import { tracingState } from "./tracing/state.ts";
-import { span } from "./tracing/span.ts";
 import * as Tracing from "./tracing/Tracing.ts";
 
 let failed = 0;
@@ -255,6 +255,14 @@ async function stderrOf(work: () => Promise<unknown>) {
 	return written;
 }
 let effectLog = "";
+/** Ponder's own span around some work, as the services make it (Effect.fn), with its attributes. */
+const span = (name: string, attributes: Tracing.SpanAttributes, work: () => Promise<unknown>) =>
+	effects.runPromise(
+		Effect.gen(function* () {
+			yield* Tracing.annotate(attributes);
+			return yield* Effect.tryPromise({ try: work, catch: (error) => error });
+		}).pipe(Effect.withSpan(name)),
+	);
 
 await withReplyTrace(RUN_ID, async () => {
 	recordReplySpan(RUN_ID, "chat.request", Date.now() - 50, Date.now(), { "ponder.continued": true }, [linkToReply("wrun_01M7AAXEME3MDRQZPA53SJG1W6")]);
@@ -398,7 +406,9 @@ await check("an Effect log inside a reply's trace ends with its trace id, as con
 });
 
 await check("a span outside a reply records nothing", async () => {
-	const ran = await context.with(trace.deleteSpan(context.active()), () => span("thread.load", {}, async (active) => active.isRecording()));
+	const ran = await context.with(trace.deleteSpan(context.active()), () =>
+		effects.runPromise(OtelTracer.currentOtelSpan.pipe(Effect.map((active) => active.isRecording()), Effect.withSpan("thread.load"))),
+	);
 	assert.equal(ran, false);
 });
 

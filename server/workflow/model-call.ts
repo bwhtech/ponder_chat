@@ -44,11 +44,14 @@ export type ModelResponse = {
  *
  * The step has MODEL_CALL_ATTEMPTS attempts, for errors and for a server that stopped
  * in the middle (a crash, a deploy, a restart). The attempt decides whether an error is
- * worth another attempt (model-errors.ts).
+ * worth another attempt (model-errors.ts), and fails with RetryableError or FatalError.
  */
 export async function modelCallStep(call: ModelCall, writable: WritableStream<ModelCallStreamPart>): Promise<ModelResponse> {
 	"use step";
-	const { runModelAttempt } = await import("./model-attempt.ts");
-	return runModelAttempt(call, writable);
+	const { getStepMetadata } = await import("workflow");
+	const { runStep } = await import("../runtime/step.ts");
+	const ModelAttempt = await import("./model-attempt.ts");
+	const { stepId, attempt } = getStepMetadata();
+	return runStep(ModelAttempt.run(call, writable, { stepId, attempt }), ModelAttempt.rules);
 }
 modelCallStep.maxRetries = MODEL_CALL_ATTEMPTS - 1;

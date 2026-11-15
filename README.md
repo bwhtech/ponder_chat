@@ -316,7 +316,7 @@ Each reply can be one OpenTelemetry trace. A trace shows where the reply's time 
 | One trace per reply | `server/tracing/reply-trace.ts`, `server/tracing/flow-middleware.ts` |
 | What a span may carry | `server/tracing/privacy.ts` |
 | HTTP spans | `server/tracing/http.ts` |
-| Ponder's own spans | `span()` in `server/tracing/span.ts`, called in the modules |
+| Ponder's own spans | `Effect.fn("name")` in the services, on Effect's tracer (`server/tracing/Tracing.ts`); spans with given times in `server/tracing/reply-trace.ts` |
 
 A reply's trace has these spans:
 
@@ -340,7 +340,7 @@ One reply is one trace:
 
 - A reply's trace id and root span id come from its run id (a SHA-256 of it). Every process that knows the run id gets the same ids, so nothing is stored.
 - The workflow worker sends each step to `/.well-known/workflow/v1/flow`. A Nitro middleware reads the run id in the message and runs the step under the reply's root. So Workflow's spans, Ponder's spans and the AI SDK's spans join the trace, in every job, every replay, and in the server that goes on after a crash.
-- The root span is sent last, when the run is marked finished (`finishRun` in `server/workflow/runs.ts`), with the run's start time. Every way a reply ends goes through there: saved, failed or stopped.
+- The root span is sent last, when the run is marked finished (`ThreadRuns.finish` in `server/workflow/runs.ts`), with the run's start time. Every way a reply ends goes through there: saved, failed or stopped.
 - After an approval, a new run carries on the message (see "Connectors"). It is a trace of its own. Its `chat.request` span links to the root of the run it carries on, and both have the same `gen_ai.conversation.id` (the thread id).
 - Only replies are traced. A span with no reply above it, such as a page load or a queue poll, is not sampled.
 

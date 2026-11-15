@@ -22,12 +22,12 @@ export function runtime(): Runtime {
 }
 
 /**
- * Runs an effect from code that is not on Effect yet, such as workflow/replies.ts, and
- * gives its value. A failure rejects with the error itself (the first failure, or else
- * the defect), not a wrapper, so a caller's catch sees what it saw before.
+ * Runs an effect from Promise code at the server's edges, and gives its value. A failure
+ * rejects with the error itself (the first failure, or else the defect), not a wrapper.
  *
- * The boundary for unconverted callers only: each later phase removes the uses in the
- * files it converts. Routes use route.ts, steps use step.ts, scripts use main.ts.
+ * Only for the edges that are not a route, a step or a script: startup.ts (the Nitro
+ * plugin, and SIGTERM), the check scripts, and scripts/demo/seed.ts. Routes use route.ts,
+ * steps use step.ts, scripts use main.ts. Never in a service.
  */
 export function runPromise<A, E>(effect: Effect.Effect<A, E, AppLayer.Services>): Promise<A> {
 	return runtime().runPromise(effect);

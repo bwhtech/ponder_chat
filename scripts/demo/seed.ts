@@ -21,7 +21,9 @@ if (!database.includes("demo")) {
 	process.exit(1);
 }
 
-const { sql } = await import("../../server/db.ts");
+// postgres.js, which the e2e tests use too: the server itself is on Effect's client.
+const { default: postgres } = await import("postgres");
+const sql = postgres(process.env.DATABASE_URL!, { onnotice: () => {} });
 const Auth = await import("../../server/auth/Auth.ts");
 const { runPromise } = await import("../../server/runtime/runtime.ts");
 /** One of Better Auth's endpoints, on the app's runtime (server/auth/Auth.ts). */

@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { context, ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, TraceFlags, type Context, type Link } from "@opentelemetry/api";
-import { defined, tracer, type SpanAttributes } from "./span.ts";
+import * as Effect from "effect/Effect";
+import * as Tracer from "effect/Tracer";
 import { tracingState } from "./state.ts";
+import { defined, type SpanAttributes } from "./Tracing.ts";
 
 /**
  * One reply is one trace, though its steps run as separate queue jobs, in replays, and in
@@ -12,8 +14,10 @@ import { tracingState } from "./state.ts";
  *
  * - flow-middleware.ts runs each delivery of the run's steps under the root, so
  *   Workflow's spans, Ponder's spans and the AI SDK's spans all join the trace.
- * - The route (replies.ts, app.ts) does the same once start() gives the run id.
- * - The root span is sent last, when the run is marked finished (runs.ts finishRun), with
+ * - The routes (workflow/replies.ts) do the same once start() gives the run id: Effect
+ *   code with `inReplyTrace`, which makes the root the parent of its spans and the
+ *   active OpenTelemetry span while it runs.
+ * - The root span is sent last, when the run is marked finished (runs.ts, ThreadRuns.finish), with
  *   the ids below and the start time in the run id. Its children name it as their parent
  *   before it exists; Jaeger puts them together once it arrives.
  *
@@ -42,15 +46,41 @@ export function withReplyTrace<T>(runId: string, work: () => T): T {
 	return context.with(replyContext(runId), work);
 }
 
+/**
+ * `withReplyTrace` for Effect code: the effect's spans are children of the reply's root,
+ * and code it runs (Workflow's API, the AI SDK, http.ts) sees the root as the active span.
+ * With tracing off, the effect runs as it is.
+ */
+export const inReplyTrace =
+	(runId: string) =>
+	<A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, E, R> =>
+		Effect.suspend(() => (tracingState() ? Effect.withParentSpan(effect, Tracer.externalSpan({ ...replyIds(runId), sampled: true })) : effect));
+
 /** A link to another run's reply, such as the one a continued run carries on. */
 export function linkToReply(runId: string): Link {
 	return { context: { ...replyIds(runId), traceFlags: TraceFlags.SAMPLED, isRemote: true } };
 }
 
+/**
+ * Ponder's spans that are measured where no Effect span can be: before the run id was known
+ * (the credit check), from the queue's own timestamp (flow-middleware.ts's queue.wait), or
+ * in workflow code, which can neither run Effect nor send spans (the tool calls, tool-spans.ts).
+ * An Effect span starts and ends when its effect runs, so these stay plain OpenTelemetry
+ * spans with the times given. With tracing off, the global provider records nothing.
+ */
+const tracer = trace.getTracer("ponder");
+
 /** A span of the reply whose times were measured before the run id was known, such as the credit check. */
 export function recordReplySpan(runId: string, name: string, start: number, end: number, attributes: SpanAttributes = {}, links: Link[] = []) {
 	if (!tracingState()) return;
 	tracer.startSpan(name, { startTime: start, attributes: defined(attributes), links }, replyContext(runId)).end(end);
+}
+
+/** A span with the times given, in the active context, such as a tool call that the reply loop measured. */
+export function recordSpan(name: string, { start, end, attributes = {}, failed = false }: { start: number; end: number; attributes?: SpanAttributes; failed?: boolean }) {
+	const span = tracer.startSpan(name, { startTime: start, attributes: defined(attributes) });
+	if (failed) span.setStatus({ code: SpanStatusCode.ERROR });
+	span.end(end);
 }
 
 export type ReplyOutcome = "saved" | "failed" | "cancelled";

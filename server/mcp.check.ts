@@ -18,10 +18,10 @@ import type { AddressInfo } from "node:net";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PgClient from "@effect/sql-pg/PgClient";
 import { Hono } from "hono";
 import type { SignedInEnv } from "./auth.ts";
 import * as PonderConfig from "./config.ts";
-import { sql } from "./db.ts";
 import * as ConnectorOAuth from "./mcp/ConnectorOAuth.ts";
 import * as ConnectorStore from "./mcp/ConnectorStore.ts";
 import type { Connection, Credentials } from "./mcp/ConnectorStore.ts";
@@ -58,6 +58,8 @@ async function check(name: string, body: () => Promise<void>) {
 // The connector services, on the app's runtime. A failure rejects with the error itself.
 const connectors = <A, E>(use: (service: Connectors.Connectors["Service"]) => Effect.Effect<A, E>) => runPromise(Connectors.Connectors.use(use));
 const store = <A, E>(use: (service: ConnectorStore.ConnectorStore["Service"]) => Effect.Effect<A, E>) => runPromise(ConnectorStore.ConnectorStore.use(use));
+/** The check's own rows (its people), on the app's database. */
+const database = <A, E>(use: (sql: PgClient.PgClient) => Effect.Effect<A, E>) => runPromise(PgClient.PgClient.use(use));
 const addConnector = (user: string, origin: string, input: NewConnector) => connectors((service) => service.addConnector(user, origin, input));
 const changeConnector = (user: string, id: string, change: ConnectorChange) => connectors((service) => service.changeConnector(user, id, change));
 const completeSignIn = (user: string, params: { state: string; code: string; issuer?: string }) => connectors((service) => service.completeSignIn(user, params));
@@ -222,7 +224,7 @@ if (process.argv.includes("--serve")) {
 const people = [`check-${randomUUID()}`, `check-${randomUUID()}`] as const;
 const [alice, bob] = people;
 await store((service) => service.migrate);
-for (const id of people) await sql`insert into users (id, name, email, "emailVerified") values (${id}, 'Connector check', ${`${id}@example.invalid`}, true)`;
+for (const id of people) await database((sql) => sql`insert into users (id, name, email, "emailVerified") values (${id}, 'Connector check', ${`${id}@example.invalid`}, true)`);
 
 try {
 	await check("a sealed value copied to another row does not decrypt", async () => {
@@ -484,10 +486,9 @@ try {
 		});
 	}
 } finally {
-	for (const id of people) await sql`delete from users where id = ${id}`;
+	for (const id of people) await database((sql) => sql`delete from users where id = ${id}`);
 	server.close();
 	await dispose();
-	await sql.end();
 }
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");

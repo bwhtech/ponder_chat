@@ -33,8 +33,7 @@ export class PonderConfig extends Context.Service<
 		readonly encryptionKey: Option.Option<Redacted.Redacted>;
 		/**
 		 * PONDER_TOOL_APPROVAL_SECRET, as the operator set it. Empty = missing. When it is
-		 * missing, startup.ts derives one from BETTER_AUTH_SECRET and puts it in the
-		 * environment for workflow/approvals.ts, which reads it there.
+		 * missing, workflow/approval-secret.ts derives one from BETTER_AUTH_SECRET.
 		 */
 		readonly toolApprovalSecret: Option.Option<Redacted.Redacted>;
 		/** PONDER_HOSTS, split on commas; by default localhost and 127.0.0.1 on `port` (hosts.ts used it). */

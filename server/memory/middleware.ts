@@ -67,7 +67,7 @@ export const makeMemoryMiddleware = Effect.fnUntraced(function* ({ adapter, scop
 		track(ctx.threadId, fiber);
 	});
 
-	// The span's name is the one span.ts gave it: tracing.spec.ts looks for it.
+	// The span's name is the one it had before Effect: tracing.spec.ts looks for it.
 	const write = Effect.fn("memory.save")(function* (resolved: MemoryScope, turn: MemoryTurn) {
 		const receipts = yield* adapter.save(resolved, turn).pipe(recoverAll((error) => Effect.as(Effect.logError(`${name}: save failed:`, problem(error)), [])));
 		for (const receipt of receipts) if (!receipt.ok) yield* Effect.logError(`${name}: save failed:`, receipt.error);

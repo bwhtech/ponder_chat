@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect";
 import * as Threads from "../threads/Threads.ts";
 import * as Tracing from "../tracing/Tracing.ts";
-import { superseded } from "../workflow/runs.ts";
+import * as ThreadRuns from "../workflow/runs.ts";
 import { modelMessages } from "../workflow/thread-messages.ts";
 import { runCompaction, type CompactionDeps, type CompactionState, type CompactRequest, type CompactResult } from "./compaction.ts";
 import * as CompactionStore from "./store.ts";
@@ -14,24 +14,26 @@ export type { CompactionState, CompactRequest, CompactResult };
  * workflow's compactStep, through runStep: a failure is thrown as the error itself, so
  * Workflow runs the step again, as before.
  *
- * `status` writes to the step's stream (steps.ts), a Promise API; superseded (workflow/runs.ts)
- * and modelMessages (workflow/thread-messages.ts) are not on Effect yet. Their rejections
- * are defects, which runStep throws as the error itself.
+ * `status` writes to the step's stream (steps.ts), a Promise API. Its rejection is a
+ * defect, which runStep throws as the error itself.
  */
-// The span's name and attributes are the ones span.ts gave it: tracing.check.ts checks them.
+// The span's name and attributes are the ones it had before Effect: tracing.check.ts checks them.
 export const compact = Effect.fn("compaction.run")(function* (request: CompactRequest, options: { lastAttempt: boolean; status: (state: CompactionState) => Promise<void> }) {
 	// Counts and the outcome only: never the summary or the messages (tracing/privacy.ts).
 	yield* Tracing.annotate({ "ponder.between_steps": request.mode === "turn", "ponder.last_attempt": options.lastAttempt });
 	const threads = yield* Threads.Threads;
 	const store = yield* CompactionStore.CompactionStore;
 	const summarizer = yield* Summarizer.Summarizer;
+	const runs = yield* ThreadRuns.ThreadRuns;
+	const services = yield* Effect.context<Effect.Services<ReturnType<typeof modelMessages>>>();
 	const deps: CompactionDeps<Summarizer.SummaryError> = {
 		loadThread: threads.load,
 		loadSummary: store.loadSummary,
 		saveSummary: store.saveSummary,
-		superseded: (threadId, runId) => Effect.promise(() => superseded(threadId, runId)),
+		// A failure of these two is a defect, as it was: runStep throws it as itself, and Workflow runs the step again.
+		superseded: (threadId, runId) => Effect.orDie(runs.superseded(threadId, runId)),
 		writeSummary: summarizer.write,
-		modelMessages: (thread, messageOptions) => Effect.promise(() => modelMessages(thread, messageOptions)),
+		modelMessages: (thread, messageOptions) => Effect.orDie(Effect.provideContext(modelMessages(thread, messageOptions), services)),
 		status: (state) => Effect.promise(() => options.status(state)),
 		log: (message) => Effect.logError(message),
 	};

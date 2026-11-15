@@ -1,5 +1,4 @@
 import type { ModelMessage, ToolApprovalRequest, ToolApprovalResponse, ToolCallPart } from "ai";
-import { TOOL_APPROVAL_SECRET_ENV } from "./approval-secret.ts";
 
 /**
  * Tool calls that wait for the person (loop.ts). The reply asks with a signed
@@ -67,16 +66,20 @@ export function withoutApprovals(messages: ModelMessage[]): ModelMessage[] {
 
 export type SignedCall = { approvalId: string; toolCallId: string; toolName: string; input: unknown };
 
-/** Signs an approval request. A step, because it reads the secret from the environment. */
+/** Signs an approval request. A step, because it reads the secret (approval-secret.ts). */
 export async function signApprovalStep(call: SignedCall): Promise<string> {
 	"use step";
-	return signApproval(approvalSecret(), call);
+	const { runStep } = await import("../runtime/step.ts");
+	const { toolApprovalSecret } = await import("./approval-secret.ts");
+	return signApproval(await runStep(toolApprovalSecret), call);
 }
 
 /** Whether the person's approval carries a valid signature for exactly this call. */
 export async function verifyApprovalStep(call: SignedCall, signature: string | undefined): Promise<boolean> {
 	"use step";
-	return Boolean(signature) && verifyApproval(approvalSecret(), call, signature!);
+	const { runStep } = await import("../runtime/step.ts");
+	const { toolApprovalSecret } = await import("./approval-secret.ts");
+	return Boolean(signature) && verifyApproval(await runStep(toolApprovalSecret), call, signature!);
 }
 
 export async function signApproval(secret: string, call: SignedCall): Promise<string> {
@@ -98,12 +101,6 @@ function hmacKey(secret: string) {
 
 async function payloadOf({ approvalId, toolCallId, toolName, input }: SignedCall) {
 	return encoder.encode(JSON.stringify(["ai-sdk-tool-approval-v1", approvalId, toolCallId, toolName, await digest(input)]));
-}
-
-function approvalSecret() {
-	const secret = process.env[TOOL_APPROVAL_SECRET_ENV];
-	if (!secret) throw new Error(`${TOOL_APPROVAL_SECRET_ENV} is not set.`);
-	return secret;
 }
 
 function assistantParts(messages: ModelMessage[]) {

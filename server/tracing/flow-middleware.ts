@@ -1,5 +1,4 @@
-import { tracer } from "./span.ts";
-import { replyContext, withReplyTrace } from "./reply-trace.ts";
+import { recordReplySpan, withReplyTrace } from "./reply-trace.ts";
 import { tracingState } from "./state.ts";
 
 /**
@@ -12,7 +11,8 @@ import { tracingState } from "./state.ts";
  * Also records `queue.wait`: from when the message was queued to now.
  *
  * nitro.config.ts registers this as a middleware on the flow route, not lazy, so Nitro
- * calls it with `next`.
+ * calls it with `next`. A boundary, in plain OpenTelemetry: it runs before any step, and
+ * `next` runs the whole delivery, which an Effect span could not wrap.
  */
 type Delivery = { req: Request };
 
@@ -43,20 +43,11 @@ function recordQueueWait(message: Message, headers: Headers) {
 	const queuedAt = Date.parse(message.requestedAt ?? headers.get("x-vqs-message-created-at") ?? "");
 	const now = Date.now();
 	if (!Number.isFinite(queuedAt) || queuedAt > now) return;
-	const queue = headers.get("x-vqs-queue-name") ?? undefined;
+	const queue = headers.get("x-vqs-queue-name") || undefined;
 	const attempt = Number(headers.get("x-vqs-message-attempt"));
-	tracer
-		.startSpan(
-			"queue.wait",
-			{
-				startTime: queuedAt,
-				attributes: {
-					"messaging.system": "graphile-worker",
-					...(queue && { "messaging.destination.name": queue }),
-					...(Number.isFinite(attempt) && { "workflow.delivery.attempt": attempt }),
-				},
-			},
-			replyContext(message.runId),
-		)
-		.end(now);
+	recordReplySpan(message.runId, "queue.wait", queuedAt, now, {
+		"messaging.system": "graphile-worker",
+		"messaging.destination.name": queue,
+		"workflow.delivery.attempt": Number.isFinite(attempt) ? attempt : undefined,
+	});
 }

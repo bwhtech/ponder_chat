@@ -311,7 +311,7 @@ const make = Effect.gen(function* () {
 		return yield* store.deleteConnection(id, userId);
 	});
 
-	// The span's name and attributes are the ones span.ts gave it. Counts only: never a
+	// The span's name and attributes are the ones it had before Effect. Counts only: never a
 	// connector's name or a tool's (tracing/privacy.ts).
 	const connectorCatalogFor = Effect.fn("connectors.list")(function* (userId: string) {
 		const connections = yield* store.connectionsForReply(userId);
