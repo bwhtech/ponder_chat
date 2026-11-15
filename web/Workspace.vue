@@ -47,7 +47,8 @@ const onWidth = () => (wide.value = wideScreen.matches);
 wideScreen.addEventListener("change", onWidth);
 onBeforeUnmount(() => wideScreen.removeEventListener("change", onWidth));
 // The chats (ChatsPanel.vue), their own chunk. A wide screen fetches it beside the first code
-// (boot-page.ts) and shows a sidebar of the same size until it is here, so nothing moves.
+// (boot-page.ts). Until it is here, the sidebar or the sheet shows its layout with skeleton rows
+// (SidebarPlaceholder.vue), so nothing moves.
 const loadChatsPanel = once(() => import("./ChatsPanel.vue").then((module) => module.default));
 const ChatsPanel = defineAsyncComponent({ loader: loadChatsPanel, loadingComponent: SidebarPlaceholder, delay: 0 });
 // On a phone: a bottom sheet, loaded the first time it opens, or once the page has loaded on a narrow screen.
