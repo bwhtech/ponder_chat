@@ -28,7 +28,8 @@ export const memoryApi = new Hono<SignedInEnv>()
 		route(c, Effect.map(Memory.Memory.use((memory) => memory.forget(userOf(c), c.req.param("id"))), (forgotten) => (forgotten ? c.json({ ok: true }) : notFound(c)))),
 	)
 
-	.post("/saves/:id/undo", (c) => {
+	// async, so both answers are a promise: TypeScript 7 does not infer a handler that returns a promise or a value.
+	.post("/saves/:id/undo", async (c) => {
 		const saveId = Number(c.req.param("id"));
 		if (!Number.isSafeInteger(saveId)) return notFound(c);
 		return route(
