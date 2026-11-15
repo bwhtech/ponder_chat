@@ -78,7 +78,7 @@ app.use("*", async (c, next) => {
 // The reference for a thin route (docs/effect.md): one effect, its failures mapped to answers.
 const databaseUnavailable = (_: unknown, c: Context) => c.text("database unavailable", 503);
 app.get("/health", (c) =>
-	route(c, Database.ping.pipe(Effect.timeout("3 seconds"), Effect.map(() => c.text("ok"))), {
+	route(c, Database.pingWithin("3 seconds").pipe(Effect.map(() => c.text("ok"))), {
 		SqlError: databaseUnavailable,
 		TimeoutError: databaseUnavailable,
 	}),

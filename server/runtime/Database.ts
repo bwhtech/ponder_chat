@@ -1,6 +1,7 @@
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PonderConfig from "../config.ts";
@@ -25,12 +26,29 @@ export const layer = Layer.unwrap(
 			url: Option.getOrUndefined(config.databaseUrl),
 			maxConnections: 10,
 			connectTimeout: Duration.seconds(30),
+			// postgres.js read a row of any size, and a thread's messages are one jsonb value
+			// that can pass the client's default of 16 MiB. Postgres caps a value at 1 GiB.
+			maxMessageSize: 1024 * 1024 * 1024,
 		});
 	}),
 );
 
-/** One round trip to the database, for /health. */
+/** One round trip to the database. */
 export const ping = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
 	yield* sql`select 1`;
+});
+
+/**
+ * `ping`, answered within `limit`, for /health. Interrupting a query waits for the
+ * client to cancel it on the server, which takes seconds on a hung connection. So the
+ * ping runs in a fiber of its own, the answer waits only for `limit`, and a ping still
+ * running then is stopped in the background.
+ */
+export const pingWithin = Effect.fn("Database.pingWithin")(function* (limit: Duration.Input) {
+	const fiber = yield* Effect.forkDetach(ping);
+	return yield* Fiber.join(fiber).pipe(
+		Effect.timeout(limit),
+		Effect.onError(() => Effect.forkDetach(Fiber.interrupt(fiber))),
+	);
 });

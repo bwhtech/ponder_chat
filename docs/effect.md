@@ -146,6 +146,9 @@ Differences from postgres.js that later phases must handle:
 - **`numeric` comes back as a string**, as before.
 - **A `SqlError`'s `message` is the client's** ("PgConnection: Query failed"), not Postgres's. Postgres's message and code are on `error.reason.cause`. A log line that printed `error.message` of a postgres.js error printed Postgres's text: keep that by printing the cause's message.
 - Idle connections close after 60 seconds (postgres.js kept them).
+- **A row can be up to 1 GiB** (`maxMessageSize` in `server/runtime/Database.ts`), as with postgres.js. The client's default is 16 MiB, less than a long thread's `messages`.
+- **The client reads only `DATABASE_URL`.** postgres.js also read `PGUSER`, `PGPASSWORD`, `PGHOST` and the others, and treated `sslmode=require` as "encrypt, but don't verify the certificate". Here `sslmode=require` verifies it. Every Ponder deployment puts the user and password in `DATABASE_URL` and connects to 127.0.0.1 without TLS, so neither matters today. A deployment that needs them must say so in `DATABASE_URL`, or pass `ssl` options in the layer.
+- **Interrupting a query waits for the client to cancel it** on the server: seconds, on a hung connection. A deadline that a person waits on runs the query in a fiber of its own, as `Database.pingWithin` does for /health.
 
 Until Phase 3 two pools run: postgres.js (`server/db.ts`) and `PgClient`. Up to 20 connections, plus better-auth's 5 and Workflow's own.
 
