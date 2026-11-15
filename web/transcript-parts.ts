@@ -1,10 +1,13 @@
-import { defineAsyncComponent } from "vue";
+import { defineAsyncComponent, ref } from "vue";
 import { once } from "./once";
 import { toastsWanted } from "./toasts";
 
 type Parts = typeof import("./transcript");
 /** The transcript's components; it also exports functions (for quotes), which are not. */
 type PartName = { [K in keyof Parts]: Parts[K] extends (...args: never[]) => unknown ? never : K }[keyof Parts];
+
+/** The transcript's chunk has loaded. Until then a chat that opens with messages shows the skeleton (ChatView.vue). */
+export const transcriptReady = ref(false);
 
 /**
  * The transcript's chunk (transcript.ts), loaded once: by the first chat with messages, or
@@ -14,6 +17,7 @@ type PartName = { [K in keyof Parts]: Parts[K] extends (...args: never[]) => unk
 export const loadTranscript = once(() =>
 	import("./transcript").then((parts) => {
 		toastsWanted.value = true;
+		transcriptReady.value = true;
 		return parts;
 	}),
 );

@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { Skeleton } from "frappe-ui";
 
-/** Stands in for a thread the device does not have yet: turns shaped like the chat's, and the message field. */
+/**
+ * Stands in for a thread the device does not have yet: turns shaped like the chat's, and the
+ * message field. Without the field (`composer` false) it stands in for the messages alone, while
+ * the code that draws them loads (ChatView.vue).
+ */
+withDefaults(defineProps<{ composer?: boolean }>(), { composer: true });
 const turns = [
 	{ ask: "w-56", lines: ["w-full", "w-11/12", "w-3/5"] },
 	{ ask: "w-40", lines: ["w-full", "w-4/5"] },
@@ -23,7 +28,7 @@ const turns = [
 			</div>
 		</div>
 	</div>
-	<footer class="scroll-gutter-match shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+	<footer v-if="composer" class="scroll-gutter-match shrink-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 		<div class="flex h-[90px] flex-col justify-between rounded-7 border border-outline-gray-2 p-3">
 			<Skeleton class="h-3.5 w-2/3 rounded-4" />
 			<div class="flex items-center gap-2">
