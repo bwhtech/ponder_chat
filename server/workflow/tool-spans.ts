@@ -1,5 +1,4 @@
-import { SpanStatusCode } from "@opentelemetry/api";
-import { tracer } from "../tracing/span.ts";
+import { recordSpan } from "../tracing/reply-trace.ts";
 import type { ToolSpan } from "./tool-calls.ts";
 
 /**
@@ -12,11 +11,11 @@ import type { ToolSpan } from "./tool-calls.ts";
  */
 export function sendToolSpans(spans: ToolSpan[]) {
 	for (const { name, callId, start, end, failed } of spans) {
-		const span = tracer.startSpan(`execute_tool ${name}`, {
-			startTime: start,
+		recordSpan(`execute_tool ${name}`, {
+			start,
+			end,
+			failed,
 			attributes: { "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": name, "gen_ai.tool.call.id": callId },
 		});
-		if (failed) span.setStatus({ code: SpanStatusCode.ERROR });
-		span.end(end);
 	}
 }

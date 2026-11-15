@@ -7,32 +7,33 @@ import { etag } from "hono/etag";
 import type { hc } from "hono/client";
 import { HTTPException } from "hono/http-exception";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { z } from "zod";
 import { ARTIFACT_CDNS } from "../shared/cdns.ts";
 import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
-import { displayName } from "./admin/people.ts";
-import { appOrigin, auth, type SignedInEnv } from "./auth.ts";
+import type { SignedInEnv } from "./auth.ts";
+import * as Auth from "./auth/Auth.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
-import { sessionOf } from "./session-cache.ts";
-import { creditStatus } from "./credits.ts";
-import { askForCredits } from "./extra-credits.ts";
-import { listThreads, renameThread, sql } from "./db.ts";
-import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
-import { memoryFor } from "./memory.ts";
+import * as Credits from "./credits/Credits.ts";
+import * as Files from "./files.ts";
+import { MAX_FILE_BYTES, refusalText } from "./files.ts";
+import * as Memory from "./memory.ts";
 import { memoryApi } from "./memory/routes.ts";
-import { availableModels } from "./models.ts";
-import { notifyAdmins } from "./notify.ts";
-import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
+import * as Models from "./models/Models.ts";
+import type { LimitName } from "./limits/RateLimits.ts";
+import { limitPerPerson } from "./rate-limit.ts";
+import * as Sandbox from "./python/pyodide.ts";
 import { searchThreads } from "./thread-search.ts";
-import { pythonReady } from "./startup.ts";
-import { isFirstMessage, nameThread } from "./thread-title.ts";
+import * as Database from "./runtime/Database.ts";
+import { route } from "./runtime/route.ts";
 import { threadResponse } from "./thread-cache.ts";
-import { usageReport } from "./telemetry.ts";
-import { recordReplySpan, withReplyTrace } from "./tracing/reply-trace.ts";
+import * as Threads from "./threads/Threads.ts";
+import * as Runs from "./telemetry/Runs.ts";
 import { validate } from "./validate.ts";
 import { WEB_BUILD } from "./web-build.ts";
-import { deleteChat, followReply, startReply, stopReply, whenReplyFinished } from "./workflow/replies.ts";
+import * as Replies from "./workflow/replies.ts";
 
 /**
  * The HTTP API, served by Nitro (nitro.config.ts), which also compiles the chat workflow
@@ -71,30 +72,30 @@ app.use("*", async (c, next) => {
 	if (!c.req.path.startsWith("/api/") && !c.res.headers.has("Content-Security-Policy")) c.res.headers.set("Content-Security-Policy", PAGE_POLICY);
 });
 
-// For the uptime checks: the server answers and its database does. 503 otherwise.
-app.get("/health", async (c) => {
-	try {
-		await Promise.race([sql`select 1`, new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000))]);
-		return c.text("ok");
-	} catch {
-		return c.text("database unavailable", 503);
-	}
-});
+// For the uptime checks: the server answers and its database does, within 3 seconds. 503 otherwise.
+// The reference for a thin route (docs/effect.md): one effect, its failures mapped to answers.
+const databaseUnavailable = (_: unknown, c: Context) => c.text("database unavailable", 503);
+app.get("/health", (c) =>
+	route(c, Database.pingWithin("3 seconds").pipe(Effect.map(() => c.text("ok"))), {
+		SqlError: databaseUnavailable,
+		TimeoutError: databaseUnavailable,
+	}),
+);
 
 // The end of a connector's OAuth sign-in (mcp/routes.ts). It reads the session itself.
 app.get("/oauth/mcp/callback", oauthCallback);
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
-app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+app.on(["GET", "POST"], "/api/auth/*", (c) => route(c, Auth.Auth.use((auth) => auth.handler(c.req.raw))));
 app.use("/api/*", async (c, next) => {
-	const session = await sessionOf(c.req.raw.headers);
-	if (!session) return c.json({ error: "Sign in first." }, 401);
-	c.set("user", session.user);
+	const session = await route(c, Auth.Auth.use((auth) => auth.session(c.req.raw.headers)));
+	if (Option.isNone(session)) return c.json({ error: "Sign in first." }, 401);
+	c.set("user", session.value.user);
 	await next();
 });
 const userOf = (c: Context<Env>) => c.get("user").id;
 /** At most so many uses per person (rate-limit.ts). */
-const perPerson = (limit: RateLimit, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
+const perPerson = (limit: LimitName, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
 
 // A repeated or odd query value is ignored, not refused.
 const searchQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
@@ -117,7 +118,7 @@ const uploadLimit = bodyLimit({
  */
 const api = app
 	// Who is signed in, their role (read from the database, not the cookie), and their credits for today.
-	.get("/api/me", async (c) => c.json(await meOf(c.get("user"))))
+	.get("/api/me", (c) => route(c, Effect.map(meOf(c.get("user")), (me) => c.json(me))))
 
 	// The admin pages' API (admin/routes.ts). Every route there needs the admin role.
 	.route("/api/admin", adminApi)
@@ -126,117 +127,191 @@ const api = app
 	.route("/api/connectors", connectorsApi)
 
 	// Whether the chat can run Python, for the attach button.
-	.get("/api/features", async (c) => c.json({ python: await pythonReady }))
+	.get("/api/features", (c) => route(c, Effect.map(Sandbox.Sandbox.use((sandbox) => sandbox.ready), (python) => c.json({ python }))))
 
 	// The models a person can pick (only those with Zero Data Retention), and the one picked when they have not chosen.
-	.get("/api/models", async (c) => c.json(await availableModels()))
+	.get("/api/models", (c) =>
+		route(
+			c,
+			Effect.map(
+				Models.Models.use((models) => models.available),
+				(available) => c.json(available),
+			),
+		),
+	)
 
 	// The skills that are on, for the $ menu: names and descriptions, not the instructions.
-	.get("/api/skills", async (c) => c.json({ skills: await skillOptions() }))
+	.get("/api/skills", (c) => route(c, Effect.map(skillOptions, (skills) => c.json({ skills }))))
 
-	.get("/api/credits", async (c) => c.json(await creditStatus(userOf(c))))
+	.get("/api/credits", (c) => route(c, Effect.map(Credits.Credits.use((credits) => credits.status(userOf(c))), (status) => c.json(status))))
 
-	// Out of credits: ask the admins for more (extra-credits.ts). One request waits at a time.
-	.post("/api/credits/request", perPerson(creditRequestLimit), async (c) => {
-		const status = await creditStatus(userOf(c));
-		if (status.request?.status === "pending") return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
-		if (status.remaining > 0) return c.json({ error: "You still have credits for today." }, 400);
-		if (!(await askForCredits(userOf(c)))) return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
-		const { name, email } = c.get("user");
-		await notifyAdmins(
-			"Ponder Chat: credit request",
-			`${displayName(name, email)} asked for more credits (${status.used >= 100 ? Math.round(status.used) : status.used} of ${status.limit} used today).`,
-			`${appOrigin(c.req.raw.headers)}/admin/requests`,
-		);
-		return c.json(await creditStatus(userOf(c)));
-	})
+	// Out of credits: ask the admins for more (credits/ExtraCredits.ts). One request waits at a time.
+	.post("/api/credits/request", perPerson("creditRequest"), (c) =>
+		route(
+			c,
+			Effect.flatMap(Auth.appOrigin(c.req.raw.headers), (origin) =>
+				Effect.map(Credits.Credits.use((credits) => credits.request(c.get("user"), origin)), (status) => c.json(status)),
+			),
+			{
+				AlreadyAsked: (error, c) => c.json({ error: error.message }, 409),
+				CreditsLeft: (error, c) => c.json({ error: error.message }, 400),
+			},
+		),
+	)
 
 	// The list revalidates by its content and goes gzipped; one thread has its own cache (thread-cache.ts).
-	.get("/api/threads", compress(), etag(), async (c) => c.json({ threads: await listThreads(userOf(c)) }))
+	.get("/api/threads", compress(), etag(), (c) =>
+		route(
+			c,
+			Effect.map(
+				Threads.Threads.use((threads) => threads.list(userOf(c))),
+				(threads) => c.json({ threads }),
+			),
+		),
+	)
 
 	// Search in the person's chats (thread-search.ts). Before /api/threads/:id, which would take "search" as an id.
-	.get("/api/threads/search", perPerson(searchLimit), validate("query", searchQuery), async (c) =>
-		c.json({ threads: await searchThreads(userOf(c), c.req.valid("query").q) }),
+	.get("/api/threads/search", perPerson("search"), validate("query", searchQuery), (c) =>
+		route(
+			c,
+			Effect.map(searchThreads(userOf(c), c.req.valid("query").q), (threads) => c.json({ threads })),
+		),
 	)
 
-	.patch("/api/threads/:id", validate("json", threadTitle), async (c) => {
-		const renamed = await renameThread(c.req.param("id"), userOf(c), c.req.valid("json").title);
-		return renamed ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
-	})
+	.patch("/api/threads/:id", validate("json", threadTitle), (c) =>
+		route(
+			c,
+			Effect.map(
+				Threads.Threads.use((threads) => threads.rename(c.req.param("id"), userOf(c), c.req.valid("json").title)),
+				(renamed) => (renamed ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404)),
+			),
+		),
+	)
 
 	// A reply still running stops first (workflow/replies.ts).
-	.delete("/api/threads/:id", async (c) =>
-		(await deleteChat(c.req.param("id"), userOf(c))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404),
+	.delete("/api/threads/:id", (c) =>
+		route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.remove(c.req.param("id"), userOf(c))),
+				(deleted) => (deleted ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404)),
+			),
+		),
 	)
 
-	.get("/api/threads/:id", (c) => threadResponse(c, c.req.param("id"), userOf(c)))
+	.get("/api/threads/:id", (c) => route(c, threadResponse(c, c.req.param("id"), userOf(c))))
 
 	// A run with no messages fails before it writes, and its stream would never close, so chatBody refuses it.
-	.post("/api/chat", perPerson(chatLimit, { plain: true }), validate("json", chatBody, { error: "Nothing to send.", plain: true }), async (c) => {
+	// The chat transport shows the response text as the error, so its errors are plain text.
+	// The chat routes answer a stream, so their type is Response, as it always was: the chat transport reads them.
+	.post("/api/chat", perPerson("chat", { plain: true }), validate("json", chatBody, { error: "Nothing to send.", plain: true }), (c): Promise<Response> => {
 		const body = c.req.valid("json");
-		// The chat transport shows the response text as the error, so this one is plain text.
-		const checking = Date.now();
-		const credits = await creditStatus(userOf(c));
-		const checked = Date.now();
-		if (credits.remaining <= 0) return c.text(outOfCredits(credits.resetsAt), 402);
-		const reply = await startReply({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model });
-		if (!reply) return c.json({ error: "Not found" }, 404);
-		// Measured before the run had an id, so recorded into its trace now (server/tracing/reply-trace.ts).
-		if (!reply.followed) recordReplySpan(reply.runId, "credits.check", checking, checked);
-		// A new thread gets a name from a cheap model while the reply is written (thread-title.ts).
-		if (!reply.followed && isFirstMessage(body.messages)) withReplyTrace(reply.runId, () => void nameThread({ threadId: body.id, user: userOf(c) }, body.messages));
-		return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
+		return route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.start({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model })),
+				(reply) => createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } }),
+			),
+			{
+				OutOfCredits: (error, c) => c.text(error.message, 402),
+				ThreadNotYours: (_, c) => c.json({ error: "Not found" }, 404),
+			},
+		);
 	})
 
 	// A reply, from its start or from `startIndex` (the UI chunks the page already has).
 	// :id is the thread (a reloaded page) or the run (WorkflowChatTransport after a dropped
 	// connection). 204 when the thread has no run.
-	.get("/api/chat/:id/stream", validate("query", streamQuery), async (c) => {
-		const reply = await followReply(c.req.param("id"), userOf(c), c.req.valid("query").startIndex);
-		if (!reply) return c.body(null, 204);
-		return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
-	})
+	.get("/api/chat/:id/stream", validate("query", streamQuery), (c): Promise<Response> =>
+		route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.follow(c.req.param("id"), userOf(c), c.req.valid("query").startIndex)),
+				Option.match({
+					onNone: () => c.body(null, 204),
+					onSome: (reply) => createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } }),
+				}),
+			),
+		),
+	)
 
 	// Stop: closing the request does not end a run; this does.
-	.post("/api/chat/:id/stop", async (c) => c.json({ stopped: await stopReply(c.req.param("id"), userOf(c)) }))
+	.post("/api/chat/:id/stop", (c) =>
+		route(
+			c,
+			Effect.map(
+				Replies.Replies.use((replies) => replies.stop(c.req.param("id"), userOf(c))),
+				(stopped) => c.json({ stopped }),
+			),
+		),
+	)
 
 	// Memory (server/memory/routes.ts): what Ponder remembers about the person, and the decisions behind it.
 	.route("/api/memory", memoryApi)
 
 	// A chat's memory decisions. With ?wait=1, first waits for the reply to be saved and its memory save to end.
-	.get("/api/threads/:id/memory", validate("query", memoryQuery), async (c) => {
+	.get("/api/threads/:id/memory", validate("query", memoryQuery), (c) => {
 		const threadId = c.req.param("id");
 		const wait = Boolean(c.req.valid("query").wait);
-		if (wait) await whenReplyFinished(threadId);
-		return c.json({ saves: await memoryFor(userOf(c)).threadSaves(threadId, { settle: wait }) });
+		const saved = wait ? Replies.Replies.use((replies) => replies.whenFinished(threadId)) : Effect.void;
+		return route(
+			c,
+			saved.pipe(
+				Effect.andThen(Memory.Memory.use((memory) => memory.threadSaves(userOf(c), threadId, { settle: wait }))),
+				Effect.map((saves) => c.json({ saves })),
+			),
+		);
 	})
 
 	// The upload is a form, read by the route: a form validator would read the body
 	// itself and turn "too large" (uploadLimit) into a 400.
-	.post("/api/files", perPerson(uploadRate), uploadLimit, async (c) => {
+	.post("/api/files", perPerson("upload"), uploadLimit, async (c) => {
 		const form = await c.req.formData();
 		const file = form.get("file");
 		if (!(file instanceof File)) return c.json({ error: "No file in the upload." }, 400);
-		const result = await saveFile(userOf(c), file);
-		return "error" in result ? c.json(result, 400) : c.json(result.file);
+		return route(
+			c,
+			Effect.map(
+				Files.Files.use((files) => files.save(userOf(c), file)),
+				(stored) => c.json(stored),
+			),
+			{ FileRefused: (refused, c) => c.json({ error: refusalText(file.name, refused) }, 400) },
+		);
 	})
 
-	.get("/api/files/:id", async (c) => {
-		const file = await loadFile(c.req.param("id"), userOf(c));
-		if (!file) return c.json({ error: "Not found" }, 404);
-		// Only types that cannot run script open in the browser. Anything else (HTML or SVG that Python wrote) downloads, sandboxed.
-		const inline = INLINE_TYPES.has(file.media_type);
-		return c.body(new Uint8Array(file.data), 200, {
-			"Content-Type": file.media_type,
-			"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
-			"Cache-Control": "private, max-age=31536000, immutable",
-			"X-Content-Type-Options": "nosniff",
-			...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
-		});
-	})
+	.get("/api/files/:id", (c) =>
+		route(
+			c,
+			Effect.map(
+				Files.Files.use((files) => files.load(c.req.param("id"), userOf(c))),
+				Option.match({
+					onNone: () => c.json({ error: "Not found" }, 404),
+					onSome: (file) => {
+						// Only types that cannot run script open in the browser. Anything else (HTML or SVG that Python wrote) downloads, sandboxed.
+						const inline = INLINE_TYPES.has(file.media_type);
+						return c.body(new Uint8Array(file.data), 200, {
+							"Content-Type": file.media_type,
+							"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+							"Cache-Control": "private, max-age=31536000, immutable",
+							"X-Content-Type-Options": "nosniff",
+							...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
+						});
+					},
+				}),
+			),
+		),
+	)
 
 	// Tokens and cost of a person's runs, optionally for one thread.
-	.get("/api/usage", validate("query", usageQuery), async (c) => c.json(await usageReport({ user: userOf(c), thread: c.req.valid("query").thread })));
+	.get("/api/usage", validate("query", usageQuery), (c) =>
+		route(
+			c,
+			Effect.map(
+				Runs.Runs.use((runs) => runs.usageReport({ user: userOf(c), thread: c.req.valid("query").thread })),
+				(report) => c.json(report),
+			),
+		),
+	);
 
 /** The API's routes, for the typed client (web/api.ts). Import it as a type only, so no server code reaches the browser. */
 export type AppType = typeof api;
@@ -268,6 +343,8 @@ app.notFound((c) => (c.req.path.startsWith("/api/") ? c.json({ error: "Not found
 app.onError((error, c) => {
 	// A refusal that a route or middleware threw carries its own answer.
 	if (error instanceof HTTPException) return error.getResponse();
+	// The console, as Effect's logger writes it: Hono calls this without waiting, and the
+	// error may be the runtime's own, such as one that could not be built.
 	console.error(`request failed: ${c.req.method} ${c.req.path}:`, error);
 	const message = "Something went wrong. Try again.";
 	if (isChat(c.req.path)) return c.text(message, 500);
@@ -279,11 +356,6 @@ export default app;
 /** The chat routes answer in plain text: the chat transport shows the response text as the error. */
 function isChat(path: string) {
 	return path === "/api/chat" || path.startsWith("/api/chat/");
-}
-
-function outOfCredits(resetsAt: string) {
-	const hours = Math.max(1, Math.ceil((new Date(resetsAt).getTime() - Date.now()) / 3_600_000));
-	return `You have used today's credits. They refill in about ${hours} hour${hours === 1 ? "" : "s"}.`;
 }
 
 const INLINE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json"]);

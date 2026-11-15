@@ -4,12 +4,12 @@ import { fromBoot } from "./boot";
 import { once } from "./once";
 
 /**
- * Who is signed in, and their credits for today. Sign-in is by email (server/auth.ts):
+ * Who is signed in, and their credits for today. Sign-in is by email (server/auth/Auth.ts):
  * the person types their email, then types the code from the email, or opens its link
  * and lands back here. Either way they get a session cookie.
  */
 export type Me = Answer<typeof client.api.me.$get>;
-/** Today's credits (CreditStatus in server/credits.ts). */
+/** Today's credits (CreditStatus in server/credits/Credits.ts). */
 export type Credits = Me["credits"];
 
 /**

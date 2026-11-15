@@ -1,12 +1,12 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
-import { MODELS } from "../../server/models.ts";
+import { MODELS } from "../../server/models/Models.ts";
 import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
 
 /**
  * A fake OpenRouter, and a fake Cloudflare email API, for the end-to-end tests. Ponder
- * reaches it through OPENROUTER_BASE_URL and CLOUDFLARE_API_URL (server/openrouter.ts,
- * server/email.ts), so the tests need no API key and spend nothing.
+ * reaches it through OPENROUTER_BASE_URL and CLOUDFLARE_API_URL (server/openrouter/OpenRouter.ts,
+ * server/email/Mailer.ts), so the tests need no API key and spend nothing.
  *
  * It answers each kind of call Ponder makes:
  * - chat replies, streamed in OpenRouter's format, with tool calls (`ChatScript`);

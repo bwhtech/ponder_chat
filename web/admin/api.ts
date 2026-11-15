@@ -12,7 +12,7 @@ export const admin = client.api.admin;
 
 export type SettingsData = Answer<typeof admin.settings.$get>;
 export type Settings = Answer<typeof admin.settings.$put>;
-/** The OpenRouter key in use, without the key itself (server/openrouter-key.ts). */
+/** The OpenRouter key in use, without the key itself (server/openrouter/OpenRouterKey.ts). */
 export type KeyStatus = SettingsData["openRouterKey"];
 export type Admin = SettingsData["admins"][number];
 

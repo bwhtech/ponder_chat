@@ -36,8 +36,9 @@ export async function loadModelMessages(
 	keepReasoningOf?: string,
 ): Promise<ThreadContext> {
 	"use step";
+	const { runStep } = await import("../runtime/step.ts");
 	const { loadThreadContext } = await import("./thread-messages.ts");
-	const context = await loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, keepReasoningOf });
+	const context = await runStep(loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, keepReasoningOf }));
 	if (context.through) await writeCompactionState(writable, { state: "done", through: context.through });
 	return context;
 }
@@ -53,9 +54,10 @@ export const COMPACT_RETRIES = 2;
 export async function compactStep(writable: WritableStream<ModelCallStreamPart>, request: CompactRequest): Promise<CompactResult> {
 	"use step";
 	const { getStepMetadata } = await import("workflow");
+	const { runStep } = await import("../runtime/step.ts");
 	const { compact } = await import("../compaction/compact.ts");
 	const { attempt } = getStepMetadata();
-	return compact(request, { lastAttempt: attempt > COMPACT_RETRIES, status: (state) => writeCompactionState(writable, state) });
+	return runStep(compact(request, { lastAttempt: attempt > COMPACT_RETRIES, status: (state) => writeCompactionState(writable, state) }));
 }
 compactStep.maxRetries = COMPACT_RETRIES;
 
@@ -76,40 +78,46 @@ async function writeCompactionState(writable: WritableStream<ModelCallStreamPart
 export async function recallMemoryStep(threadId: string, owner: string): Promise<{ guidance: string; recalled: string }> {
 	"use step";
 	return contextStep("memory", `thread ${threadId}`, async () => {
-		const { loadThread } = await import("../db.ts");
-		const { memoryForRun } = await import("../memory.ts");
-		return memoryForRun({ threadId, user: owner }, await loadThread(threadId));
+		const { runStep } = await import("../runtime/step.ts");
+		const Threads = await import("../threads/Threads.ts");
+		const Memory = await import("../memory.ts");
+		const messages = await runStep(Threads.Threads.use((threads) => threads.load(threadId)));
+		return runStep(Memory.Memory.use((memory) => memory.forRun({ threadId, user: owner }, messages)));
 	});
 }
 recallMemoryStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function runPythonStep(input: RunPythonInput, threadId: string, owner: string) {
 	"use step";
-	const { executeRunPython } = await import("../python/tool.ts");
-	return executeRunPython(input, { threadId, owner });
+	const { runStep } = await import("../runtime/step.ts");
+	const RunPython = await import("../python/tool.ts");
+	return runStep(RunPython.RunPython.use((python) => python.execute(input, { threadId, owner })));
 }
 
 export async function webSearchStep(input: WebSearchInput, threadId: string, owner: string) {
 	"use step";
+	const { runStep } = await import("../runtime/step.ts");
 	const { executeWebSearch } = await import("../search/tool.ts");
-	return executeWebSearch(input, { threadId, owner });
+	return runStep(executeWebSearch(input, { threadId, owner }));
 }
 
 /** The pages web_fetch may read in this thread without asking the person (search/trusted-pages.ts). */
 export async function trustedPagesStep(threadId: string): Promise<string[]> {
 	"use step";
 	return contextStep("trusted pages", `thread ${threadId}`, async () => {
-		const { loadThread } = await import("../db.ts");
+		const { runStep } = await import("../runtime/step.ts");
+		const Threads = await import("../threads/Threads.ts");
 		const { trustedPageKeys } = await import("../search/trusted-pages.ts");
-		return trustedPageKeys(await loadThread(threadId));
+		return trustedPageKeys(await runStep(Threads.Threads.use((threads) => threads.load(threadId))));
 	});
 }
 trustedPagesStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function webFetchStep(input: WebFetchInput) {
 	"use step";
+	const { runStep } = await import("../runtime/step.ts");
 	const { executeWebFetch } = await import("../search/tool.ts");
-	return executeWebFetch(input);
+	return runStep(executeWebFetch(input));
 }
 
 export async function saveReplyStep(
@@ -121,17 +129,17 @@ export async function saveReplyStep(
 	continued: Continued | null = null,
 ) {
 	"use step";
-	const { saveReply } = await import("./reply.ts");
-	await settleModelCalls(threadId, runId);
-	await saveReply(threadId, owner, runId, model, { failed, continued });
+	const { runStep } = await import("../runtime/step.ts");
+	const { saveRunReply } = await import("./reply.ts");
+	await runStep(saveRunReply(threadId, owner, runId, model, { failed, continued }));
 }
 
 /** Marks the run finished, and failed, when saving its reply failed, so the thread does not look busy forever. */
 export async function finishRunStep(threadId: string, runId: string, model: string, continued: Continued | null = null) {
 	"use step";
-	const { finishRun } = await import("./runs.ts");
-	await settleModelCalls(threadId, runId);
-	await finishRun(threadId, runId, model, { failed: true, continued });
+	const { runStep } = await import("../runtime/step.ts");
+	const { finishFailedRun } = await import("./reply.ts");
+	await runStep(finishFailedRun(threadId, runId, model, continued));
 }
 
 /**
@@ -148,13 +156,4 @@ export async function endReplyStream(writable: WritableStream<ModelCallStreamPar
 		writer.releaseLock();
 	}
 	await writable.close();
-}
-
-/**
- * Settles the run's model calls that a crash cut short on their last attempt (model-calls.ts):
- * nothing ran again to settle them. They are not charged, and the sweep gets their cost.
- */
-async function settleModelCalls(threadId: string, runId: string) {
-	const { settleModelCalls } = await import("../telemetry/model-calls.ts");
-	await settleModelCalls(threadId, runId).catch((error) => console.warn(`steps: could not settle the model calls of run ${runId}:`, error));
 }

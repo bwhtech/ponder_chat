@@ -152,7 +152,7 @@ Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL`
 
 Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts`, `server/tracing.check.ts`, `server/workflow/loop.check.ts` and `server/mcp.check.ts` on every pull request.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, `npx tsx server/tracing.check.ts`, `npx tsx server/workflow/loop.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npm run test` (the server's unit tests; set `TEST_DATABASE_URL` to a throwaway Postgres to include the database tests, [`docs/effect.md`](docs/effect.md)), `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, `npx tsx server/tracing.check.ts`, `npx tsx server/workflow/loop.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -202,9 +202,9 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 
 - Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link. Either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes. A code takes 3 wrong tries. A code is checked only by signing in with it: Better Auth's route that checks a code alone is off, and so are codes of any type other than sign-in.
 - Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
-- Models: the list is in `server/models.ts`, and it is also the allowlist. A request for any other model gets the default, Auto (`CHAT_DEFAULT_MODEL` changes it). Every new chat starts on Auto; an old chat keeps the model of its last reply.
-- Auto (`server/auto-router.ts`): `openrouter/auto` with the `auto-router` plugin. `allowed_models` holds only the models on the list with a ZDR endpoint, and `cost_tier` is the cost level that admins set in Settings, Auto (low, medium or high; medium by default). The chat's id goes as `session_id`, so OpenRouter keeps a chat on one model where it can. Its window is the smallest window of those models, every PDF gets the free parser, and the call carries Anthropic's cache marks. The replies of an Auto chat drop their reasoning on the next call, because the next model may differ. OpenRouter's decision model, which reads each message to pick the model, is not covered by the ZDR rule as far as its docs say.
-- Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter.ts`). The model menu shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
+- Models: the list is in `server/models/Models.ts`, and it is also the allowlist. A request for any other model gets the default, Auto (`CHAT_DEFAULT_MODEL` changes it). Every new chat starts on Auto; an old chat keeps the model of its last reply.
+- Auto (`server/models/AutoRouter.ts`): `openrouter/auto` with the `auto-router` plugin. `allowed_models` holds only the models on the list with a ZDR endpoint, and `cost_tier` is the cost level that admins set in Settings, Auto (low, medium or high; medium by default). The chat's id goes as `session_id`, so OpenRouter keeps a chat on one model where it can. Its window is the smallest window of those models, every PDF gets the free parser, and the call carries Anthropic's cache marks. The replies of an Auto chat drop their reasoning on the next call, because the next model may differ. OpenRouter's decision model, which reads each message to pick the model, is not covered by the ZDR rule as far as its docs say.
+- Privacy: every OpenRouter call (replies, names, memory, embeddings) asks for Zero Data Retention endpoints only (`server/openrouter/OpenRouter.ts`). The model menu shows only the models that have such an endpoint, from OpenRouter's public list. OpenRouter's own PDF parser is not covered by this rule.
 - Chat names: a cheap model writes them. Search uses Postgres full-text search (`server/thread-search.ts`). Export to Markdown runs in the browser (`web/export-markdown.ts`).
 - Side panel (`web/side-panel/`): on a narrow screen the panel covers the page. pdf.js loads only the first time a PDF opens. A CSV or TSV file shows up to 2,000 rows. Cmd- or Ctrl-click still opens the file in a new tab.
 - Artifacts (`server/artifacts/schema.ts`, `web/artifacts/`): a deck is HTML, one `<section>` per 1280×720 slide. The content is the tool call's input, so it is saved with the message. Writing the same id again makes a new version. Slides run no scripts and load nothing from other addresses. While a reply writes an artifact, the card lists its steps (`web/artifacts/steps.ts`). Replies skip OpenRouter providers that send a tool call only when it is complete (Wafer), so the artifact shows as it is written (`server/workflow/model.ts`).
@@ -220,7 +220,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 - Both settings are in the `settings` table (one row), and admins change them on `/admin`, Settings. The first start fills the row from `CHAT_DAILY_CREDITS` (default 1000) and `CHAT_CREDITS_PER_USD` (default 1000). After that, the app does not read these two variables.
 
 - Credits are charged from the cost that OpenRouter reports for each call. The `runs` table records it (`server/telemetry/`).
-- The calls that write chat names are recorded in `runs` but are not charged to credits. The view `charged_runs` (`server/telemetry/store.ts`) holds this rule, and which run ends a reply (`is_reply`). Credits, `/admin` and `deploy/sentinel.sh` all read it.
+- The calls that write chat names are recorded in `runs` but are not charged to credits. The view `charged_runs` (`server/telemetry/Runs.ts`) holds this rule, and which run ends a reply (`is_reply`). Credits, `/admin` and `deploy/sentinel.sh` all read it.
 - A model call that did not finish is also recorded in `runs` but not charged: a call that a crash cut short (`finish_reason` "interrupted", or "started" until the reply settles it), a call that failed and was tried again ("retried"), the last failed attempt ("failed"), and the call that Stop cut short ("stopped"). OpenRouter can bill them, so `deploy/sentinel.sh`'s daily cost, which reads `runs`, includes them.
 - Each web search is a `runs` row (`function_id` `web-search`) and is charged: about $0.007, so 7 credits.
 - Each summary of a long chat is a `runs` row (`function_id` `compaction`) and is charged. With DeepSeek V4.1 Flash, a summary of 200,000 tokens costs about $0.01, so 10 credits. See "Long chats".
@@ -248,7 +248,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 - A "reply" is a `runs` row in `charged_runs` with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each attempt at a model call, so a reply that used tools, or whose model call was tried again, has several rows. Only the last one counts.
 - The OpenRouter key: an admin pastes it in Settings. The server checks it with OpenRouter, then saves it encrypted in the `secrets` table (AES-256-GCM, with a key derived from `BETTER_AUTH_SECRET`), so a copy of the database alone does not give it away. The key is never sent back to the page; Settings shows its last four characters. Until a key is saved there, `OPENROUTER_API_KEY` from the environment is used. A new `BETTER_AUTH_SECRET` makes the saved key unreadable: the server then uses `OPENROUTER_API_KEY` if it is set, and Settings asks for the key again.
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
-- The admin activity log is the `admin_events` table (`server/admin-events.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/admin-auth-events.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
+- The admin activity log is the `admin_events` table (`server/admin/AdminEvents.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/auth/AdminAuthEvents.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
 - An admin can change a person's email with Better Auth's `/api/auth/admin/update-user`. The admin can then sign in to that account with the new address. So each email change is logged, and the old address gets an email that names the new address and the admin.
 
 ### Durable replies
@@ -258,7 +258,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 | The workflow: one reply | `server/workflow/chat.ts` |
 | The agent loop: model calls, tool calls, approvals | `server/workflow/loop.ts`, `server/workflow/tool-calls.ts`, `server/workflow/approvals.ts` |
 | One model call as a step, and its retries | `server/workflow/model-call.ts`, `server/workflow/model-attempt.ts`, `server/workflow/model-errors.ts` |
-| The `runs` row of each model call | `server/telemetry/model-calls.ts` |
+| The `runs` row of each model call | `server/telemetry/ModelCalls.ts` |
 | Streams, reconnects, saving the reply | `server/workflow/reply.ts`, `server/workflow/runs.ts` |
 | Start-up and shutdown of the worker | `server/startup.ts` |
 | Browser: reconnects with `WorkflowChatTransport` | `web/ChatView.vue` |
@@ -316,7 +316,7 @@ Each reply can be one OpenTelemetry trace. A trace shows where the reply's time 
 | One trace per reply | `server/tracing/reply-trace.ts`, `server/tracing/flow-middleware.ts` |
 | What a span may carry | `server/tracing/privacy.ts` |
 | HTTP spans | `server/tracing/http.ts` |
-| Ponder's own spans | `span()` in `server/tracing/span.ts`, called in the modules |
+| Ponder's own spans | `Effect.fn("name")` in the services, on Effect's tracer (`server/tracing/Tracing.ts`); spans with given times in `server/tracing/reply-trace.ts` |
 
 A reply's trace has these spans:
 
@@ -340,7 +340,7 @@ One reply is one trace:
 
 - A reply's trace id and root span id come from its run id (a SHA-256 of it). Every process that knows the run id gets the same ids, so nothing is stored.
 - The workflow worker sends each step to `/.well-known/workflow/v1/flow`. A Nitro middleware reads the run id in the message and runs the step under the reply's root. So Workflow's spans, Ponder's spans and the AI SDK's spans join the trace, in every job, every replay, and in the server that goes on after a crash.
-- The root span is sent last, when the run is marked finished (`finishRun` in `server/workflow/runs.ts`), with the run's start time. Every way a reply ends goes through there: saved, failed or stopped.
+- The root span is sent last, when the run is marked finished (`ThreadRuns.finish` in `server/workflow/runs.ts`), with the run's start time. Every way a reply ends goes through there: saved, failed or stopped.
 - After an approval, a new run carries on the message (see "Connectors"). It is a trace of its own. Its `chat.request` span links to the root of the run it carries on, and both have the same `gen_ai.conversation.id` (the thread id).
 - Only replies are traced. A span with no reply above it, such as a page load or a queue poll, is not sampled.
 
@@ -414,8 +414,8 @@ Settings, Connectors (from the account menu) lists the MCP servers the person co
 
 - Add connector takes the URL of a remote MCP server (Streamable HTTP, or SSE for old servers). While the person types, the server sends it an `initialize` request (`server/mcp/probe.ts`) and says whether it needs no sign-in, an API key, or an OAuth sign-in. No stdio: Ponder never runs a command that a person typed.
 - OAuth: `@ai-sdk/mcp` runs the flow the MCP spec asks for (discovery, dynamic client registration, PKCE, state and issuer checks). The sign-in opens in a popup and ends at `/oauth/mcp/callback`, which tells the page on a `BroadcastChannel` and closes. On a phone, the sign-in uses the same tab and comes back to `/?settings=connectors`. For a server that does not allow dynamic registration (GitHub), the person registers their own OAuth app and enters its client ID and secret under Advanced.
-- Credentials (header values, OAuth client, tokens) are one value per connection in `mcp_connections.credentials`, encrypted with AES-256-GCM and bound to the row (`seal` in `server/secrets.ts`). The key comes from `PONDER_ENCRYPTION_KEY` when it is set, else from `BETTER_AUTH_SECRET`. A sealed value names its key, so setting `PONDER_ENCRYPTION_KEY` later keeps the older values readable while `BETTER_AUTH_SECRET` stays the same. The page never gets a credential: only header names.
-- Every request to an MCP server or its OAuth endpoints goes through the same guard as `web_fetch` (`server/net-guard.ts`): https, public addresses only, checked on each connection. For development and the checks only, `MCP_ALLOW_PRIVATE_NETWORKS=1` turns the guard off for connectors.
+- Credentials (header values, OAuth client, tokens) are one value per connection in `mcp_connections.credentials`, encrypted with AES-256-GCM and bound to the row (`seal` in `server/secrets/Secrets.ts`). The key comes from `PONDER_ENCRYPTION_KEY` when it is set, else from `BETTER_AUTH_SECRET`. A sealed value names its key, so setting `PONDER_ENCRYPTION_KEY` later keeps the older values readable while `BETTER_AUTH_SECRET` stays the same. The page never gets a credential: only header names.
+- Every request to an MCP server or its OAuth endpoints goes through the same guard as `web_fetch` (`server/net/NetGuard.ts`): https, public addresses only, checked on each connection. For development and the checks only, `MCP_ALLOW_PRIVATE_NETWORKS=1` turns the guard off for connectors.
 - Rules: each tool is named `<slug>__<tool>`, such as `linear__create_issue`. A tool that says it only reads (`readOnlyHint`) starts on "Always allow". Every other tool starts on "Ask first". The person can set each tool to "Always allow", "Ask first" or "Off", and turn a connector off. The tool lists are kept in the database and listed again in the background when they are more than an hour old.
 - A catalog, not a tool list: connector tools are not tools of their own. The model gets two tools when the person has a connector on. `connector_search` searches the person's connector tools and returns each match's exact name and a short TypeScript-like signature of its input. `connector_call` calls one: `connector_call({ tool: "linear__create_issue", input: {...} })`. Connecting, changing or removing a connector then changes neither the tools nor the instructions, so the provider's cache keeps them (see "What the model reads"). The design follows vercel/eve's deferred tool catalog (`server/mcp/catalog.ts`).
 - Search ranks by keywords, with no embeddings (`server/mcp/rank.ts`). An exact name ranks first. Next come the name without its slug, then a connector's slug or name, then the start of a name. Last come other words, weighted by where they match: the tool's name, the connector, the input's property names, then the descriptions. A query word matches a word that it starts, or the word with an ending: "categories" finds category, "copied" copy, "seeing" see, and in names "shipping" finds ship and "committed" commit. Short words don't take "d", "ed" or "ing", so "add" does not match "ad", and words such as "being" and "incoming" are words of their own. Filler words such as "the" and "for" match nothing. Descriptions also keep each word whole, and a query word also matches two adjacent words of a name joined, as a whole word, so "github" finds "GitHub" and `searchGitHub`. Words in any script count, with their combining marks and zero-width joiners. A run of more than eight marks is cut before the text is normalized, and a server's names and titles are cut to 200 characters: NFC sorts a run of marks in time that grows with its square. Thai and Chinese have no spaces, so a phrase in them is one word, found only by its start. A query such as `linear__` lists one connector's tools. Results also carry what each connector's server says about itself (its MCP instructions). A query is at most 300 characters, and only its first 16 distinct words are scored, so a long query can't hold up the server. The output is cut at 20,000 characters, and the results past that count as remaining.
@@ -467,29 +467,29 @@ A chat can grow longer than its model can read. `server/compaction/` and `server
 
 ### Limits
 
-- Per person, in memory (`server/rate-limit.ts`): 12 messages a minute and 200 an hour; 30 uploads in 10 minutes and 150 a day; 3 requests for credits an hour; 60 chat searches a minute. Over a limit, the answer is 429 with `Retry-After`. A restart clears the counts.
-- Sign-in (Better Auth, `server/auth.ts`), per address: 5 sign-in emails in 10 minutes, 10 code tries and 10 link opens in 10 minutes, 100 other requests a minute. The address comes from `cf-connecting-ip` (Cloudflare), else `x-forwarded-for`.
+- Per person, in memory (`server/limits/RateLimits.ts`): 12 messages a minute and 200 an hour; 30 uploads in 10 minutes and 150 a day; 3 requests for credits an hour; 60 chat searches a minute. Over a limit, the answer is 429 with `Retry-After`. A restart clears the counts.
+- Sign-in (Better Auth, `server/auth/Auth.ts`), per address: 5 sign-in emails in 10 minutes, 10 code tries and 10 link opens in 10 minutes, 100 other requests a minute. The address comes from `cf-connecting-ip` (Cloudflare), else `x-forwarded-for`.
 
 ### Code
 
 | Part | Where |
 | --- | --- |
 | HTTP API | `server/app.ts` |
-| Sign-in, invites and admins | `server/auth.ts`, `server/invites.ts`, `server/admins.ts`, `web/SignIn.vue` |
+| Sign-in, invites and admins | `server/auth/Auth.ts`, `server/people/Invites.ts`, `server/people/Accounts.ts`, `web/SignIn.vue` |
 | Admin pages | `server/admin/`, `web/admin.html`, `web/admin/` |
 | Chat workflow | `server/workflow/` |
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |
 | Files and what the model reads of them | `server/files.ts`, `server/file-context.ts`, `server/image-resize.ts`, `server/pdf-text.ts` |
 | Trimming, memory placement and prompt caching | `server/workflow/context.ts`, `server/workflow/cache.ts` |
 | Summaries of long chats | `server/compaction/`, `server/workflow/context-guard.ts`, `web/compaction.ts` |
-| Rate limits | `server/rate-limit.ts` |
+| Rate limits | `server/limits/RateLimits.ts`, `server/rate-limit.ts` |
 | Search in chats, Markdown export | `server/thread-search.ts`, `web/thread-search.ts`, `web/export-markdown.ts` |
 | Citation chips | `inline-citation/collect.ts`, `CitationCard.vue` and `response/Response.vue` in [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) |
-| Models | `server/models.ts`, `web/models.ts` |
-| OpenRouter key and other secrets | `server/openrouter-key.ts`, `server/secrets.ts` |
-| Credits | `server/credits.ts`, `server/settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
+| Models | `server/models/Models.ts`, `web/models.ts` |
+| OpenRouter key and other secrets | `server/openrouter/OpenRouterKey.ts`, `server/secrets/Secrets.ts` |
+| Credits | `server/credits/Credits.ts`, `server/settings/Settings.ts`, `server/credits/ExtraCredits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
-| Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net-guard.ts`, `web/connectors/`, `web/settings/` |
+| Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net/NetGuard.ts`, `web/connectors/`, `web/settings/` |
 | Tracing | `server/tracing/`, `server/plugins/tracing.ts`, `deploy/jaeger.*` |
 | Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
 | Components | The [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) package. `web/side-panel/panel.ts` is its file viewer (`provideFileViewer` in `web/Workspace.vue`). |

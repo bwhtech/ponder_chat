@@ -16,6 +16,8 @@ export async function contextStep<T>(what: string, about: string, work: () => Pr
 		const { getStepMetadata } = await import("workflow");
 		const { attempt } = getStepMetadata();
 		const message = `${what} (${about}, attempt ${attempt} of ${CONTEXT_STEP_RETRIES + 1}): ${error instanceof Error ? error.message : String(error)}`;
+		// The console, not Effect's logger: this function is in the workflow's bundle, which
+		// must not load the runtime. Effect's logger writes the same lines to it.
 		if (attempt > CONTEXT_STEP_RETRIES) console.error(`reply degraded: ${message}`);
 		else console.warn(`reply step failed, will retry: ${message}`);
 		throw error;

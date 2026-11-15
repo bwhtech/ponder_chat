@@ -185,7 +185,7 @@ export function useSettingsForm() {
 
 export type AutoCostTier = Settings["autoCostTier"];
 
-/** How much Auto may spend on a request (server/auto-router.ts). */
+/** How much Auto may spend on a request (server/models/AutoRouter.ts). */
 export const AUTO_COST_OPTIONS: { label: string; value: AutoCostTier }[] = [
 	{ label: "Low", value: "low" },
 	{ label: "Medium", value: "medium" },

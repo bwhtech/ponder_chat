@@ -22,8 +22,9 @@ export const SKILL_PART = "data-skill";
 export async function skillsStep(): Promise<ActiveSkill[]> {
 	"use step";
 	return contextStep("skills", "all skills", async () => {
-		const { activeSkills } = await import("../skills.ts");
-		return activeSkills();
+		const { runStep } = await import("../runtime/step.ts");
+		const Skills = await import("../skills.ts");
+		return runStep(Skills.Skills.use((skills) => skills.active));
 	});
 }
 skillsStep.maxRetries = CONTEXT_STEP_RETRIES;

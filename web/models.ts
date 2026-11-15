@@ -5,7 +5,7 @@ import { fromBoot } from "./boot";
 import { once } from "./once";
 
 /**
- * The models a person can pick (server/models.ts), and the one a new chat starts on:
+ * The models a person can pick (server/models/Models.ts), and the one a new chat starts on:
  * the server's default, Auto. An old chat starts on the model of its last reply
  * (ChatView.vue).
  */

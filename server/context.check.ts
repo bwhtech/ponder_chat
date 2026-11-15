@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import type { ModelMessage, UIMessage } from "ai";
-import { RateLimit } from "./rate-limit.ts";
+import { RateLimit } from "./limits/RateLimits.ts";
 import { withCacheMarks } from "./workflow/cache.ts";
 import { addRecalledMemory, dropOtherModelsReasoning, trimOldToolResults } from "./workflow/context.ts";
 

@@ -1,19 +1,17 @@
 import { type Context, Hono } from "hono";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { z } from "zod";
-import { appOrigin, auth, type SignedInEnv } from "../auth.ts";
-import { connectorLimit, limitPerPerson } from "../rate-limit.ts";
-import {
-	addConnector,
-	changeConnector,
-	completeSignIn,
-	listConnectors,
-	refreshConnector,
-	removeConnector,
-	signInAgain,
-} from "./connectors.ts";
-import { ConnectorProblem, describeError, NeedsSignIn } from "./errors.ts";
+import type { SignedInEnv } from "../auth.ts";
+import * as Auth from "../auth/Auth.ts";
+import { limitPerPerson } from "../rate-limit.ts";
+import type { Services } from "../runtime/layer.ts";
+import { route } from "../runtime/route.ts";
+import * as ConnectorStore from "./ConnectorStore.ts";
+import * as Connectors from "./Connectors.ts";
+import { ConnectorFailed, ConnectorProblem, describeError, NeedsSignIn } from "./errors.ts";
 import { probe } from "./probe.ts";
-import { takeSignIn } from "./store.ts";
 import { validate } from "../validate.ts";
 import type { SignInMessage } from "../../shared/connectors.ts";
 
@@ -26,7 +24,7 @@ type Env = SignedInEnv;
 
 const userOf = (c: Context<Env>) => c.get("user").id;
 const idOf = (c: Context<Env>) => c.req.param("id") ?? "";
-const limited = limitPerPerson(connectorLimit, userOf);
+const limited = limitPerPerson("connector", userOf);
 
 const headerList = z.array(z.object({ name: z.string().max(100), value: z.string().max(4_000) })).max(10);
 const newConnector = z.object({
@@ -46,39 +44,58 @@ const change = z.object({
 });
 const probeBody = z.object({ url: z.string().trim().max(2_000) });
 
+/** One method of the Connectors service. */
+const connectors = <A, E>(use: (service: Connectors.Connectors["Service"]) => Effect.Effect<A, E>) => Connectors.Connectors.use(use);
+
 export const connectorsApi = new Hono<Env>()
-	.get("/", (c) => answer(c, async () => ({ connectors: await listConnectors(userOf(c)) })))
+	.get("/", (c) => answer(c, Effect.map(connectors((service) => service.listConnectors(userOf(c))), (list) => ({ connectors: list }))))
 
-	.post("/probe", limited, validate("json", probeBody), (c) => answer(c, () => probe(c.req.valid("json").url)))
+	.post("/probe", limited, validate("json", probeBody), (c) => answer(c, probe(c.req.valid("json").url)))
 
-	.post("/", limited, validate("json", newConnector), (c) => answer(c, () => addConnector(userOf(c), appOrigin(c.req.raw.headers), c.req.valid("json"))))
+	.post("/", limited, validate("json", newConnector), (c) => answer(c, Effect.flatMap(Auth.appOrigin(c.req.raw.headers), (origin) => connectors((service) => service.addConnector(userOf(c), origin, c.req.valid("json"))))))
 
-	.post("/:id/sign-in", limited, (c) => answer(c, () => signInAgain(userOf(c), appOrigin(c.req.raw.headers), idOf(c))))
+	.post("/:id/sign-in", limited, (c) => answer(c, Effect.flatMap(Auth.appOrigin(c.req.raw.headers), (origin) => connectors((service) => service.signInAgain(userOf(c), origin, idOf(c))))))
 
-	.post("/:id/refresh", limited, (c) => answer(c, async () => ({ connector: await refreshConnector(userOf(c), idOf(c)) })))
+	.post("/:id/refresh", limited, (c) => answer(c, Effect.map(connectors((service) => service.refreshConnector(userOf(c), idOf(c))), (connector) => ({ connector }))))
 
-	.patch("/:id", validate("json", change), (c) => answer(c, async () => ({ connector: await changeConnector(userOf(c), idOf(c), c.req.valid("json")) })))
+	.patch("/:id", validate("json", change), (c) =>
+		answer(c, Effect.map(connectors((service) => service.changeConnector(userOf(c), idOf(c), c.req.valid("json"))), (connector) => ({ connector }))),
+	)
 
 	.delete("/:id", (c) =>
-		answer(c, async () => {
-			if (!(await removeConnector(userOf(c), idOf(c)))) throw new ConnectorProblem("That connector was not found.");
-			return { ok: true };
-		}),
+		answer(
+			c,
+			Effect.flatMap(connectors((service) => service.removeConnector(userOf(c), idOf(c))), (removed) =>
+				removed ? Effect.succeed({ ok: true }) : Effect.fail(new ConnectorProblem({ reason: "not-found" })),
+			),
+		),
 	);
 
 /**
  * Runs a request: a problem the person can fix is a 400 with its message. The MCP SDK
  * checks a server's replies with zod, and its message says what the server got wrong.
+ * Anything else, a bug too, is a 502 with a short reason, and logged.
  */
-async function answer<T extends object>(c: Context<Env>, run: () => Promise<T>) {
-	try {
-		return c.json(await run());
-	} catch (error) {
-		if (error instanceof z.ZodError) return c.json({ error: error.issues[0]?.message ?? "That request is not valid." }, 400);
-		if (error instanceof ConnectorProblem || error instanceof NeedsSignIn) return c.json({ error: error.message }, 400);
-		console.warn("connectors:", error);
-		return c.json({ error: describeError(error) }, 502);
-	}
+function answer<T extends object, E>(c: Context<Env>, effect: Effect.Effect<T, E, Services>) {
+	return route(
+		c,
+		effect.pipe(
+			Effect.map((value) => c.json(value)),
+			Effect.catchCause((cause) => refusal(c, cause)),
+		),
+	);
+}
+
+const problemAnswer = (c: Context<Env>, error: string) => c.json({ error }, 400);
+const failureAnswer = (c: Context<Env>, error: string) => c.json({ error }, 502);
+
+function refusal(c: Context<Env>, cause: Cause.Cause<unknown>): Effect.Effect<ReturnType<typeof problemAnswer> | ReturnType<typeof failureAnswer>> {
+	if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause as Cause.Cause<never>);
+	const error = Cause.squash(cause);
+	const zod = error instanceof ConnectorFailed ? error.cause : error;
+	if (zod instanceof z.ZodError) return Effect.succeed(problemAnswer(c, zod.issues[0]?.message ?? "That request is not valid."));
+	if (error instanceof ConnectorProblem || error instanceof NeedsSignIn) return Effect.succeed(problemAnswer(c, error.message));
+	return Effect.as(Effect.logWarning("connectors:", error), failureAnswer(c, describeError(error)));
 }
 
 /**
@@ -87,26 +104,34 @@ async function answer<T extends object>(c: Context<Env>, run: () => Promise<T>) 
  * and closes; on a phone, where the sign-in used the same tab, it goes back to Settings,
  * Connectors.
  */
-export async function oauthCallback(c: Context) {
+export function oauthCallback(c: Context) {
 	const query = c.req.query();
-	const session = await auth.api.getSession({ headers: c.req.raw.headers });
-	let message: SignInMessage;
-	if (!session) message = failed("Sign in to Ponder first, then connect again.");
-	else if (query.error) {
-		if (query.state) await takeSignIn(query.state, session.user.id);
-		message = failed(query.error === "access_denied" ? "The sign-in was cancelled. Nothing was saved." : `The server ended the sign-in: ${query.error_description || query.error}`);
-	} else if (!query.code || !query.state) message = failed("The sign-in came back without a code. Try again.");
-	else {
-		try {
-			const { id } = await completeSignIn(session.user.id, { state: query.state, code: query.code, issuer: query.iss });
-			message = { type: "ponder:connector-sign-in", ok: true, id };
-		} catch (error) {
-			console.warn("connectors: sign-in:", error);
-			message = failed(describeError(error));
-		}
-	}
-	if (query.state) message.state = query.state;
-	return c.html(callbackPage(message), 200, { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+	return route(
+		c,
+		Effect.gen(function* () {
+			const found = yield* Auth.Auth.use((auth) => auth.getSession(c.req.raw.headers));
+			const session = Option.getOrUndefined(found);
+			let message: SignInMessage;
+			if (!session) message = failed("Sign in to Ponder first, then connect again.");
+			else if (query.error) {
+				if (query.state) yield* ConnectorStore.ConnectorStore.use((store) => store.takeSignIn(query.state!, session.user.id));
+				message = failed(query.error === "access_denied" ? "The sign-in was cancelled. Nothing was saved." : `The server ended the sign-in: ${query.error_description || query.error}`);
+			} else if (!query.code || !query.state) message = failed("The sign-in came back without a code. Try again.");
+			else {
+				const params = { state: query.state, code: query.code, issuer: query.iss };
+				message = yield* connectors((service) => service.completeSignIn(session.user.id, params)).pipe(
+					Effect.map(({ id }): SignInMessage => ({ type: "ponder:connector-sign-in", ok: true, id })),
+					Effect.catchCause((cause): Effect.Effect<SignInMessage> => {
+						if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause as Cause.Cause<never>);
+						const error = Cause.squash(cause);
+						return Effect.as(Effect.logWarning("connectors: sign-in:", error), failed(describeError(error)));
+					}),
+				);
+			}
+			if (query.state) message.state = query.state;
+			return c.html(callbackPage(message), 200, { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer" });
+		}),
+	);
 }
 
 const failed = (error: string): SignInMessage => ({ type: "ponder:connector-sign-in", ok: false, error });

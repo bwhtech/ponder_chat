@@ -15,19 +15,31 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as PgClient from "@effect/sql-pg/PgClient";
 import { Hono } from "hono";
 import type { SignedInEnv } from "./auth.ts";
-import { sql } from "./db.ts";
-import { forgetClient } from "./mcp/client.ts";
-import { addConnector, callConnectorTool, changeConnector, completeSignIn, catalogFrom, connectorCatalogFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
-import { freshCredentials } from "./mcp/oauth.ts";
-import { probe } from "./mcp/probe.ts";
+import * as PonderConfig from "./config.ts";
+import * as ConnectorOAuth from "./mcp/ConnectorOAuth.ts";
+import * as ConnectorStore from "./mcp/ConnectorStore.ts";
+import type { Connection, Credentials } from "./mcp/ConnectorStore.ts";
+import * as Connectors from "./mcp/Connectors.ts";
+import { catalogFrom, type ConnectorChange, type NewConnector } from "./mcp/Connectors.ts";
+import * as McpClients from "./mcp/McpClients.ts";
+import { probe as probeEffect } from "./mcp/probe.ts";
 import { connectorsApi } from "./mcp/routes.ts";
-import { getConnection, migrateConnectors, readCredentials, type Connection } from "./mcp/store.ts";
 import { Catalog } from "./mcp/catalog.ts";
 import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor, toToolInfo } from "./mcp/tools.ts";
-import { guardedFetch, mcpUrlProblem } from "./net-guard.ts";
-import { seal, unseal } from "./secrets.ts";
+import * as NetGuard from "./net/NetGuard.ts";
+import { dispose, runPromise } from "./runtime/runtime.ts";
+import * as Secrets from "./secrets/Secrets.ts";
+
+// The test servers are on 127.0.0.1, over http. The app's runtime reads this when it
+// starts (net/NetGuard.ts), so it is set before anything runs on it. The check of the
+// guard itself builds its own NetGuard, with private networks refused.
+process.env.MCP_ALLOW_PRIVATE_NETWORKS = "1";
 
 const live = process.argv.includes("--live");
 const ORIGIN = "http://localhost:3500";
@@ -42,6 +54,26 @@ async function check(name: string, body: () => Promise<void>) {
 		console.log(`FAIL ${name}\n     ${error instanceof Error ? (error.stack ?? error.message) : error}`);
 	}
 }
+
+// The connector services, on the app's runtime. A failure rejects with the error itself.
+const connectors = <A, E>(use: (service: Connectors.Connectors["Service"]) => Effect.Effect<A, E>) => runPromise(Connectors.Connectors.use(use));
+const store = <A, E>(use: (service: ConnectorStore.ConnectorStore["Service"]) => Effect.Effect<A, E>) => runPromise(ConnectorStore.ConnectorStore.use(use));
+/** The check's own rows (its people), on the app's database. */
+const database = <A, E>(use: (sql: PgClient.PgClient) => Effect.Effect<A, E>) => runPromise(PgClient.PgClient.use(use));
+const addConnector = (user: string, origin: string, input: NewConnector) => connectors((service) => service.addConnector(user, origin, input));
+const changeConnector = (user: string, id: string, change: ConnectorChange) => connectors((service) => service.changeConnector(user, id, change));
+const completeSignIn = (user: string, params: { state: string; code: string; issuer?: string }) => connectors((service) => service.completeSignIn(user, params));
+const callConnectorTool = (id: string, tool: string, input: unknown, user: string, approved: boolean) =>
+	connectors((service) => service.callConnectorTool(id, tool, input, user, approved));
+const connectorCatalogFor = (user: string) => connectors((service) => service.connectorCatalogFor(user));
+const listConnectors = (user: string) => connectors((service) => service.listConnectors(user));
+const removeConnector = (user: string, id: string) => connectors((service) => service.removeConnector(user, id));
+const getConnection = async (id: string, user: string) => Option.getOrUndefined(await store((service) => service.getConnection(id, user)));
+const readCredentials = (connection: Connection) => store((service) => service.readCredentials(connection));
+const freshCredentials = (connection: Connection, credentials: Credentials) =>
+	runPromise(ConnectorOAuth.ConnectorOAuth.use((oauth) => oauth.freshCredentials(connection, credentials)));
+const forgetClient = (id: string) => runPromise(McpClients.McpClients.use((clients) => clients.forget(id)));
+const probe = (address: string) => runPromise(probeEffect(address));
 
 // The test servers: an MCP server at /open/mcp (no sign-in), /key/mcp (x-api-key) and
 // /oauth/mcp (OAuth), and an authorization server at /as.
@@ -191,29 +223,32 @@ if (process.argv.includes("--serve")) {
 // Two test people.
 const people = [`check-${randomUUID()}`, `check-${randomUUID()}`] as const;
 const [alice, bob] = people;
-await migrateConnectors();
-for (const id of people) await sql`insert into users (id, name, email, "emailVerified") values (${id}, 'Connector check', ${`${id}@example.invalid`}, true)`;
+await store((service) => service.migrate);
+for (const id of people) await database((sql) => sql`insert into users (id, name, email, "emailVerified") values (${id}, 'Connector check', ${`${id}@example.invalid`}, true)`);
 
 try {
 	await check("a sealed value copied to another row does not decrypt", async () => {
-		const sealed = seal("mcp_connections:a:credentials", "secret");
-		assert.equal(unseal("mcp_connections:a:credentials", sealed), "secret");
-		assert.throws(() => unseal("mcp_connections:b:credentials", sealed));
+		const sealed = await runPromise(Secrets.Secrets.use((secrets) => secrets.seal("mcp_connections:a:credentials", "secret")));
+		assert.equal(await runPromise(Secrets.Secrets.use((secrets) => secrets.unseal("mcp_connections:a:credentials", sealed))), "secret");
+		await assert.rejects(runPromise(Secrets.Secrets.use((secrets) => secrets.unseal("mcp_connections:b:credentials", sealed))), Secrets.UnreadableSecret);
 	});
 
 	await check("private addresses and plain http are refused", async () => {
-		delete process.env.MCP_ALLOW_PRIVATE_NETWORKS;
-		for (const address of ["https://127.0.0.1/mcp", "https://10.0.0.5/mcp", "https://100.100.1.1/mcp", "https://[::1]/mcp", "https://localhost/mcp", "http://example.com/mcp"])
-			assert.ok(mcpUrlProblem(address), address);
-		assert.equal(mcpUrlProblem("https://mcp.example.com/mcp"), null);
-		await assert.rejects(guardedFetch(`${base}/open/mcp`), "plain http to 127.0.0.1 was allowed");
-		await assert.rejects(guardedFetch("https://127.0.0.1/"), "127.0.0.1 was allowed");
-		const probed = await probe(`${base}/open/mcp`);
-		assert.equal(probed.ok, false);
+		// A guard as production has it: MCP_ALLOW_PRIVATE_NETWORKS not set.
+		const strict = NetGuard.layer.pipe(Layer.provide(PonderConfig.layerFromEnv({})));
+		const checked = NetGuard.NetGuard.use((guard) =>
+			Effect.promise(async () => {
+				for (const address of ["https://127.0.0.1/mcp", "https://10.0.0.5/mcp", "https://100.100.1.1/mcp", "https://[::1]/mcp", "https://localhost/mcp", "http://example.com/mcp"])
+					assert.ok(Option.isSome(guard.mcpUrlProblem(address)), address);
+				assert.deepEqual(guard.mcpUrlProblem("https://mcp.example.com/mcp"), Option.none());
+				await assert.rejects(guard.fetch(`${base}/open/mcp`), "plain http to 127.0.0.1 was allowed");
+				await assert.rejects(guard.fetch("https://127.0.0.1/"), "127.0.0.1 was allowed");
+			}),
+		);
+		await Effect.runPromise(Effect.provide(checked, strict));
 	});
 
 	// The rest talks to the test servers on 127.0.0.1.
-	process.env.MCP_ALLOW_PRIVATE_NETWORKS = "1";
 
 	await check("tool names are unique, short and safe", async () => {
 		assert.equal(modelToolName("linear", "create_issue"), "linear__create_issue");
@@ -385,7 +420,7 @@ try {
 		const connection = (await getConnection(id, alice))!;
 		assert.equal(connection.status, "connected");
 		assert.equal(connection.tools.length, 3);
-		assert.ok(readCredentials(connection).client?.client_id.startsWith("dyn-"));
+		assert.ok((await readCredentials(connection)).client?.client_id.startsWith("dyn-"));
 		assert.equal(await callConnectorTool(id, "echo", { text: "signed in" }, alice, false), "signed in");
 		await assert.rejects(completeSignIn(alice, params), /expired or was used/);
 	});
@@ -402,18 +437,19 @@ try {
 		const { id } = await signIn(bob, { name: "Check Refresh" });
 		const connection = (await getConnection(id, bob))!;
 		const before = mock.refreshes;
-		const [one, two] = await Promise.all([freshCredentials(connection, readCredentials(connection)), freshCredentials(connection, readCredentials(connection))]);
+		const [first, second] = await Promise.all([readCredentials(connection), readCredentials(connection)]);
+		const [one, two] = await Promise.all([freshCredentials(connection, first), freshCredentials(connection, second)]);
 		assert.equal(mock.refreshes, before + 1);
 		assert.equal(one.tokens?.access_token, two.tokens?.access_token);
-		assert.equal(readCredentials((await getConnection(id, bob))!).tokens?.access_token, one.tokens?.access_token, "the new token was not saved");
+		assert.equal((await readCredentials((await getConnection(id, bob))!)).tokens?.access_token, one.tokens?.access_token, "the new token was not saved");
 		mock.accessTtl = 3600;
-		forgetClient(id);
+		await forgetClient(id);
 		assert.equal(await callConnectorTool(id, "echo", { text: "refreshed" }, bob, false), "refreshed");
 	});
 
 	await check("refused tokens: the connection needs a new sign-in, and the model is told", async () => {
 		mock.revokeAll();
-		forgetClient(oauthId);
+		await forgetClient(oauthId);
 		const text = await callConnectorTool(oauthId, "echo", { text: "x" }, alice, false);
 		assert.match(text, /sign in again/);
 		assert.equal((await getConnection(oauthId, alice))!.status, "needs_sign_in");
@@ -440,7 +476,6 @@ try {
 	});
 
 	if (live) {
-		delete process.env.MCP_ALLOW_PRIVATE_NETWORKS;
 		await check("live: DeepWiki, with no sign-in", async () => {
 			const probed = await probe("https://mcp.deepwiki.com/mcp");
 			assert.ok(probed.ok && probed.auth === "none", JSON.stringify(probed));
@@ -451,9 +486,9 @@ try {
 		});
 	}
 } finally {
-	for (const id of people) await sql`delete from users where id = ${id}`;
+	for (const id of people) await database((sql) => sql`delete from users where id = ${id}`);
 	server.close();
-	await sql.end();
+	await dispose();
 }
 
 console.log(failed ? `\n${failed} failed` : "\nall passed");

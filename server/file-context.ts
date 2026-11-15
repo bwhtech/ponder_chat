@@ -1,6 +1,9 @@
 import type { UIMessage } from "ai";
-import { loadFile, pdfText, SPREADSHEET_TYPES, TEXT_TYPES, URL_PREFIX, type LoadedFile } from "./files.ts";
-import { span } from "./tracing/span.ts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Files from "./files.ts";
+import { SPREADSHEET_TYPES, TEXT_TYPES, URL_PREFIX, type LoadedFile } from "./files.ts";
+import * as Tracing from "./tracing/Tracing.ts";
 
 /**
  * Attached files as the model reads them. Messages carry only links (files.ts); before
@@ -20,51 +23,60 @@ const MIN_FILE_CHARS = 2_000;
 
 type FilePart = Extract<UIMessage["parts"][number], { type: "file" }>;
 type Options = { pdfAsText: boolean };
+type Parts = UIMessage["parts"];
 
-export async function resolveFileParts(messages: UIMessage[], owner: string, options: Options): Promise<UIMessage[]> {
+/** The messages with their file links swapped for content. No span and no work when there are no files. */
+export const resolveFileParts = (messages: UIMessage[], owner: string, options: Options) => {
 	const files = messages.reduce((count, message) => count + message.parts.filter(isStoredFile).length, 0);
-	if (!files) return messages;
-	return span("file_context.resolve", { "ponder.files": files, "ponder.pdf_as_text": options.pdfAsText }, () => new FileContext(owner, options).resolve(messages));
-}
+	return files ? resolveFiles(messages, owner, options, files) : Effect.succeed(messages);
+};
+
+const resolveFiles = Effect.fn("file_context.resolve")(function* (messages: UIMessage[], owner: string, options: Options, files: number) {
+	yield* Tracing.annotate({ "ponder.files": files, "ponder.pdf_as_text": options.pdfAsText });
+	const context = new FileContext(yield* Files.Files, owner, options);
+	// Newest message first, so the budget goes to the files the person attached last.
+	const resolved: UIMessage[] = [];
+	for (const message of [...messages].reverse()) resolved.unshift(yield* context.resolveMessage(message));
+	return resolved;
+});
 
 class FileContext {
 	private room = MAX_CALL_CHARS;
 
 	constructor(
+		private files: Files.Files["Service"],
 		private owner: string,
 		private options: Options,
 	) {}
 
-	/** Newest message first, so the budget goes to the files the person attached last. */
-	async resolve(messages: UIMessage[]) {
-		const resolved: UIMessage[] = [];
-		for (const message of [...messages].reverse()) resolved.unshift(await this.resolveMessage(message));
-		return resolved;
+	resolveMessage(message: UIMessage) {
+		return Effect.gen({ self: this }, function* () {
+			if (!message.parts.some(isStoredFile)) return message;
+			const parts: Parts = [];
+			for (const part of message.parts) parts.push(...(isStoredFile(part) ? yield* this.resolvePart(part) : [part]));
+			return { ...message, parts };
+		});
 	}
 
-	private async resolveMessage(message: UIMessage): Promise<UIMessage> {
-		if (!message.parts.some(isStoredFile)) return message;
-		const parts: UIMessage["parts"] = [];
-		for (const part of message.parts) parts.push(...(isStoredFile(part) ? await this.resolvePart(part) : [part]));
-		return { ...message, parts };
-	}
+	private resolvePart(part: FilePart) {
+		return Effect.gen({ self: this }, function* () {
+			const id = part.url.slice(URL_PREFIX.length);
+			const found = yield* this.files.load(id, this.owner);
+			if (Option.isNone(found)) return [text(`[The attached file "${part.filename ?? "file"}" is no longer available.]`)] as Parts;
+			const file = found.value;
+			const attached = `The person attached "${file.name}" (${file.media_type}, file id ${id}).`;
 
-	private async resolvePart(part: FilePart): Promise<UIMessage["parts"]> {
-		const id = part.url.slice(URL_PREFIX.length);
-		const file = await loadFile(id, this.owner);
-		if (!file) return [text(`[The attached file "${part.filename ?? "file"}" is no longer available.]`)];
-		const attached = `The person attached "${file.name}" (${file.media_type}, file id ${id}).`;
-
-		if (Object.values(SPREADSHEET_TYPES).includes(file.media_type)) {
-			return [text(`${attached} It is a spreadsheet: read it with run_python, passing this file id as an input.`)];
-		}
-		if (TEXT_TYPES.has(file.media_type)) return [this.textOf(attached, "Its contents", file.data.toString("utf8"))];
-		if (file.media_type === "application/pdf" && this.options.pdfAsText) {
-			const pdf = await pdfText(id, file);
-			// A scan has no text: the model gets the PDF, and OpenRouter's parser reads it.
-			if (pdf) return [this.textOf(attached, "Its text, read from the PDF", pdf)];
-		}
-		return [text(attached), { ...part, url: dataUrl(file) }];
+			if (Object.values(SPREADSHEET_TYPES).includes(file.media_type)) {
+				return [text(`${attached} It is a spreadsheet: read it with run_python, passing this file id as an input.`)] as Parts;
+			}
+			if (TEXT_TYPES.has(file.media_type)) return [this.textOf(attached, "Its contents", file.data.toString("utf8"))] as Parts;
+			if (file.media_type === "application/pdf" && this.options.pdfAsText) {
+				const pdf = yield* this.files.pdfText(id, file);
+				// A scan has no text: the model gets the PDF, and OpenRouter's parser reads it.
+				if (pdf) return [this.textOf(attached, "Its text, read from the PDF", pdf)] as Parts;
+			}
+			return [text(attached), { ...part, url: dataUrl(file) }] as Parts;
+		});
 	}
 
 	/** The text in a fence, cut to the room left. */

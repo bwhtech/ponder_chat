@@ -1,13 +1,15 @@
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
-import { modelWindow } from "../auto-router.ts";
-import { loadSummary, tokenRatio } from "../compaction/store.ts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as CompactionStore from "../compaction/store.ts";
 import { withSummary } from "../compaction/summary.ts";
 import { estimate, type Estimate } from "../compaction/tokens.ts";
-import { loadThread } from "../db.ts";
 import { resolveFileParts } from "../file-context.ts";
-import { MODELS } from "../models.ts";
-import { getSettings } from "../settings.ts";
+import * as AutoRouter from "../models/AutoRouter.ts";
+import { MODELS } from "../models/Models.ts";
+import * as Settings from "../settings/Settings.ts";
 import type { ActiveSkill } from "../skills.ts";
+import * as Threads from "../threads/Threads.ts";
 import { openAnswersSettled } from "./answered-again.ts";
 import { citationPartText } from "./citations.ts";
 import { addConnectorNote, connectorCallsInHistory } from "./connector-messages.ts";
@@ -39,19 +41,23 @@ export type ThreadContext = {
 	through?: string;
 };
 
-/** The thread as the model reads it, with its saved summary in place of the messages it covers. */
-export async function loadThreadContext(threadId: string, options: MessageOptions): Promise<ThreadContext> {
-	const thread = await loadThread(threadId);
-	const summary = await loadSummary(threadId, thread);
-	const messages = await modelMessages(withSummary(thread, summary), options);
+/**
+ * The thread as the model reads it, with its saved summary in place of the messages it covers.
+ * Untraced, as these were before: thread.load and file_context.resolve stay the step's children.
+ */
+export const loadThreadContext = Effect.fnUntraced(function* (threadId: string, options: MessageOptions) {
+	const store = yield* CompactionStore.CompactionStore;
+	const thread = yield* Threads.Threads.use((threads) => threads.load(threadId));
+	const summary = Option.getOrUndefined(yield* store.loadSummary(threadId, thread));
+	const messages = yield* modelMessages(withSummary(thread, summary), options);
 	return {
 		messages,
 		estimate: estimate(messages),
-		ratio: await tokenRatio(threadId, options.modelId),
-		window: (await modelWindow(options.modelId)) ?? null,
+		ratio: yield* store.tokenRatio(threadId, options.modelId),
+		window: Option.getOrNull(yield* AutoRouter.AutoRouter.use((router) => router.modelWindow(options.modelId))),
 		...(summary && { through: thread[summary.covers - 1]?.id }),
-	};
-}
+	} satisfies ThreadContext;
+});
 
 /**
  * Messages as the model reads them: the owner's attached files swapped for their content
@@ -61,13 +67,15 @@ export async function loadThreadContext(threadId: string, options: MessageOption
  * recalled and the person's connectors added to the person's latest message (context.ts,
  * connector-messages.ts).
  */
-export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors, keepReasoningOf }: MessageOptions): Promise<ModelMessage[]> {
+export const modelMessages = Effect.fnUntraced(function* (thread: UIMessage[], { owner, modelId, recalled, skills, connectors, keepReasoningOf }: MessageOptions) {
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
-	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
-	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText });
-	const messages = await convertToModelMessages(resolved, {
-		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
-	});
+	const pdfAsText = !readsPdf && (yield* Settings.Settings.use((settings) => settings.get)).pdfTextOnServer;
+	const resolved = yield* resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText });
+	// The SDK's conversion fails only on messages it can't read: a bug, thrown as itself.
+	const messages: ModelMessage[] = yield* Effect.promise(() =>
+		convertToModelMessages(resolved, {
+			convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
+		}),
+	);
 	return addConnectorNote(addRecalledMemory(trimOldToolResults(connectorCallsInHistory(messages)), recalled), connectors);
-}
-
+});

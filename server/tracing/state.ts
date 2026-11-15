@@ -9,7 +9,7 @@ import type { Telemetry } from "ai";
 export type TracingState = {
 	/** Makes the ids of a span that is sent later, such as a reply's root (reply-trace.ts). */
 	ids: OpenTelemetryIdGenerator;
-	/** The AI SDK's OpenTelemetry integration, for registerTelemetry (telemetry.ts). */
+	/** The AI SDK's OpenTelemetry integration, for registerTelemetry (telemetry/Telemetry.ts). */
 	integration: Telemetry & Pick<OpenTelemetry, "experimental_durable">;
 	/** Sends the spans that wait in the batch. */
 	flush: () => Promise<void>;

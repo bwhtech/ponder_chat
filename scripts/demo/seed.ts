@@ -21,8 +21,13 @@ if (!database.includes("demo")) {
 	process.exit(1);
 }
 
-const { sql } = await import("../../server/db.ts");
-const { auth } = await import("../../server/auth.ts");
+// postgres.js, which the e2e tests use too: the server itself is on Effect's client.
+const { default: postgres } = await import("postgres");
+const sql = postgres(process.env.DATABASE_URL!, { onnotice: () => {} });
+const Auth = await import("../../server/auth/Auth.ts");
+const { runPromise } = await import("../../server/runtime/runtime.ts");
+/** One of Better Auth's endpoints, on the app's runtime (server/auth/Auth.ts). */
+const callAuth = <A>(endpoint: (api: import("../../server/auth/Auth.ts").AuthApi) => Promise<A>) => runPromise(Auth.Auth.use((auth) => auth.call(endpoint)));
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const asset = (name: string) => readFileSync(path.join(here, "assets", name));
@@ -80,8 +85,8 @@ async function reset() {
 async function signIn() {
 	await sql`insert into allowed_emails (email, note) values (${DEMO_EMAIL}, 'Demo') on conflict do nothing`;
 	const headers = new Headers({ host, "x-forwarded-for": "127.0.0.1", "user-agent": DEVICES.macChrome });
-	const otp = await auth.api.createVerificationOTP({ body: { email: DEMO_EMAIL, type: "sign-in" }, headers });
-	const signed = await auth.api.signInEmailOTP({ body: { email: DEMO_EMAIL, otp }, headers, returnHeaders: true });
+	const otp = await callAuth((api) => api.createVerificationOTP({ body: { email: DEMO_EMAIL, type: "sign-in" }, headers }));
+	const signed = await callAuth((api) => api.signInEmailOTP({ body: { email: DEMO_EMAIL, otp }, headers, returnHeaders: true }));
 	const [user] = await sql<{ id: string }[]>`update users set name = 'Alex Rivera', role = 'admin' where email = ${DEMO_EMAIL} returning id`;
 	const [hostname] = host.split(":");
 	// Only the session token: the cached session cookie still holds the name and role from before the update above.
@@ -593,9 +598,10 @@ const SKILLS = [
 ];
 
 async function addSkills(admins: string[]) {
-	const { saveSkill } = await import("../../server/skills.ts");
+	const Skills = await import("../../server/skills.ts");
 	for (const skill of SKILLS) {
-		const saved = await saveSkill({ name: skill.name, description: skill.description, automatic: skill.automatic, body: skill.body, enabled: true }, admins[skill.by]!);
+		const input = { name: skill.name, description: skill.description, automatic: skill.automatic, body: skill.body, enabled: true };
+		const saved = await runPromise(Skills.Skills.use((skills) => skills.save(input, admins[skill.by]!)));
 		if (!saved.ok) throw new Error(`${skill.name}: ${saved.error}`);
 		await sql`update skills set created_at = ${ago(skill.ago)}, updated_at = ${ago(skill.ago)} where name = ${skill.name} and deleted_at is null`;
 	}

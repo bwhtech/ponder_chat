@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Connection, Rule, ToolInfo } from "./store.ts";
+import type { Connection, Rule, ToolInfo } from "./ConnectorStore.ts";
 
 /**
  * Connector tools as the model sees them: their names, the rule that says whether a call

@@ -1,5 +1,6 @@
+import * as PgClient from "@effect/sql-pg/PgClient";
+import * as Effect from "effect/Effect";
 import { buildSkillFile, checkSkill, parseSkillFile } from "../shared/skill-file.ts";
-import { sql } from "./db.ts";
 import docx from "./standard-skills/docx.ts";
 import technicalWriting from "./standard-skills/technical-writing.ts";
 
@@ -11,22 +12,24 @@ import technicalWriting from "./standard-skills/technical-writing.ts";
  */
 const STANDARD_SKILLS = [technicalWriting, docx];
 
-export async function seedStandardSkills() {
-	await sql`create table if not exists skill_seeds (name text primary key, seeded_at timestamptz not null default now())`;
-	for (const source of STANDARD_SKILLS) await seed(source);
-}
-
-async function seed(source: string) {
-	const skill = parseSkillFile(source);
-	const errors = skill ? checkSkill(skill, true) : ["The file has no frontmatter."];
-	if (!skill || errors.length) throw new Error(`Standard skill ${skill?.name ?? "?"}: ${errors.join(" ")}`);
-	await sql.begin(async (tx) => {
-		const [isNew] = await tx`insert into skill_seeds (name) values (${skill.name}) on conflict do nothing returning name`;
-		if (!isNew) return;
-		// An install that already has a skill with this name keeps its own.
-		await tx`
-			insert into skills (name, description, automatic, enabled, source)
-			values (${skill.name}, ${skill.description}, ${skill.automatic}, true, ${buildSkillFile(skill)})
-			on conflict (name) where deleted_at is null do nothing`;
-	});
-}
+/** After the skills table (Skills.migrate). A standard skill that does not pass the checks is a bug in this file: a defect. */
+export const seedStandardSkills = Effect.fn("StandardSkills.seed")(function* () {
+	const sql = yield* PgClient.PgClient;
+	yield* sql`create table if not exists skill_seeds (name text primary key, seeded_at timestamptz not null default now())`;
+	for (const source of STANDARD_SKILLS) {
+		const skill = parseSkillFile(source);
+		const errors = skill ? checkSkill(skill, true) : ["The file has no frontmatter."];
+		if (!skill || errors.length) return yield* Effect.die(new Error(`Standard skill ${skill?.name ?? "?"}: ${errors.join(" ")}`));
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				const isNew = yield* sql`insert into skill_seeds (name) values (${skill.name}) on conflict do nothing returning name`;
+				if (!isNew.length) return;
+				// An install that already has a skill with this name keeps its own.
+				yield* sql`
+					insert into skills (name, description, automatic, enabled, source)
+					values (${skill.name}, ${skill.description}, ${skill.automatic}, true, ${buildSkillFile(skill)})
+					on conflict (name) where deleted_at is null do nothing`;
+			}),
+		);
+	}
+});

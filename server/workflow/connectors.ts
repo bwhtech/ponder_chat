@@ -16,14 +16,15 @@ import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
  * A live MCP client can't cross a step boundary or survive a restart, so one step reads
  * the catalog as plain data (recorded, so a replay uses the same tools). Searching and
  * checking a call are pure, so they need no step. Each call is its own step that
- * connects (mcp/client.ts).
+ * connects (mcp/McpClients.ts).
  */
 
 export async function connectorCatalogStep(owner: string): Promise<CatalogData> {
 	"use step";
 	return contextStep("connectors", `person ${owner}`, async () => {
-		const { connectorCatalogFor } = await import("../mcp/connectors.ts");
-		return connectorCatalogFor(owner);
+		const { runStep } = await import("../runtime/step.ts");
+		const Connectors = await import("../mcp/Connectors.ts");
+		return runStep(Connectors.Connectors.use((connectors) => connectors.connectorCatalogFor(owner)));
 	});
 }
 connectorCatalogStep.maxRetries = CONTEXT_STEP_RETRIES;
@@ -125,7 +126,8 @@ function interruptedOrThrow(error: unknown): string {
  */
 export async function callConnectorToolStep(connectionId: string, toolName: string, input: unknown, owner: string, approved: boolean): Promise<string> {
 	"use step";
-	const { callConnectorTool } = await import("../mcp/connectors.ts");
-	return callConnectorTool(connectionId, toolName, input, owner, approved);
+	const { runStep } = await import("../runtime/step.ts");
+	const Connectors = await import("../mcp/Connectors.ts");
+	return runStep(Connectors.Connectors.use((connectors) => connectors.callConnectorTool(connectionId, toolName, input, owner, approved)));
 }
 callConnectorToolStep.maxRetries = 0;

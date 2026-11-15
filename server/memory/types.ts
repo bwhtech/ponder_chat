@@ -1,3 +1,5 @@
+import type * as Effect from "effect/Effect";
+
 /**
  * The memory contract, ported from TanStack AI's `@tanstack/ai-memory` 1.0.0 (MIT, see LICENSE-tanstack-ai;
  * src/types.ts), by way of the Seva platform. A backend implements two verbs: `recall`
@@ -9,6 +11,8 @@
  * - `RecallResult.tools` is left out: Ponder's memory offers the model no tools.
  * - `MemoryTurn.messageId` is new and optional: the reply that produced the turn, for provenance.
  * - `update` and `forget` are new optional methods, for the Memory page.
+ * - Each method returns an Effect, not a Promise (docs/effect.md), with the adapter's own
+ *   failures in its type. A TanStack adapter ports by wrapping its calls in Effect.tryPromise.
  */
 
 /**
@@ -76,35 +80,35 @@ export type MemoryFact = {
 	createdAt?: string;
 };
 
-export interface MemoryAdapter {
+export interface MemoryAdapter<E = never> {
 	/** A stable id for logs, e.g. "postgres". */
 	readonly id: string;
 	readonly name?: string;
 
 	/** Read: what is relevant to `query` within `scope`. How it ranks is the adapter's business. */
-	recall(scope: MemoryScope, query: string): Promise<RecallResult>;
+	readonly recall: (scope: MemoryScope, query: string) => Effect.Effect<RecallResult, E>;
 	/** Write: keep a finished turn. Extraction (turn → stored facts) happens here. */
-	save(scope: MemoryScope, turn: MemoryTurn): Promise<SaveReceipt[]>;
+	readonly save: (scope: MemoryScope, turn: MemoryTurn) => Effect.Effect<SaveReceipt[], E>;
 
-	inspect?(scope: MemoryScope): Promise<MemorySnapshot>;
-	listFacts?(scope: MemoryScope): Promise<MemoryFact[]>;
+	readonly inspect?: (scope: MemoryScope) => Effect.Effect<MemorySnapshot, E>;
+	readonly listFacts?: (scope: MemoryScope) => Effect.Effect<MemoryFact[], E>;
 
 	/** Change a stored fact's text. False when it is not in this scope. */
-	update?(scope: MemoryScope, id: string, text: string): Promise<boolean>;
+	readonly update?: (scope: MemoryScope, id: string, text: string) => Effect.Effect<boolean, E>;
 	/** Forget a stored fact. False when it is not in this scope. */
-	forget?(scope: MemoryScope, id: string): Promise<boolean>;
+	readonly forget?: (scope: MemoryScope, id: string) => Effect.Effect<boolean, E>;
 }
 
 /** What the search index holds for one memory: never more than this. */
 export type IndexedMemory = { id: string; owner: string; text: string };
 
 /** A search index over the memories in use. Postgres stays the source of truth; the index can be rebuilt from it. */
-export interface MemoryIndex {
+export interface MemoryIndex<E = never> {
 	readonly name?: string;
-	upsert(memories: IndexedMemory[]): Promise<void>;
-	remove(ids: string[]): Promise<void>;
+	readonly upsert: (memories: IndexedMemory[]) => Effect.Effect<void, E>;
+	readonly remove: (ids: string[]) => Effect.Effect<void, E>;
 	/** The ids of the person's memories that best match `query`, best first. */
-	search(owner: string, query: string, limit: number): Promise<string[]>;
-	rebuild(memories: IndexedMemory[]): Promise<void>;
-	count(): Promise<number>;
+	readonly search: (owner: string, query: string, limit: number) => Effect.Effect<string[], E>;
+	readonly rebuild: (memories: IndexedMemory[]) => Effect.Effect<void, E>;
+	readonly count: Effect.Effect<number, E>;
 }

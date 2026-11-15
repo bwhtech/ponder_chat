@@ -1,7 +1,11 @@
 import { gzipSync } from "node:zlib";
-import type { Context } from "hono";
-import { loadThread, threadUpdatedAt } from "./db.ts";
-import { latestRun } from "./workflow/runs.ts";
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import type { Context as HonoContext } from "hono";
+import * as Threads from "./threads/Threads.ts";
+import * as ThreadRuns from "./workflow/runs.ts";
 
 /**
  * GET /api/threads/:id, cached. A thread's version is its updated_at plus whether a
@@ -9,16 +13,42 @@ import { latestRun } from "./workflow/runs.ts";
  * nothing changed. Otherwise the response body, and its gzip, come from memory while
  * the version holds: a long thread is close to 1 MB of JSON and about a tenth of
  * that gzipped.
+ *
+ * One cache for the process: the service lives in the app's runtime, which every copy of
+ * this module in the build shares.
  */
 type Entry = { etag: string; json: string; gzip: Buffer };
 
-const entries = new Map<string, Entry>();
 const MAX_BYTES = 64 * 1024 * 1024;
-let bytes = 0;
 
-export async function threadResponse(c: Context, id: string, owner: string) {
-	const updatedAt = await threadUpdatedAt(id, owner);
-	const run = await latestRun(id);
+export class ThreadCache extends Context.Service<
+	ThreadCache,
+	{
+		/** The answer for the version, kept while it holds; `body` makes it once on a miss. */
+		readonly entry: <E, R>(id: string, etag: string, body: Effect.Effect<string, E, R>) => Effect.Effect<Entry, E, R>;
+		/** Drops a deleted thread. A saved one needs nothing: its new version misses the cache. */
+		readonly forget: (id: string) => Effect.Effect<void>;
+	}
+>()("ponder/threads/ThreadCache") {}
+
+const make = Effect.sync(() => {
+	const lru = new Lru();
+	const entry = <E, R>(id: string, etag: string, body: Effect.Effect<string, E, R>) =>
+		Effect.suspend(() => {
+			const found = lru.get(id, etag);
+			return found ? Effect.succeed(found) : Effect.map(body, (json) => lru.remember(id, etag, json));
+		});
+	return ThreadCache.of({ entry, forget: (id) => Effect.sync(() => lru.forget(id)) });
+});
+
+export const layer = Layer.effect(ThreadCache, make);
+
+/** The route's answer: a 304, the cached body (gzipped when the browser takes it), or no thread yet. */
+export const threadResponse = Effect.fn("ThreadCache.respond")(function* (c: HonoContext, id: string, owner: string) {
+	const threads = yield* Threads.Threads;
+	const cache = yield* ThreadCache;
+	const updatedAt = Option.getOrNull(yield* threads.updatedAt(id, owner));
+	const run = Option.getOrUndefined(yield* ThreadRuns.ThreadRuns.use((runs) => runs.latest(id)));
 	const running = Boolean(run && !run.finished);
 	// The model kept erroring: the page offers Retry (workflow/chat.ts).
 	const failed = Boolean(run?.finished && run.failed);
@@ -29,41 +59,46 @@ export async function threadResponse(c: Context, id: string, owner: string) {
 	const headers = { ETag: etag, "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
 	if (c.req.header("If-None-Match")?.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) return c.body(null, 304, headers);
 
-	const entry = cached(id, etag) ?? remember(id, etag, JSON.stringify({ messages: await loadThread(id), running, failed }));
+	const entry = yield* cache.entry(id, etag, Effect.map(threads.load(id), (messages) => JSON.stringify({ messages, running, failed })));
 	if (/\bgzip\b/.test(c.req.header("Accept-Encoding") ?? "")) {
 		return c.body(new Uint8Array(entry.gzip), 200, { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" });
 	}
 	return c.body(entry.json, 200, { ...headers, "Content-Type": "application/json" });
-}
+});
 
-/** Drops a deleted thread. A saved one needs nothing: its new version misses the cache. */
-export function forgetThread(id: string) {
-	const entry = entries.get(id);
-	if (!entry) return;
-	entries.delete(id);
-	bytes -= size(entry);
-}
+/** Entries by thread, the least recently used first, up to MAX_BYTES of JSON and gzip. */
+class Lru {
+	private entries = new Map<string, Entry>();
+	private bytes = 0;
 
-function cached(id: string, etag: string) {
-	const entry = entries.get(id);
-	if (entry?.etag !== etag) return undefined;
-	// Most recently used goes last; the first is evicted first.
-	entries.delete(id);
-	entries.set(id, entry);
-	return entry;
-}
-
-function remember(id: string, etag: string, json: string) {
-	forgetThread(id);
-	const entry = { etag, json, gzip: gzipSync(json) };
-	entries.set(id, entry);
-	bytes += size(entry);
-	for (const [oldest, old] of entries) {
-		if (bytes <= MAX_BYTES || oldest === id) break;
-		entries.delete(oldest);
-		bytes -= size(old);
+	get(id: string, etag: string) {
+		const entry = this.entries.get(id);
+		if (entry?.etag !== etag) return undefined;
+		// Most recently used goes last; the first is evicted first.
+		this.entries.delete(id);
+		this.entries.set(id, entry);
+		return entry;
 	}
-	return entry;
+
+	remember(id: string, etag: string, json: string) {
+		this.forget(id);
+		const entry = { etag, json, gzip: gzipSync(json) };
+		this.entries.set(id, entry);
+		this.bytes += size(entry);
+		for (const [oldest, old] of this.entries) {
+			if (this.bytes <= MAX_BYTES || oldest === id) break;
+			this.entries.delete(oldest);
+			this.bytes -= size(old);
+		}
+		return entry;
+	}
+
+	forget(id: string) {
+		const entry = this.entries.get(id);
+		if (!entry) return;
+		this.entries.delete(id);
+		this.bytes -= size(entry);
+	}
 }
 
 const size = (entry: Entry) => entry.json.length + entry.gzip.length;

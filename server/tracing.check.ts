@@ -12,13 +12,19 @@ import { context, SpanKind, SpanStatusCode, trace, TraceFlags } from "@opentelem
 import { InMemorySpanExporter, SimpleSpanProcessor, TracerProvider, type ReadableSpan } from "@opentelemetry/sdk-trace";
 import { registerTelemetry, stepCountIs, streamText, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
+import * as OtelTracer from "@effect/opentelemetry/OtelTracer";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Schema from "effect/Schema";
 import { z } from "zod";
 import { withPeer } from "./tracing/http.ts";
 import { cleanSpan, withoutConnector } from "./tracing/privacy.ts";
 import { endReplyTrace, linkToReply, recordReplySpan, replyIds, runStartTime, withReplyTrace } from "./tracing/reply-trace.ts";
-import { startTracing, tracesUrl, withoutContent } from "./tracing/setup.ts";
+import * as Logger from "./tracing/Logger.ts";
+import { SQL_STATEMENT_SPAN, startTracing, tracesUrl, withoutContent } from "./tracing/setup.ts";
 import { tracingState } from "./tracing/state.ts";
-import { span } from "./tracing/span.ts";
+import * as Tracing from "./tracing/Tracing.ts";
 
 let failed = 0;
 
@@ -69,6 +75,29 @@ function model() {
 			return { stream: new ReadableStream({ start: (controller) => (parts.forEach((part) => controller.enqueue(part)), controller.close()) }) };
 		},
 	});
+}
+
+/** A model that answers at once, for the call inside an Effect span. */
+function answeringModel() {
+	const usage = { inputTokens: { total: 10, noCache: 10, cacheRead: undefined, cacheWrite: undefined }, outputTokens: { total: 3, text: 3, reasoning: undefined } };
+	const parts = [
+		{ type: "stream-start" as const, warnings: [] },
+		{ type: "text-start" as const, id: "t" },
+		{ type: "text-delta" as const, id: "t", delta: `Effect says ${MARKER}.` },
+		{ type: "text-end" as const, id: "t" },
+		{ type: "finish" as const, finishReason: { unified: "stop" as const, raw: "stop" }, usage },
+	];
+	return new MockLanguageModelV4({
+		provider: "openrouter",
+		modelId: "test/effect",
+		doStream: async () => ({ stream: new ReadableStream({ start: (controller) => (parts.forEach((part) => controller.enqueue(part)), controller.close()) }) }),
+	});
+}
+
+class CheckFailed extends Schema.TaggedError<CheckFailed>()("CheckFailed", {}) {
+	override get message() {
+		return `the check failed with ${MARKER}`;
+	}
 }
 
 const tools = {
@@ -211,6 +240,30 @@ const tracing = await startTracing("http://127.0.0.1:9", exported);
 assert.ok(tracing);
 registerTelemetry(tracing.integration);
 
+// Effect code, on the server's tracer and logger (server/runtime/layer.ts gives the app the same).
+const effects = ManagedRuntime.make(Layer.mergeAll(Tracing.layer, Logger.layer));
+/** What a log line wrote to stderr, where console.warn and console.error go. */
+async function stderrOf(work: () => Promise<unknown>) {
+	const write = process.stderr.write;
+	let written = "";
+	process.stderr.write = ((chunk: string | Uint8Array) => ((written += String(chunk)), true)) as typeof process.stderr.write;
+	try {
+		await work();
+	} finally {
+		process.stderr.write = write;
+	}
+	return written;
+}
+let effectLog = "";
+/** Ponder's own span around some work, as the services make it (Effect.fn), with its attributes. */
+const span = (name: string, attributes: Tracing.SpanAttributes, work: () => Promise<unknown>) =>
+	effects.runPromise(
+		Effect.gen(function* () {
+			yield* Tracing.annotate(attributes);
+			return yield* Effect.tryPromise({ try: work, catch: (error) => error });
+		}).pipe(Effect.withSpan(name)),
+	);
+
 await withReplyTrace(RUN_ID, async () => {
 	recordReplySpan(RUN_ID, "chat.request", Date.now() - 50, Date.now(), { "ponder.continued": true }, [linkToReply("wrun_01M7AAXEME3MDRQZPA53SJG1W6")]);
 	await span("thread.load", { "ponder.messages": 3 }, async () => undefined);
@@ -223,7 +276,23 @@ await withReplyTrace(RUN_ID, async () => {
 	await span("python.run", {}, async () => {
 		throw new Error(`the code printed ${MARKER}`);
 	}).catch(() => undefined);
+	// An Effect span with no Effect parent: its parent is the active span, the reply's root.
+	// The AI SDK's spans inside it nest under it, and so do Effect spans inside it.
+	effectLog = await stderrOf(() =>
+		effects.runPromise(
+			Effect.gen(function* () {
+				yield* Tracing.annotate({ "ponder.messages": 2, "ponder.skipped": undefined });
+				yield* Effect.logWarning("check: a warning inside an Effect span");
+				yield* Effect.tryPromise(() => streamText({ model: answeringModel(), prompt: `Tell me about ${MARKER}`, telemetry: { recordInputs: true, recordOutputs: true } }).consumeStream());
+				yield* Effect.fail(new CheckFailed()).pipe(Effect.withSpan("Check.failing"), Effect.ignore);
+				// A statement's span from Effect's SQL client is not recorded (setup.ts).
+				trace.getTracer("check").startSpan(SQL_STATEMENT_SPAN).end();
+			}).pipe(Effect.withSpan("Check.effectSpan")),
+		),
+	);
 });
+// Outside any reply, an Effect span records nothing either.
+await effects.runPromise(Effect.void.pipe(Effect.withSpan("Check.outside")));
 // Outside any reply: never traced.
 await span("thread.load", { "ponder.messages": 1 }, async () => undefined);
 await fetch(`${address}/outside`).then((response) => response.text());
@@ -306,8 +375,40 @@ await check("a failure keeps its kind, not its message", async () => {
 	assert.equal(python.attributes["error.type"], "Error");
 });
 
+await check("an Effect span inside a reply is in its trace, under the active span, and the AI SDK's spans nest under it", async () => {
+	const { traceId, spanId } = replyIds(RUN_ID);
+	const [effectSpan] = named("Check.effectSpan");
+	assert.ok(effectSpan, "no Effect span");
+	assert.equal(effectSpan.spanContext().traceId, traceId);
+	assert.equal(effectSpan.parentSpanContext?.spanId, spanId);
+	assert.equal(effectSpan.attributes["ponder.messages"], 2);
+	assert.ok(!("ponder.skipped" in effectSpan.attributes));
+	// The AI SDK's call starts with its own root, invoke_agent <model>, then a step, then the model call.
+	const [call] = named("invoke_agent test/effect");
+	assert.ok(call && named("chat test/effect").length === 1, spans.map((each) => each.name).join(", "));
+	assert.equal(call.parentSpanContext?.spanId, effectSpan.spanContext().spanId);
+	assert.equal(named("Check.failing")[0]?.parentSpanContext?.spanId, effectSpan.spanContext().spanId);
+	assert.equal(named("Check.outside").length, 0, "an Effect span outside a reply was traced");
+	assert.equal(named(SQL_STATEMENT_SPAN).length, 0, "a SQL statement's span was recorded");
+});
+
+await check("a failed Effect span keeps its error's tag, not its message", async () => {
+	const [failing] = named("Check.failing");
+	assert.equal(failing?.status.code, SpanStatusCode.ERROR);
+	assert.equal(failing.status.message, undefined);
+	assert.equal(failing.attributes["error.type"], "CheckFailed");
+	assert.deepEqual(failing.events.map((event) => [event.name, event.attributes]), [["exception", { "exception.type": "CheckFailed" }]]);
+});
+
+await check("an Effect log inside a reply's trace ends with its trace id, as console.warn's lines do", async () => {
+	const { traceId } = replyIds(RUN_ID);
+	assert.equal(effectLog, `check: a warning inside an Effect span trace_id=${traceId}\n`);
+});
+
 await check("a span outside a reply records nothing", async () => {
-	const ran = await context.with(trace.deleteSpan(context.active()), () => span("thread.load", {}, async (active) => active.isRecording()));
+	const ran = await context.with(trace.deleteSpan(context.active()), () =>
+		effects.runPromise(OtelTracer.currentOtelSpan.pipe(Effect.map((active) => active.isRecording()), Effect.withSpan("thread.load"))),
+	);
 	assert.equal(ran, false);
 });
 
@@ -336,4 +437,5 @@ await check("a compaction's span keeps its outcome and counts, and no summary or
 	assert.deepEqual(clean.attributes, { "ponder.between_steps": false, "ponder.last_attempt": false, "ponder.outcome": "compacted", "ponder.tokens": 24_000 });
 });
 
+await effects.dispose();
 process.exit(failed ? 1 : 0);

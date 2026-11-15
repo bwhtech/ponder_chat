@@ -13,7 +13,7 @@ import { lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 
 /**
- * The admin activity log (server/admin-events.ts), newest first: each change an admin
+ * The admin activity log (server/admin/AdminEvents.ts), newest first: each change an admin
  * made, from /admin or straight through Better Auth. Read only: no one can change or
  * delete an event. ?person=<id or email> shows the events done by or to one person.
  */

@@ -90,7 +90,7 @@ const TEXT_KEYS = new Set([
 	"server.address",
 	"error.type",
 	"error.category",
-	// Ponder's own (span.ts callers).
+	// Ponder's own attributes (Tracing.annotate, reply-trace.ts).
 	"ponder.outcome",
 	"ponder.peer",
 	"ponder.content_type",
@@ -182,6 +182,9 @@ const KNOWN_NAMES = [
 	/^ai\.[\w.]+$/,
 	/^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|CONNECT|TRACE|HTTP)$/,
 	/^(chat\.request|credits\.check|queue\.wait|thread\.load|file_context\.resolve|pdf\.extract_text|memory\.(recall|save)|connectors\.list|mcp\.call_tool|search\.query|web_fetch\.read|python\.run|reply\.save|title\.write|compaction\.run)$/,
+	// Effect.fn("Service.operation") in Ponder's services (docs/effect.md), and Effect's SQL transactions.
+	/^[A-Z][A-Za-z]{1,60}\.[a-z][A-Za-z]{1,60}$/,
+	/^sql\.transaction$/,
 ];
 
 export function cleanName(name: string): string {
