@@ -1,5 +1,6 @@
 import { slideCount, standaloneDeck } from "../artifacts/slides";
-import { fileKind, type Artifact, type ArtifactKind, type PanelItem, type ViewedFile } from "./panel";
+import { ARTIFACT_LOOK, FILE_LOOK } from "./look";
+import { fileKind, type Artifact, type PanelItem, type ViewedFile } from "./panel";
 
 /** What the panel's header shows for the item it holds: icon, title, a short detail and the download. */
 export type PanelHeader = {
@@ -19,12 +20,8 @@ export function panelHeader(item: PanelItem | null, rows: number | null): PanelH
 	return { title: "", icon: "", ink: "", meta: "", copyLabel: "", download: null, inset: false };
 }
 
-/** Each kind's icon and colour, for the panel's header and the card in the reply. */
-export const ARTIFACT_LOOK: Record<ArtifactKind, { icon: string; ink: string; label: string }> = {
-	document: { icon: "lucide-file-text", ink: "text-ink-blue-6", label: "Document" },
-	slides: { icon: "lucide-presentation", ink: "text-ink-amber-6", label: "Slides" },
-	html: { icon: "lucide-app-window", ink: "text-ink-violet-6", label: "Web page" },
-};
+/** For the card in the reply (artifacts/ArtifactPart.vue). */
+export { ARTIFACT_LOOK };
 
 function artifactHeader(artifact: Artifact): PanelHeader {
 	const title = artifact.title || "Untitled";
@@ -54,14 +51,9 @@ function artifactFile(artifact: Artifact, title: string) {
 
 function fileHeader(file: ViewedFile, rows: number | null): PanelHeader {
 	const kind = fileKind(file.mediaType, file.name);
-	const look = {
-		pdf: { icon: "lucide-file-text", ink: "text-ink-red-6" },
-		image: { icon: "lucide-image", ink: "text-ink-violet-6" },
-		table: { icon: "lucide-file-spreadsheet", ink: "text-ink-green-6" },
-	}[kind ?? "image"];
 	return {
 		title: file.name,
-		...look,
+		...FILE_LOOK[kind ?? "image"],
 		meta: kind === "table" && rows !== null ? plural(rows, "row") : "",
 		copyLabel: "",
 		download: { url: file.url, name: file.name },

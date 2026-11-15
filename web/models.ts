@@ -2,6 +2,7 @@ import { defineAsyncComponent, ref } from "vue";
 import type { ModelOption } from "frappe-ui-ai-elements";
 import { client } from "./api";
 import { fromBoot } from "./boot";
+import ModelMenuPlaceholder from "./ModelMenuPlaceholder.vue";
 import { once } from "./once";
 
 /**
@@ -15,9 +16,15 @@ export const defaultModel = ref("");
 /** What the server can do: Python only when its sandbox is set up. */
 export const features = ref({ python: false });
 
-/** The model menu (model-selector.ts). It shows once the models are here, and loads beside them. */
+/** The model menu's button was tapped before the menu's code came: the menu opens when it comes (model-selector.ts). */
+export const modelMenuAsked = ref(false);
+
+/**
+ * The model menu (model-selector.ts). It shows once the models are here, and loads beside them.
+ * Until its code is here, its button stands in at once, so the message box does not move.
+ */
 const loadModelSelector = once(() => import("./model-selector").then((module) => module.ModelSelector));
-export const ModelSelector = defineAsyncComponent(loadModelSelector);
+export const ModelSelector = defineAsyncComponent({ loader: loadModelSelector, loadingComponent: ModelMenuPlaceholder, delay: 0 });
 
 /** The first time, the page brings both lists (boot.ts); the server leaves out the models only just after a start. */
 export async function loadModels() {
