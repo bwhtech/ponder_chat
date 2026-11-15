@@ -7,9 +7,13 @@
  *   node e2e/shard.ts --update a.json …   writes durations.json from Playwright JSON reports
  *
  * Each shard runs WORKERS workers (playwright.config.ts). A test goes to the worker that
- * is free first, longest test first, so each shard gets about the same time. A file whose
- * tests run one at a time (a serial describe, or a durability file) stays whole, on one
- * worker. A test that durations.json does not know counts as the median test.
+ * is free first, longest test first, so each shard gets about the same time. A test that
+ * durations.json does not know counts as the median test.
+ *
+ * A file whose tests run one at a time (a serial describe, or a durability file) stays
+ * whole, on one worker, and counts SERVER_START more for the server it starts. These
+ * files get shards of their own: Playwright takes files in alphabetical order, so on a
+ * shard with other tests a long serial file could start last and end late.
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -19,6 +23,8 @@ const DURATIONS = join(import.meta.dirname, "durations.json");
 const TESTS = join(import.meta.dirname, "tests");
 /** Workers per shard: as many as the runner has cores (playwright.config.ts). */
 const WORKERS = Number(process.env.E2E_WORKERS ?? 2);
+/** What a serial file adds to its tests' time: a new database and a Ponder of its own (durability.ts), measured in CI. */
+const SERVER_START = 8_000;
 
 type Spec = { title: string; file: string; line: number };
 type Suite = { specs?: Spec[]; suites?: Suite[] };
@@ -35,29 +41,40 @@ function shard(index: number, total: number): string[] {
 	const durations: Record<string, number> = JSON.parse(readFileSync(DURATIONS, "utf8"));
 	const known = Object.values(durations).sort((a, b) => a - b);
 	const median = known[Math.floor(known.length / 2)] ?? 5_000;
-	const units = new Map<string, { args: string[]; ms: number }>();
+	const serialUnits = new Map<string, Unit>();
+	const testUnits = new Map<string, Unit>();
 	for (const spec of listed()) {
 		const ms = durations[key(spec)] ?? median;
 		if (serial(spec.file)) {
-			const unit = units.get(spec.file) ?? { args: [`e2e/tests/${spec.file}`], ms: 0 };
+			const unit = serialUnits.get(spec.file) ?? { args: [`e2e/tests/${spec.file}`], ms: SERVER_START };
 			unit.ms += ms;
-			units.set(spec.file, unit);
-		} else units.set(`${spec.file}:${spec.line}`, { args: [`e2e/tests/${spec.file}:${spec.line}`], ms });
+			serialUnits.set(spec.file, unit);
+		} else testUnits.set(`${spec.file}:${spec.line}`, { args: [`e2e/tests/${spec.file}:${spec.line}`], ms });
 	}
-	// Longest first, each to the worker that is free first. Ties go to the lowest worker, so every shard computes the same split.
-	const workers = Array.from({ length: total * WORKERS }, () => ({ ms: 0, args: [] as string[] }));
-	const sorted = [...units.entries()].sort(([a, x], [b, y]) => y.ms - x.ms || a.localeCompare(b));
-	for (const [, unit] of sorted) {
-		const free = workers.reduce((best, worker) => (worker.ms < best.ms ? worker : best));
-		free.ms += unit.ms;
-		free.args.push(...unit.args);
-	}
+	// The serial files get as many shards as their share of the time, at least one, and leave at least one for the rest.
+	const sum = (units: Map<string, Unit>) => [...units.values()].reduce((all, unit) => all + unit.ms, 0);
+	const serialShards = serialUnits.size === 0 ? 0 : Math.min(total - 1, Math.max(1, Math.round((total * sum(serialUnits)) / (sum(serialUnits) + sum(testUnits)))));
+	const workers = [...spread(serialUnits, serialShards), ...spread(testUnits, total - serialShards)];
 	const mine = workers.slice((index - 1) * WORKERS, index * WORKERS);
 	const args = mine.flatMap((worker) => worker.args).sort();
 	if (args.length === 0) throw new Error(`Shard ${index} of ${total} has no tests: use fewer shards.`);
 	const seconds = mine.map((worker) => (worker.ms / 1000).toFixed(0)).join(" + ");
 	console.error(`Shard ${index} of ${total}: ${args.length} files or tests, about ${seconds} seconds of tests on ${WORKERS} workers.`);
 	return args;
+}
+
+type Unit = { args: string[]; ms: number };
+
+/** The units on `shards` shards' workers: longest first, each to the worker that is free first. Ties go to the lowest worker, so every shard computes the same split. */
+function spread(units: Map<string, Unit>, shards: number) {
+	const workers = Array.from({ length: shards * WORKERS }, () => ({ ms: 0, args: [] as string[] }));
+	const sorted = [...units.entries()].sort(([a, x], [b, y]) => y.ms - x.ms || a.localeCompare(b));
+	for (const [, unit] of sorted) {
+		const free = workers.reduce((best, worker) => (worker.ms < best.ms ? worker : best));
+		free.ms += unit.ms;
+		free.args.push(...unit.args);
+	}
+	return workers;
 }
 
 /** Every test that Playwright would run, from its own list. */

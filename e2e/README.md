@@ -138,7 +138,7 @@ If Ponder starts to call another OpenRouter endpoint, add a route for it to `e2e
 
 ## Shards in CI
 
-CI splits the tests into 6 shards that run at the same time, each with its own Postgres and its own Ponder (`.github/workflows/ci.yml`). `e2e/shard.ts` makes the split from `e2e/durations.json`, the time of each test in an earlier CI run, so that the shards end at about the same time. A new test counts as the median test until the file is updated.
+CI splits the tests into 6 shards that run at the same time, each with its own Postgres and its own Ponder (`.github/workflows/ci.yml`). `e2e/shard.ts` makes the split from `e2e/durations.json`, the time of each test in an earlier CI run, so that the shards end at about the same time. The durability files run one test at a time, so they get shards of their own, where each starts at once on its own worker. A new test counts as the median test until the file is updated.
 
 To update the times after tests are added or changed:
 
