@@ -8,6 +8,7 @@ import { openSettings, settings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
 import { pendingDialog } from "./dialogs";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
+import { modelMenuAsked } from "./models";
 import { once } from "./once";
 import SidebarPlaceholder from "./SidebarPlaceholder.vue";
 import { afterLoad, prefetchChat } from "./preload";
@@ -83,6 +84,8 @@ const view = ref<"chat" | "memory">(viewInUrl());
 addEventListener("popstate", () => (view.value = viewInUrl()));
 // The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
 watch([current, view], closePanel);
+// A tap on the model button before its menu's code came (models.ts) is for that chat only.
+watch(current, () => (modelMenuAsked.value = false));
 
 function viewInUrl() {
 	return new URL(location.href).searchParams.get("view") === "memory" ? "memory" : "chat";
@@ -133,10 +136,16 @@ if (back.searchParams.get("settings") === "connectors") {
 // tap closes the menu and says so at once (PageOpening.vue), on the click, not on the touch: on an
 // iPhone, what a touch adds to the page can lose its click. Back from /admin out of the browser's
 // cache (bfcache), the page is as it was left, so the note goes.
+// If the person stops the navigation (Escape, the Stop button), the note goes too: the Navigation
+// API says so where it exists, and after OPENING_MAX_MS the note goes anyway.
 const openingAdmin = ref(false);
+const OPENING_MAX_MS = 20_000;
 function openAdmin() {
 	sheetOpen.value = false;
 	openingAdmin.value = true;
+	const stop = () => (openingAdmin.value = false);
+	(window as { navigation?: EventTarget }).navigation?.addEventListener("navigateerror", stop, { once: true });
+	setTimeout(stop, OPENING_MAX_MS);
 	location.assign("/admin");
 }
 const backFromCache = (event: PageTransitionEvent) => event.persisted && (openingAdmin.value = false);

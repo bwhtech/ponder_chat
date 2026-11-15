@@ -19,16 +19,20 @@ function close() {
 	emit("close");
 }
 
+// On the window, in the capture phase: before reka-ui's dialogs under it (Settings, the phone's
+// bottom sheet), which listen on the document. Escape closes this one only, as the top dialog.
 function onKeydown(event: KeyboardEvent) {
-	if (event.key === "Escape" && !event.defaultPrevented) close();
+	if (event.key !== "Escape" || event.defaultPrevented) return;
+	event.stopImmediatePropagation();
+	close();
 }
 
 onMounted(() => {
-	addEventListener("keydown", onKeydown);
+	addEventListener("keydown", onKeydown, { capture: true });
 	box.value?.focus({ preventScroll: true });
 });
 onBeforeUnmount(() => {
-	removeEventListener("keydown", onKeydown);
+	removeEventListener("keydown", onKeydown, { capture: true });
 	if (closing) return before?.focus({ preventScroll: true });
 	// The real dialog mounts in this same update.
 	const root = document.documentElement;
