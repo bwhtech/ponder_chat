@@ -1,4 +1,4 @@
-import { toast } from "frappe-ui";
+import { toast } from "../toasts";
 import { getToolIcon, type ToolLabel, type ToolLabeler } from "frappe-ui-ai-elements";
 import { CONNECTOR_CALL, CONNECTOR_SEARCH } from "../../shared/connectors";
 import { changeConnector, findTool, toolTitle } from "./api";

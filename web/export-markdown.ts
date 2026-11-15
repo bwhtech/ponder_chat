@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import { toast } from "frappe-ui";
+import { toast } from "./toasts";
 import { isAuto } from "../shared/auto-model";
 import { modelName } from "./models";
 import { CITATION_PART, type CitationPart } from "./cite/citations";

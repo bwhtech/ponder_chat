@@ -218,8 +218,8 @@ test("a reply that goes on after an approval is summarized when the approved cal
 		summarized: [{ text: "APPROVE-DONE" }],
 	});
 	await chat.send(page, "APPROVE-ADD put my notes on order A1");
-	// The page loaded before the connector was added, so the question names the tool only.
-	const approve = page.getByRole("button", { name: "Approve", exact: true });
+	// A new chat loads the connectors with its first message, after Shop was added, so the question names it.
+	const approve = page.getByRole("button", { name: "Allow once", exact: true });
 	await expect(approve).toBeVisible({ timeout: 60_000 });
 	expect(await fake.summaries("APPROVE-M1 ")).toHaveLength(0);
 

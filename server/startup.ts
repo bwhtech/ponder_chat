@@ -19,6 +19,7 @@ import { stopTracing } from "./tracing/setup.ts";
 import { migrateApprovalUses } from "./workflow/approval-uses.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
 import { checkWebBuild } from "./web-build.ts";
+import { modelsWithZdr } from "./openrouter.ts";
 
 /**
  * What the server does once when it starts, before it answers requests: create and
@@ -31,6 +32,8 @@ export const pythonReady = new Promise<boolean>((resolve) => (resolvePython = re
 
 export async function startup() {
 	checkWebBuild();
+	// OpenRouter's list of private models, read now: the chat page's first screen shows them without waiting (boot-page.ts).
+	void modelsWithZdr();
 	// A failed migration still settles pythonReady, so the routes that wait on it don't hang.
 	try {
 		await migrateAll();

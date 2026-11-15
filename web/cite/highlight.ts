@@ -1,6 +1,7 @@
-import { toast } from "frappe-ui";
+import { toast } from "../toasts";
 import { nextTick } from "vue";
-import { findSource, resolveRange, type Citation } from "./citations";
+import type { Citation } from "./citations";
+import { findSource, resolveRange } from "./text";
 
 /**
  * Marks cited text in a reply with the CSS Custom Highlight API, so the page's own

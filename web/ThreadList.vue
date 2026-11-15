@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { dialog, Dropdown, SidebarItem, SidebarLabel, Skeleton, TextInput } from "frappe-ui";
-import { computed, nextTick, ref, watch } from "vue";
-import { downloadThreadMarkdown } from "./export-markdown";
+import { SidebarItem, SidebarLabel, Skeleton, TextInput } from "frappe-ui";
+import { dialog } from "./dialogs";
+import { computed, nextTick, reactive, ref, watch } from "vue";
 import { excerptPieces, useThreadSearch } from "./thread-search";
 import { useThreads, type ThreadSummary } from "./threads";
+import ThreadMenu from "./ThreadMenu.vue";
+import { loadTranscript } from "./transcript-parts";
 
 /**
  * The person's threads, grouped by when they were last active, with a search box above.
@@ -25,6 +27,16 @@ const emit = defineEmits<{
 }>();
 
 const { threads, listLoaded, current, prefetch, rename, remove } = useThreads();
+
+/** The rows whose ⋯ menu has mounted (ThreadMenu.vue). */
+const armedMenus = reactive(new Set<string>());
+
+/** About to open a chat or its menu: its messages, the code that shows them (transcript.ts) and its menu load now. */
+function warm(id: string) {
+	armedMenus.add(id);
+	prefetch(id);
+	void loadTranscript().catch(() => undefined);
+}
 const query = ref("");
 const searching = computed(() => Boolean(query.value.trim()));
 const search = useThreadSearch(query);
@@ -60,7 +72,8 @@ const groups = computed(() => {
 function menu(thread: ThreadSummary) {
 	return [
 		{ label: "Rename", icon: "lucide-pencil", onClick: () => askRename(thread) },
-		{ label: "Export as Markdown", icon: "lucide-download", onClick: () => void downloadThreadMarkdown(thread.id, thread.title) },
+		// The export's code loads when it is chosen.
+		{ label: "Export as Markdown", icon: "lucide-download", onClick: () => void import("./export-markdown").then((module) => module.downloadThreadMarkdown(thread.id, thread.title)) },
 		{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: () => askDelete(thread) },
 	];
 }
@@ -111,7 +124,7 @@ function askDelete(thread: ThreadSummary) {
 					class="flex w-full flex-col gap-0.5 rounded-4 px-2 py-1.5 text-left transition-opacity duration-150 ease-out-strong motion-reduce:transition-none hover:bg-surface-gray-2 active:bg-surface-gray-3"
 					:class="{ 'bg-surface-elevation-3 shadow-sm': props.highlight && hit.id === current, 'opacity-50': search.searching.value }"
 					@click="emit('select', hit.id)"
-					@pointerenter="prefetch(hit.id)"
+					@pointerenter="warm(hit.id)"
 				>
 					<span class="truncate text-sm text-ink-gray-8">{{ hit.title }}</span>
 					<span v-if="hit.excerpt" class="line-clamp-2 text-p-xs text-ink-gray-5">
@@ -127,7 +140,7 @@ function askDelete(thread: ThreadSummary) {
 			<!-- A group that starts while the page is open (the first chat today) fades in. -->
 			<TransitionGroup tag="div" class="flex flex-col gap-4 empty:hidden" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none" enter-from-class="opacity-0">
 				<div v-for="group in searching ? [] : groups" :key="group.label" class="space-y-0.5" data-slot="thread-group">
-					<SidebarLabel class="[&_h3]:text-xs-medium [&_h3]:text-ink-gray-5">{{ group.label }}</SidebarLabel>
+					<SidebarLabel class="[&_h3]:text-xs-medium [&_h3]:text-ink-gray-6">{{ group.label }}</SidebarLabel>
 					<!-- A new or newly active chat slides in at the top; the others move down. -->
 					<TransitionGroup
 						tag="div"
@@ -145,26 +158,15 @@ function askDelete(thread: ThreadSummary) {
 							:label="thread.title"
 							:active="props.highlight && thread.id === current"
 							@click="emit('select', thread.id)"
-							@pointerenter="prefetch(thread.id)"
-							@focusin="prefetch(thread.id)"
-							@touchstart.passive="prefetch(thread.id)"
+							@pointerenter="warm(thread.id)"
+							@focusin="warm(thread.id)"
+							@touchstart.passive="warm(thread.id)"
 						>
 							<!-- SidebarItem keeps an 8px gap for an icon; these rows have none, so the title takes it back
 							     and starts on the sidebar's 16px edge with the search icon, the group label and the credits. -->
 							<span class="-ml-2 truncate text-sm leading-tighter">{{ thread.title }}</span>
 							<template #suffix>
-								<Dropdown :options="menu(thread)" align="end">
-									<template #trigger>
-										<button
-											type="button"
-											class="relative flex size-6 items-center justify-center rounded-4 text-ink-gray-5 opacity-0 transition-opacity duration-150 ease-out-strong after:absolute after:-inset-1 after:content-[''] [@media(pointer:coarse)]:after:-inset-2.5 hover:bg-surface-gray-3 hover:text-ink-gray-8 focus-visible:opacity-100 active:bg-surface-gray-4 aria-expanded:opacity-100 data-[state=open]:opacity-100 group-hover/sidebar-item:opacity-100 group-focus-within/sidebar-item:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100"
-											:class="{ 'opacity-100': props.highlight && thread.id === current }"
-											:aria-label="`Actions for ${thread.title}`"
-										>
-											<span class="lucide-ellipsis size-4" aria-hidden="true" />
-										</button>
-									</template>
-								</Dropdown>
+								<ThreadMenu :id="thread.id" :title="thread.title" :options="menu(thread)" :current="props.highlight && thread.id === current" :armed="armedMenus" />
 							</template>
 						</SidebarItem>
 					</TransitionGroup>

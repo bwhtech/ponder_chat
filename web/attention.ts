@@ -1,4 +1,4 @@
-import { onBeforeUnmount, watch, type Ref } from "vue";
+import { onScopeDispose, watch, type Ref } from "vue";
 
 /**
  * Tells a person who switched tabs that Ponder Chat needs them: a count on the favicon and in
@@ -77,7 +77,10 @@ class Attention {
 
 let attention: Attention | undefined;
 
-/** Counts this chat's replies toward the badge while the tab is hidden. Call from a chat's setup. */
+/**
+ * Counts this chat's replies toward the badge while the tab is hidden. Call from a chat's setup,
+ * or later in its scope (ChatView.vue starts it with the first reply).
+ */
 export function useAttention(busy: Ref<boolean>, waiting: Ref<boolean>) {
 	attention ??= new Attention();
 	const counter = attention;
@@ -94,7 +97,7 @@ export function useAttention(busy: Ref<boolean>, waiting: Ref<boolean>) {
 			if (!busy.value && !waiting.value) counter.add();
 		}, FINISH_GRACE_MS);
 	});
-	onBeforeUnmount(cancelFinish);
+	onScopeDispose(cancelFinish);
 }
 
 function setFavicon(href: string) {

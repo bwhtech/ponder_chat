@@ -1,5 +1,6 @@
 import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
-import { captureSelection, CITATION_MAX_TEXT, type Citation } from "./citations";
+import { CITATION_MAX_TEXT, type Citation } from "./citations";
+import { captureSelection } from "./text";
 
 export type PendingCite = { citation: Citation; range: Range; x: number; y: number; tooLong: boolean };
 

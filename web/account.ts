@@ -1,7 +1,7 @@
-import { createAuthClient } from "better-auth/vue";
-import { adminClient, emailOTPClient, magicLinkClient } from "better-auth/client/plugins";
 import { ref } from "vue";
 import { client, type Answer } from "./api";
+import { fromBoot } from "./boot";
+import { once } from "./once";
 
 /**
  * Who is signed in, and their credits for today. Sign-in is by email (server/auth.ts):
@@ -12,7 +12,17 @@ export type Me = Answer<typeof client.api.me.$get>;
 /** Today's credits (CreditStatus in server/credits.ts). */
 export type Credits = Me["credits"];
 
-export const authClient = createAuthClient({ plugins: [magicLinkClient(), emailOTPClient(), adminClient()] });
+/**
+ * Better Auth's client, for signing in and out. It loads when one of those starts, not with
+ * the page: a signed-in page reads who is signed in from /api/me alone.
+ */
+const auth = once(() =>
+	Promise.all([import("better-auth/vue"), import("better-auth/client/plugins")]).then(([vue, plugins]) => makeAuthClient(vue, plugins)),
+);
+
+function makeAuthClient({ createAuthClient }: typeof import("better-auth/vue"), { adminClient, emailOTPClient, magicLinkClient }: typeof import("better-auth/client/plugins")) {
+	return createAuthClient({ plugins: [magicLinkClient(), emailOTPClient(), adminClient()] });
+}
 
 /** Undefined while loading, null when signed out. */
 export const me = ref<Me | null | undefined>(undefined);
@@ -22,8 +32,17 @@ export const meError = ref("");
 /**
  * Asks who is signed in, and returns it. Only a 401 or 403 means signed out. When the server
  * cannot be reached or fails, `me` stays as it was and `meError` says why, so App.vue can offer Retry.
+ * The first time, the page itself says, with no request (boot.ts).
  */
 export async function loadMe() {
+	const booted = fromBoot("me");
+	if (booted !== undefined) me.value = booted;
+	else await askWhoIsSignedIn();
+	if (me.value) keepCachesFor(me.value.user.id);
+	return me.value;
+}
+
+async function askWhoIsSignedIn() {
 	try {
 		const response = await client.api.me.$get();
 		// The route's type has only its 200: the 401 comes from the session check before it.
@@ -34,8 +53,6 @@ export async function loadMe() {
 	} catch {
 		meError.value = "Ponder Chat could not reach the server. Check your connection, then try again.";
 	}
-	if (me.value) keepCachesFor(me.value.user.id);
-	return me.value;
 }
 
 /** Asks again how many credits are left: after each reply, and when a reply is refused. */
@@ -46,7 +63,7 @@ export async function refreshCredits() {
 
 /** Sends the email with the link and the code. The page then waits for the code, or for the link to be opened. */
 export async function sendSignInLink(email: string) {
-	const { error } = await authClient.signIn.magicLink({ email, callbackURL: "/", errorCallbackURL: "/?sign-in=failed" });
+	const { error } = await (await auth()).signIn.magicLink({ email, callbackURL: "/", errorCallbackURL: "/?sign-in=failed" });
 	if (error) throw new Error(error.message ?? "The email could not be sent.");
 }
 
@@ -56,6 +73,7 @@ export async function sendSignInLink(email: string) {
  * code that worked is signed out again, and nothing is reported.
  */
 export async function signInWithCode(email: string, code: string, stillWanted = () => true) {
+	const authClient = await auth();
 	const { error } = await authClient.signIn.emailOtp({ email, otp: code });
 	if (!stillWanted()) {
 		if (!error) await authClient.signOut().catch(() => undefined);
@@ -75,7 +93,7 @@ const codeErrors: Record<string, string> = {
 const TOO_FAST = "Too many tries. Wait a minute, then try again.";
 
 export async function signOut() {
-	await authClient.signOut();
+	await (await auth()).signOut();
 	clearCaches();
 	location.assign("/");
 }

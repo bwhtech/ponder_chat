@@ -10,7 +10,8 @@ let ruleChanges = 0;
 </script>
 
 <script setup lang="ts">
-import { Badge, Select, toast } from "frappe-ui";
+import { Badge, Select } from "frappe-ui";
+import { toast } from "../toasts";
 import { computed } from "vue";
 import { changeConnector, RULES, toolTitle, type Connector, type ConnectorTool, type Rule } from "./api";
 

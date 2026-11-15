@@ -2,6 +2,7 @@ import type { UIMessage } from "ai";
 import { computed, ref, shallowRef } from "vue";
 import { nameFromFirstMessage } from "../shared/thread-name";
 import { client, unwrap, type Answer } from "./api";
+import { fromBoot } from "./boot";
 import { forgetThread, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
 
 /**
@@ -83,9 +84,8 @@ async function init() {
 
 async function refresh() {
 	try {
-		const response = await client.api.threads.$get();
-		if (!response.ok) return;
-		const fresh: ThreadSummary[] = (await response.json()).threads;
+		const fresh: ThreadSummary[] | undefined = fromBoot("threads") ?? (await fetchList());
+		if (!fresh) return;
 		for (const id of pending.keys()) if (fresh.some((thread) => thread.id === id)) pending.delete(id);
 		threads.value = [...pending.values(), ...fresh];
 		localStorage.setItem(LIST_KEY, JSON.stringify(fresh));
@@ -94,6 +94,12 @@ async function refresh() {
 	} finally {
 		listLoaded.value = true;
 	}
+}
+
+/** The list from the server; undefined when it refused. The first one comes with the page (boot.ts). */
+async function fetchList(): Promise<ThreadSummary[] | undefined> {
+	const response = await client.api.threads.$get();
+	return response.ok ? (await response.json()).threads : undefined;
 }
 
 async function open(id: string, { push = true } = {}) {

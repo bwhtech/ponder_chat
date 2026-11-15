@@ -4,7 +4,7 @@
   "description": "Ponder Chat: a chat app on OpenRouter models, with a daily credit limit per person.",
   "main": "index.js",
   "scripts": {
-    "build": "vite build && nitro build",
+    "build": "PONDER_PAGE=chat vite build && PONDER_PAGE=admin vite build && tsx scripts/compress-web.ts && nitro build",
     "typecheck": "node scripts/vue-tsc.cjs --noEmit -p tsconfig.json && node scripts/vue-tsc.cjs --noEmit -p tsconfig.no-node.json",
     "dev": "tsx scripts/dev.ts",
     "start": "./start.sh",
@@ -13,7 +13,7 @@
     "e2e": "npm run build && playwright test",
     "e2e:server": "tsx e2e/start.ts",
     "sandbox:setup": "sandbox/pyodide/setup.sh",
-    "build:web": "vite build",
+    "build:web": "PONDER_PAGE=chat vite build && PONDER_PAGE=admin vite build && tsx scripts/compress-web.ts",
     "build:server": "nitro build"
   },
   "keywords": [],
@@ -51,6 +51,7 @@
     "pdfjs-dist": "^6.5.438",
     "pg": "^8.23.1",
     "postgres": "^3.4.9",
+    "reka-ui": "^2.11.0",
     "rollup": "^4.67.5",
     "sharp": "^0.35.5",
     "tsx": "^4.23.15",

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Alert, Button, debounce, Dialog, LoadingIndicator, Password, TextInput, toast } from "frappe-ui";
+import { Alert, Button, debounce, Dialog, LoadingIndicator, Password, TextInput } from "frappe-ui";
+import { toast } from "../toasts";
 import { computed, reactive, ref, watch } from "vue";
 import { settings } from "../settings/state";
 import { addConnector, connectors, loadConnectors, probeServer, type Connector, type Header, type Probe, type SignInMessage } from "./api";

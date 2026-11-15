@@ -10,6 +10,7 @@ import { sql } from "./db.ts";
 import { sendEmail, signInEmail } from "./email.ts";
 import { hosts, isLocalHost } from "./hosts.ts";
 import { applyInvite, isAllowed } from "./invites.ts";
+import { forgetSessions } from "./session-cache.ts";
 
 /**
  * Sign-in: Better Auth with no passwords. One email holds a link and a 6-digit code, and
@@ -85,6 +86,9 @@ export const auth = betterAuth({
 			await beforeAdminCall(ctx);
 		}),
 		after: createAuthMiddleware(async (ctx) => {
+			// Anything but a read may change who a session belongs to: sign-in and sign-out, revoked
+			// sessions, bans, an admin's edit of a person. The sessions kept in memory are read again.
+			if (ctx.path !== "/get-session") forgetSessions();
 			await afterAdminCall(ctx);
 			const returned = ctx.context.returned;
 			if (ctx.path !== "/magic-link/verify" || !isAPIError(returned) || returned.statusCode < 400) return;

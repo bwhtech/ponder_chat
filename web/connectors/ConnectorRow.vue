@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Button, Dropdown, Switch, toast } from "frappe-ui";
+import { Button, Dropdown, Switch } from "frappe-ui";
+import { toast } from "../toasts";
 import { computed } from "vue";
 import { settings } from "../settings/state";
 import { changeConnector, refreshConnector, type Connector } from "./api";

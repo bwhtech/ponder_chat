@@ -1,45 +1,33 @@
 <script setup lang="ts">
-import { useChat } from "@ai-sdk/vue";
-import { WorkflowChatTransport } from "@ai-sdk/workflow/client";
-import { lastAssistantMessageIsCompleteWithApprovalResponses, type FileUIPart, type UIMessage } from "ai";
-import { Alert, Button } from "frappe-ui";
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import type { FileUIPart, UIMessage } from "ai";
+import { Button } from "frappe-ui";
+import { Alert, OutOfCredits } from "./lazy-alert";
+import { computed, getCurrentScope, onBeforeUnmount, onMounted, ref, shallowRef, watch, type Ref } from "vue";
 import { me } from "./account";
 import { client } from "./api";
-import { useAttention } from "./attention";
-import { askForMoreCredits, outOfCreditsNotice } from "./credit-request";
-import { connectors, loadConnectors } from "./connectors/api";
-import { connectorLabel } from "./connectors/labels";
 import { useDraft } from "./drafts";
-import { fetchApprovalQuestion } from "./fetch-approval";
-import { canUndo } from "./memory";
-import { MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
-import { useThinking } from "./thinking";
+import { canUndo, MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from "./message-queue";
 import { isAuto } from "../shared/auto-model";
-import { defaultModel, features, modelName, models } from "./models";
-import { chosenCitations, citationLabel, citationPart, findSource, resolveRange, withComment, type Citation } from "./cite/citations";
-import CitationChip, { type CiteAnchor } from "./cite/CitationChip.vue";
-import CiteButton from "./cite/CiteButton.vue";
-import { markQuote, revealCitation } from "./cite/highlight";
-import { useCiteSelection } from "./cite/selection";
-import ArtifactPart from "./artifacts/ArtifactPart.vue";
-import RunPythonPart from "./RunPythonPart.vue";
-import { useSkillPicker } from "./skills/picker";
-import SkillChip from "./skills/SkillChip.vue";
-import SkillMenu from "./skills/SkillMenu.vue";
+import { defaultModel, features, ModelSelector, modelName, models } from "./models";
+import { chosenCitations, citationLabel, citationPart, withComment, type Citation } from "./cite/citations";
+import type { CiteAnchor } from "./cite/CitationChip.vue";
+import type { PendingCite } from "./cite/selection";
+import { SkillMenu, useSkillPicker } from "./skills/picker";
 import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skills/skills";
-import UseSkillPart from "./skills/UseSkillPart.vue";
-import WebToolPart from "./WebToolPart.vue";
-import CompactionDivider from "./CompactionDivider.vue";
 import { summarizedThrough } from "./compaction";
 import { THREAD_CHANGED } from "../shared/replies";
 import { useThreads } from "./threads";
-import { clockTime } from "./dates";
+import { useLazyChat } from "./lazy-chat";
+import { once } from "./once";
+import { preloadChat } from "./preload";
+// The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
 import {
+	CitationChip,
+	CiteSelection,
+	CompactionDivider,
 	Conversation,
 	ConversationContent,
-	ConversationEmptyState,
 	ConversationItem,
 	ConversationScrollButton,
 	Loader,
@@ -48,7 +36,12 @@ import {
 	MessageContent,
 	MessageCopyAction,
 	MessageParts,
-	ModelSelector,
+	loadTranscript,
+	SkillChip,
+	ToolContext,
+} from "./transcript-parts";
+import {
+	ConversationEmptyState,
 	PromptInput,
 	PromptInputAttachButton,
 	PromptInputFooter,
@@ -57,8 +50,6 @@ import {
 	PromptInputSubmit,
 	PromptInputTextarea,
 	PromptInputTools,
-	provideToolLabels,
-	provideToolRenderers,
 	Suggestion,
 	Suggestions,
 } from "frappe-ui-ai-elements";
@@ -93,9 +84,9 @@ function lastReplyModel(messages: UIMessage[]) {
 
 /** The server said the saved thread is ahead of this page (THREAD_CHANGED). */
 let threadChanged = false;
-const { messages, sendMessage, addToolApprovalResponse, status, error, stop, regenerate, resumeStream } = useChat({
+// The AI SDK loads beside the page (lazy-chat.ts); the messages show without it.
+const { messages, sendMessage, addToolApprovalResponse, status, error, stop, regenerate, resumeStream } = useLazyChat(({ WorkflowChatTransport, lastAssistantMessageIsCompleteWithApprovalResponses }) => ({
 	id: props.threadId,
-	messages: props.initialMessages,
 	// Each reply is a durable workflow run on the server. When the connection drops before
 	// the reply ends (a server restart, a flaky network), the transport reconnects to the
 	// run and picks up where it left off. The model goes with every request.
@@ -119,7 +110,7 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 		void notes.load({ wait: true });
 	},
 	onError: () => emit("refused"),
-});
+}), props.initialMessages);
 
 /**
  * fetch for the transport: reconnecting to a reply (a GET) waits and tries again for up
@@ -145,33 +136,24 @@ const notes = useRememberedNotes(props.threadId);
 const { byMessage: remembered, fresh: newSaves, undo: undoRemembered } = notes;
 
 onMounted(() => {
-	void notes.load();
+	// A new chat has no replies, so nothing was remembered from it yet.
+	if (props.initialMessages.length) void notes.load();
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	if (props.running) void resumeStream();
 });
 
 const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
-const refillTime = computed(() =>
-	me.value ? clockTime(me.value.credits.resetsAt) : "",
-);
-// While a request for more credits waits, the notice says so and has no button.
-const creditNotice = computed(() => outOfCreditsNotice(me.value?.credits, refillTime.value));
+
 
 const input = ref("");
 // What the person was writing in this chat comes back after a switch or a reload.
 useDraft(props.threadId, input);
+// Typing a message: the code to send it and show the reply loads now, if the page has not loaded it yet.
+watch(input, () => void preloadChat(), { once: true });
 const uploading = ref(false);
 const uploadError = ref("");
 // What the server can pass to the model; spreadsheets only when Python can read them.
 const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
-// A Python run shows its code, what it printed, and the files it made.
-// Searches and page reads are one line each, so they fold with the steps around them.
-// A skill Ponder chose (use_skill) stays a line of its own, so the person sees which skill shaped the reply.
-// An artifact (write_artifact) is a card that opens it in the side panel.
-provideToolRenderers(
-	{ run_python: RunPythonPart, web_search: WebToolPart, web_fetch: WebToolPart, use_skill: UseSkillPart, write_artifact: ArtifactPart },
-	{ foldable: ["web_search", "web_fetch"] },
-);
 
 // Skills: $name in the message box opens the menu (skills/picker.ts); a chosen skill is a chip until the message goes out.
 const composer = ref<HTMLElement | null>(null);
@@ -195,13 +177,8 @@ function askedSkills(message: UIMessage) {
 	return chosenSkills(messages.value[messages.value.indexOf(message) - 1]);
 }
 
-// Connector steps show as "Linear · Create issue", and a search as what it looked for
-// (connectors/labels.ts). When a call waits for approval, "Always allow" saves its rule, then approves.
-if (!connectors.value) void loadConnectors().catch(() => undefined);
-provideToolLabels((name, part) => {
-	if (name === "web_fetch") return { title: "Read a page", question: fetchApprovalQuestion(messages.value) };
-	return connectorLabel(name, part);
-});
+// The replies' tool steps show and label themselves through ToolContext.vue, in the transcript, which
+// also loads the connectors. When a call waits for approval, "Always allow" saves its rule, then approves.
 
 /** The person answered a tool that waited for approval. The answer goes out by itself (sendAutomaticallyWhen). */
 function answerApproval(id: string, approved: boolean) {
@@ -261,12 +238,12 @@ function pinInPlace(element: Element) {
 	Object.assign(el.style, { position: "fixed", top: `${top}px`, left: `${left}px`, width: `${width}px`, height: `${height}px` });
 }
 
-// Citations: selecting text in a reply shows a Cite button (cite/selection.ts). Cite puts the
-// quote in the message box as a chip and opens a field for an optional comment, beside the
-// quoted text, which stays marked while the comment is written. Adapted from T3 Code.
+// Citations: selecting text in a reply shows a Cite button (cite/CiteSelection.vue, in the
+// transcript). Cite puts the quote in the message box as a chip and opens a field for an
+// optional comment, beside the quoted text, which stays marked while the comment is written.
+// Adapted from T3 Code.
 const promptInput = ref<{ submit: () => void } | null>(null);
 const citeChips = ref<Citation[]>([]);
-const { pending: pendingCite, dismiss: dismissCite } = useCiteSelection(area);
 /** The chip whose comment is open, and what its editor sits against: the quote, or the chip. */
 const editingCite = ref<number | null>(null);
 const citeAnchor = ref<CiteAnchor | null>(null);
@@ -279,30 +256,34 @@ let unmarkQuote = () => {};
 let newCite = false;
 onBeforeUnmount(() => unmarkQuote());
 
-function cite() {
-	const shown = pendingCite.value;
-	if (!shown || shown.tooLong) return;
-	document.getSelection()?.removeAllRanges();
-	dismissCite();
+function cite(shown: PendingCite) {
 	citeChips.value = [...citeChips.value, shown.citation];
 	editComment(citeChips.value.length - 1, shown.range);
 	newCite = true;
 }
 
-/** Opens a chip's comment editor beside its quote when the quote is on screen, else beside the chip. */
+/**
+ * Opens a chip's comment editor beside its quote when the quote is on screen, else beside the
+ * chip. Finding and marking the quote are in the transcript's chunk, which a chat with quotes
+ * has loaded: the editor opens once they answer, a moment later.
+ */
 function editComment(index: number, range?: Range | null) {
 	newCite = false;
 	unmarkQuote();
 	const citation = citeChips.value[index];
 	if (!citation) return;
-	if (range === undefined) {
-		const source = findSource(citation.messageId);
-		range = source && resolveRange(source, citation);
-	}
-	const onScreen = range && area.value && isInside(range.getBoundingClientRect(), area.value.getBoundingClientRect());
-	citeAnchor.value = range && onScreen ? quoteAnchor(range) : null;
-	if (range && onScreen) unmarkQuote = markQuote(range);
-	editingCite.value = index;
+	void loadTranscript().then(({ findSource, markQuote, resolveRange }) => {
+		// Something else opened, or the chip went, meanwhile.
+		if (citeChips.value[index] !== citation || (editingCite.value !== null && editingCite.value !== index)) return;
+		if (range === undefined) {
+			const source = findSource(citation.messageId);
+			range = source && resolveRange(source, citation);
+		}
+		const onScreen = range && area.value && isInside(range.getBoundingClientRect(), area.value.getBoundingClientRect());
+		citeAnchor.value = range && onScreen ? quoteAnchor(range) : null;
+		if (range && onScreen) unmarkQuote = markQuote(range);
+		editingCite.value = index;
+	});
 }
 
 function isInside(rect: DOMRect, bounds: DOMRect) {
@@ -348,11 +329,13 @@ function removeCite(index: number) {
 
 /** Scrolls to the quote in its reply, rendering older messages when it is above them. */
 function revealQuote(citation: Citation) {
-	void revealCitation(citation, () => {
-		if (firstShown.value === 0) return false;
-		showEarlier();
-		return true;
-	});
+	void loadTranscript().then(({ revealCitation }) =>
+		revealCitation(citation, () => {
+			if (firstShown.value === 0) return false;
+			showEarlier();
+			return true;
+		}),
+	);
 }
 
 const busy = computed(() => status.value === "submitted" || status.value === "streaming");
@@ -380,10 +363,24 @@ onBeforeUnmount(() => {
 	if (busy.value) remember(props.threadId, { messages: messages.value, running: true });
 	chatBusy.value = false;
 });
-// While the tab is hidden, a finished reply puts a count on the favicon.
-useAttention(busy, computed(() => waitingOnPerson(messages.value)));
 
-const { thinking, text: thinkingText } = useThinking(busy, messages);
+// "Thinking" (thinking.ts), and a count on the favicon for a reply that finishes while the tab
+// is hidden (attention.ts), start with the chat's first reply: a new chat that sends nothing
+// loads neither. The page prefetches them once it has loaded (boot-page.ts).
+const scope = getCurrentScope();
+const replyState = shallowRef<{ thinking: Ref<boolean>; text: Ref<string> }>();
+const thinking = computed(() => replyState.value?.thinking.value ?? false);
+const thinkingText = computed(() => replyState.value?.text.value ?? "Thinking");
+const startReplyHelpers = once(() =>
+	Promise.all([import("./thinking"), import("./attention")]).then(([{ useThinking }, { useAttention }]) => {
+		if (!scope?.active) return;
+		scope.run(() => {
+			replyState.value = useThinking(busy, messages);
+			useAttention(busy, computed(() => waitingOnPerson(messages.value)));
+		});
+	}),
+);
+watch(busy, (now) => now && void startReplyHelpers().catch(() => undefined), { immediate: true });
 /** "Thinking" sits in the reply's place before the reply exists: the turn after the person's message. */
 /** The last message the newest summary covers: a divider follows it. */
 const summarized = computed(() => summarizedThrough(messages.value));
@@ -504,108 +501,110 @@ function replyModelId(message: UIMessage) {
 				</div>
 			</ConversationEmptyState>
 		</Transition>
-		<Conversation v-if="!landing">
-			<ConversationContent class="mx-auto w-full max-w-[720px] px-4 pb-8 pt-8 sm:px-5">
-				<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">
-					<Button variant="ghost" size="sm" icon-left="lucide-chevrons-up" @click="showEarlier">
-						Show earlier messages ({{ firstShown }})
-					</Button>
-				</ConversationItem>
-				<ConversationItem
-					v-for="message in shownMessages"
-					:key="message.id"
-					:message-id="message.id"
-					:scroll-anchor="message.role === 'user'"
-					:data-new="shownAtStart.has(message.id) ? undefined : message.role"
-				>
-					<Message :from="message.role">
-						<MessageContent :bare="message.role === 'user'">
-							<div v-if="chosenSkills(message).length || chosenCitations(message).length" data-slot="message-skills" class="flex max-w-full flex-wrap justify-end gap-1.5 self-end">
-								<SkillChip v-for="name in chosenSkills(message)" :key="name" :name="name" />
-								<CitationChip v-for="(citation, index) in chosenCitations(message)" :key="`quote-${index}`" :citation="citation" @reveal="revealQuote(citation)" />
-							</div>
-							<p
-								v-for="name in askedSkills(message)"
-								:key="name"
-								data-slot="asked-skill"
-								class="flex items-center gap-1.5 text-p-sm text-ink-gray-6"
-							>
-								<span class="lucide-sparkles size-3.5 shrink-0" aria-hidden="true" />
-								<span>Used skill <span class="text-ink-gray-7">{{ skillTitle(name) }}</span> · You asked for it</span>
-							</p>
-							<!-- The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). -->
-							<div class="contents" :data-cite-source="message.role === 'assistant' && !isStreaming(message) ? message.id : undefined">
-							<MessageParts
-								:message="message"
-								:streaming="isStreaming(message)"
-								@approve="answerApproval($event, true)"
-								@deny="answerApproval($event, false)"
-							/>
-							</div>
-							<Loader v-if="thinking && message === lastMessage && message.role === 'assistant'" :text="thinkingText" />
-							<MessageActions
-								v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
-								data-reply-actions
-							>
-								<MessageCopyAction
-									:value="replyText(message)"
-									:class="{ 'opacity-0 transition-opacity duration-150 ease-out-strong focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100': message.id !== lastReplyId }"
-								/>
-								<span v-if="replyModel(message)" class="pr-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
-							</MessageActions>
-							<div
-								v-for="{ save, operations } in remembered.get(message.id) ?? []"
-								:key="save.id"
-								data-slot="memory-saved"
-								:data-new="newSaves.has(save.id) || undefined"
-								class="-ml-1 -mt-3 flex flex-wrap items-start gap-x-1 [@media(pointer:coarse)]:mt-0 [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:gap-x-2"
-							>
-								<div class="min-w-0">
-									<button
-										v-for="op in operations"
-										:key="op.memoryId + op.op"
-										type="button"
-										data-slot="memory-note"
-										class="flex w-fit max-w-full items-start gap-2 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-6 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
-										:class="{ 'line-through': save.undoneAt }"
-										title="Open Memory"
-										@click="emit('openMemory')"
-									>
-										<span class="lucide-bookmark mt-0.5 size-4 shrink-0" aria-hidden="true" />
-										<span class="min-w-0"><span class="text-ink-gray-7">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
-									</button>
+		<ToolContext v-if="!landing" :messages="messages">
+			<Conversation>
+				<ConversationContent class="mx-auto w-full max-w-[720px] px-4 pb-8 pt-8 sm:px-5">
+					<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">
+						<Button variant="ghost" size="sm" icon-left="lucide-chevrons-up" @click="showEarlier">
+							Show earlier messages ({{ firstShown }})
+						</Button>
+					</ConversationItem>
+					<ConversationItem
+						v-for="message in shownMessages"
+						:key="message.id"
+						:message-id="message.id"
+						:scroll-anchor="message.role === 'user'"
+						:data-new="shownAtStart.has(message.id) ? undefined : message.role"
+					>
+						<Message :from="message.role">
+							<MessageContent :bare="message.role === 'user'">
+								<div v-if="chosenSkills(message).length || chosenCitations(message).length" data-slot="message-skills" class="flex max-w-full flex-wrap justify-end gap-1.5 self-end">
+									<SkillChip v-for="name in chosenSkills(message)" :key="name" :name="name" />
+									<CitationChip v-for="(citation, index) in chosenCitations(message)" :key="`quote-${index}`" :citation="citation" @reveal="revealQuote(citation)" />
 								</div>
-								<button
-									v-if="canUndo(save)"
-									type="button"
-									data-slot="memory-undo"
-									class="touch-target rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-7 underline decoration-outline-gray-3 underline-offset-2 hover:bg-surface-gray-2 hover:decoration-current hover:text-ink-gray-8 active:bg-surface-gray-3"
-									@click="undoRemembered(save)"
+								<p
+									v-for="name in askedSkills(message)"
+									:key="name"
+									data-slot="asked-skill"
+									class="flex items-center gap-1.5 text-p-sm text-ink-gray-6"
 								>
-									Undo
-								</button>
-								<span v-else-if="save.undoneAt" class="px-1 py-0.5 text-p-sm text-ink-gray-5">Undone</span>
-							</div>
-						</MessageContent>
-					</Message>
-					<CompactionDivider v-if="message.id === summarized" />
-				</ConversationItem>
-				<ConversationItem v-if="thinkingAlone">
-					<Message from="assistant">
-						<MessageContent><Loader :text="thinkingText" /></MessageContent>
-					</Message>
-				</ConversationItem>
-				<ConversationItem v-if="(error || failedBefore) && !outOfCredits">
-					<Alert
-						theme="red"
-						title="Something went wrong"
-						:description="error?.message ?? 'The last reply did not finish. Retry, or choose another model.'"
-						:primary-action="{ label: 'Retry', onClick: () => regenerate() }"
-					/>
-				</ConversationItem>
-			</ConversationContent>
-			<ConversationScrollButton />
-		</Conversation>
+									<span class="lucide-sparkles size-3.5 shrink-0" aria-hidden="true" />
+									<span>Used skill <span class="text-ink-gray-7">{{ skillTitle(name) }}</span> · You asked for it</span>
+								</p>
+								<!-- The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). -->
+								<div class="contents" :data-cite-source="message.role === 'assistant' && !isStreaming(message) ? message.id : undefined">
+								<MessageParts
+									:message="message"
+									:streaming="isStreaming(message)"
+									@approve="answerApproval($event, true)"
+									@deny="answerApproval($event, false)"
+								/>
+								</div>
+								<Loader v-if="thinking && message === lastMessage && message.role === 'assistant'" :text="thinkingText" />
+								<MessageActions
+									v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
+									data-reply-actions
+								>
+									<MessageCopyAction
+										:value="replyText(message)"
+										:class="{ 'opacity-0 transition-opacity duration-150 ease-out-strong focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100': message.id !== lastReplyId }"
+									/>
+									<span v-if="replyModel(message)" class="pr-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
+								</MessageActions>
+								<div
+									v-for="{ save, operations } in remembered.get(message.id) ?? []"
+									:key="save.id"
+									data-slot="memory-saved"
+									:data-new="newSaves.has(save.id) || undefined"
+									class="-ml-1 -mt-3 flex flex-wrap items-start gap-x-1 [@media(pointer:coarse)]:mt-0 [@media(pointer:coarse)]:items-center [@media(pointer:coarse)]:gap-x-2"
+								>
+									<div class="min-w-0">
+										<button
+											v-for="op in operations"
+											:key="op.memoryId + op.op"
+											type="button"
+											data-slot="memory-note"
+											class="flex w-fit max-w-full items-start gap-2 rounded-4 px-1 py-0.5 text-left text-p-sm text-ink-gray-6 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center hover:bg-surface-gray-2 hover:text-ink-gray-7 active:bg-surface-gray-3"
+											:class="{ 'line-through': save.undoneAt }"
+											title="Open Memory"
+											@click="emit('openMemory')"
+										>
+											<span class="lucide-bookmark mt-0.5 size-4 shrink-0" aria-hidden="true" />
+											<span class="min-w-0"><span class="text-ink-gray-7">{{ MEMORY_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}</span>
+										</button>
+									</div>
+									<button
+										v-if="canUndo(save)"
+										type="button"
+										data-slot="memory-undo"
+										class="touch-target rounded-4 px-1 py-0.5 text-p-sm text-ink-gray-7 underline decoration-outline-gray-3 underline-offset-2 hover:bg-surface-gray-2 hover:decoration-current hover:text-ink-gray-8 active:bg-surface-gray-3"
+										@click="undoRemembered(save)"
+									>
+										Undo
+									</button>
+									<span v-else-if="save.undoneAt" class="px-1 py-0.5 text-p-sm text-ink-gray-5">Undone</span>
+								</div>
+							</MessageContent>
+						</Message>
+						<CompactionDivider v-if="message.id === summarized" />
+					</ConversationItem>
+					<ConversationItem v-if="thinkingAlone">
+						<Message from="assistant">
+							<MessageContent><Loader :text="thinkingText" /></MessageContent>
+						</Message>
+					</ConversationItem>
+					<ConversationItem v-if="(error || failedBefore) && !outOfCredits">
+						<Alert
+							theme="red"
+							title="Something went wrong"
+							:description="error?.message ?? 'The last reply did not finish. Retry, or choose another model.'"
+							:primary-action="{ label: 'Retry', onClick: () => regenerate() }"
+						/>
+					</ConversationItem>
+				</ConversationContent>
+				<ConversationScrollButton />
+			</Conversation>
+		</ToolContext>
 	</div>
 
 	<footer ref="footer" class="scroll-gutter-match flex shrink-0 flex-col gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
@@ -616,14 +615,7 @@ function replyModelId(message: UIMessage) {
 				<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
 			</Suggestions>
 		</Transition>
-		<Alert
-			v-if="outOfCredits"
-			theme="amber"
-			title="You've used today's credits"
-			:description="creditNotice.description"
-			:primary-action="creditNotice.canAsk ? { label: 'Request more credits', onClick: askForMoreCredits } : undefined"
-			data-slot="out-of-credits"
-		/>
+		<OutOfCredits v-if="outOfCredits" />
 		<Alert v-if="uploadError" theme="red" :title="uploadError" description="Attach the files again to send them." />
 		<div ref="composer" class="relative" v-bind="skillListeners">
 			<SkillMenu
@@ -679,7 +671,7 @@ function replyModelId(message: UIMessage) {
 			</PromptInput>
 		</div>
 	</footer>
-	<CiteButton v-if="pendingCite" :pending="pendingCite" @cite="cite" />
+	<CiteSelection v-if="!landing" :area="area" @cite="cite" />
 	<!-- As tall as the space above, so the greeting and the field sit in the middle. -->
 	<div v-if="landing" class="hidden flex-1 sm:block" aria-hidden="true" />
 </template>

@@ -12,8 +12,9 @@ import { ARTIFACT_CDNS } from "../shared/cdns.ts";
 import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import { displayName } from "./admin/people.ts";
-import { roleOf } from "./admins.ts";
 import { appOrigin, auth, type SignedInEnv } from "./auth.ts";
+import { bootPage, meOf, skillOptions } from "./boot-page.ts";
+import { sessionOf } from "./session-cache.ts";
 import { creditStatus } from "./credits.ts";
 import { askForCredits } from "./extra-credits.ts";
 import { listThreads, renameThread, sql } from "./db.ts";
@@ -23,7 +24,6 @@ import { memoryApi } from "./memory/routes.ts";
 import { availableModels } from "./models.ts";
 import { notifyAdmins } from "./notify.ts";
 import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
-import { activeSkills } from "./skills.ts";
 import { searchThreads } from "./thread-search.ts";
 import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
@@ -87,7 +87,7 @@ app.get("/oauth/mcp/callback", oauthCallback);
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 app.use("/api/*", async (c, next) => {
-	const session = await auth.api.getSession({ headers: c.req.raw.headers });
+	const session = await sessionOf(c.req.raw.headers);
 	if (!session) return c.json({ error: "Sign in first." }, 401);
 	c.set("user", session.user);
 	await next();
@@ -117,11 +117,7 @@ const uploadLimit = bodyLimit({
  */
 const api = app
 	// Who is signed in, their role (read from the database, not the cookie), and their credits for today.
-	.get("/api/me", async (c) => {
-		const { id, email, name } = c.get("user");
-		const [role, credits] = await Promise.all([roleOf(id), creditStatus(id)]);
-		return c.json({ user: { id, email, name, role }, credits });
-	})
+	.get("/api/me", async (c) => c.json(await meOf(c.get("user"))))
 
 	// The admin pages' API (admin/routes.ts). Every route there needs the admin role.
 	.route("/api/admin", adminApi)
@@ -136,9 +132,7 @@ const api = app
 	.get("/api/models", async (c) => c.json(await availableModels()))
 
 	// The skills that are on, for the $ menu: names and descriptions, not the instructions.
-	.get("/api/skills", async (c) =>
-		c.json({ skills: (await activeSkills()).map(({ name, description }) => ({ name, description })) }),
-	)
+	.get("/api/skills", async (c) => c.json({ skills: await skillOptions() }))
 
 	.get("/api/credits", async (c) => c.json(await creditStatus(userOf(c))))
 
@@ -254,7 +248,18 @@ const adminPage = serveStatic({ path: join(WEB_BUILD, "admin.html") });
 app.get("/admin", adminPage);
 app.get("/admin/*", adminPage);
 
-app.use("/*", serveStatic({ root: WEB_BUILD }));
+// The chat page, with the data its first screen needs (boot-page.ts).
+app.get("/", bootPage);
+
+// Vite names each file in assets/ by its content, so a browser may keep it for good: a new
+// build has new names. Without this, Cloudflare told browsers to keep them 4 hours, after
+// which each visit asked again for every file.
+app.use("/assets/*", async (c, next) => {
+	await next();
+	if (c.res.status === 200) c.res.headers.set("Cache-Control", "public, max-age=31536000, immutable");
+});
+// The build keeps brotli and gzip copies of its text files, at the highest levels (scripts/compress-web.ts).
+app.use("/*", serveStatic({ root: WEB_BUILD, precompressed: true }));
 
 // An unknown API address answers in the API's shape. Any other is Hono's own 404, as before.
 app.notFound((c) => (c.req.path.startsWith("/api/") ? c.json({ error: "Not found" }, 404) : c.text("404 Not Found", 404)));
