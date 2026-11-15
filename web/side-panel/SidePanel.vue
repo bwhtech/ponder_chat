@@ -7,13 +7,16 @@ import PresentMode from "../artifacts/PresentMode.vue";
 import SlidesView from "../artifacts/SlidesView.vue";
 import { slideCount } from "../artifacts/slides";
 import { panelHeader } from "./header";
+import { panelStandIn } from "./look";
 import { closePanel, fileKind, panelItem } from "./panel";
 import TableView from "./TableView.vue";
+import "./slide.css";
 
 /**
  * The panel at the right of the chat, for a file or an artifact. On a wide screen it sits
  * beside the chat; on a narrower one it covers the page. Mount it once, in the shell's row.
- * pdf.js loads the first time a PDF opens, not with the app.
+ * pdf.js loads the first time a PDF opens, not with the app. The first time, the panel slides
+ * in, unless its stand-in (PanelPlaceholder.vue) already has while this code loaded.
  */
 const PdfPages = defineAsyncComponent(() => import("./PdfPages.vue"));
 
@@ -63,7 +66,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-	<Transition name="side-panel">
+	<Transition name="side-panel" :appear="!panelStandIn.shown">
 		<aside
 			v-if="item"
 			data-slot="side-panel"
@@ -125,30 +128,5 @@ onBeforeUnmount(() => {
 .panel-icon:focus-visible {
 	outline: none;
 	box-shadow: 0 0 0 2px var(--outline-gray-3);
-}
-
-.side-panel-enter-active,
-.side-panel-leave-active {
-	transition:
-		opacity 180ms var(--ease-out-strong, ease-out),
-		transform 220ms var(--ease-out-strong, ease-out);
-}
-.side-panel-enter-from,
-.side-panel-leave-to {
-	opacity: 0;
-	transform: translateX(24px);
-}
-@media (max-width: 1023px) {
-	.side-panel-enter-from,
-	.side-panel-leave-to {
-		opacity: 1;
-		transform: translateX(100%);
-	}
-}
-@media (prefers-reduced-motion: reduce) {
-	.side-panel-enter-from,
-	.side-panel-leave-to {
-		transform: none;
-	}
 }
 </style>
