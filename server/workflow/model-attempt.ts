@@ -10,6 +10,7 @@ import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import * as Scope from "effect/Scope";
 import { isSqlError, type SqlError } from "effect/sql/SqlError";
 import * as Stream from "effect/Stream";
 import { isAuto } from "../../shared/auto-model.ts";
@@ -135,7 +136,11 @@ const modelStream = Effect.fnUntraced(
 		// The first wait counts from here, before the key and the settings are read, as the watchdog's did.
 		const since = yield* Clock.currentTimeMillis;
 		const model = yield* ChatModels.ChatModels.use((models) => models.make(call.modelId, call.threadId));
-		const signal = yield* Effect.abortSignal;
+		// The request's own scope, closed (which aborts the request) when the attempt ends,
+		// and at once on a stall: the stream can only stop once the request is aborted.
+		const request = yield* Scope.make();
+		yield* Effect.addFinalizer(() => Scope.close(request, Exit.void));
+		const signal = yield* Scope.provide(request)(Effect.abortSignal);
 		const result = streamText({
 			model: withGenerationTap(model, generation),
 			instructions: call.instructions,
@@ -154,6 +159,7 @@ const modelStream = Effect.fnUntraced(
 		});
 		const seen: { error?: unknown; finish?: Finish } = {};
 		const toolCalls: ModelToolCall[] = [];
+		const stall = stallDeadline(since);
 		// Per part: no span for each one.
 		const take = Effect.fnUntraced(function* (part: TextStreamPart<ToolSet>) {
 			if (part.type === "error") seen.error ??= part.error;
@@ -161,11 +167,16 @@ const modelStream = Effect.fnUntraced(
 			if (part.type === "finish-step") seen.finish = part;
 			if (part.type === "tool-call") toolCalls.push(toolCallOf(part));
 			const stored = storedPart(part);
-			if (stored) yield* write(writer, stored);
+			if (!stored) return;
+			// Only the model's output counts: streamText sends its own start parts at once.
+			stall.moved(yield* Clock.currentTimeMillis);
+			yield* write(writer, stored);
 		});
-		yield* Stream.fromAsyncIterable(result.fullStream, (cause) => new AttemptBroke({ cause })).pipe(
-			stallsAfter({ since, counts: (part) => storedPart(part) !== undefined }),
-			Stream.runForEach(take),
+		// The deadline is watched on its own, so a write that waits (the durable stream)
+		// can't hold it off, as the old watchdog's timer could not be held off.
+		yield* Effect.raceFirst(
+			Stream.fromAsyncIterable(result.fullStream, (cause) => new AttemptBroke({ cause })).pipe(Stream.runForEach(take)),
+			stall.watch.pipe(Effect.tapError(() => Scope.close(request, Exit.void))),
 		);
 		const { error, finish } = seen;
 		if (error !== undefined) return yield* new AttemptBroke({ cause: error });
@@ -178,34 +189,30 @@ const modelStream = Effect.fnUntraced(
 );
 
 /**
- * The stall timeout on the model's stream: it fails with ModelStalledError when the model
- * sends nothing for too long, first FIRST_CHUNK_MS from `since`, then NEXT_CHUNK_MS after
- * each part that `counts`. Only the model's output counts: streamText sends its own start
- * parts at once, and they don't move the deadline. Each pull waits only until the
- * deadline, so a part that does not count can't stretch it.
+ * The stall timeout on the model's stream: `watch` fails with ModelStalledError when the
+ * model sends nothing for too long, first FIRST_CHUNK_MS from `since`, then NEXT_CHUNK_MS
+ * after each part of the model's output (`moved`). It looks again at the deadline, or
+ * after NEXT_CHUNK_MS when that comes first: a part may move the deadline while it sleeps,
+ * and a moved deadline is never further than NEXT_CHUNK_MS from the time it moved.
  */
-const stallsAfter =
-	<A>({ since, counts }: { since: number; counts: (part: A) => boolean }) =>
-	<E, R>(stream: Stream.Stream<A, E, R>): Stream.Stream<A, E | ModelStalledError, R> =>
-		Stream.transformPull(stream, (pull) =>
-			Effect.sync(() => {
-				let deadline = since + FIRST_CHUNK_MS;
-				let stalled = () => new ModelStalledError(`The model sent nothing for ${FIRST_CHUNK_MS / 1000} seconds.`);
-				return Effect.flatMap(Clock.currentTimeMillis, (now) =>
-					pull.pipe(
-						Effect.timeoutOrElse({ duration: Duration.millis(Math.max(0, deadline - now)), orElse: () => Effect.fail(stalled()) }),
-						Effect.tap((parts) =>
-							parts.some(counts)
-								? Effect.map(Clock.currentTimeMillis, (at) => {
-										deadline = at + NEXT_CHUNK_MS;
-										stalled = () => new ModelStalledError(`The model's stream stopped for ${NEXT_CHUNK_MS / 1000} seconds.`);
-									})
-								: Effect.void,
-						),
-					),
-				);
-			}),
-		);
+function stallDeadline(since: number) {
+	let deadline = since + FIRST_CHUNK_MS;
+	let stalled = () => new ModelStalledError(`The model sent nothing for ${FIRST_CHUNK_MS / 1000} seconds.`);
+	const watch: Effect.Effect<never, ModelStalledError> = Effect.gen(function* () {
+		while (true) {
+			const now = yield* Clock.currentTimeMillis;
+			if (now >= deadline) return yield* Effect.fail(stalled());
+			yield* Effect.sleep(Duration.millis(Math.min(deadline - now, NEXT_CHUNK_MS)));
+		}
+	});
+	return {
+		watch,
+		moved(at: number) {
+			deadline = at + NEXT_CHUNK_MS;
+			stalled = () => new ModelStalledError(`The model's stream stopped for ${NEXT_CHUNK_MS / 1000} seconds.`);
+		},
+	};
+}
 
 /** Writes a part to the reply's stream. Per part: no span. */
 const write = (writer: WritableStreamDefaultWriter<ModelCallStreamPart>, part: ModelCallStreamPart) =>

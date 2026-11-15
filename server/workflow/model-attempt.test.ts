@@ -161,6 +161,25 @@ describe("a model call's stall timeout", () => {
 		}),
 	);
 
+	it.effect("stalls while a write waits, and aborts the request", () =>
+		Effect.gen(function* () {
+			const fake = fakeModel();
+			const started = Deferred.makeUnsafe<void>();
+			// The reply's stream takes the reset part, then never takes the model's first part.
+			const writable = new WritableStream<ModelCallStreamPart>({
+				write: (part) => (part.type === "reset-step" ? undefined : (Deferred.doneUnsafe(started, Exit.void), new Promise<void>(() => {}))),
+			});
+			const attempt = yield* ModelAttempt.run(call("wrun_stall_write"), writable, { stepId: "step_1", attempt: 1 }).pipe(Effect.provide(layerWith(fake.model)), Effect.flip, Effect.forkChild);
+			const options = yield* Deferred.await(fake.called);
+			fake.send({ type: "stream-start", warnings: [] }, { type: "text-start", id: "t" });
+			yield* Deferred.await(started);
+			yield* TestClock.adjust(Duration.millis(NEXT_CHUNK_MS));
+			const error = yield* Fiber.join(attempt);
+			assert.instanceOf(error, ModelAttempt.ModelCallRetry);
+			assert.strictEqual(error.message, "The model's stream stopped for 120 seconds.");
+			assert.isTrue(options.abortSignal?.aborted, "the request was not aborted");
+		}),
+	);
 });
 
 // The last attempt settles the earlier ones first (ModelCalls.settleEarlierAttempts), which needs the database.

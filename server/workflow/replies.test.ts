@@ -9,10 +9,14 @@ import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import { afterAll, assert, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import type { UIMessage } from "ai";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type { WorkflowReadableStream } from "workflow/api";
+import type { RunStatus } from "./WorkflowRuns.ts";
 
 const tag = Math.random().toString(36).slice(2, 10);
 const schema = `test_replies_${tag}`;
@@ -38,9 +42,14 @@ const WorkflowRuns = await import("./WorkflowRuns.ts");
 const Threads = await import("../threads/Threads.ts");
 const Sandbox = await import("../python/pyodide.ts");
 
-/** Workflow's runtime: run ids in the order the runs start (ULIDs sort so), and the runs it was asked to cancel. */
-const workflow = { started: [] as string[], cancelled: [] as string[] };
+/**
+ * Workflow's runtime: run ids in the order the runs start (ULIDs sort so), the runs it was
+ * asked to cancel, a status per run ("running" when not set), and the runs whose stream
+ * never ends, with a signal when one is read.
+ */
+const workflow = { started: [] as string[], cancelled: [] as string[], status: new Map<string, RunStatus>(), endless: new Map<string, Deferred.Deferred<void>>() };
 const emptyStream = () => Object.assign(new ReadableStream<ModelCallStreamPart>({ start: (controller) => controller.close() }), { getTailIndex: async () => -1 }) as WorkflowReadableStream<ModelCallStreamPart>;
+const endlessStream = () => Object.assign(new ReadableStream<ModelCallStreamPart>(), { getTailIndex: async () => 0 }) as WorkflowReadableStream<ModelCallStreamPart>;
 const fakeWorkflow = Layer.succeed(
 	WorkflowRuns.WorkflowRuns,
 	WorkflowRuns.WorkflowRuns.of({
@@ -50,9 +59,15 @@ const fakeWorkflow = Layer.succeed(
 				workflow.started.push(runId);
 				return runId;
 			}),
-		status: () => Effect.succeed("running"),
+		status: (runId) => Effect.succeed(workflow.status.get(runId) ?? "running"),
 		cancel: (runId) => Effect.sync(() => void workflow.cancelled.push(runId)),
-		readable: () => Effect.sync(emptyStream),
+		readable: (runId) =>
+			Effect.sync(() => {
+				const reading = workflow.endless.get(runId);
+				if (!reading) return emptyStream();
+				Deferred.doneUnsafe(reading, Exit.void);
+				return endlessStream();
+			}),
 		endStream: () => Effect.void,
 	}),
 );
@@ -140,6 +155,26 @@ describe.skipIf(!base)("replies that race", () => {
 				assert.isFalse(yield* replies.remove(threadId, "someone-else"));
 				assert.strictEqual(workflow.cancelled.length, cancels);
 				assert.isTrue(Option.isSome(yield* ThreadRuns.ThreadRuns.use((runs) => runs.active(threadId))));
+			}).pipe(onFakeWorkflow),
+		);
+
+		it.effect("a sweep stopped in the middle of saving a reply leaves its run for the next sweep", () =>
+			Effect.gen(function* () {
+				const threadId = `thread-sweep-stop-${tag}`;
+				const replies = yield* Replies.Replies;
+				const { runId } = yield* replies.start({ threadId, owner, messages: [message("m1", "Hi")] });
+				// The run failed without saving its reply, and its stream is still being read when the sweep stops (SIGTERM).
+				workflow.status.set(runId, "failed");
+				const reading = Deferred.makeUnsafe<void>();
+				workflow.endless.set(runId, reading);
+				const sweep = yield* Effect.forkChild(replies.finishEndedRuns);
+				yield* Deferred.await(reading);
+				yield* Fiber.interrupt(sweep);
+				const latest = Option.getOrThrow(yield* ThreadRuns.ThreadRuns.use((runs) => runs.latest(threadId)));
+				assert.strictEqual(latest.runId, runId);
+				assert.isFalse(latest.finished, "the run was finished without its reply saved");
+				workflow.status.delete(runId);
+				workflow.endless.delete(runId);
 			}).pipe(onFakeWorkflow),
 		);
 	});

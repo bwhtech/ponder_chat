@@ -4,6 +4,7 @@ import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schedule from "effect/Schedule";
@@ -356,11 +357,15 @@ const make = Effect.gen(function* () {
 export const layer = Layer.effect(Replies, make);
 
 /**
- * As try/finally: `after` runs on every way out of `work`, an interruption too, and a
- * failure of `after` wins, as a throw from a finally block does.
+ * As try/finally: `after` runs when `work` succeeds or fails, and a failure of `after`
+ * wins, as a throw from a finally block does. Not when `work` is interrupted (SIGTERM
+ * disposing the runtime): the run then stays unfinished, as it did when the old process
+ * stopped in the middle, so the sweep at the next start saves its reply and finishes it.
  */
 function andFinally<A, E, R, E2, R2>(work: Effect.Effect<A, E, R>, after: Effect.Effect<unknown, E2, R2>): Effect.Effect<A, E | E2, R | R2> {
-	return Effect.uninterruptibleMask((restore) => Effect.flatMap(Effect.exit(restore(work)), (exit) => Effect.andThen(after, exit)));
+	return Effect.uninterruptibleMask((restore) =>
+		Effect.flatMap(Effect.exit(restore(work)), (exit) => (Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause) ? exit : Effect.andThen(after, exit))),
+	);
 }
 
 function chunkStream(chunks: UIMessageChunk[]) {
