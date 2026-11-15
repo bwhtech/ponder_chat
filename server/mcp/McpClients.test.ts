@@ -14,6 +14,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 import * as PonderConfig from "../config.ts";
 import * as NetGuard from "../net/NetGuard.ts";
@@ -35,6 +36,8 @@ function fakeServer() {
 		callSignal: undefined as AbortSignal | undefined,
 		/** Connecting never answers: it waits until it is aborted. */
 		hangOnConnect: false,
+		/** Closing never answers, as a server that stalls the session's DELETE. */
+		hangOnClose: false,
 		answer: (async () => ({ content: [{ type: "text", text: "ok" }] })) as Call,
 	};
 	const hang = (signal: AbortSignal) => new Promise<never>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
@@ -56,6 +59,7 @@ function fakeServer() {
 				close: async () => {
 					open = false;
 					server.closed++;
+					if (server.hangOnClose) await new Promise<never>(() => {});
 				},
 			} as McpClients.McpSession;
 		},
@@ -156,6 +160,21 @@ describe("McpClients", () => {
 					assert.strictEqual(server.closed, 0);
 				}),
 			);
+			assert.strictEqual(server.closed, 2);
+		});
+	});
+
+	it.effect("closes its clients at the same time when its scope closes, so stalled closes wait once", () => {
+		const { server, layer } = setup();
+		server.hangOnClose = true;
+		return Effect.gen(function* () {
+			const scope = yield* Scope.make();
+			const context = yield* Layer.buildWithScope(layer, scope);
+			yield* Effect.provideContext(Effect.all([call(connection("a")), call(connection("b"))]), context);
+			const closing = yield* Effect.forkChild(Scope.close(scope, Exit.void));
+			// One close timeout (5 seconds), not one for each client.
+			yield* TestClock.adjust("5 seconds");
+			assert.isDefined(closing.pollUnsafe(), "the clients closed one after another");
 			assert.strictEqual(server.closed, 2);
 		});
 	});

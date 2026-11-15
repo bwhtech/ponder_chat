@@ -192,6 +192,12 @@ const make = Effect.gen(function* () {
 		lookup: (key: ClientKey) => Effect.flatMap(targetFor(key.connection!), open),
 		idleTimeToLive: IDLE,
 	});
+	// When the runtime closes (SIGTERM), every client closes at the same time: the pool's own
+	// finalizer closes them one after another, CLOSE_TIMEOUT each, which a few stalled servers
+	// would stretch past the stop's 10-second deadline. Added after the pool, so it runs first.
+	yield* Effect.addFinalizer(() =>
+		RcMap.keys(pool).pipe(Effect.flatMap((keys) => Effect.forEach(keys, (key) => RcMap.invalidate(pool, key), { concurrency: "unbounded", discard: true }))),
+	);
 	const generations = new Map<string, number>();
 	const keyFor = (id: string, connection?: Connection) => new ClientKey(id, generations.get(id) ?? 0, connection);
 

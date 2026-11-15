@@ -139,6 +139,6 @@ The reviewer reports real bugs only, not style. The implementing agent fixes the
 | --- | --- |
 | 0 Foundation | Done, reviewed |
 | 1 Platform services | Done, reviewed |
-| 2 Domains | Done (2A, 2B, 2C, 2D) |
-| 3 Reply engine | Done (the reply engine, app.ts, tracing, startup; postgres.js and span.ts removed) |
-| 4 Full check | Not started |
+| 2 Domains | Done (2A, 2B, 2C, 2D), reviewed, 4 fixes |
+| 3 Reply engine | Done (the reply engine, app.ts, tracing, startup; postgres.js and span.ts removed), reviewed, 2 fixes |
+| 4 Full check | Done: types, 170 vitest tests, every check script, 88 e2e tests; whole-PR review, 1 fix |
