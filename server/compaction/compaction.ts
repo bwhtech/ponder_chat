@@ -1,4 +1,9 @@
 import type { ModelMessage, UIMessage } from "ai";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import { isSqlError } from "effect/sql/SqlError";
+import { sqlMessage } from "../runtime/Database.ts";
 import type { ActiveSkill } from "../skills.ts";
 import { leftOutNote } from "./prompt.ts";
 import { currentTurnStart, planCovers, summaryMessage, withSummary, type Summary } from "./summary.ts";
@@ -14,7 +19,8 @@ import { addEstimates, budgetFor, countTokens, estimate, type Estimate } from ".
  * saved, and the next reply tries again.
  *
  * The database, the summarizer and the message builder come in as `CompactionDeps`
- * (compact.ts), so the checks run this without them.
+ * (compact.ts), so the checks run this without them. Each is an Effect, with its own
+ * failures in `E`.
  */
 export type CompactRequest = {
 	threadId: string;
@@ -49,19 +55,19 @@ export type CompactResult =
 
 export type CompactionState = { state: "running" | "done" | "failed"; through?: string };
 
-export type CompactionDeps = {
-	loadThread(threadId: string): Promise<UIMessage[]>;
-	loadSummary(threadId: string, thread: UIMessage[]): Promise<Summary | undefined>;
-	saveSummary(threadId: string, thread: UIMessage[], summary: Summary, model: string): Promise<void>;
+export type CompactionDeps<E> = {
+	loadThread(threadId: string): Effect.Effect<UIMessage[], E>;
+	loadSummary(threadId: string, thread: UIMessage[]): Effect.Effect<Option.Option<Summary>, E>;
+	saveSummary(threadId: string, thread: UIMessage[], summary: Summary, model: string): Effect.Effect<void, E>;
 	/** True when another run replaced this one, or it was stopped. */
-	superseded(threadId: string, runId: string): Promise<boolean>;
-	writeSummary(input: { run: { threadId: string; user: string }; chatModel: string; previous: string | undefined; messages: UIMessage[]; ratio: number }): Promise<{ text: string; model: string }>;
+	superseded(threadId: string, runId: string): Effect.Effect<boolean, E>;
+	writeSummary(input: { run: { threadId: string; user: string }; chatModel: string; previous: string | undefined; messages: UIMessage[]; ratio: number }): Effect.Effect<{ text: string; model: string }, E>;
 	modelMessages(
 		thread: UIMessage[],
 		options: { owner: string; modelId: string; recalled: string; skills: ActiveSkill[]; connectors: string; keepReasoningOf?: string },
-	): Promise<ModelMessage[]>;
-	status(state: CompactionState): Promise<void>;
-	log(message: string): void;
+	): Effect.Effect<ModelMessage[], E>;
+	status(state: CompactionState): Effect.Effect<void, E>;
+	log(message: string): Effect.Effect<void>;
 };
 
 /** After a compaction the text should be at most this share of the trigger, so the next one is not soon. */
@@ -72,76 +78,45 @@ const FIT_SHARE = 0.75;
  */
 const MIN_FOLD_SHARE = 0.1;
 
-export class Compaction {
-	private budget;
+/**
+ * Runs one compaction. `lastAttempt` is the step's last try: a summary that fails then
+ * leaves the old messages out instead of failing the step.
+ */
+export function runCompaction<E>(request: CompactRequest, deps: CompactionDeps<E>, lastAttempt: boolean): Effect.Effect<CompactResult, E> {
+	const budget = budgetFor(request.window);
+	const { threadId, owner, runId, modelId, mode, ratio } = request;
 
-	constructor(
-		private request: CompactRequest,
-		private deps: CompactionDeps,
-	) {
-		this.budget = budgetFor(request.window);
-	}
+	/** The call's estimate: these messages, the instructions and tools, and the current turn between steps. */
+	const total = (messages: ModelMessage[]) => addEstimates(estimate(messages), { text: request.envelope, media: 0 }, request.turn ?? { text: 0, media: 0 });
 
-	async run(lastAttempt: boolean): Promise<CompactResult> {
-		const { threadId, owner, runId, modelId, mode, ratio } = this.request;
-		const thread = await this.deps.loadThread(threadId);
-		const previous = await this.deps.loadSummary(threadId, thread);
-		const from = previous?.covers ?? 0;
-		const turn = currentTurnStart(thread);
-		// The saved summary already brings the call under the trigger: a step retried after its
-		// save lands here, and so does a run whose messages were loaded before another run's save.
-		const reused = previous && (await this.reuse(thread, previous, turn));
-		if (reused && reused.tokens <= this.budget.trigger) return this.done(thread, previous, reused);
-		const covers = mode === "turn" ? (turn > from ? turn : undefined) : planCovers(thread, from, this.budget.tail);
-		// Nothing new worth folding: the saved summary, if any, is still the best there is.
-		if (covers === undefined || !this.worthFolding(thread.slice(from, covers))) return reused ? this.done(thread, previous, reused) : { kind: "unchanged" };
-		if (await this.deps.superseded(threadId, runId)) return { kind: "unchanged" };
-
-		await this.deps.status({ state: "running" });
-		const messages = thread.slice(from, turn);
-		const written = await this.deps.writeSummary({ run: { threadId, user: owner }, chatModel: modelId, previous: previous?.text, messages, ratio }).catch((error) => {
-			if (!lastAttempt) throw error;
-			this.deps.log(`reply degraded: summary (thread ${threadId}): ${error instanceof Error ? error.message : String(error)}`);
-			return undefined;
-		});
-		const textFor = (end: number) => written?.text ?? [previous?.text, leftOutNote(end - from)].filter(Boolean).join("\n\n");
-		const fitted = await this.fit(thread, textFor, covers, turn);
-		if (fitted.kind === "over-limit") {
-			await this.deps.status({ state: "failed" });
-			return fitted;
-		}
-		// The summary read up to the current turn, so its fingerprint covers that much.
-		const summary = { ...fitted.summary, reads: turn };
-		if (written && !(await this.deps.superseded(threadId, runId))) await this.deps.saveSummary(threadId, thread, summary, written.model);
-		await this.deps.status({ state: written ? "done" : "failed", through: thread[summary.covers - 1]?.id });
-		return { kind: written ? "compacted" : "left-out", messages: fitted.messages, tokens: fitted.tokens };
-	}
+	const messagesWith = (thread: UIMessage[], summary: Summary) => {
+		const { recalled, skills, connectors, keepReasoningOf } = request;
+		if (mode === "start") return deps.modelMessages(withSummary(thread, summary), { owner, modelId, recalled, skills, connectors, keepReasoningOf });
+		// Between steps, only the summary message is new: the current turn is already in the prompt, memory and connector notes included.
+		const message = summaryMessage(thread.slice(0, summary.covers), thread.slice(summary.covers), summary);
+		return deps.modelMessages([message], { owner, modelId, recalled: "", skills, connectors: "" });
+	};
 
 	/**
 	 * The messages with the saved summary. Between steps only when it ends at the current
 	 * turn: the result replaces everything before the turn, so it must cover all of it.
 	 */
-	private async reuse(thread: UIMessage[], previous: Summary, turn: number) {
-		if (this.request.mode === "turn" && previous.covers !== turn) return undefined;
-		const messages = await this.messagesWith(thread, previous);
-		return { messages, tokens: countTokens(this.total(messages), this.request.ratio) };
-	}
+	const reuse = (thread: UIMessage[], previous: Summary, turn: number) => {
+		if (mode === "turn" && previous.covers !== turn) return Effect.succeed(undefined);
+		return Effect.map(messagesWith(thread, previous), (messages) => ({ messages, tokens: countTokens(total(messages), ratio) }));
+	};
 
-	private async done(thread: UIMessage[], previous: Summary, reused: { messages: ModelMessage[]; tokens: number }): Promise<CompactResult> {
-		await this.deps.status({ state: "done", through: thread[previous.covers - 1]?.id });
-		return { kind: "compacted", ...reused };
-	}
+	const done = (thread: UIMessage[], previous: Summary, reused: { messages: ModelMessage[]; tokens: number }) =>
+		Effect.as(deps.status({ state: "done", through: thread[previous.covers - 1]?.id }), { kind: "compacted" as const, ...reused });
 
-	private worthFolding(messages: UIMessage[]) {
-		return this.request.ratio * estimate(messages).text >= this.budget.trigger * MIN_FOLD_SHARE;
-	}
+	const worthFolding = (messages: UIMessage[]) => ratio * estimate(messages).text >= budget.trigger * MIN_FOLD_SHARE;
 
 	/**
 	 * The first option that fits: keep the files, then name them only, then keep only the
 	 * current turn. Text decides: the estimate for images and PDFs is a guess from their
 	 * size, so it never drops a file or refuses a message on its own.
 	 */
-	private async fit(thread: UIMessage[], textFor: (covers: number) => string, covers: number, turn: number) {
+	const fit = Effect.fnUntraced(function* (thread: UIMessage[], textFor: (covers: number) => string, covers: number, turn: number) {
 		const options = [
 			{ covers, keepFiles: true },
 			{ covers, keepFiles: false },
@@ -150,27 +125,56 @@ export class Compaction {
 		let text = 0;
 		for (const [index, option] of options.entries()) {
 			const summary: Summary = { ...option, text: textFor(option.covers) };
-			const messages = await this.messagesWith(thread, summary);
-			const total = this.total(messages);
-			text = Math.ceil(this.request.ratio * total.text);
+			const messages = yield* messagesWith(thread, summary);
+			const estimated = total(messages);
+			text = Math.ceil(ratio * estimated.text);
 			const last = index === options.length - 1;
-			if (text <= (last ? this.budget.limit : this.budget.trigger * FIT_SHARE)) {
-				return { kind: "fits" as const, summary, messages, tokens: countTokens(total, this.request.ratio) };
+			if (text <= (last ? budget.limit : budget.trigger * FIT_SHARE)) {
+				return { kind: "fits" as const, summary, messages, tokens: countTokens(estimated, ratio) };
 			}
 		}
-		return { kind: "over-limit" as const, tokens: text, limit: this.budget.limit };
-	}
+		return { kind: "over-limit" as const, tokens: text, limit: budget.limit };
+	});
 
-	/** The call's estimate: these messages, the instructions and tools, and the current turn between steps. */
-	private total(messages: ModelMessage[]) {
-		return addEstimates(estimate(messages), { text: this.request.envelope, media: 0 }, this.request.turn ?? { text: 0, media: 0 });
-	}
+	return Effect.gen(function* () {
+		const thread = yield* deps.loadThread(threadId);
+		const previous = Option.getOrUndefined(yield* deps.loadSummary(threadId, thread));
+		const from = previous?.covers ?? 0;
+		const turn = currentTurnStart(thread);
+		// The saved summary already brings the call under the trigger: a step retried after its
+		// save lands here, and so does a run whose messages were loaded before another run's save.
+		const reused = previous && (yield* reuse(thread, previous, turn));
+		if (previous && reused && reused.tokens <= budget.trigger) return yield* done(thread, previous, reused);
+		const covers = mode === "turn" ? (turn > from ? turn : undefined) : planCovers(thread, from, budget.tail);
+		// Nothing new worth folding: the saved summary, if any, is still the best there is.
+		if (covers === undefined || !worthFolding(thread.slice(from, covers))) return previous && reused ? yield* done(thread, previous, reused) : { kind: "unchanged" as const };
+		if (yield* deps.superseded(threadId, runId)) return { kind: "unchanged" as const };
 
-	private async messagesWith(thread: UIMessage[], summary: Summary) {
-		const { owner, modelId, recalled, skills, connectors, keepReasoningOf, mode } = this.request;
-		if (mode === "start") return this.deps.modelMessages(withSummary(thread, summary), { owner, modelId, recalled, skills, connectors, keepReasoningOf });
-		// Between steps, only the summary message is new: the current turn is already in the prompt, memory and connector notes included.
-		const message = summaryMessage(thread.slice(0, summary.covers), thread.slice(summary.covers), summary);
-		return this.deps.modelMessages([message], { owner, modelId, recalled: "", skills, connectors: "" });
-	}
+		yield* deps.status({ state: "running" });
+		const messages = thread.slice(from, turn);
+		// Any failure of the summary, on the last attempt, leaves the old messages out; before it, the step tries again.
+		const written = yield* deps.writeSummary({ run: { threadId, user: owner }, chatModel: modelId, previous: previous?.text, messages, ratio }).pipe(
+			Effect.catchCause((cause) => {
+				if (!lastAttempt || Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+				return Effect.as(deps.log(`reply degraded: summary (thread ${threadId}): ${problem(Cause.squash(cause))}`), undefined);
+			}),
+		);
+		const textFor = (end: number) => written?.text ?? [previous?.text, leftOutNote(end - from)].filter(Boolean).join("\n\n");
+		const fitted = yield* fit(thread, textFor, covers, turn);
+		if (fitted.kind === "over-limit") {
+			yield* deps.status({ state: "failed" });
+			return fitted;
+		}
+		// The summary read up to the current turn, so its fingerprint covers that much.
+		const summary = { ...fitted.summary, reads: turn };
+		if (written && !(yield* deps.superseded(threadId, runId))) yield* deps.saveSummary(threadId, thread, summary, written.model);
+		yield* deps.status({ state: written ? "done" : "failed", through: thread[summary.covers - 1]?.id });
+		return { kind: written ? ("compacted" as const) : ("left-out" as const), messages: fitted.messages, tokens: fitted.tokens };
+	});
+}
+
+/** What a failed summary says in the log: Postgres's own words for a database error, else the error's message. */
+function problem(error: unknown) {
+	if (isSqlError(error)) return sqlMessage(error);
+	return error instanceof Error ? error.message : String(error);
 }

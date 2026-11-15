@@ -248,7 +248,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 - A "reply" is a `runs` row in `charged_runs` with `function_id` "chat", no `parent_id`, and a `finish_reason` other than "tool-calls". The chat workflow writes one "chat" row for each attempt at a model call, so a reply that used tools, or whose model call was tried again, has several rows. Only the last one counts.
 - The OpenRouter key: an admin pastes it in Settings. The server checks it with OpenRouter, then saves it encrypted in the `secrets` table (AES-256-GCM, with a key derived from `BETTER_AUTH_SECRET`), so a copy of the database alone does not give it away. The key is never sent back to the page; Settings shows its last four characters. Until a key is saved there, `OPENROUTER_API_KEY` from the environment is used. A new `BETTER_AUTH_SECRET` makes the saved key unreadable: the server then uses `OPENROUTER_API_KEY` if it is set, and Settings asks for the key again.
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
-- The admin activity log is the `admin_events` table (`server/admin-events.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/admin-auth-events.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
+- The admin activity log is the `admin_events` table (`server/admin/AdminEvents.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/auth/AdminAuthEvents.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
 - An admin can change a person's email with Better Auth's `/api/auth/admin/update-user`. The admin can then sign in to that account with the new address. So each email change is logged, and the old address gets an email that names the new address and the admin.
 
 ### Durable replies
@@ -467,27 +467,27 @@ A chat can grow longer than its model can read. `server/compaction/` and `server
 
 ### Limits
 
-- Per person, in memory (`server/rate-limit.ts`): 12 messages a minute and 200 an hour; 30 uploads in 10 minutes and 150 a day; 3 requests for credits an hour; 60 chat searches a minute. Over a limit, the answer is 429 with `Retry-After`. A restart clears the counts.
-- Sign-in (Better Auth, `server/auth.ts`), per address: 5 sign-in emails in 10 minutes, 10 code tries and 10 link opens in 10 minutes, 100 other requests a minute. The address comes from `cf-connecting-ip` (Cloudflare), else `x-forwarded-for`.
+- Per person, in memory (`server/limits/RateLimits.ts`): 12 messages a minute and 200 an hour; 30 uploads in 10 minutes and 150 a day; 3 requests for credits an hour; 60 chat searches a minute. Over a limit, the answer is 429 with `Retry-After`. A restart clears the counts.
+- Sign-in (Better Auth, `server/auth/Auth.ts`), per address: 5 sign-in emails in 10 minutes, 10 code tries and 10 link opens in 10 minutes, 100 other requests a minute. The address comes from `cf-connecting-ip` (Cloudflare), else `x-forwarded-for`.
 
 ### Code
 
 | Part | Where |
 | --- | --- |
 | HTTP API | `server/app.ts` |
-| Sign-in, invites and admins | `server/auth.ts`, `server/invites.ts`, `server/admins.ts`, `web/SignIn.vue` |
+| Sign-in, invites and admins | `server/auth/Auth.ts`, `server/people/Invites.ts`, `server/people/Accounts.ts`, `web/SignIn.vue` |
 | Admin pages | `server/admin/`, `web/admin.html`, `web/admin/` |
 | Chat workflow | `server/workflow/` |
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |
 | Files and what the model reads of them | `server/files.ts`, `server/file-context.ts`, `server/image-resize.ts`, `server/pdf-text.ts` |
 | Trimming, memory placement and prompt caching | `server/workflow/context.ts`, `server/workflow/cache.ts` |
 | Summaries of long chats | `server/compaction/`, `server/workflow/context-guard.ts`, `web/compaction.ts` |
-| Rate limits | `server/rate-limit.ts` |
+| Rate limits | `server/limits/RateLimits.ts`, `server/rate-limit.ts` |
 | Search in chats, Markdown export | `server/thread-search.ts`, `web/thread-search.ts`, `web/export-markdown.ts` |
 | Citation chips | `inline-citation/collect.ts`, `CitationCard.vue` and `response/Response.vue` in [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) |
 | Models | `server/models/Models.ts`, `web/models.ts` |
 | OpenRouter key and other secrets | `server/openrouter/OpenRouterKey.ts`, `server/secrets/Secrets.ts` |
-| Credits | `server/credits.ts`, `server/settings/Settings.ts`, `server/extra-credits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
+| Credits | `server/credits/Credits.ts`, `server/settings/Settings.ts`, `server/credits/ExtraCredits.ts`, `web/CreditMeter.vue`, `web/credit-request.ts` |
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
 | Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net/NetGuard.ts`, `web/connectors/`, `web/settings/` |
 | Tracing | `server/tracing/`, `server/plugins/tracing.ts`, `deploy/jaeger.*` |

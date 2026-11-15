@@ -22,12 +22,14 @@ import { Hono } from "hono";
 import type { SignedInEnv } from "./auth.ts";
 import * as PonderConfig from "./config.ts";
 import { sql } from "./db.ts";
-import { forgetClient } from "./mcp/client.ts";
-import { addConnector, callConnectorTool, changeConnector, completeSignIn, catalogFrom, connectorCatalogFor, listConnectors, removeConnector } from "./mcp/connectors.ts";
-import { freshCredentials } from "./mcp/oauth.ts";
-import { probe } from "./mcp/probe.ts";
+import * as ConnectorOAuth from "./mcp/ConnectorOAuth.ts";
+import * as ConnectorStore from "./mcp/ConnectorStore.ts";
+import type { Connection, Credentials } from "./mcp/ConnectorStore.ts";
+import * as Connectors from "./mcp/Connectors.ts";
+import { catalogFrom, type ConnectorChange, type NewConnector } from "./mcp/Connectors.ts";
+import * as McpClients from "./mcp/McpClients.ts";
+import { probe as probeEffect } from "./mcp/probe.ts";
 import { connectorsApi } from "./mcp/routes.ts";
-import { getConnection, migrateConnectors, readCredentials, type Connection } from "./mcp/store.ts";
 import { Catalog } from "./mcp/catalog.ts";
 import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor, toToolInfo } from "./mcp/tools.ts";
 import * as NetGuard from "./net/NetGuard.ts";
@@ -52,6 +54,24 @@ async function check(name: string, body: () => Promise<void>) {
 		console.log(`FAIL ${name}\n     ${error instanceof Error ? (error.stack ?? error.message) : error}`);
 	}
 }
+
+// The connector services, on the app's runtime. A failure rejects with the error itself.
+const connectors = <A, E>(use: (service: Connectors.Connectors["Service"]) => Effect.Effect<A, E>) => runPromise(Connectors.Connectors.use(use));
+const store = <A, E>(use: (service: ConnectorStore.ConnectorStore["Service"]) => Effect.Effect<A, E>) => runPromise(ConnectorStore.ConnectorStore.use(use));
+const addConnector = (user: string, origin: string, input: NewConnector) => connectors((service) => service.addConnector(user, origin, input));
+const changeConnector = (user: string, id: string, change: ConnectorChange) => connectors((service) => service.changeConnector(user, id, change));
+const completeSignIn = (user: string, params: { state: string; code: string; issuer?: string }) => connectors((service) => service.completeSignIn(user, params));
+const callConnectorTool = (id: string, tool: string, input: unknown, user: string, approved: boolean) =>
+	connectors((service) => service.callConnectorTool(id, tool, input, user, approved));
+const connectorCatalogFor = (user: string) => connectors((service) => service.connectorCatalogFor(user));
+const listConnectors = (user: string) => connectors((service) => service.listConnectors(user));
+const removeConnector = (user: string, id: string) => connectors((service) => service.removeConnector(user, id));
+const getConnection = async (id: string, user: string) => Option.getOrUndefined(await store((service) => service.getConnection(id, user)));
+const readCredentials = (connection: Connection) => store((service) => service.readCredentials(connection));
+const freshCredentials = (connection: Connection, credentials: Credentials) =>
+	runPromise(ConnectorOAuth.ConnectorOAuth.use((oauth) => oauth.freshCredentials(connection, credentials)));
+const forgetClient = (id: string) => runPromise(McpClients.McpClients.use((clients) => clients.forget(id)));
+const probe = (address: string) => runPromise(probeEffect(address));
 
 // The test servers: an MCP server at /open/mcp (no sign-in), /key/mcp (x-api-key) and
 // /oauth/mcp (OAuth), and an authorization server at /as.
@@ -201,7 +221,7 @@ if (process.argv.includes("--serve")) {
 // Two test people.
 const people = [`check-${randomUUID()}`, `check-${randomUUID()}`] as const;
 const [alice, bob] = people;
-await migrateConnectors();
+await store((service) => service.migrate);
 for (const id of people) await sql`insert into users (id, name, email, "emailVerified") values (${id}, 'Connector check', ${`${id}@example.invalid`}, true)`;
 
 try {
@@ -421,13 +441,13 @@ try {
 		assert.equal(one.tokens?.access_token, two.tokens?.access_token);
 		assert.equal((await readCredentials((await getConnection(id, bob))!)).tokens?.access_token, one.tokens?.access_token, "the new token was not saved");
 		mock.accessTtl = 3600;
-		forgetClient(id);
+		await forgetClient(id);
 		assert.equal(await callConnectorTool(id, "echo", { text: "refreshed" }, bob, false), "refreshed");
 	});
 
 	await check("refused tokens: the connection needs a new sign-in, and the model is told", async () => {
 		mock.revokeAll();
-		forgetClient(oauthId);
+		await forgetClient(oauthId);
 		const text = await callConnectorTool(oauthId, "echo", { text: "x" }, alice, false);
 		assert.match(text, /sign in again/);
 		assert.equal((await getConnection(oauthId, alice))!.status, "needs_sign_in");

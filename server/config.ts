@@ -276,17 +276,6 @@ const fromProcessEnv = ConfigProvider.layer(Effect.sync(() => ConfigProvider.fro
  */
 export const layer = Layer.effect(PonderConfig, make).pipe(Layer.provide(fromProcessEnv));
 
-/**
- * The same config, read from the environment now, for code that needs a value before any
- * effect can run: auth.ts builds Better Auth with the hosts when its module loads, and
- * mcp/oauth.ts names them in sync getters of the AI SDK's OAuth provider. Reading the
- * config only parses the environment, so it runs synchronously.
- *
- * TEMPORARY: Phase 2 puts auth and connectors on Effect, where they read the runtime's
- * PonderConfig, and removes this.
- */
-export const readNow = (): PonderConfig["Service"] => Effect.runSync(make.pipe(Effect.provide(fromProcessEnv)));
-
 /** The config from a given environment, for tests. */
 export const layerFromEnv = (env: Record<string, string>) =>
 	Layer.effect(PonderConfig, make).pipe(Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnvRecord(env, { preserveEmptyStrings: true }))));

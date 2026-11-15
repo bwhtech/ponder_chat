@@ -1,19 +1,19 @@
 import { hkdfSync } from "node:crypto";
 import * as Effect from "effect/Effect";
-import { migrateAdminEvents } from "./admin-events.ts";
-import { migrateAuth } from "./auth.ts";
-import { migrateCredits } from "./credits.ts";
+import * as AdminEvents from "./admin/AdminEvents.ts";
+import * as Auth from "./auth/Auth.ts";
+import * as Credits from "./credits/Credits.ts";
 import { sql } from "./db.ts";
-import { migrateFiles } from "./files.ts";
-import { migrateInvites } from "./invites.ts";
-import { setupMemory } from "./memory.ts";
-import { checkSandbox } from "./python/pyodide.ts";
-import { migratePythonState } from "./python/state.ts";
-import { migrateConnectors } from "./mcp/store.ts";
-import { migrateCompaction } from "./compaction/store.ts";
+import * as Files from "./files.ts";
+import * as Invites from "./people/Invites.ts";
+import * as Memory from "./memory.ts";
+import * as Sandbox from "./python/pyodide.ts";
+import * as PythonState from "./python/state.ts";
+import * as ConnectorStore from "./mcp/ConnectorStore.ts";
+import * as CompactionStore from "./compaction/store.ts";
 import { dispose, runPromise } from "./runtime/runtime.ts";
 import * as Secrets from "./secrets/Secrets.ts";
-import { migrateSkills } from "./skills.ts";
+import * as Skills from "./skills.ts";
 import { seedStandardSkills } from "./standard-skills.ts";
 import * as Threads from "./threads/Threads.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
@@ -21,7 +21,7 @@ import * as Telemetry from "./telemetry/Telemetry.ts";
 import { stopTracing } from "./tracing/setup.ts";
 import { migrateApprovalUses } from "./workflow/approval-uses.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
-import { checkWebBuild } from "./web-build.ts";
+import * as WebBuild from "./web-build.ts";
 import * as OpenRouter from "./openrouter/OpenRouter.ts";
 
 /**
@@ -34,7 +34,6 @@ let resolvePython: (ready: boolean) => void;
 export const pythonReady = new Promise<boolean>((resolve) => (resolvePython = resolve));
 
 export async function startup() {
-	checkWebBuild();
 	// A failed migration still settles pythonReady, so the routes that wait on it don't hang.
 	try {
 		await runPromise(migrateAll);
@@ -62,6 +61,8 @@ export async function startup() {
  * itself, as before. Later phases put each module's own Effect in its place.
  */
 const migrateAll = Effect.gen(function* () {
+	// First, so a missing web build is said before anything else.
+	yield* WebBuild.WebBuild.use((build) => build.check);
 	const threads = yield* Threads.Threads;
 	// OpenRouter's list of private models, read now, in the background: the chat page's first
 	// screen shows them without waiting (boot-page.ts).
@@ -69,22 +70,22 @@ const migrateAll = Effect.gen(function* () {
 	yield* Telemetry.Telemetry.use((telemetry) => telemetry.setup);
 	yield* threads.migrate;
 	// After threads: its tables reference them.
-	yield* Effect.promise(() => migrateCompaction());
-	yield* Effect.promise(() => migrateAuth());
-	yield* Effect.promise(() => migrateFiles());
-	yield* Effect.promise(() => migrateCredits());
-	yield* Effect.promise(() => migrateInvites());
-	yield* Effect.promise(() => migrateAdminEvents());
+	yield* CompactionStore.CompactionStore.use((store) => store.migrate);
+	yield* Auth.Auth.use((auth) => auth.migrate);
+	yield* Files.Files.use((files) => files.migrate);
+	yield* Credits.Credits.use((credits) => credits.migrate);
+	yield* Invites.Invites.use((invites) => invites.migrate);
+	yield* AdminEvents.AdminEvents.use((events) => events.migrate);
 	yield* Secrets.Secrets.use((secrets) => secrets.migrate);
-	yield* Effect.promise(() => migrateConnectors());
-	yield* Effect.promise(() => migrateSkills());
-	yield* Effect.promise(() => seedStandardSkills());
+	yield* ConnectorStore.ConnectorStore.use((store) => store.migrate);
+	yield* Skills.Skills.use((skills) => skills.migrate);
+	yield* seedStandardSkills();
 	yield* Effect.sync(setToolApprovalSecret);
-	yield* Effect.promise(() => migratePythonState());
+	yield* PythonState.PythonState.use((states) => states.migrate);
 	yield* Effect.promise(() => migrateThreadRuns());
 	yield* Effect.promise(() => migrateApprovalUses());
-	yield* Effect.promise(() => setupMemory());
-	resolvePython(yield* Effect.promise(() => checkSandbox()));
+	yield* Memory.Memory.use((memory) => memory.setup);
+	resolvePython(yield* Sandbox.Sandbox.use((sandbox) => sandbox.check));
 });
 
 /**

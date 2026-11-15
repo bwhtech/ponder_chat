@@ -1,6 +1,6 @@
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
 import * as Option from "effect/Option";
-import { loadSummary, tokenRatio } from "../compaction/store.ts";
+import * as CompactionStore from "../compaction/store.ts";
 import { withSummary } from "../compaction/summary.ts";
 import { estimate, type Estimate } from "../compaction/tokens.ts";
 import { resolveFileParts } from "../file-context.ts";
@@ -44,12 +44,12 @@ export type ThreadContext = {
 /** The thread as the model reads it, with its saved summary in place of the messages it covers. */
 export async function loadThreadContext(threadId: string, options: MessageOptions): Promise<ThreadContext> {
 	const thread = await runPromise(Threads.Threads.use((threads) => threads.load(threadId)));
-	const summary = await loadSummary(threadId, thread);
+	const summary = Option.getOrUndefined(await runPromise(CompactionStore.CompactionStore.use((store) => store.loadSummary(threadId, thread))));
 	const messages = await modelMessages(withSummary(thread, summary), options);
 	return {
 		messages,
 		estimate: estimate(messages),
-		ratio: await tokenRatio(threadId, options.modelId),
+		ratio: await runPromise(CompactionStore.CompactionStore.use((store) => store.tokenRatio(threadId, options.modelId))),
 		window: Option.getOrNull(await runPromise(AutoRouter.AutoRouter.use((router) => router.modelWindow(options.modelId)))),
 		...(summary && { through: thread[summary.covers - 1]?.id }),
 	};
@@ -66,7 +66,7 @@ export async function loadThreadContext(threadId: string, options: MessageOption
 export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors, keepReasoningOf }: MessageOptions): Promise<ModelMessage[]> {
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (await runPromise(Settings.Settings.use((settings) => settings.get))).pdfTextOnServer;
-	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText });
+	const resolved = await runPromise(resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText }));
 	const messages = await convertToModelMessages(resolved, {
 		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 	});

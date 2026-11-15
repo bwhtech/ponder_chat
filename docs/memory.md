@@ -7,19 +7,19 @@ The design comes from the Seva platform (`~/.t3/projects/seva-studio/platform/do
 | File | Job |
 | --- | --- |
 | `server/memory/types.ts` | The contract: `MemoryScope`, `MemoryTurn`, `RecallResult`, `SaveReceipt`, `MemoryAdapter`, `MemoryIndex`. |
-| `server/memory/middleware.ts` | `memoryMiddleware()`: recall before the run, save after it. `turnFrom()` builds the turn to save. |
-| `server/memory/postgres.ts` | The adapter: memories in Postgres, search through the index. |
+| `server/memory/middleware.ts` | `makeMemoryMiddleware()`: recall before the run, save after it. `turnFrom()` builds the turn to save. |
+| `server/memory/postgres.ts` | The adapter, the `MemoryStore` service: memories in Postgres, search through the index. |
 | `server/memory/save-log.ts` | The decision log (`memory_saves`), and undo. |
 | `server/memory/pgvector-index.ts` | The search index, in the same Postgres with pgvector. |
 | `server/memory/decision-gate.ts`, `server/memory/gate.json` | The gate: a decision model and its questions. |
 | `server/memory/extract.ts`, `server/memory/extract.md` | The two steps together, and the writer and its prompt. |
-| `server/memory.ts` | Wires it together: the scope, the guidance for the model, `setupMemory()`. |
+| `server/memory.ts` | The `Memory` service: the scope, the guidance for the model, the Memory page's calls, and `setup`. |
 | `web/MemoryView.vue`, `web/memory.ts` | The Memory page, and the "Remembered" notes under replies. |
 
 ## How a reply uses memory
 
 1. **Recall.** The chat workflow's first step, `recallMemoryStep` (`server/workflow/steps.ts`), loads the chat and calls `adapter.recall(scope, query)` with the text of the person's latest message. `MEMORY_GUIDANCE` and the recalled block go after the instructions.
-2. **Save.** `saveReply` (`server/workflow/reply.ts`) saves the reply, then calls `rememberTurn()`. That starts `adapter.save(scope, turn)` without waiting, so the run ends and the reply is never held up. Stop saves the reply the same way, so a stopped reply is remembered too. A reply that Stop and the run's last step both save is remembered once.
+2. **Save.** `saveReply` (`server/workflow/reply.ts`) saves the reply, then calls `Memory.rememberTurn`. That starts `adapter.save(scope, turn)` without waiting, so the run ends and the reply is never held up. Stop saves the reply the same way, so a stopped reply is remembered too. A reply that Stop and the run's last step both save is remembered once.
 
 If recall or save fails, the chat goes on without memory, and the error is logged.
 
@@ -34,7 +34,7 @@ Recall is a workflow step. A reply that was in the middle of its run during the 
 - **What is never kept** is wider: the person's own phone, email, address, ID, bank and card numbers too, health details, and what they say about other people.
 - **No `ask_user` answers** in the turn: Ponder has no such tool.
 - **pgvector only.** The LanceDB index and the gate benchmark (`scripts/bench-memory-gate.ts`) stay in Seva.
-- **Cost counts against credits.** The gate's and the writer's runs go to `runs` as `memory-gate` and `memory-extract`, which `server/credits.ts` adds up. Embeddings are not recorded.
+- **Cost counts against credits.** The gate's and the writer's runs go to `runs` as `memory-gate` and `memory-extract`, which `server/credits/Credits.ts` adds up. Embeddings are not recorded.
 
 ## The turn
 
@@ -92,7 +92,7 @@ With 30 or fewer memories, recall gives all of them. Above that it finds the 8 m
 
 The recalled block quotes each memory's text as JSON, so a saved sentence cannot break out of the list and pose as instructions. It tells the model that what the person says now wins over memory.
 
-The index is the `memory_vectors` table. Saves, edits and forgets update it after `memories`; if that fails, the memory is still saved and the log says the index failed. On start, `syncIndex()` rebuilds it when its count differs from `memories`.
+The index is the `memory_vectors` table. Saves, edits and forgets update it after `memories`; if that fails, the memory is still saved and the log says the index failed. On start, `syncIndex` rebuilds it when its count differs from `memories`.
 
 ## On the page
 

@@ -15,7 +15,7 @@ Effect is `effect` 4.1.1. The agent docs in `~/src/t3code/.repos/effect-smol/` a
 | `server/runtime/main.ts` | `runMain(effect)`: the boundary for scripts. |
 | `server/runtime/Database.ts` | The `PgClient` layer (one pool), `ping`, and `pgCode` and `sqlMessage` for a `SqlError`. |
 | `server/runtime/Http.ts` | Effect's `HttpClient` on fetch, with its own spans off, and `requestProblem` for log lines. |
-| `server/config.ts` | `PonderConfig`: every environment variable. `readNow()` for code that needs a value before an effect can run. |
+| `server/config.ts` | `PonderConfig`: every environment variable. |
 | `server/tracing/Tracing.ts` | Effect's tracer on Ponder's OpenTelemetry provider, and `annotate`. |
 | `server/tracing/Logger.ts` | Effect's logger, in Ponder's console format. |
 | `server/db.ts` | **Temporary.** The postgres.js `sql` for modules not on Effect yet. Phase 3 removes it. |
@@ -58,7 +58,7 @@ Plain modules, with no I/O and no environment: `server/hosts.ts` (`isLocalHost`,
 14. **Tracing** goes to the provider of `server/tracing/setup.ts` (see "Tracing").
 15. **Tests.** `*.test.ts` with `@effect/vitest`. Test layers only for outside systems. No mocks of the logic under test, no sleeps or polling. The `*.check.ts` scripts stay and must pass.
 16. **Comments** say why, in short plain sentences. Move them with the code.
-17. **No shims.** Update every caller of a moved function. The only deliberate exceptions: `server/db.ts`'s `sql` (until Phase 3), `runPromise` in `runtime.ts` (until the last caller is on Effect), `PonderConfig.readNow()` (until auth.ts and mcp/oauth.ts are on Effect), and `Telemetry`'s `Effect.runPromiseWith` for the AI SDK's callbacks into `RunRecorder`, on the services of its layer.
+17. **No shims.** Update every caller of a moved function. The only deliberate exceptions: `server/db.ts`'s `sql` (until Phase 3), `runPromise` in `runtime.ts` (until the last caller is on Effect), and `Telemetry`'s `Effect.runPromiseWith` for the AI SDK's callbacks into `RunRecorder`, on the services of its layer.
 
 ## A service module
 
@@ -136,7 +136,6 @@ const steps = config.maxSteps; // CHAT_MAX_STEPS, default 10
 ```
 
 - The layer reads the environment once, when the runtime is built. Some modules read `process.env` at each call before (notify.ts, secrets.ts, net-guard.ts, tracing/http.ts). On `PonderConfig`, they see the value at start: `NOTIFY_URL`, the keys of `Secrets` and `MCP_ALLOW_PRIVATE_NETWORKS` (`NetGuard`) are read once. Nothing changes the environment in production, and the e2e server gets its environment before it starts. A check script that sets `process.env` must do it before the runtime is built: `server/mcp.check.ts` sets `MCP_ALLOW_PRIVATE_NETWORKS=1` at its top, and checks the strict guard on a `NetGuard` layer of its own (`PonderConfig.layerFromEnv({})`).
-- `PonderConfig.readNow()` reads the same config from the environment, synchronously, for code that needs a value before an effect can run: auth.ts makes Better Auth with the hosts when its module loads, and mcp/oauth.ts names them in sync getters. It is a boundary like `runPromise`: Phase 2 removes it.
 - Empty values keep the old rule of each module: `X ?? default` kept `""`; `X || default` and `if (!X)` did not. The field's comment says "Empty = missing" for the second kind.
 - `PONDER_TOOL_APPROVAL_SECRET`: the field is what the operator set. startup.ts still derives it from `BETTER_AUTH_SECRET` and writes it to `process.env` for workflow/approvals.ts. Phase 3 moves this to a value in the runtime.
 - Tests: `PonderConfig.layerFromEnv({ DATABASE_URL: url })`.
@@ -185,6 +184,41 @@ Until Phase 3 two pools run: postgres.js (`server/db.ts`) and `PgClient`. Up to 
 - Never log an `HttpClientError`'s message: it holds the address, with its query. `requestProblem(error)` gives what the old log lines printed: `HTTP 503`, fetch's own message, or AbortSignal.timeout's.
 - **Addresses that people or the model choose** go through `NetGuard` (`server/net/NetGuard.ts`): its `fetch` is the guarded fetch, unchanged (public addresses only, checked on each connection; a GET follows 3 checked redirects; other methods get the redirect as the answer). It stays a plain `typeof fetch`, because the libraries that use it (@ai-sdk/mcp) take one. Effect code that wants an `HttpClient` on it provides `FetchHttpClient.Fetch` with it. web_fetch uses `publicAgent` with undici directly. The agent closes with the runtime.
 - `ObjectStore` keeps aws4fetch, which signs each request and retries an answer of 5xx or 429 itself; `Effect.tryPromise((signal) => client.fetch(url, { signal }))` gives it the signal.
+
+## Connectors (MCP)
+
+`server/mcp/layer.ts` holds the connector services: `ConnectorStore` (the SQL), `ConnectorOAuth` (sign-ins and refreshes), `McpTransport` (@ai-sdk/mcp's client on the guarded fetch), `McpClients` (clients as resources) and `Connectors` (what the routes and the steps call). The catalog, ranking, signatures and input checks stay plain functions: the workflow loads them.
+
+- A client is opened with `Effect.acquireRelease` and closed with its scope. The pool is an `RcMap` with an idle time of 2 minutes, so a client is never closed while a call uses it, and the idle close runs on Effect's clock (a test moves it with `TestClock`). A client that failed, or that `forget` took out, keeps its old key, so a late error on it does not take out the newer one.
+- The timeouts (15 s connect, 20 s list, 60 s call) are `Effect.timeout`. The SDK gets the signal of `Effect.tryPromise`, so a timeout aborts the request.
+- The SDK calls the OAuth provider back with plain functions, some of them sync getters. `ConnectorOAuth` builds the provider with the hosts and the clock already read, and runs its effects (saving credentials, reading metadata) with `Effect.runPromiseWith` on its own context. A `ConnectorProblem` that the provider throws inside the SDK comes out as itself (`sdkFailure`).
+- Errors: `ConnectorProblem` (a `reason`, and only the header name or the address problem that the person typed), `NeedsSignIn`, and `ConnectorFailed` (an `operation`, with what the server or the network said in `cause`). `describeError` reads the cause for the sentence the person sees.
+- A test gives a fake `McpTransport` in place of an MCP server (`server/mcp/McpClients.test.ts`).
+
+## Memory and compaction
+
+- `Memory` (`server/memory.ts`) is what the steps and routes call: `forRun`, `rememberTurn`, `overview`, `update`, `forget`, `undo`, `threadSaves`, `setup`. Under it, `MemoryStore` (`server/memory/postgres.ts`) is the adapter. TanStack's memory contract (`memory/types.ts`) keeps its shapes, but each method returns an Effect. `MemoryStore.makeWith({ extract, index })` makes a store with other parts, as memory.check.ts does with a stand-in extractor.
+- The gate, the writer and the pgvector index are made from the environment (`makeDecisionGate`, `makeLlmWriter`, `makePgvectorIndex`). The gate calls the Decisions API with `HttpClient`; the writer, the embeddings and the summarizer call the AI SDK in `Effect.tryPromise` with its signal.
+- Background saves are fibers in the Memory layer's scope (`Effect.forkIn`). A fork keeps the caller's async context, so `memory.save` is in the reply's trace.
+- Memory never stops a chat: recall and save recover from any failure or defect (`recoverAll` in `memory/errors.ts`), and log it. An interruption stays one.
+- Errors name the model and the HTTP status, never the provider's answer: `MemoryGateFailed`, `MemoryWriterFailed`, `EmbeddingFailed`, `SummaryFailed`. The text in the save log and in the log lines is `problem(error)`: Postgres's own message for a `SqlError`, else the error's message.
+- Compaction: `CompactionStore` (`compaction/store.ts`), `Summarizer` (`compaction/summarize.ts`), and `compact` (`compaction/compact.ts`), which `compactStep` runs with `runStep`. The engine (`runCompaction` in `compaction/compaction.ts`) takes its parts as Effects, so `compaction-flow.check.ts` runs it with fakes. On the step's last attempt, any failure of the summary (not an interruption) leaves the old messages out.
+
+## Tools and files
+
+- Services: `Files` (`server/files.ts`: `migrate`, `save`, `store`, `load`, `pdfText`), `PdfText` (`server/pdf-text.ts`: `extract`), `Sandbox` (`server/python/pyodide.ts`: `enabled`, `check`, `run`), `PythonState` (`server/python/state.ts`), `RunPython` (`server/python/tool.ts`: `execute`, one turn at a time per thread), `SearchBackend` (`server/search/backend.ts`, chosen by `SEARCH_BACKEND`), `Skills` (`server/skills.ts`) and `ThreadCache` (`server/thread-cache.ts`). Effect functions on the environment: `resolveFileParts`, `prepareImage`, `fetchPage`, `executeWebSearch`, `executeWebFetch`, `searchThreads`, `nameThread`, `seedStandardSkills`, `threadResponse`. `trusted-pages.ts`, the tool schemas (zod, for the AI SDK) and `artifacts/` stay plain: the workflow loads them.
+- The PDF worker and the Deno process are resources: `Effect.acquireRelease` starts one and listens to it in the same step, and the release stops it (`worker.terminate()`; SIGKILL to the process group, then a wait for its pipes to close). A timeout (`Effect.timeoutOrElse`, 20 s and 60 s as before) or an interruption runs the release. Turns are `Semaphore`s, which serve waiters in order.
+- `Sandbox.run` has no span of its own, so its `ponder.wait_ms` lands on the caller's `python.run`, as before. `fetchPage` has none either: `web_fetch.read` is its span, and `withPeer("web")` wraps each request.
+- Answers for the person or the model are built at the edge from bounded errors: `refusalText(name, FileRefused)` for an upload, the tool's `error` text from `PageRefused` and `PageUnreachable` (the cause's message, as undici gave it) for web_fetch.
+- `server/python/pyodide.test.ts` fakes Deno with a small Node program, and moves the run's 60 seconds with `TestClock`.
+
+## People and admin
+
+- `server/admin/layer.ts` holds them: `Auth` (`server/auth/Auth.ts`), `AdminAuthEvents`, `Accounts` and `Invites` (`server/people/`), `Credits` and `ExtraCredits` (`server/credits/`), `RateLimits` (`server/limits/`), `AdminEvents`, `AdminReports` (what /admin reads) and `AdminActions` (what /admin changes), and `WebBuild` (`server/web-build.ts`: the start-up check and the chat page's template). `server/admin/people.ts`, `usage.ts` and `activity.ts` are the plain parts of the reports.
+- Better Auth keeps its own `pg` pool (5) and its options. `Auth` makes it on first use (`Effect.cached`), with the hosts and the secret of `PonderConfig`, so a script or a check that never signs anyone in opens no pool; the pool closes with the runtime. Better Auth's hooks and email callbacks run on the layer's services with `Effect.runPromiseWith`. Its endpoints are called through `auth.call((api) => ...)`: a refusal is `AuthRefused` (its status and Better Auth's own fixed text), anything else a defect. `auth.session(headers)` is the session cached for a minute (`auth/session-cache.ts`), `auth.getSession(headers)` reads it each time. `appOrigin(headers)` is an Effect on `PonderConfig`'s hosts.
+- Hono middleware stays middleware and calls the services through `route` (the session check in app.ts, `requireAdmin`, `limitPerPerson` in `server/rate-limit.ts`).
+- Credits read the day from `Clock`; the tests give a fixed wall clock (`server/credits/Credits.test.ts`). The rate-limit windows run on `Clock` too (`TestClock` in `server/limits/RateLimits.test.ts`).
+- The tests that need `users` run in a schema of their own: `?options=-csearch_path=<schema>` on `TEST_DATABASE_URL`, dropped at the end. Other test files make and drop a `users` table of another shape at the same time.
 
 ## Errors of a service, and their messages
 

@@ -1,7 +1,20 @@
 import * as Layer from "effect/Layer";
+import * as People from "../admin/layer.ts";
+import * as CompactionStore from "../compaction/store.ts";
+import * as Summarizer from "../compaction/summarize.ts";
 import * as PonderConfig from "../config.ts";
 import * as Mailer from "../email/Mailer.ts";
+import * as Mcp from "../mcp/layer.ts";
+import * as Memory from "../memory.ts";
 import * as ObjectStore from "../files/ObjectStore.ts";
+import * as Files from "../files.ts";
+import * as PdfText from "../pdf-text.ts";
+import * as Sandbox from "../python/pyodide.ts";
+import * as PythonState from "../python/state.ts";
+import * as RunPython from "../python/tool.ts";
+import * as SearchBackend from "../search/backend.ts";
+import * as Skills from "../skills.ts";
+import * as ThreadCache from "../thread-cache.ts";
 import * as AutoRouter from "../models/AutoRouter.ts";
 import * as Models from "../models/Models.ts";
 import * as NetGuard from "../net/NetGuard.ts";
@@ -26,9 +39,10 @@ import * as Http from "./Http.ts";
  * Tracing and the logger come last, so every layer above, and every effect the runtime
  * runs, logs and traces through them.
  */
-export const layer = Layer.mergeAll(Threads.layer, AutoRouter.layer, ModelCalls.layer, Telemetry.layer).pipe(
+export const layer = Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer).pipe(
+	Layer.provideMerge(Layer.mergeAll(Threads.layer, AutoRouter.layer, ModelCalls.layer, Telemetry.layer, Memory.layer, CompactionStore.layer, Mcp.layer, Files.layer, Sandbox.layer, PythonState.layer, Skills.layer, ThreadCache.layer, People.layer)),
 	Layer.provideMerge(Layer.mergeAll(Models.layer, OpenRouterKey.layer, Runs.layer)),
-	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer, Settings.layer, NetGuard.layer, ObjectStore.layer, Mailer.layer, Notify.layer)),
+	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer, Settings.layer, NetGuard.layer, ObjectStore.layer, Mailer.layer, Notify.layer, PdfText.layer)),
 	Layer.provideMerge(Layer.mergeAll(Database.layer, Http.layer)),
 	Layer.provideMerge(PonderConfig.layer),
 	Layer.provideMerge(Layer.mergeAll(Tracing.layer, Logger.layer)),

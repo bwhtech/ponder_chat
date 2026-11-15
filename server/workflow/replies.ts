@@ -7,10 +7,10 @@ import * as ModelCalls from "../telemetry/ModelCalls.ts";
 import { isAuto } from "../../shared/auto-model.ts";
 import * as AutoRouter from "../models/AutoRouter.ts";
 import * as Models from "../models/Models.ts";
-import { forgetPythonState } from "../python/state.ts";
+import * as PythonState from "../python/state.ts";
 import { runPromise } from "../runtime/runtime.ts";
 import { pythonReady } from "../startup.ts";
-import { forgetThread } from "../thread-cache.ts";
+import * as ThreadCache from "../thread-cache.ts";
 import * as Threads from "../threads/Threads.ts";
 import { linkToReply, recordReplySpan, tracingOn, withReplyTrace } from "../tracing/reply-trace.ts";
 import { approvalsUsedBy, forgetApprovalUses, releaseApprovals, useApprovals } from "./approval-uses.ts";
@@ -162,8 +162,8 @@ export async function deleteChat(threadId: string, owner: string): Promise<boole
 		return true;
 	});
 	if (deleted) {
-		forgetThread(threadId);
-		await forgetPythonState(threadId, owner);
+		await runPromise(ThreadCache.ThreadCache.use((cache) => cache.forget(threadId)));
+		await runPromise(PythonState.PythonState.use((states) => states.forget(threadId, owner)));
 	}
 	return deleted;
 }

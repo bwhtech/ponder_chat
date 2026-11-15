@@ -4,8 +4,15 @@
  * Run: npx tsx server/pdf-text.check.ts
  */
 import assert from "node:assert/strict";
+import * as Effect from "effect/Effect";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 import { pagesPdf, slowPdf, textPdf } from "../e2e/pdfs.ts";
-import { extractPdfText } from "./pdf-text.ts";
+import * as PdfText from "./pdf-text.ts";
+
+// The service on a runtime of its own: one set of reading slots for every check.
+const runtime = ManagedRuntime.make(PdfText.layer);
+const extractPdfText = (data: Buffer, timeoutMs?: number) =>
+	runtime.runPromise(PdfText.PdfText.use((pdf) => pdf.extract(data, timeoutMs)));
 
 let failed = 0;
 

@@ -45,7 +45,7 @@ if [ "${1:-}" = "--daily" ]; then
 	FAILED=$(sql "select count(*) from workflow.workflow_runs where created_at > now() - interval '1 day' and status = 'failed'")
 	COST=$(sql "select to_char(coalesce(sum(cost_usd), 0), 'FM990.00') from runs where created_at > now() - interval '1 day'")
 	TOP=$(sql "select string_agg(format('%s \$%s', coalesce(u.email, r.\"user\"), to_char(r.cost, 'FM990.000')), ', ') from (select \"user\", sum(cost_usd) cost from runs where created_at > now() - interval '1 day' group by 1 order by 2 desc nulls last limit 3) r left join users u on u.id = r.\"user\"")
-	# The limits are in the app's tables (server/settings/Settings.ts, server/credits.ts): the default, each person's own, and today's extra credits.
+	# The limits are in the app's tables (server/settings/Settings.ts, server/credits/Credits.ts): the default, each person's own, and today's extra credits.
 	# charged_runs (server/telemetry/Runs.ts) holds the rule for what costs credits.
 	OUT_OF_CREDITS=$(sql "with s as (select default_daily_credits, credits_per_usd from settings where id = 1),
 		spent as (select \"user\", sum(cost_usd) * (select credits_per_usd from s) credits from charged_runs

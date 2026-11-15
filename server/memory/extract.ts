@@ -1,23 +1,29 @@
 import { readFile } from "node:fs/promises";
 import { generateText, Output } from "ai";
+import * as Effect from "effect/Effect";
+import type { SqlError } from "effect/sql/SqlError";
 import { z } from "zod";
+import * as PonderConfig from "../config.ts";
 import { privateRouting } from "../openrouter/OpenRouter.ts";
 import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
-import { runPromise } from "../runtime/runtime.ts";
+import type { UnreadableSecret } from "../secrets/Secrets.ts";
 import { runTelemetry } from "../telemetry/Telemetry.ts";
-import { decisionGate, GATE_MODEL, readGateQuestions } from "./decision-gate.ts";
+import { makeDecisionGate, readGateQuestions } from "./decision-gate.ts";
+import { MemoryWriterFailed, statusOf, type MemoryGateFailed } from "./errors.ts";
 import type { MemoryScope, MemoryTurn } from "./types.ts";
 
 /**
  * What a finished turn adds to memory, in two steps. The gate (decision-gate.ts, its
  * questions in gate.json) decides whether there is anything to save, change or forget,
  * and whether the turn holds something never to keep; most turns stop there. Only on a
- * yes does the writer (extract.md) write the operations. The questions and the prompt
- * are read on every call, so an edit applies to the next turn without a restart. Every
- * decision, "nothing to save" included, is logged in `memory_saves`.
+ * yes does the writer (extract.md, PONDER_MEMORY_MODEL) write the operations. The questions
+ * and the prompt are read on every call, so an edit applies to the next turn without a
+ * restart. Every decision, "nothing to save" included, is logged in `memory_saves`.
  */
 const PROMPT_PATH = new URL("./extract.md", import.meta.url);
-const MODEL = process.env.PONDER_MEMORY_MODEL ?? "z-ai/glm-5.3-flash";
+
+/** The file ships with the code: a failure to read it is a bug, a defect. */
+const readWriterPrompt = Effect.promise(() => readFile(PROMPT_PATH, "utf8"));
 
 export const KINDS = ["fact", "project", "preference"] as const;
 export type MemoryKind = (typeof KINDS)[number];
@@ -53,54 +59,76 @@ export type Decision = { summary: string; operations: Operation[]; model: string
  * `existing` is the saved memories the turn may touch: all of them while there are few,
  * else the ones related to the turn. `forgotten` is what the person had Ponder forget, newest first.
  */
-type ExtractInput = { scope: MemoryScope; turn: MemoryTurn; existing: ExistingMemory[]; forgotten?: string[] };
-export type Extractor = (input: ExtractInput) => Promise<Decision>;
+export type ExtractInput = { scope: MemoryScope; turn: MemoryTurn; existing: ExistingMemory[]; forgotten?: string[] };
+
+/** How the gate or the writer can fail: the model's call, or the OpenRouter key. */
+export type ExtractError = MemoryGateFailed | MemoryWriterFailed | OpenRouterKey.NoOpenRouterKey | UnreadableSecret | SqlError;
+export type Extractor = (input: ExtractInput) => Effect.Effect<Decision, ExtractError>;
 
 /** The gate's answer: run the writer or not, why, and what the turn holds that is never allowed. */
 export type GateVerdict = { save: boolean; reason: string; refuse: string[]; model: string };
-export type Gate = (input: ExtractInput) => Promise<GateVerdict>;
+export type Gate = (input: ExtractInput) => Effect.Effect<GateVerdict, ExtractError>;
 /** The writer, told what the gate found. */
-export type Writer = (input: ExtractInput & { gate: GateVerdict }) => Promise<Decision>;
+export type Writer = (input: ExtractInput & { gate: GateVerdict }) => Effect.Effect<Decision, ExtractError>;
 
 /** The gate's questions and the writer's prompt, as the Memory page shows them under "How it decides". */
-export async function readExtractPrompt() {
-	const [questions, extract] = await Promise.all([readGateQuestions(), readFile(PROMPT_PATH, "utf8")]);
+export const readExtractPrompt = Effect.gen(function* () {
+	const config = yield* PonderConfig.PonderConfig;
+	const [questions, extract] = yield* Effect.all([readGateQuestions, readWriterPrompt], { concurrency: 2 });
 	return (
-		`# Step 1: the gate (${GATE_MODEL}, a decision model)\n\nIt answers these yes/no questions with a probability. Above 50% on "save", the writer runs.\n\n${questions.trim()}\n\n` +
-		`# Step 2: the writer (${MODEL})\n\n${extract.trim()}\n`
+		`# Step 1: the gate (${config.memoryGateModel}, a decision model)\n\nIt answers these yes/no questions with a probability. Above 50% on "save", the writer runs.\n\n${questions.trim()}\n\n` +
+		`# Step 2: the writer (${config.memoryModel})\n\n${extract.trim()}\n`
 	);
-}
+});
 
 /** Gate first; the writer runs only on a yes. A no is logged with the gate's reason. */
 export function gatedExtractor({ gate, write }: { gate: Gate; write: Writer }): Extractor {
-	return async (input) => {
-		const verdict = await gate(input);
+	// No span of its own: it runs inside memory.save.
+	return Effect.fnUntraced(function* (input: ExtractInput) {
+		const verdict = yield* gate(input);
 		if (!verdict.save) {
 			const refused = verdict.refuse.length ? ` Refused: ${verdict.refuse.join("; ")}.` : "";
 			return { summary: `${verdict.reason}${refused}`, operations: [], model: verdict.model };
 		}
-		const decision = await write({ ...input, gate: verdict });
+		const decision = yield* write({ ...input, gate: verdict });
 		return { ...decision, model: `${verdict.model} → ${decision.model}` };
-	};
+	});
 }
 
-export const llmWriter: Writer = async ({ gate, ...input }) => {
-	const note = [`The gate said: ${JSON.stringify(gate.reason)}`, gate.refuse.length ? `Never save: ${JSON.stringify(gate.refuse)}` : ""]
-		.filter(Boolean)
-		.join("\n");
-	const { scope } = input;
-	const { output } = await generateText({
-		model: (await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.provider)))(MODEL, { usage: { include: true }, provider: privateRouting }),
-		instructions: await readFile(PROMPT_PATH, "utf8"),
-		prompt: `${describe(input)}\n\n${note}`,
-		output: Output.object({ schema: decision }),
-		...runTelemetry({ threadId: scope.threadId, user: scope.userId ?? "" }, "memory-extract"),
+/** The writer, on the services of the environment it is made in. */
+export const makeLlmWriter = Effect.gen(function* () {
+	const config = yield* PonderConfig.PonderConfig;
+	const keys = yield* OpenRouterKey.OpenRouterKey;
+	const model = config.memoryModel;
+
+	const write: Writer = Effect.fnUntraced(function* ({ gate, ...input }: ExtractInput & { gate: GateVerdict }) {
+		const note = [`The gate said: ${JSON.stringify(gate.reason)}`, gate.refuse.length ? `Never save: ${JSON.stringify(gate.refuse)}` : ""]
+			.filter(Boolean)
+			.join("\n");
+		const { scope } = input;
+		const openRouter = yield* keys.provider;
+		const instructions = yield* readWriterPrompt;
+		const { output } = yield* Effect.tryPromise({
+			try: (signal) =>
+				generateText({
+					model: openRouter(model, { usage: { include: true }, provider: privateRouting }),
+					instructions,
+					prompt: `${describe(input)}\n\n${note}`,
+					output: Output.object({ schema: decision }),
+					abortSignal: signal,
+					...runTelemetry({ threadId: scope.threadId, user: scope.userId ?? "" }, "memory-extract"),
+				}),
+			catch: (cause) => new MemoryWriterFailed({ model, status: statusOf(cause), cause }),
+		});
+		return { summary: output.summary, operations: toOperations(output.operations), model };
 	});
-	return { summary: output.summary, operations: toOperations(output.operations), model: MODEL };
-};
+	return write;
+});
 
 /** The default: the gate, then the writer. */
-export const llmExtractor: Extractor = gatedExtractor({ gate: decisionGate, write: llmWriter });
+export const makeLlmExtractor = Effect.gen(function* () {
+	return gatedExtractor({ gate: yield* makeDecisionGate, write: yield* makeLlmWriter });
+});
 
 /**
  * Whether `quote` is in what the person said, ignoring case, spacing, the kind of quote

@@ -1,40 +1,33 @@
-import { toCredits, utcDay } from "../credits.ts";
-import { sql } from "../db.ts";
+import { toCredits } from "../credits/Credits.ts";
 import { MODELS } from "../models/Models.ts";
-import { runPromise } from "../runtime/runtime.ts";
-import * as Settings from "../settings/Settings.ts";
 
 /**
- * Usage for /admin, read from `charged_runs` (telemetry/Runs.ts): cost, model and time
- * only, never chat content. So credits and replies are counted as credits.ts counts them,
- * at today's credits per dollar.
+ * Usage for /admin, read from `charged_runs` (telemetry/Runs.ts) by AdminReports.ts: cost,
+ * model and time only, never chat content. So credits and replies are counted as
+ * credits/Credits.ts counts them, at today's credits per dollar.
+ *
+ * Plain code: AdminReports.ts reads the rows and gives the dates.
  */
 export type DayUsage = { credits: number; replies: number };
 
+/** One person's spending on one UTC day, as the query sums it. */
+export type UsageRow = { user: string; day: string; usd: number; replies: number };
+
 /** Each person's credits and replies per UTC day, over the last `days` days (today is the last). */
 export class Usage {
+	private byUser = new Map<string, Map<string, DayUsage>>();
+
 	constructor(
 		/** "2026-11-05", oldest first. */
 		readonly dates: string[],
-		private byUser: Map<string, Map<string, DayUsage>>,
-	) {}
-
-	static async load(days: number, user?: string) {
-		const dates = lastDays(days);
-		const { creditsPerUsd } = await runPromise(Settings.Settings.use((settings) => settings.get));
-		const rows = await sql<{ user: string; day: string; usd: number; replies: number }[]>`
-			select "user", to_char((created_at at time zone 'utc')::date, 'YYYY-MM-DD') as day,
-				coalesce(sum(cost_usd), 0)::float8 as usd, (count(*) filter (where is_reply))::int as replies
-			from charged_runs
-			where created_at >= ${new Date(`${dates[0]}T00:00:00Z`)} and "user" is not null ${user ? sql`and "user" = ${user}` : sql``}
-			group by 1, 2`;
-		const byUser = new Map<string, Map<string, DayUsage>>();
+		rows: ReadonlyArray<UsageRow>,
+		creditsPerUsd: number,
+	) {
 		for (const row of rows) {
-			const days = byUser.get(row.user) ?? new Map<string, DayUsage>();
+			const days = this.byUser.get(row.user) ?? new Map<string, DayUsage>();
 			days.set(row.day, { credits: toCredits(row.usd, creditsPerUsd), replies: row.replies });
-			byUser.set(row.user, days);
+			this.byUser.set(row.user, days);
 		}
-		return new Usage(dates, byUser);
 	}
 
 	get today() {
@@ -78,32 +71,17 @@ export class Usage {
 	}
 }
 
-/** Credits per model over the last `days` days, largest first, by the names people pick from. */
-export async function creditsByModel(days: number, user?: string) {
-	const { creditsPerUsd } = await runPromise(Settings.Settings.use((settings) => settings.get));
-	const rows = await sql<{ model: string; usd: number }[]>`
-		select model, coalesce(sum(cost_usd), 0)::float8 as usd from charged_runs
-		where created_at >= ${new Date(`${lastDays(days)[0]}T00:00:00Z`)} ${user ? sql`and "user" = ${user}` : sql``}
-		group by 1`;
-	const totals = new Map<string, number>();
-	for (const row of rows) totals.set(modelName(row.model), (totals.get(modelName(row.model)) ?? 0) + row.usd);
-	return [...totals]
-		.map(([model, usd]) => ({ model, credits: Math.round(usd * creditsPerUsd) }))
-		.filter((row) => row.credits > 0)
-		.sort((a, b) => b.credits - a.credits);
-}
-
 /**
  * The limit for today of each person: their own limit or the default, plus today's
- * extra credits. Both tables are small, so they are read whole.
+ * extra credits.
  */
-export async function limitsToday() {
-	const { defaultDailyCredits } = await runPromise(Settings.Settings.use((settings) => settings.get));
-	const [own, extra] = await Promise.all([
-		sql<{ user_id: string; daily_credits: number }[]>`select user_id, daily_credits from credit_limits`,
-		sql<{ user_id: string; credits: number }[]>`
-			select user_id, sum(credits)::int as credits from credit_grants where day = ${utcDay().day} group by 1`,
-	]);
+export type Limits = ReturnType<typeof limitsOf>;
+
+export function limitsOf(
+	defaultDailyCredits: number,
+	own: ReadonlyArray<{ user_id: string; daily_credits: number }>,
+	extra: ReadonlyArray<{ user_id: string; credits: number }>,
+) {
 	const ownLimit = new Map(own.map((row) => [row.user_id, row.daily_credits]));
 	const extraToday = new Map(extra.map((row) => [row.user_id, row.credits]));
 	return {
@@ -115,10 +93,20 @@ export async function limitsToday() {
 	};
 }
 
-/** The last `days` UTC dates, oldest first. */
-function lastDays(days: number) {
-	const today = utcDay().start.getTime();
-	return Array.from({ length: days }, (_, i) => new Date(today - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10));
+/** Credits per model, largest first, by the names people pick from. */
+export function byModel(rows: ReadonlyArray<{ model: string; usd: number }>, creditsPerUsd: number) {
+	const totals = new Map<string, number>();
+	for (const row of rows) totals.set(modelName(row.model), (totals.get(modelName(row.model)) ?? 0) + row.usd);
+	return [...totals]
+		.map(([model, usd]) => ({ model, credits: Math.round(usd * creditsPerUsd) }))
+		.filter((row) => row.credits > 0)
+		.sort((a, b) => b.credits - a.credits);
+}
+
+/** The last `days` UTC dates up to the day that starts at `today`, oldest first. */
+export function lastDays(days: number, today: Date) {
+	const start = today.getTime();
+	return Array.from({ length: days }, (_, i) => new Date(start - (days - 1 - i) * 86_400_000).toISOString().slice(0, 10));
 }
 
 /** OpenRouter can answer with a dated id, such as "openai/gpt-6-luna-20261001". */

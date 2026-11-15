@@ -1,7 +1,7 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
-import { rememberTurn } from "../memory.ts";
+import * as Memory from "../memory.ts";
 import { runPromise } from "../runtime/runtime.ts";
 import * as Threads from "../threads/Threads.ts";
 import { replayReply } from "./replay.ts";
@@ -92,7 +92,10 @@ async function saveReplyNow(threadId: string, owner: string, runId: string, mode
 		if (at === -1) messages.push(reply);
 		else messages[at] = reply;
 		// Only into the thread as it is: a thread deleted while the reply was written stays deleted.
-		if (await runPromise(Threads.Threads.use((threads) => threads.update(threadId, owner, messages)))) rememberTurn({ threadId, user: owner }, messages);
+		if (await runPromise(Threads.Threads.use((threads) => threads.update(threadId, owner, messages)))) {
+			// It starts the save in the background, and does not wait for it.
+			await runPromise(Memory.Memory.use((memory) => memory.rememberTurn({ threadId, user: owner }, messages)));
+		}
 	}
 	await finishRun(threadId, runId, model, { cancelled, failed, continued });
 }

@@ -53,9 +53,10 @@ export const COMPACT_RETRIES = 2;
 export async function compactStep(writable: WritableStream<ModelCallStreamPart>, request: CompactRequest): Promise<CompactResult> {
 	"use step";
 	const { getStepMetadata } = await import("workflow");
+	const { runStep } = await import("../runtime/step.ts");
 	const { compact } = await import("../compaction/compact.ts");
 	const { attempt } = getStepMetadata();
-	return compact(request, { lastAttempt: attempt > COMPACT_RETRIES, status: (state) => writeCompactionState(writable, state) });
+	return runStep(compact(request, { lastAttempt: attempt > COMPACT_RETRIES, status: (state) => writeCompactionState(writable, state) }));
 }
 compactStep.maxRetries = COMPACT_RETRIES;
 
@@ -78,22 +79,25 @@ export async function recallMemoryStep(threadId: string, owner: string): Promise
 	return contextStep("memory", `thread ${threadId}`, async () => {
 		const { runStep } = await import("../runtime/step.ts");
 		const Threads = await import("../threads/Threads.ts");
-		const { memoryForRun } = await import("../memory.ts");
-		return memoryForRun({ threadId, user: owner }, await runStep(Threads.Threads.use((threads) => threads.load(threadId))));
+		const Memory = await import("../memory.ts");
+		const messages = await runStep(Threads.Threads.use((threads) => threads.load(threadId)));
+		return runStep(Memory.Memory.use((memory) => memory.forRun({ threadId, user: owner }, messages)));
 	});
 }
 recallMemoryStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function runPythonStep(input: RunPythonInput, threadId: string, owner: string) {
 	"use step";
-	const { executeRunPython } = await import("../python/tool.ts");
-	return executeRunPython(input, { threadId, owner });
+	const { runStep } = await import("../runtime/step.ts");
+	const RunPython = await import("../python/tool.ts");
+	return runStep(RunPython.RunPython.use((python) => python.execute(input, { threadId, owner })));
 }
 
 export async function webSearchStep(input: WebSearchInput, threadId: string, owner: string) {
 	"use step";
+	const { runStep } = await import("../runtime/step.ts");
 	const { executeWebSearch } = await import("../search/tool.ts");
-	return executeWebSearch(input, { threadId, owner });
+	return runStep(executeWebSearch(input, { threadId, owner }));
 }
 
 /** The pages web_fetch may read in this thread without asking the person (search/trusted-pages.ts). */
@@ -110,8 +114,9 @@ trustedPagesStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function webFetchStep(input: WebFetchInput) {
 	"use step";
+	const { runStep } = await import("../runtime/step.ts");
 	const { executeWebFetch } = await import("../search/tool.ts");
-	return executeWebFetch(input);
+	return runStep(executeWebFetch(input));
 }
 
 export async function saveReplyStep(

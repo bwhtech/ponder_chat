@@ -137,8 +137,8 @@ The reviewer reports real bugs only, not style. The implementing agent fixes the
 
 | Phase | State |
 | --- | --- |
-| 0 Foundation | Not started |
-| 1 Platform services | Not started |
-| 2 Domains | Not started |
+| 0 Foundation | Done, reviewed |
+| 1 Platform services | Done, reviewed |
+| 2 Domains | Done (2A, 2B, 2C, 2D) |
 | 3 Reply engine | Not started |
 | 4 Full check | Not started |

@@ -1,5 +1,13 @@
 import { Worker } from "node:worker_threads";
-import { span } from "./tracing/span.ts";
+import * as Clock from "effect/Clock";
+import * as Context from "effect/Context";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
+import * as Semaphore from "effect/Semaphore";
+import * as Tracing from "./tracing/Tracing.ts";
 
 /**
  * The text of a PDF, read once on this server with pdf.js, so that a model that cannot
@@ -11,66 +19,83 @@ import { span } from "./tracing/span.ts";
  * meanwhile. A read that takes too long or too much memory is stopped and fails, and the
  * caller stores "" for it (files.ts), so the PDF is not read again.
  */
-const TIMEOUT_MS = 20_000;
+const TIMEOUT = Duration.seconds(20);
 const MAX_HEAP_MB = 256;
+/** Each read can use a whole CPU core and MAX_HEAP_MB. The others wait their turn, in order. */
 const MAX_READS_AT_ONCE = 2;
 // The build swaps this address for the worker file that it makes (nitro.config.ts).
 const WORKER = new URL("./pdf-text-worker.ts", import.meta.url);
 
-export async function extractPdfText(data: Buffer, timeoutMs = TIMEOUT_MS): Promise<string> {
-	return span("pdf.extract_text", { "ponder.bytes": data.length }, async (active) => {
-		const waiting = Date.now();
-		await readers.take();
-		active.setAttribute("ponder.wait_ms", Date.now() - waiting);
-		try {
-			const text = await readInWorker(data, timeoutMs);
-			active.setAttribute("ponder.chars", text.length);
-			return text;
-		} finally {
-			readers.release();
-		}
-	});
-}
-
-function readInWorker(data: Buffer, timeoutMs: number): Promise<string> {
-	return new Promise((resolve, reject) => {
-		// A copy, which the worker takes over. The caller keeps its buffer.
-		const bytes = new Uint8Array(data);
-		const worker = new Worker(WORKER, {
-			workerData: bytes,
-			transferList: [bytes.buffer],
-			resourceLimits: { maxOldGenerationSizeMb: MAX_HEAP_MB, maxYoungGenerationSizeMb: 32 },
-		});
-		const finish = (settle: () => void) => {
-			clearTimeout(timer);
-			void worker.terminate();
-			settle();
-		};
-		const timer = setTimeout(() => finish(() => reject(new Error(`reading took longer than ${timeoutMs / 1000} seconds`))), timeoutMs);
-		worker.once("message", (text: string) => finish(() => resolve(text)));
-		// Out of memory comes here too.
-		worker.once("error", (error) => finish(() => reject(error)));
-		worker.once("exit", () => finish(() => reject(new Error("the reader stopped before it answered"))));
-	});
-}
-
-/** Lets a fixed number of reads run at once; the others wait their turn. Each one can use a whole CPU core and MAX_HEAP_MB. */
-class Slots {
-	private waiting: (() => void)[] = [];
-
-	constructor(private free: number) {}
-
-	async take() {
-		if (this.free > 0) this.free--;
-		else await new Promise<void>((resolve) => this.waiting.push(resolve));
-	}
-
-	/** Hands the slot to the next one waiting, if any. */
-	release() {
-		const next = this.waiting.shift();
-		if (next) next();
-		else this.free++;
+/**
+ * A read that did not give text: it took too long, pdf.js failed (out of memory comes
+ * here too; the cause is pdf.js's error), or the worker stopped before it answered.
+ */
+export class PdfTextError extends Schema.TaggedError<PdfTextError>()("PdfTextError", {
+	reason: Schema.Literals(["timeout", "failed", "stopped"]),
+	seconds: Schema.optional(Schema.Number),
+	cause: Schema.optional(Schema.Defect()),
+}) {
+	override get message() {
+		if (this.reason === "timeout") return `reading took longer than ${this.seconds} seconds`;
+		if (this.reason === "stopped") return "the reader stopped before it answered";
+		return "pdf.js could not read the PDF";
 	}
 }
 
-const readers = new Slots(MAX_READS_AT_ONCE);
+export class PdfText extends Context.Service<
+	PdfText,
+	{
+		/** The PDF's text, or "" for a scan. At most MAX_READS_AT_ONCE at once; the timeout counts from the read's turn. */
+		readonly extract: (data: Buffer, timeout?: Duration.Input) => Effect.Effect<string, PdfTextError>;
+	}
+>()("ponder/files/PdfText") {}
+
+const make = Effect.gen(function* () {
+	const readers = yield* Semaphore.make(MAX_READS_AT_ONCE);
+
+	const extract = Effect.fn("pdf.extract_text")(function* (data: Buffer, timeout: Duration.Input = TIMEOUT) {
+		yield* Tracing.annotate({ "ponder.bytes": data.length });
+		const waiting = yield* Clock.currentTimeMillis;
+		return yield* readers.withPermit(
+			Effect.gen(function* () {
+				yield* Tracing.annotate({ "ponder.wait_ms": (yield* Clock.currentTimeMillis) - waiting });
+				const text = yield* readInWorker(data).pipe(
+					Effect.timeoutOrElse({
+						duration: timeout,
+						orElse: () => Effect.fail(new PdfTextError({ reason: "timeout", seconds: Duration.toSeconds(timeout) })),
+					}),
+				);
+				yield* Tracing.annotate({ "ponder.chars": text.length });
+				return text;
+			}),
+		);
+	});
+
+	return PdfText.of({ extract });
+});
+
+export const layer = Layer.effect(PdfText, make);
+
+/** One worker for one read. It is stopped when the read ends, fails or is interrupted (a timeout). */
+const readInWorker = (data: Buffer) =>
+	Effect.acquireRelease(Effect.sync(() => startWorker(data)), ({ worker }) => Effect.promise(() => worker.terminate())).pipe(
+		Effect.flatMap(({ answer }) => Deferred.await(answer)),
+		Effect.scoped,
+	);
+
+/** Starts the worker and listens to it at once, so no answer comes before the listeners. */
+function startWorker(data: Buffer) {
+	// A copy, which the worker takes over. The caller keeps its buffer.
+	const bytes = new Uint8Array(data);
+	const worker = new Worker(WORKER, {
+		workerData: bytes,
+		transferList: [bytes.buffer],
+		resourceLimits: { maxOldGenerationSizeMb: MAX_HEAP_MB, maxYoungGenerationSizeMb: 32 },
+	});
+	const answer = Deferred.makeUnsafe<string, PdfTextError>();
+	worker.once("message", (text: string) => Deferred.doneUnsafe(answer, Effect.succeed(text)));
+	// Out of memory comes here too.
+	worker.once("error", (error) => Deferred.doneUnsafe(answer, Effect.fail(new PdfTextError({ reason: "failed", cause: error }))));
+	worker.once("exit", () => Deferred.doneUnsafe(answer, Effect.fail(new PdfTextError({ reason: "stopped" }))));
+	return { worker, answer };
+}

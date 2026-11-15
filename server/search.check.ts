@@ -6,10 +6,15 @@
  */
 import assert from "node:assert/strict";
 import { lookup } from "node:dns/promises";
-import { searchBackend } from "./search/backend.ts";
 import { isPrivate } from "./net/NetGuard.ts";
-import { fetchPage } from "./search/fetch-page.ts";
-import { executeWebFetch } from "./search/tool.ts";
+import { runPromise } from "./runtime/runtime.ts";
+import * as SearchBackend from "./search/backend.ts";
+import { fetchPage as fetchPageEffect } from "./search/fetch-page.ts";
+import { executeWebFetch as executeWebFetchEffect } from "./search/tool.ts";
+
+// On the app's runtime: NetGuard for the pages, and OpenRouter's key for --live.
+const fetchPage = (address: string) => runPromise(fetchPageEffect(address));
+const executeWebFetch = (input: { url: string }) => runPromise(executeWebFetchEffect(input));
 
 const live = process.argv.includes("--live");
 let failed = 0;
@@ -69,7 +74,7 @@ if (live) {
 	});
 
 	await check("a search returns results with addresses and text, and a cost", async () => {
-		const reply = await searchBackend().search("Vercel AI SDK latest release");
+		const reply = await runPromise(SearchBackend.SearchBackend.use((backend) => backend.search("Vercel AI SDK latest release")));
 		assert.ok(reply.results.length >= 2, `${reply.results.length} results`);
 		assert.ok(reply.results.every((result) => result.url.startsWith("http") && result.text.length > 0));
 		assert.ok((reply.costUsd ?? 0) > 0, "no cost");

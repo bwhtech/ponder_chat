@@ -8,22 +8,22 @@ import type { hc } from "hono/client";
 import { HTTPException } from "hono/http-exception";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import { z } from "zod";
 import { ARTIFACT_CDNS } from "../shared/cdns.ts";
 import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
-import { displayName } from "./admin/people.ts";
-import { appOrigin, auth, type SignedInEnv } from "./auth.ts";
+import type { SignedInEnv } from "./auth.ts";
+import * as Auth from "./auth/Auth.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
-import { sessionOf } from "./session-cache.ts";
-import { creditStatus } from "./credits.ts";
-import { askForCredits } from "./extra-credits.ts";
-import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
-import { memoryFor } from "./memory.ts";
+import * as Credits from "./credits/Credits.ts";
+import * as Files from "./files.ts";
+import { MAX_FILE_BYTES, refusalText } from "./files.ts";
+import * as Memory from "./memory.ts";
 import { memoryApi } from "./memory/routes.ts";
 import * as Models from "./models/Models.ts";
-import * as Notify from "./notify/Notify.ts";
-import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
+import type { LimitName } from "./limits/RateLimits.ts";
+import { limitPerPerson } from "./rate-limit.ts";
 import { searchThreads } from "./thread-search.ts";
 import * as Database from "./runtime/Database.ts";
 import { route } from "./runtime/route.ts";
@@ -89,16 +89,16 @@ app.get("/health", (c) =>
 app.get("/oauth/mcp/callback", oauthCallback);
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
-app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
+app.on(["GET", "POST"], "/api/auth/*", (c) => route(c, Auth.Auth.use((auth) => auth.handler(c.req.raw))));
 app.use("/api/*", async (c, next) => {
-	const session = await sessionOf(c.req.raw.headers);
-	if (!session) return c.json({ error: "Sign in first." }, 401);
-	c.set("user", session.user);
+	const session = await route(c, Auth.Auth.use((auth) => auth.session(c.req.raw.headers)));
+	if (Option.isNone(session)) return c.json({ error: "Sign in first." }, 401);
+	c.set("user", session.value.user);
 	await next();
 });
 const userOf = (c: Context<Env>) => c.get("user").id;
 /** At most so many uses per person (rate-limit.ts). */
-const perPerson = (limit: RateLimit, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
+const perPerson = (limit: LimitName, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
 
 // A repeated or odd query value is ignored, not refused.
 const searchQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
@@ -121,7 +121,7 @@ const uploadLimit = bodyLimit({
  */
 const api = app
 	// Who is signed in, their role (read from the database, not the cookie), and their credits for today.
-	.get("/api/me", async (c) => c.json(await meOf(c.get("user"))))
+	.get("/api/me", (c) => route(c, Effect.map(meOf(c.get("user")), (me) => c.json(me))))
 
 	// The admin pages' API (admin/routes.ts). Every route there needs the admin role.
 	.route("/api/admin", adminApi)
@@ -144,22 +144,23 @@ const api = app
 	)
 
 	// The skills that are on, for the $ menu: names and descriptions, not the instructions.
-	.get("/api/skills", async (c) => c.json({ skills: await skillOptions() }))
+	.get("/api/skills", (c) => route(c, Effect.map(skillOptions, (skills) => c.json({ skills }))))
 
-	.get("/api/credits", async (c) => c.json(await creditStatus(userOf(c))))
+	.get("/api/credits", (c) => route(c, Effect.map(Credits.Credits.use((credits) => credits.status(userOf(c))), (status) => c.json(status))))
 
-	// Out of credits: ask the admins for more (extra-credits.ts). One request waits at a time.
-	.post("/api/credits/request", perPerson(creditRequestLimit), async (c) => {
-		const status = await creditStatus(userOf(c));
-		if (status.request?.status === "pending") return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
-		if (status.remaining > 0) return c.json({ error: "You still have credits for today." }, 400);
-		if (!(await askForCredits(userOf(c)))) return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
-		const { name, email } = c.get("user");
-		const used = status.used >= 100 ? Math.round(status.used) : status.used;
-		const message = `${displayName(name, email)} asked for more credits (${used} of ${status.limit} used today).`;
-		await runPromise(Notify.Notify.use((notify) => notify.admins("Ponder Chat: credit request", message, `${appOrigin(c.req.raw.headers)}/admin/requests`)));
-		return c.json(await creditStatus(userOf(c)));
-	})
+	// Out of credits: ask the admins for more (credits/ExtraCredits.ts). One request waits at a time.
+	.post("/api/credits/request", perPerson("creditRequest"), (c) =>
+		route(
+			c,
+			Effect.flatMap(Auth.appOrigin(c.req.raw.headers), (origin) =>
+				Effect.map(Credits.Credits.use((credits) => credits.request(c.get("user"), origin)), (status) => c.json(status)),
+			),
+			{
+				AlreadyAsked: (error, c) => c.json({ error: error.message }, 409),
+				CreditsLeft: (error, c) => c.json({ error: error.message }, 400),
+			},
+		),
+	)
 
 	// The list revalidates by its content and goes gzipped; one thread has its own cache (thread-cache.ts).
 	.get("/api/threads", compress(), etag(), (c) =>
@@ -173,8 +174,11 @@ const api = app
 	)
 
 	// Search in the person's chats (thread-search.ts). Before /api/threads/:id, which would take "search" as an id.
-	.get("/api/threads/search", perPerson(searchLimit), validate("query", searchQuery), async (c) =>
-		c.json({ threads: await searchThreads(userOf(c), c.req.valid("query").q) }),
+	.get("/api/threads/search", perPerson("search"), validate("query", searchQuery), (c) =>
+		route(
+			c,
+			Effect.map(searchThreads(userOf(c), c.req.valid("query").q), (threads) => c.json({ threads })),
+		),
 	)
 
 	.patch("/api/threads/:id", validate("json", threadTitle), (c) =>
@@ -192,14 +196,14 @@ const api = app
 		(await deleteChat(c.req.param("id"), userOf(c))) ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404),
 	)
 
-	.get("/api/threads/:id", (c) => threadResponse(c, c.req.param("id"), userOf(c)))
+	.get("/api/threads/:id", (c) => route(c, threadResponse(c, c.req.param("id"), userOf(c))))
 
 	// A run with no messages fails before it writes, and its stream would never close, so chatBody refuses it.
-	.post("/api/chat", perPerson(chatLimit, { plain: true }), validate("json", chatBody, { error: "Nothing to send.", plain: true }), async (c) => {
+	.post("/api/chat", perPerson("chat", { plain: true }), validate("json", chatBody, { error: "Nothing to send.", plain: true }), async (c) => {
 		const body = c.req.valid("json");
 		// The chat transport shows the response text as the error, so this one is plain text.
 		const checking = Date.now();
-		const credits = await creditStatus(userOf(c));
+		const credits = await route(c, Credits.Credits.use((credits) => credits.status(userOf(c))));
 		const checked = Date.now();
 		if (credits.remaining <= 0) return c.text(outOfCredits(credits.resetsAt), 402);
 		const reply = await startReply({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model });
@@ -207,7 +211,7 @@ const api = app
 		// Measured before the run had an id, so recorded into its trace now (server/tracing/reply-trace.ts).
 		if (!reply.followed) recordReplySpan(reply.runId, "credits.check", checking, checked);
 		// A new thread gets a name from a cheap model while the reply is written (thread-title.ts).
-		if (!reply.followed && isFirstMessage(body.messages)) withReplyTrace(reply.runId, () => void nameThread({ threadId: body.id, user: userOf(c) }, body.messages));
+		if (!reply.followed && isFirstMessage(body.messages)) withReplyTrace(reply.runId, () => void runPromise(nameThread({ threadId: body.id, user: userOf(c) }, body.messages)));
 		return createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } });
 	})
 
@@ -231,32 +235,47 @@ const api = app
 		const threadId = c.req.param("id");
 		const wait = Boolean(c.req.valid("query").wait);
 		if (wait) await whenReplyFinished(threadId);
-		return c.json({ saves: await memoryFor(userOf(c)).threadSaves(threadId, { settle: wait }) });
+		return route(c, Effect.map(Memory.Memory.use((memory) => memory.threadSaves(userOf(c), threadId, { settle: wait })), (saves) => c.json({ saves })));
 	})
 
 	// The upload is a form, read by the route: a form validator would read the body
 	// itself and turn "too large" (uploadLimit) into a 400.
-	.post("/api/files", perPerson(uploadRate), uploadLimit, async (c) => {
+	.post("/api/files", perPerson("upload"), uploadLimit, async (c) => {
 		const form = await c.req.formData();
 		const file = form.get("file");
 		if (!(file instanceof File)) return c.json({ error: "No file in the upload." }, 400);
-		const result = await saveFile(userOf(c), file);
-		return "error" in result ? c.json(result, 400) : c.json(result.file);
+		return route(
+			c,
+			Effect.map(
+				Files.Files.use((files) => files.save(userOf(c), file)),
+				(stored) => c.json(stored),
+			),
+			{ FileRefused: (refused, c) => c.json({ error: refusalText(file.name, refused) }, 400) },
+		);
 	})
 
-	.get("/api/files/:id", async (c) => {
-		const file = await loadFile(c.req.param("id"), userOf(c));
-		if (!file) return c.json({ error: "Not found" }, 404);
-		// Only types that cannot run script open in the browser. Anything else (HTML or SVG that Python wrote) downloads, sandboxed.
-		const inline = INLINE_TYPES.has(file.media_type);
-		return c.body(new Uint8Array(file.data), 200, {
-			"Content-Type": file.media_type,
-			"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
-			"Cache-Control": "private, max-age=31536000, immutable",
-			"X-Content-Type-Options": "nosniff",
-			...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
-		});
-	})
+	.get("/api/files/:id", (c) =>
+		route(
+			c,
+			Effect.map(
+				Files.Files.use((files) => files.load(c.req.param("id"), userOf(c))),
+				Option.match({
+					onNone: () => c.json({ error: "Not found" }, 404),
+					onSome: (file) => {
+						// Only types that cannot run script open in the browser. Anything else (HTML or SVG that Python wrote) downloads, sandboxed.
+						const inline = INLINE_TYPES.has(file.media_type);
+						return c.body(new Uint8Array(file.data), 200, {
+							"Content-Type": file.media_type,
+							"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+							"Cache-Control": "private, max-age=31536000, immutable",
+							"X-Content-Type-Options": "nosniff",
+							...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
+						});
+					},
+				}),
+			),
+		),
+	)
 
 	// Tokens and cost of a person's runs, optionally for one thread.
 	.get("/api/usage", validate("query", usageQuery), (c) =>

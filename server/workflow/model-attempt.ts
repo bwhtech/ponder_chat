@@ -4,7 +4,7 @@ import { isStepCount, jsonSchema, streamText, tool, wrapLanguageModel, type Text
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
 import * as Option from "effect/Option";
 import { isAuto } from "../../shared/auto-model.ts";
-import { saveTokenRatio } from "../compaction/store.ts";
+import * as CompactionStore from "../compaction/store.ts";
 import { measuredRatio } from "../compaction/tokens.ts";
 import * as AutoRouter from "../models/AutoRouter.ts";
 import { runPromise } from "../runtime/runtime.ts";
@@ -112,7 +112,7 @@ class ModelAttempt {
 	private async measureRatio(inputTokens: number) {
 		const ratio = this.call.estimated && measuredRatio(inputTokens, this.call.estimated);
 		if (!ratio) return;
-		await saveTokenRatio(this.call.threadId, this.call.modelId, ratio).catch((error) => console.warn("model-attempt: could not save the token ratio:", error));
+		await runPromise(CompactionStore.CompactionStore.use((store) => store.saveTokenRatio(this.call.threadId, this.call.modelId, ratio))).catch((error) => console.warn("model-attempt: could not save the token ratio:", error));
 	}
 
 	/** The error to throw: another attempt after a wait, or the end of the reply. */

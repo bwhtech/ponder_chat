@@ -1,9 +1,11 @@
 import { Readability } from "@mozilla/readability";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import { parseHTML } from "linkedom";
 import { isIP } from "node:net";
-import { fetch } from "undici";
+import { fetch, type Response } from "undici";
 import * as NetGuard from "../net/NetGuard.ts";
-import { runPromise } from "../runtime/runtime.ts";
+import { withPeer } from "../tracing/http.ts";
 
 /**
  * web_fetch: reads a page on our own server, so no other company sees what is read.
@@ -13,59 +15,131 @@ import { runPromise } from "../runtime/runtime.ts";
 const MAX_BYTES = 3_000_000;
 const MAX_CHARS = 20_000;
 const MAX_REDIRECTS = 5;
-const TIMEOUT_MS = 20_000;
+/** For each request, with the reading of the last one's body, as AbortSignal.timeout gave each fetch. */
+const TIMEOUT = "20 seconds";
 const USER_AGENT = "PonderChat/1.0 (+https://chat.bwh.tech)";
 const HTML = /^(text\/html|application\/xhtml\+xml)/;
 const TEXT = /^(text\/(plain|markdown|csv)|application\/json)/;
 
 export type FetchedPage = { url: string; title: string; text: string; truncated: boolean };
 
-export async function fetchPage(address: string): Promise<FetchedPage> {
-	const response = await fetchFollowing(address);
+/** An address web_fetch does not read, or a page that did not answer with one. Fixed text: never the address. */
+export class PageRefused extends Schema.TaggedError<PageRefused>()("PageRefused", {
+	reason: Schema.Literals(["invalid", "scheme", "port", "credentials", "private", "redirects", "status"]),
+	status: Schema.optional(Schema.Number),
+}) {
+	override get message() {
+		switch (this.reason) {
+			case "invalid":
+				return "Invalid URL";
+			case "scheme":
+				return "Only http and https addresses can be read.";
+			case "port":
+				return "Only the usual web ports (80 and 443) can be read.";
+			case "credentials":
+				return "Addresses with a user name or password cannot be read.";
+			case "private":
+				return "That address is on a private network.";
+			case "redirects":
+				return "The page redirects too many times.";
+			case "status":
+				return `The page answered ${this.status}.`;
+		}
+	}
+}
+
+/**
+ * The request failed: undici's error is the cause (its own cause names the reason, such
+ * as a name that resolves to a private address), or it took too long.
+ */
+export class PageUnreachable extends Schema.TaggedError<PageUnreachable>()("PageUnreachable", {
+	timedOut: Schema.Boolean,
+	cause: Schema.optional(Schema.Defect()),
+}) {
+	override get message() {
+		return this.timedOut ? "The page took too long to answer." : "The page could not be reached.";
+	}
+}
+
+type Agent = NetGuard.NetGuard["Service"]["publicAgent"];
+type Hop = { _tag: "Redirect"; location: string } | { _tag: "Page"; page: FetchedPage };
+
+/** The page's title and readable text, cut to MAX_CHARS. No span of its own: web_fetch.read (tool.ts) is its span. */
+export const fetchPage = Effect.fnUntraced(function* (address: string) {
+	const { publicAgent } = yield* NetGuard.NetGuard;
+	let url = yield* checkedUrl(address);
+	for (let redirects = 0; ; redirects++) {
+		const hop = yield* request(url, publicAgent, address);
+		if (hop._tag === "Page") return hop.page;
+		if (redirects >= MAX_REDIRECTS) return yield* new PageRefused({ reason: "redirects" });
+		url = yield* checkedUrl(new URL(hop.location, url).toString());
+	}
+});
+
+/** One request, in its own time: a redirect to follow, or the page read to its end. */
+const request = (url: URL, agent: Agent, address: string) =>
+	Effect.tryPromise({
+		// Its request spans say "web", and nothing of the address (tracing/http.ts).
+		try: (signal) => withPeer("web", () => hop(url, agent, address, signal)),
+		catch: (cause) => new PageUnreachable({ timedOut: false, cause }),
+	}).pipe(
+		Effect.timeoutOrElse({ duration: TIMEOUT, orElse: () => Effect.fail(new PageUnreachable({ timedOut: true })) }),
+		Effect.flatMap((answer) => (answer instanceof PageRefused ? Effect.fail(answer) : Effect.succeed(answer))),
+	);
+
+async function hop(url: URL, agent: Agent, address: string, signal: AbortSignal): Promise<Hop | PageRefused> {
+	const response = await fetch(url, {
+		dispatcher: agent,
+		redirect: "manual",
+		signal,
+		headers: { "user-agent": USER_AGENT, accept: "text/html,text/plain;q=0.9,*/*;q=0.5" },
+	});
+	const location = response.headers.get("location");
+	if (response.status >= 300 && response.status < 400 && location) {
+		await response.body?.cancel();
+		return { _tag: "Redirect", location };
+	}
+	return read(response, address);
+}
+
+/** The page's answer. `address` is the one the model asked for, the page's address when the answer has none. */
+async function read(response: Response, address: string): Promise<Hop | PageRefused> {
 	const type = response.headers.get("content-type") ?? "";
-	if (!response.ok) throw new Error(`The page answered ${response.status}.`);
+	if (!response.ok) {
+		await response.body?.cancel();
+		return new PageRefused({ reason: "status", status: response.status });
+	}
+	const url = response.url || address;
 	// An image or another file is there, which is often what the model wants to know. Not an error.
 	if (!HTML.test(type) && !TEXT.test(type)) {
 		await response.body?.cancel();
 		const kind = type.split(";")[0] || "a file of an unknown type";
-		return { url: response.url || address, title: "", text: `The address answers with ${kind}, not text, so it cannot be read. It exists.`, truncated: false };
+		return { _tag: "Page", page: { url, title: "", text: `The address answers with ${kind}, not text, so it cannot be read. It exists.`, truncated: false } };
 	}
 
 	const raw = decode(await readCapped(response.body), type);
 	const page = HTML.test(type) ? readable(raw) : { title: "", text: raw };
 	const text = tidy(page.text);
-	return { url: response.url || address, title: page.title, text: text.slice(0, MAX_CHARS), truncated: text.length > MAX_CHARS };
-}
-
-async function fetchFollowing(address: string) {
-	let url = checkedUrl(address);
-	const { publicAgent } = await runPromise(NetGuard.NetGuard);
-	for (let redirects = 0; ; redirects++) {
-		const response = await fetch(url, {
-			dispatcher: publicAgent,
-			redirect: "manual",
-			signal: AbortSignal.timeout(TIMEOUT_MS),
-			headers: { "user-agent": USER_AGENT, accept: "text/html,text/plain;q=0.9,*/*;q=0.5" },
-		});
-		const location = response.headers.get("location");
-		if (response.status < 300 || response.status >= 400 || !location) return response;
-		await response.body?.cancel();
-		if (redirects >= MAX_REDIRECTS) throw new Error("The page redirects too many times.");
-		url = checkedUrl(new URL(location, url).toString());
-	}
+	return { _tag: "Page", page: { url, title: page.title, text: text.slice(0, MAX_CHARS), truncated: text.length > MAX_CHARS } };
 }
 
 /** Public http(s) on the usual ports only. Host names are checked again when they resolve. */
-function checkedUrl(address: string) {
-	const url = new URL(address);
-	if (url.protocol !== "http:" && url.protocol !== "https:") throw new Error("Only http and https addresses can be read.");
-	if (url.port && url.port !== "80" && url.port !== "443") throw new Error("Only the usual web ports (80 and 443) can be read.");
-	if (url.username || url.password) throw new Error("Addresses with a user name or password cannot be read.");
-	const host = url.hostname.replace(/^\[|\]$/g, "");
-	// A connection to an IP address skips the lookup, so it is checked here.
-	if (isIP(host) && NetGuard.isPrivate(host)) throw new Error("That address is on a private network.");
-	return url;
-}
+const checkedUrl = (address: string) =>
+	Effect.suspend(() => {
+		let url: URL;
+		try {
+			url = new URL(address);
+		} catch {
+			return Effect.fail(new PageRefused({ reason: "invalid" }));
+		}
+		if (url.protocol !== "http:" && url.protocol !== "https:") return Effect.fail(new PageRefused({ reason: "scheme" }));
+		if (url.port && url.port !== "80" && url.port !== "443") return Effect.fail(new PageRefused({ reason: "port" }));
+		if (url.username || url.password) return Effect.fail(new PageRefused({ reason: "credentials" }));
+		const host = url.hostname.replace(/^\[|\]$/g, "");
+		// A connection to an IP address skips the lookup, so it is checked here.
+		if (isIP(host) && NetGuard.isPrivate(host)) return Effect.fail(new PageRefused({ reason: "private" }));
+		return Effect.succeed(url);
+	});
 
 async function readCapped(body: AsyncIterable<Uint8Array> | null) {
 	const chunks: Uint8Array[] = [];

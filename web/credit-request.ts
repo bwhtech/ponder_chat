@@ -6,7 +6,7 @@ import { ApiError, client, unwrap } from "./api";
 
 /**
  * Asking the admins for more credits, from the out-of-credits notice in the chat
- * (server/extra-credits.ts). While a request waits, the page asks every 30 seconds, and
+ * (server/credits/ExtraCredits.ts). While a request waits, the page asks every 30 seconds, and
  * when the window gets focus, whether it was answered. An approval raises today's limit,
  * so the notice goes away and a toast says how many credits came.
  */

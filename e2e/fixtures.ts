@@ -11,7 +11,7 @@ import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, ReceivedSumm
  * - `db` is Ponder's database, for what a test can't set up through the app, such as an invite.
  *
  * Each test's browser has its own IP address in `cf-connecting-ip`, which Ponder trusts
- * (server/auth.ts), so sign-in's limits per address never stop parallel tests.
+ * (server/auth/Auth.ts), so sign-in's limits per address never stop parallel tests.
  */
 export class Fake {
 	/** Only what came after the test started counts, so a server kept running between runs (start.ts) does not mix them up. */

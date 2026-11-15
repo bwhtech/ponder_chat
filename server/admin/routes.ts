@@ -1,47 +1,43 @@
-import { isAPIError } from "better-auth/api";
-import { type Context, Hono } from "hono";
+import { type Context, Hono, type MiddlewareHandler } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { z } from "zod";
-import { recordAdminEvent, type AdminEvent } from "../admin-events.ts";
-import { requireAdmin } from "../admins.ts";
-import { appOrigin, auth, type SignedInEnv } from "../auth.ts";
-import { setDailyCredits } from "../credits.ts";
-import { sql } from "../db.ts";
-import * as Mailer from "../email/Mailer.ts";
-import { decideRequest, grantCredits, pendingCount, type Decision } from "../extra-credits.ts";
-import { allow, disallow, setInviteCredits } from "../invites.ts";
-import * as Models from "../models/Models.ts";
-import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
-import { runPromise } from "../runtime/runtime.ts";
+import type { SignedInEnv } from "../auth.ts";
+import * as Auth from "../auth/Auth.ts";
+import * as ExtraCredits from "../credits/ExtraCredits.ts";
+import * as Accounts from "../people/Accounts.ts";
+import { route } from "../runtime/route.ts";
 import * as Settings from "../settings/Settings.ts";
 import { MAX_BODY } from "../../shared/skill-file.ts";
-import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult, type SkillDetail } from "../skills.ts";
-import { activityPage } from "./activity.ts";
-import { listAdmins, listPeople, personDetail } from "./people.ts";
-import { overview, requestsReport } from "./reports.ts";
+import * as Skills from "../skills.ts";
+import type { SaveResult, SkillDetail } from "../skills.ts";
+import * as AdminActions from "./AdminActions.ts";
+import * as AdminEvents from "./AdminEvents.ts";
+import * as AdminReports from "./AdminReports.ts";
 import { validate } from "../validate.ts";
-
-// What several routes read (settings/Settings.ts, openrouter/OpenRouterKey.ts, models/Models.ts).
-const currentSettings = Settings.Settings.use((settings) => settings.get);
-const keyStatus = OpenRouterKey.OpenRouterKey.use((key) => key.status);
-const privateModels = Models.Models.use((models) => models.privateModels);
 
 /**
  * The API behind /admin, mounted at /api/admin. Every route needs an admin (requireAdmin).
  * It returns usage numbers only: no route reads messages or thread titles.
  *
- * Role, ban and sign-out go through Better Auth's admin plugin (auth.api), which checks
- * the admin's session again and ends a banned person's sessions.
- *
- * Each change goes to the admin activity log (admin-events.ts) with `record`. The changes
- * made through Better Auth are logged in its hooks (admin-auth-events.ts), so not here.
+ * What a route reads is in AdminReports.ts, and what it changes in AdminActions.ts, which
+ * also records each change in the admin activity log (AdminEvents.ts). Role, ban and
+ * sign-out go through Better Auth's admin plugin, which logs them in its hooks.
  */
 type Env = SignedInEnv;
 
 const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const credits = z.number().int().min(0).max(1_000_000);
 const adminOf = (c: Context<Env>) => c.get("user").id;
+const actorOf = (c: Context<Env>): AdminActions.Actor => ({ id: c.get("user").id, email: c.get("user").email });
+
+/** One method of each service. */
+const reports = <A, E>(use: (service: AdminReports.AdminReports["Service"]) => Effect.Effect<A, E>) => AdminReports.AdminReports.use(use);
+const actions = <A, E>(use: (service: AdminActions.AdminActions["Service"]) => Effect.Effect<A, E>) => AdminActions.AdminActions.use(use);
+const skills = <A, E>(use: (service: Skills.Skills["Service"]) => Effect.Effect<A, E>) => Skills.Skills.use(use);
+/** The address the admin uses, for the links in emails (auth/Auth.ts). */
+const originOf = (c: Context<Env>) => Auth.appOrigin(c.req.raw.headers);
 
 /** A JSON body that fits the schema, or a 400. */
 const body = <Schema extends z.ZodType>(schema: Schema) => validate("json", schema, { error: "Check the values and try again." });
@@ -73,224 +69,230 @@ const activityQuery = z.object({
 	person: z.string().trim().optional().catch(undefined).transform((person) => person || undefined),
 });
 
+// The answers to the services' refusals.
+const notFound = (_: unknown, c: Context) => c.json({ error: "No one here." }, 404);
+/** A Better Auth admin endpoint's refusal, such as "You cannot ban yourself", passed on. */
+const refused = (error: Auth.AuthRefused, c: Context) => c.json({ error: error.reason }, error.status as ContentfulStatusCode);
+const ok = (c: Context) => () => c.json({ ok: true });
+
+/**
+ * Guards /api/admin/*: 403 unless the signed-in person is an admin. It reads the role from
+ * the database (people/Accounts.ts), because the session in the cookie can be five minutes old.
+ */
+const requireAdmin: MiddlewareHandler<Env> = async (c, next) => {
+	if (!(await route(c, Accounts.Accounts.use((accounts) => accounts.isAdmin(c.get("user").id))))) return c.json({ error: "Only admins can do this." }, 403);
+	await next();
+};
+
 export const adminApi = new Hono<Env>()
 	.use("*", requireAdmin)
 
 	// For the sidebar's counts.
-	.get("/summary", async (c) => {
-		const [[invites], pendingRequests] = await Promise.all([
-			sql<{ count: number }[]>`
-				select count(*)::int as count from allowed_emails a where not exists (select 1 from users u where lower(u.email) = a.email)`,
-			pendingCount(),
-		]);
-		return c.json({ pendingRequests, invited: invites.count });
-	})
+	.get("/summary", (c) => route(c, Effect.map(reports((service) => service.summary), (summary) => c.json(summary))))
 
-	.get("/overview", validate("query", overviewQuery), async (c) => c.json(await overview(c.req.valid("query").days)))
+	.get("/overview", validate("query", overviewQuery), (c) =>
+		route(c, Effect.map(reports((service) => service.overview(c.req.valid("query").days)), (overview) => c.json(overview))),
+	)
 
 	// The admin activity log, newest first. `before` is the last id of the page before; `person` a user id or an invite's email.
-	.get("/activity", validate("query", activityQuery), async (c) => {
+	.get("/activity", validate("query", activityQuery), (c) => {
 		const { before, person } = c.req.valid("query");
-		return c.json(await activityPage({ olderThan: before, person }));
+		return route(c, Effect.map(reports((service) => service.activity({ olderThan: before, person })), (page) => c.json(page)));
 	})
 
 	// People
 
-	.get("/people", async (c) => c.json({ people: await listPeople(), settings: await runPromise(currentSettings) }))
-
-	.get("/people/:id", async (c) => {
-		const detail = await personDetail(c.req.param("id"));
-		return detail ? c.json({ ...detail, settings: await runPromise(currentSettings) }) : c.json({ error: "No one here." }, 404);
-	})
-
-	// An invited person's id is their email: the limit then waits in the invite (invites.ts).
-	.put("/people/:id/daily-credits", body(z.object({ credits: credits.nullable() })), async (c) => {
-		const input = c.req.valid("json");
-		const id = c.req.param("id");
-		const target = id.includes("@") ? id.toLowerCase() : id;
-		const before = { dailyCredits: await ownDailyCredits(target) };
-		if (!(await saveDailyCredits(target, input.credits))) return notFound(c);
-		await record(c, "set-daily-credits", { target, before, after: { dailyCredits: input.credits } });
-		return c.json({ ok: true });
-	})
-
-	.post("/people/:id/grant", body(z.object({ credits: credits.min(1) })), async (c) => {
-		const input = c.req.valid("json");
-		const id = c.req.param("id");
-		if (!(await hasAccount(id))) return notFound(c);
-		await grantCredits(id, input.credits, adminOf(c));
-		await record(c, "grant-credits", { target: id, after: { credits: input.credits } });
-		return c.json({ ok: true });
-	})
-
-	.put("/people/:id/role", body(z.object({ role: z.enum(["admin", "user"]) })), async (c) => {
-		const input = c.req.valid("json");
-		const userId = c.req.param("id");
-		if (input.role === "user" && (await listAdmins()).every((admin) => admin.id === userId)) {
-			return c.json({ error: "Ponder Chat needs at least one admin." }, 400);
-		}
-		return viaAuth(c, () => auth.api.setRole({ body: { userId, role: input.role }, headers: c.req.raw.headers }));
-	})
-
-	.post("/people/:id/sign-out", (c) =>
-		viaAuth(c, () => auth.api.revokeUserSessions({ body: { userId: c.req.param("id") }, headers: c.req.raw.headers })),
+	.get("/people", (c) =>
+		route(
+			c,
+			Effect.map(
+				Effect.all([reports((service) => service.people), Settings.Settings.use((settings) => settings.get)]),
+				([people, settings]) => c.json({ people, settings }),
+			),
+		),
 	)
 
-	.post("/people/:id/ban", body(z.object({ reason: z.string().trim().max(500).default(""), days: z.number().int().min(1).max(3650).nullable() })), async (c) => {
+	.get("/people/:id", (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const detail = yield* reports((service) => service.person(c.req.param("id")));
+				if (Option.isNone(detail)) return c.json({ error: "No one here." }, 404);
+				return c.json({ ...detail.value, settings: yield* Settings.Settings.use((settings) => settings.get) });
+			}),
+		),
+	)
+
+	// An invited person's id is their email: the limit then waits in the invite (people/Invites.ts).
+	.put("/people/:id/daily-credits", body(z.object({ credits: credits.nullable() })), (c) =>
+		route(c, Effect.map(actions((service) => service.setDailyCredits(actorOf(c), c.req.param("id"), c.req.valid("json").credits)), ok(c)), { NoOne: notFound }),
+	)
+
+	.post("/people/:id/grant", body(z.object({ credits: credits.min(1) })), (c) =>
+		route(c, Effect.map(actions((service) => service.grant(actorOf(c), c.req.param("id"), c.req.valid("json").credits)), ok(c)), { NoOne: notFound }),
+	)
+
+	.put("/people/:id/role", body(z.object({ role: z.enum(["admin", "user"]) })), (c) =>
+		route(c, Effect.map(actions((service) => service.setRole(c.req.raw.headers, c.req.param("id"), c.req.valid("json").role)), ok(c)), {
+			LastAdmin: (error, c) => c.json({ error: error.message }, 400),
+			AuthRefused: refused,
+		}),
+	)
+
+	.post("/people/:id/sign-out", (c) =>
+		route(c, Effect.map(actions((service) => service.signOut(c.req.raw.headers, c.req.param("id"))), ok(c)), { AuthRefused: refused }),
+	)
+
+	.post("/people/:id/ban", body(z.object({ reason: z.string().trim().max(500).default(""), days: z.number().int().min(1).max(3650).nullable() })), (c) => {
 		const input = c.req.valid("json");
-		const banned = { userId: c.req.param("id"), banReason: input.reason || undefined, banExpiresIn: input.days ? input.days * 86_400 : undefined };
-		return viaAuth(c, () => auth.api.banUser({ body: banned, headers: c.req.raw.headers }));
+		return route(c, Effect.map(actions((service) => service.ban(c.req.raw.headers, { userId: c.req.param("id"), reason: input.reason, days: input.days })), ok(c)), {
+			AuthRefused: refused,
+		});
 	})
 
 	.post("/people/:id/unban", (c) =>
-		viaAuth(c, () => auth.api.unbanUser({ body: { userId: c.req.param("id") }, headers: c.req.raw.headers })),
+		route(c, Effect.map(actions((service) => service.unban(c.req.raw.headers, c.req.param("id"))), ok(c)), { AuthRefused: refused }),
 	)
 
 	// Invites
 
-	.post("/invites", body(inviteBody), async (c) => {
-		const input = c.req.valid("json");
-		const emails = [...new Set(input.emails)];
-		const taken = await sql<{ email: string }[]>`
-			select email from allowed_emails where email in ${sql(emails)}
-			union select lower(email) from users where lower(email) in ${sql(emails)}`;
-		if (taken.length) return c.json({ error: `Already invited: ${taken.map((row) => row.email).join(", ")}` }, 409);
-		for (const email of emails) await allow(email, { note: input.note, invitedBy: adminOf(c), dailyCredits: input.dailyCredits });
-		const notSent = input.sendEmail ? await emailInvites(c, emails) : [];
-		for (const email of emails) {
-			const emailed = input.sendEmail && !notSent.includes(email);
-			await record(c, "invite", { target: email, after: { note: input.note, dailyCredits: input.dailyCredits, emailed } });
-		}
-		return c.json({ invited: emails.length, notSent });
-	})
+	.post("/invites", body(inviteBody), (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const origin = yield* originOf(c);
+				const result = yield* actions((service) => service.invite(actorOf(c), origin, c.req.valid("json")));
+				if ("taken" in result) return c.json({ error: `Already invited: ${result.taken.join(", ")}` }, 409);
+				return c.json({ invited: result.invited, notSent: result.notSent });
+			}),
+		),
+	)
 
-	.post("/invites/:email/send", async (c) => {
-		const email = c.req.param("email").toLowerCase();
-		const [invite] = await sql`select 1 from allowed_emails where email = ${email}`;
-		if (!invite) return notFound(c);
-		const notSent = await emailInvites(c, [email]);
-		if (notSent.length) return c.json({ error: "The email could not be sent." }, 502);
-		await record(c, "send-invite", { target: email });
-		return c.json({ ok: true });
-	})
+	.post("/invites/:email/send", (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const origin = yield* originOf(c);
+				yield* actions((service) => service.sendInvite(actorOf(c), origin, c.req.param("email").toLowerCase()));
+				return c.json({ ok: true });
+			}),
+			{ NoOne: notFound, EmailNotSent: (_, c) => c.json({ error: "The email could not be sent." }, 502) },
+		),
+	)
 
-	.delete("/invites/:email", async (c) => {
-		const email = c.req.param("email").toLowerCase();
-		if (await hasAccount(email)) return c.json({ error: "They have signed in already. Ban them instead." }, 409);
-		if (!(await disallow(email))) return notFound(c);
-		await record(c, "remove-invite", { target: email });
-		return c.json({ ok: true });
-	})
-
-	// Settings
-
-	.get("/settings", async (c) =>
-		c.json({
-			...(await runPromise(currentSettings)),
-			admins: await listAdmins(),
-			openRouterKey: await runPromise(keyStatus),
-			// Only models with a private (ZDR) endpoint: another would fall back to the chat's own model.
-			models: (await runPromise(privateModels)).map(({ id, name }) => ({ id, name })),
+	.delete("/invites/:email", (c) =>
+		route(c, Effect.map(actions((service) => service.removeInvite(actorOf(c), c.req.param("email").toLowerCase())), ok(c)), {
+			SignedInAlready: (error, c) => c.json({ error: error.message }, 409),
+			NoOne: notFound,
 		}),
 	)
 
-	.put("/settings", body(z.object({ defaultDailyCredits: credits, creditsPerUsd: z.number().int().min(1).max(1_000_000_000) })), async (c) => {
-		const input = c.req.valid("json");
-		const { defaultDailyCredits, creditsPerUsd } = await runPromise(currentSettings);
-		await runPromise(Settings.Settings.use((settings) => settings.update(input, adminOf(c))));
-		await record(c, "update-settings", { before: { defaultDailyCredits, creditsPerUsd }, after: input });
-		return c.json(await runPromise(currentSettings));
-	})
+	// Settings
+
+	.get("/settings", (c) => route(c, Effect.map(actions((service) => service.settings), (settings) => c.json(settings))))
+
+	.put("/settings", body(z.object({ defaultDailyCredits: credits, creditsPerUsd: z.number().int().min(1).max(1_000_000_000) })), (c) =>
+		route(c, Effect.map(actions((service) => service.updateSettings(actorOf(c), c.req.valid("json"))), (settings) => c.json(settings))),
+	)
 
 	// How PDFs reach models that can't read them (settings/Settings.ts). Saved at once, apart from the credits.
-	.put("/settings/pdf-reading", body(z.object({ onServer: z.boolean() })), async (c) => {
-		const input = c.req.valid("json");
-		const before = { pdfTextOnServer: (await runPromise(currentSettings)).pdfTextOnServer };
-		await runPromise(Settings.Settings.use((settings) => settings.setPdfTextOnServer(input.onServer, adminOf(c))));
-		await record(c, "set-pdf-reading", { before, after: { pdfTextOnServer: input.onServer } });
-		return c.json(await runPromise(currentSettings));
-	})
+	.put("/settings/pdf-reading", body(z.object({ onServer: z.boolean() })), (c) =>
+		route(c, Effect.map(actions((service) => service.setPdfReading(actorOf(c), c.req.valid("json").onServer)), (settings) => c.json(settings))),
+	)
 
 	// The model that writes a chat's summary when it gets too long (compaction/summarize.ts). A model with a private (ZDR) endpoint.
-	.put("/settings/compaction-model", body(z.object({ model: z.string() })), async (c) => {
-		const input = c.req.valid("json");
-		const models = await runPromise(privateModels);
-		if (!models.some((model) => model.id === input.model)) return c.json({ error: "That model has no private endpoint now. Choose another." }, 400);
-		const before = { compactionModel: (await runPromise(currentSettings)).compactionModel };
-		await runPromise(Settings.Settings.use((settings) => settings.setCompactionModel(input.model, adminOf(c))));
-		await record(c, "set-compaction-model", { before, after: { compactionModel: input.model } });
-		return c.json(await runPromise(currentSettings));
-	})
+	.put("/settings/compaction-model", body(z.object({ model: z.string() })), (c) =>
+		route(c, Effect.map(actions((service) => service.setCompactionModel(actorOf(c), c.req.valid("json").model)), (settings) => c.json(settings)), {
+			NoPrivateEndpoint: (error, c) => c.json({ error: error.message }, 400),
+		}),
+	)
 
 	// How much Auto may spend on a request (models/AutoRouter.ts).
-	.put("/settings/auto-cost-tier", body(z.object({ tier: z.enum(Settings.AUTO_COST_TIERS) })), async (c) => {
-		const input = c.req.valid("json");
-		const before = { autoCostTier: (await runPromise(currentSettings)).autoCostTier };
-		await runPromise(Settings.Settings.use((settings) => settings.setAutoCostTier(input.tier, adminOf(c))));
-		await record(c, "set-auto-cost-tier", { before, after: { autoCostTier: input.tier } });
-		return c.json(await runPromise(currentSettings));
-	})
+	.put("/settings/auto-cost-tier", body(z.object({ tier: z.enum(Settings.AUTO_COST_TIERS) })), (c) =>
+		route(c, Effect.map(actions((service) => service.setAutoCostTier(actorOf(c), c.req.valid("json").tier)), (settings) => c.json(settings))),
+	)
 
 	// Saved encrypted (secrets/Secrets.ts), and only after OpenRouter accepts it: a wrong key would stop every reply.
-	.put("/settings/openrouter-key", validate("json", z.object({ key: z.string().trim().min(20).max(500) }), { error: "Paste the whole key." }), async (c) => {
-		const input = c.req.valid("json");
-		const problem = await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.check(input.key)));
-		if (Option.isSome(problem)) return c.json({ error: problem.value }, 400);
-		await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.save(input.key, adminOf(c))));
-		// That the key changed, never the key or any part of it.
-		await record(c, "set-openrouter-key");
-		return c.json(await runPromise(keyStatus));
-	})
+	.put("/settings/openrouter-key", validate("json", z.object({ key: z.string().trim().min(20).max(500) }), { error: "Paste the whole key." }), (c) =>
+		route(c, Effect.map(actions((service) => service.setOpenRouterKey(actorOf(c), c.req.valid("json").key)), (status) => c.json(status)), {
+			KeyRefused: (error, c) => c.json({ error: error.reason }, 400),
+		}),
+	)
 
 	// Skills (skills.ts): Markdown files of instructions, on for everyone or off.
 
-	.get("/skills", async (c) => c.json({ skills: await listSkills() }))
+	.get("/skills", (c) => route(c, Effect.map(skills((service) => service.list), (list) => c.json({ skills: list }))))
 
-	.get("/skills/:id", async (c) => {
-		const id = skillId(c);
-		const skill = id && (await getSkill(id));
-		return skill ? c.json(skill) : noSkill(c);
-	})
+	.get("/skills/:id", (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const id = skillId(c);
+				const skill = id ? yield* skills((service) => service.get(id)) : Option.none<SkillDetail>();
+				return Option.isSome(skill) ? c.json(skill.value) : noSkill(c);
+			}),
+		),
+	)
 
-	.post("/skills", body(skillBody), async (c) => {
-		const { expectedUpdatedAt: _, ...fields } = c.req.valid("json");
-		const result = await saveSkill(fields, adminOf(c));
-		if (result.ok) await record(c, "create-skill", { after: skillFields(result.skill) });
-		return savedSkill(c, result);
-	})
+	.post("/skills", body(skillBody), (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const { expectedUpdatedAt: _, ...fields } = c.req.valid("json");
+				const result = yield* skills((service) => service.save(fields, adminOf(c)));
+				if (result.ok) yield* record(c, "create-skill", { after: skillFields(result.skill) });
+				return savedSkill(c, result);
+			}),
+		),
+	)
 
-	.put("/skills/:id", body(skillBody), async (c) => {
-		const id = skillId(c);
-		const input = c.req.valid("json");
-		if (!id) return noSkill(c);
-		const before = await getSkill(id);
-		const result = await saveSkill({ id, ...input }, adminOf(c));
-		if (result.ok) await record(c, "update-skill", { before: before && skillFields(before), after: skillFields(result.skill, before) });
-		return savedSkill(c, result);
-	})
+	.put("/skills/:id", body(skillBody), (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const id = skillId(c);
+				const input = c.req.valid("json");
+				if (!id) return noSkill(c);
+				const before = Option.getOrUndefined(yield* skills((service) => service.get(id)));
+				const result = yield* skills((service) => service.save({ id, ...input }, adminOf(c)));
+				if (result.ok) yield* record(c, "update-skill", { before: before && skillFields(before), after: skillFields(result.skill, before) });
+				return savedSkill(c, result);
+			}),
+		),
+	)
 
-	.put("/skills/:id/enabled", body(z.object({ enabled: z.boolean() })), async (c) => {
-		const id = skillId(c);
-		const input = c.req.valid("json");
-		const skill = id ? await getSkill(id) : undefined;
-		const result = id ? await setSkillEnabled(id, input.enabled, adminOf(c)) : "missing";
-		if (result === "empty") return c.json({ error: "Write the instructions before you turn the skill on." }, 400);
-		if (result !== "ok" || !skill) return noSkill(c);
-		await record(c, input.enabled ? "enable-skill" : "disable-skill", { after: { id: skill.id, name: skill.name, enabled: input.enabled } });
-		return c.json({ ok: true });
-	})
+	.put("/skills/:id/enabled", body(z.object({ enabled: z.boolean() })), (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const id = skillId(c);
+				const input = c.req.valid("json");
+				const skill = id ? Option.getOrUndefined(yield* skills((service) => service.get(id))) : undefined;
+				const result = id ? yield* skills((service) => service.setEnabled(id, input.enabled, adminOf(c))) : "missing";
+				if (result === "empty") return c.json({ error: "Write the instructions before you turn the skill on." }, 400);
+				if (result !== "ok" || !skill) return noSkill(c);
+				yield* record(c, input.enabled ? "enable-skill" : "disable-skill", { after: { id: skill.id, name: skill.name, enabled: input.enabled } });
+				return c.json({ ok: true });
+			}),
+		),
+	)
 
-	.delete("/skills/:id", async (c) => {
-		const id = skillId(c);
-		const skill = id ? await getSkill(id) : undefined;
-		if (!skill || !(await deleteSkill(skill.id, adminOf(c)))) return noSkill(c);
-		await record(c, "delete-skill", { before: skillFields(skill) });
-		return c.json({ ok: true });
-	})
+	.delete("/skills/:id", (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const id = skillId(c);
+				const skill = id ? Option.getOrUndefined(yield* skills((service) => service.get(id))) : undefined;
+				if (!skill || !(yield* skills((service) => service.remove(skill.id, adminOf(c))))) return noSkill(c);
+				yield* record(c, "delete-skill", { before: skillFields(skill) });
+				return c.json({ ok: true });
+			}),
+		),
+	)
 
-	// Requests for more credits (extra-credits.ts)
+	// Requests for more credits (credits/ExtraCredits.ts)
 
-	.get("/requests", async (c) => c.json(await requestsReport()))
+	.get("/requests", (c) => route(c, Effect.map(reports((service) => service.requests), (report) => c.json(report))))
 
 	.post("/requests/:id/approve", body(z.object({ credits: credits.min(1) })), (c) => answer(c, { status: "approved", credits: c.req.valid("json").credits }))
 
@@ -316,73 +318,21 @@ function skillFields(skill: SkillDetail, before?: SkillDetail) {
 }
 
 /** Records the answer, then emails the person. A failed email does not undo the answer. */
-async function answer(c: Context<Env>, decision: Decision) {
+function answer(c: Context<Env>, decision: ExtraCredits.Decision) {
 	const id = Number(c.req.param("id"));
-	if (!Number.isSafeInteger(id)) return notFound(c);
-	const userId = await decideRequest(id, decision, adminOf(c));
-	if (!userId) return c.json({ error: "This request was answered already." }, 409);
-	await record(c, `${decision.status === "approved" ? "approve" : "decline"}-request`, { target: userId, after: { request: id, ...decision } });
-	const [person] = await sql<{ email: string }[]>`select email from users where id = ${userId}`;
-	const granted = decision.status === "approved" ? decision.credits : null;
-	if (person) await runPromise(Mailer.Mailer.use((mailer) => mailer.send(Mailer.creditAnswerEmail(person.email, appOrigin(c.req.raw.headers), granted)))).catch(logEmailError);
-	return c.json({ ok: true });
+	return route(
+		c,
+		Effect.gen(function* () {
+			if (!Number.isSafeInteger(id)) return c.json({ error: "No one here." }, 404);
+			const origin = yield* originOf(c);
+			yield* actions((service) => service.answer(actorOf(c), origin, id, decision));
+			return c.json({ ok: true });
+		}),
+		{ AnsweredAlready: (error, c) => c.json({ error: error.message }, 409) },
+	);
 }
 
-/** Sends the invite emails. Returns the addresses that could not be sent to. */
-async function emailInvites(c: Context<Env>, emails: string[]) {
-	const notSent: string[] = [];
-	for (const email of emails) {
-		await runPromise(Mailer.Mailer.use((mailer) => mailer.send(Mailer.inviteEmail(email, appOrigin(c.req.raw.headers))))).catch((error) => {
-			logEmailError(error);
-			notSent.push(email);
-		});
-	}
-	return notSent;
-}
-
-/** Runs a Better Auth admin endpoint and passes on its refusal, such as "You cannot ban yourself". */
-async function viaAuth(c: Context<Env>, call: () => Promise<unknown>) {
-	try {
-		await call();
-		return c.json({ ok: true });
-	} catch (error) {
-		if (isAPIError(error)) return c.json({ error: error.message }, error.statusCode as ContentfulStatusCode);
-		throw error;
-	}
-}
-
-/** Records the admin's change in the activity log (admin-events.ts). */
-function record(c: Context<Env>, action: string, details: Pick<AdminEvent, "target" | "before" | "after"> = {}) {
-	const { id, email } = c.get("user");
-	return recordAdminEvent({ actor: { id, email }, action, ...details });
-}
-
-/** A person's own daily limit, or an invite's (by email). null for the default. */
-async function ownDailyCredits(id: string) {
-	const [row] = id.includes("@")
-		? await sql<{ daily_credits: number | null }[]>`select daily_credits from allowed_emails where email = ${id}`
-		: await sql<{ daily_credits: number | null }[]>`select daily_credits from credit_limits where user_id = ${id}`;
-	return row?.daily_credits ?? null;
-}
-
-/** False when there is no such person or invite. */
-async function saveDailyCredits(id: string, dailyCredits: number | null) {
-	if (id.includes("@")) return setInviteCredits(id, dailyCredits);
-	if (!(await hasAccount(id))) return false;
-	await setDailyCredits(id, dailyCredits);
-	return true;
-}
-
-/** By user id, or by email. */
-async function hasAccount(idOrEmail: string) {
-	const [row] = await sql`select 1 from users where id = ${idOrEmail} or lower(email) = ${idOrEmail.toLowerCase()}`;
-	return Boolean(row);
-}
-
-function notFound(c: Context<Env>) {
-	return c.json({ error: "No one here." }, 404);
-}
-
-function logEmailError(error: unknown) {
-	console.error("email:", error instanceof Error ? error.message : error);
+/** Records the admin's change in the activity log (AdminEvents.ts). */
+function record(c: Context<Env>, action: string, details: Pick<AdminEvents.AdminEvent, "target" | "before" | "after"> = {}) {
+	return AdminEvents.AdminEvents.use((events) => events.record({ actor: actorOf(c), action, ...details }));
 }

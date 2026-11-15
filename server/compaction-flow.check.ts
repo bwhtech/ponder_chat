@@ -7,7 +7,9 @@
  */
 import assert from "node:assert/strict";
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
-import { Compaction, type CompactionDeps, type CompactionState, type CompactRequest } from "./compaction/compaction.ts";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import { runCompaction, type CompactionDeps, type CompactionState, type CompactRequest } from "./compaction/compaction.ts";
 import { addConnectorNote } from "./workflow/connector-messages.ts";
 import { currentTurnStart, type Summary } from "./compaction/summary.ts";
 
@@ -32,21 +34,23 @@ class World {
 
 	constructor(public thread: UIMessage[]) {}
 
-	deps(): CompactionDeps {
+	deps(): CompactionDeps<Error> {
 		return {
-			loadThread: async () => this.thread,
-			loadSummary: async () => this.saved?.summary,
-			saveSummary: async (_id, _thread, summary, model) => void (this.saved = { summary, model }),
-			superseded: async () => ++this.supersededChecks >= this.supersededAt,
-			writeSummary: async ({ messages }) => {
-				this.summarized.push(messages);
-				if (this.fail) throw new Error("summarizer down");
-				return { text: "SUMMARY", model: "deepseek/deepseek-v4.1-flash" };
-			},
+			loadThread: () => Effect.sync(() => this.thread),
+			loadSummary: () => Effect.sync(() => Option.fromUndefinedOr(this.saved?.summary)),
+			saveSummary: (_id, _thread, summary, model) => Effect.sync(() => void (this.saved = { summary, model })),
+			superseded: () => Effect.sync(() => ++this.supersededChecks >= this.supersededAt),
+			writeSummary: ({ messages }) =>
+				Effect.suspend(() => {
+					this.summarized.push(messages);
+					if (this.fail) return Effect.fail(new Error("summarizer down"));
+					return Effect.succeed({ text: "SUMMARY", model: "deepseek/deepseek-v4.1-flash" });
+				}),
 			// As thread-messages.ts builds them: the SDK's own conversion, and the <connectors> note with the latest message.
-			modelMessages: async (thread, { connectors, keepReasoningOf }) => (this.kept.push(keepReasoningOf), addConnectorNote(await convertToModelMessages(thread), connectors)),
-			status: async (state) => void this.states.push(state),
-			log: (message) => void this.logs.push(message),
+			modelMessages: (thread, { connectors, keepReasoningOf }) =>
+				Effect.promise(async () => (this.kept.push(keepReasoningOf), addConnectorNote(await convertToModelMessages(thread), connectors))),
+			status: (state) => Effect.sync(() => void this.states.push(state)),
+			log: (message) => Effect.sync(() => void this.logs.push(message)),
 		};
 	}
 }
@@ -65,7 +69,7 @@ const request = (overrides: Partial<CompactRequest> = {}): CompactRequest => ({
 	mode: "start",
 	...overrides,
 });
-const run = (world: World, overrides: Partial<CompactRequest> = {}, lastAttempt = false) => new Compaction(request(overrides), world.deps()).run(lastAttempt);
+const run = (world: World, overrides: Partial<CompactRequest> = {}, lastAttempt = false) => Effect.runPromise(runCompaction(request(overrides), world.deps(), lastAttempt));
 const textOf = (messages: ModelMessage[]) => JSON.stringify(messages);
 
 // --- A compaction: the summarizer reads up to the current turn, not into it; the summary saved says what it read.

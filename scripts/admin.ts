@@ -3,19 +3,24 @@
 //   npx tsx scripts/admin.ts revoke someone@example.org
 //   npx tsx scripts/admin.ts list
 // The role lives in `users`, so a person needs an account first: they get one when they first sign in.
-import { listAdmins, setRole } from "../server/admins.ts";
-import { sql } from "../server/db.ts";
+import * as Effect from "effect/Effect";
+import * as Accounts from "../server/people/Accounts.ts";
+import { runMain } from "../server/runtime/main.ts";
 
 const [command, email] = process.argv.slice(2);
 const noAccount = `${email} has no account yet. They get one when they first sign in.`;
 
-if (command === "grant" && email) {
-	console.log((await setRole(email, "admin")) ? `${email} is now an admin.` : noAccount);
-} else if (command === "revoke" && email) {
-	console.log((await setRole(email, "user")) ? `${email} is now a user, not an admin.` : noAccount);
-} else if (command === "list") {
-	for (const row of await listAdmins()) console.log(`${row.email}\t${row.role}\t${row.created_at.toISOString().slice(0, 10)}`);
-} else {
-	console.log("Usage: npx tsx scripts/admin.ts grant <email> | revoke <email> | list");
-}
-await sql.end();
+await runMain(
+	Effect.gen(function* () {
+		const accounts = yield* Accounts.Accounts;
+		if (command === "grant" && email) {
+			yield* Effect.log((yield* accounts.setRole(email, "admin")) ? `${email} is now an admin.` : noAccount);
+		} else if (command === "revoke" && email) {
+			yield* Effect.log((yield* accounts.setRole(email, "user")) ? `${email} is now a user, not an admin.` : noAccount);
+		} else if (command === "list") {
+			for (const row of yield* accounts.listAdmins) yield* Effect.log(`${row.email}\t${row.role}\t${row.created_at.toISOString().slice(0, 10)}`);
+		} else {
+			yield* Effect.log("Usage: npx tsx scripts/admin.ts grant <email> | revoke <email> | list");
+		}
+	}),
+);
