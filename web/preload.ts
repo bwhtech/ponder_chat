@@ -22,6 +22,10 @@ export function preloadChat() {
 export function prefetchChat() {
 	const files = fromBoot("prefetch");
 	if (!files?.length) return void preloadChat();
+	// Safari has no <link rel="prefetch">. There the files are fetched into the HTTP cache, one
+	// at a time at low priority, so they don't compete with anything the person asks for. The
+	// assets are immutable, so the later import() finds the copy.
+	if (!document.createElement("link").relList.supports?.("prefetch")) return void warmCache(files);
 	for (const href of files) {
 		const link = document.createElement("link");
 		link.rel = "prefetch";
@@ -31,6 +35,17 @@ export function prefetchChat() {
 		if (href.endsWith(".js")) link.as = "script";
 		else if (href.endsWith(".css")) link.as = "style";
 		document.head.append(link);
+	}
+}
+
+async function warmCache(files: string[]) {
+	for (const href of files) {
+		try {
+			const response = await fetch(href, { mode: "cors", credentials: "same-origin", priority: "low" } as RequestInit);
+			await response.arrayBuffer();
+		} catch {
+			// Only a head start: the import() that needs the file fetches it again.
+		}
 	}
 }
 
