@@ -72,7 +72,8 @@ export const fetchPage = Effect.fnUntraced(function* (address: string) {
 		const hop = yield* request(url, publicAgent, address);
 		if (hop._tag === "Page") return hop.page;
 		if (redirects >= MAX_REDIRECTS) return yield* new PageRefused({ reason: "redirects" });
-		url = yield* checkedUrl(new URL(hop.location, url).toString());
+		// A Location that does not parse is refused by checkedUrl, as an invalid address.
+		url = yield* checkedUrl(URL.parse(hop.location, url)?.href ?? hop.location);
 	}
 });
 

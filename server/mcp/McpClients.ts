@@ -25,6 +25,7 @@ import { toToolInfo } from "./tools.ts";
  * The timeouts are Effect's: interrupting a request aborts it, through the signal the SDK takes.
  */
 const CONNECT_TIMEOUT = Duration.seconds(15);
+const CLOSE_TIMEOUT = Duration.seconds(5);
 const LIST_TIMEOUT = Duration.seconds(20);
 const CALL_TIMEOUT = Duration.seconds(60);
 const IDLE = Duration.minutes(2);
@@ -137,7 +138,10 @@ const make = Effect.gen(function* () {
 	const open = (target: Target) =>
 		Effect.acquireRelease(
 			request("connect", (signal) => transport.connect(target, signal), CONNECT_TIMEOUT),
-			(client) => Effect.tryPromise(() => client.close()).pipe(Effect.ignore),
+			// The SDK's close() can send a DELETE with no signal. A server that stalls it holds
+			// up the step or the removal for CLOSE_TIMEOUT at most; the release is
+			// uninterruptible, so the wait itself is made interruptible for the timeout.
+			(client) => Effect.tryPromise(() => client.close()).pipe(Effect.interruptible, Effect.timeout(CLOSE_TIMEOUT), Effect.ignore),
 			// The connection can be stopped while it opens: its timeout, or the caller.
 			{ interruptible: true },
 		);

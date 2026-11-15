@@ -2,6 +2,7 @@ import type { UIMessage } from "ai";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Scope from "effect/Scope";
 import { problem, recoverAll } from "./errors.ts";
 import type { MemoryAdapter, MemoryScope, MemoryTurn } from "./types.ts";
 
@@ -20,10 +21,22 @@ import type { MemoryAdapter, MemoryScope, MemoryTurn } from "./types.ts";
  */
 export type MemoryContext = { threadId: string; user: string };
 
+/** How long a stop waits for the memory saves still running. */
+const SAVE_GRACE = Duration.seconds(3);
+
 // A constructor, run once by the Memory layer: no span.
 export const makeMemoryMiddleware = Effect.fnUntraced(function* ({ adapter, scope }: { adapter: MemoryAdapter<unknown>; scope: (ctx: MemoryContext) => MemoryScope }) {
 	const name = `memory:${adapter.id}`;
-	const forks = yield* Effect.scope;
+	// The saves run in a scope of their own, inside the layer's. Its finalizer, added after
+	// it, runs first when the runtime is disposed (SIGTERM): it gives the saves still
+	// running SAVE_GRACE to finish, as postgres.js's sql.end({ timeout: 3 }) gave their
+	// queries, before the scope interrupts them and rolls back their transactions.
+	const layerScope = yield* Effect.scope;
+	const forks = yield* Scope.fork(layerScope);
+	yield* Scope.addFinalizer(
+		layerScope,
+		Effect.suspend(() => Fiber.awaitAll([...pending.values()].flatMap((set) => [...set]))).pipe(Effect.interruptible, Effect.timeoutOption(SAVE_GRACE)),
+	);
 	// Saves still running, per thread, so the chat page can wait for one to show what was kept.
 	const pending = new Map<string, Set<Fiber.Fiber<void>>>();
 	// Replies being saved now: Stop and the run's last step can both save the same reply.
