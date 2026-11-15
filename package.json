@@ -27,6 +27,9 @@
     "@ai-sdk/vue": "^4.0.162",
     "@ai-sdk/workflow": "2.0.94",
     "@codemirror/lang-markdown": "^6.5.2",
+    "@effect/opentelemetry": "4.1.1",
+    "@effect/platform-node": "4.1.1",
+    "@effect/sql-pg": "4.1.1",
     "@hono/node-server": "^2.1.5",
     "@hono/zod-validator": "^0.9.1",
     "@mozilla/readability": "^0.6.0",
@@ -43,6 +46,7 @@
     "aws4fetch": "^1.0.20",
     "better-auth": "^1.7.12",
     "dompurify": "^3.4.17",
+    "effect": "4.1.1",
     "frappe-ui": "^1.1.0",
     "frappe-ui-ai-elements": "^1.2.0",
     "hono": "^4.13.13",
@@ -62,6 +66,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@effect/vitest": "4.1.1",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@playwright/test": "^1.65.0",
     "@types/express": "^5.0.6",
@@ -73,6 +78,7 @@
     "tailwindcss": "^3.4.19",
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
+    "vitest": "5.0.5",
     "vue-tsc": "^3.3.13"
   },
   "private": true
