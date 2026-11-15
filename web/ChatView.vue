@@ -39,7 +39,9 @@ import {
 	loadTranscript,
 	SkillChip,
 	ToolContext,
+	transcriptReady,
 } from "./transcript-parts";
+import ThreadSkeleton from "./ThreadSkeleton.vue";
 import {
 	ConversationEmptyState,
 	PromptInput,
@@ -131,6 +133,9 @@ async function patientFetch(input: RequestInfo | URL, init?: RequestInit): Promi
 		await new Promise((resolve) => setTimeout(resolve, Math.min(500 * 2 ** attempt, 3_000)));
 	}
 }
+
+// A chat with messages needs the transcript's code to draw them; the skeleton stands in until it is here.
+if (props.initialMessages.length) void loadTranscript().catch(() => undefined);
 
 const notes = useRememberedNotes(props.threadId);
 const { byMessage: remembered, fresh: newSaves, undo: undoRemembered } = notes;
@@ -501,7 +506,9 @@ function replyModelId(message: UIMessage) {
 				</div>
 			</ConversationEmptyState>
 		</Transition>
-		<ToolContext v-if="!landing" :messages="messages">
+		<!-- Opened before the transcript's code loaded: the skeleton, not an empty chat. A new chat preloads it as its first message is typed. -->
+		<ThreadSkeleton v-if="!landing && !transcriptReady && initialMessages.length" :composer="false" />
+		<ToolContext v-else-if="!landing" :messages="messages">
 			<Conversation>
 				<ConversationContent class="mx-auto w-full max-w-[720px] px-4 pb-8 pt-8 sm:px-5">
 					<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">
