@@ -12,37 +12,26 @@ import {
 	SidebarItem,
 	SidebarSection,
 } from "frappe-ui";
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineAsyncComponent, onBeforeUnmount, watch } from "vue";
 import { RouterView, useRoute } from "vue-router";
-import { loadViewer } from "./api";
 import AccountMenu from "./components/AccountMenu.vue";
 import NoAccess from "./components/NoAccess.vue";
-import SettingsModal from "./components/SettingsModal.vue";
 import { isMobile } from "./lib/viewport";
-import { counts, refreshCounts, settingsOpen, viewer } from "./store";
+import { askViewer, counts, refreshCounts, settingsOpen, viewer, viewerError } from "./store";
 import EmptyState from "../EmptyState.vue";
 
 /**
- * The admin shell. Signed out goes to the chat's sign-in page. Signed in without the
- * admin role sees NoAccess. The server checks the role again on every /api/admin call.
- * Settings is a dialog on wider screens (account menu) and a tab on phones.
+ * The admin shell. main.ts draws it once it knows who is signed in (store.ts). Signed in
+ * without the admin role sees NoAccess. The server checks the role again on every
+ * /api/admin call. Settings is a dialog on wider screens (account menu) and a tab on phones.
  */
 const route = useRoute();
 const isAdmin = computed(() => viewer.value?.user.role === "admin");
 
-// Offline or a failing server is not "signed out": say so, with Retry, and ask again when back online.
-const viewerError = ref(false);
-async function askViewer() {
-	try {
-		const loaded = await loadViewer();
-		if (!loaded) return location.assign("/");
-		viewer.value = loaded;
-		viewerError.value = false;
-	} catch {
-		viewerError.value = true;
-	}
-}
-void askViewer();
+// The dialog's code loads after the first page, as it opens only from the account menu or its shortcut.
+const SettingsModal = defineAsyncComponent(() => import("./components/SettingsModal.vue"));
+
+// When /api/me could not answer, ask again on Try again and when back online.
 const retryViewer = () => viewer.value === undefined && void askViewer();
 addEventListener("online", retryViewer);
 onBeforeUnmount(() => removeEventListener("online", retryViewer));

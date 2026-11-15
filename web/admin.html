@@ -22,7 +22,211 @@
 		</script>
 	</head>
 	<body>
-		<div id="app"></div>
+		<!--
+			The first screen, drawn before the code arrives: App.vue's frame (sidebar or tab bar) and the
+			page's title. Overview, the page the chat's Admin opens, also gets its body as it draws it
+			while it loads. The other pages' bodies stay empty: skeletons there would not be where their
+			own skeletons land. It copies the classes of the frappe-ui parts it stands for, so nothing
+			moves when the app mounts into #app and replaces it (main.ts). Change it with App.vue or Overview.vue.
+		-->
+		<div id="app">
+			<div class="h-dvh w-full bg-surface-base text-ink-gray-8" aria-busy="true">
+				<p class="sr-only">Loading Ponder Admin</p>
+				<div class="contents" aria-hidden="true" inert>
+					<!-- Wider screens: DesktopShell with the sidebar. -->
+					<div class="hidden h-full md:flex">
+						<div data-slot="sidebar" class="flex h-full w-64 shrink-0 flex-col overflow-x-hidden border-r bg-surface-sidebar">
+							<div class="flex h-12 shrink-0 items-center px-1">
+								<div class="flex h-10 w-full items-center rounded-4 px-1.5">
+									<div class="size-7 shrink-0 overflow-hidden rounded-[6px]"><img src="/logo.png" class="h-full w-full object-cover" alt="" /></div>
+									<div class="ml-2 flex min-w-0 flex-1 flex-col text-left">
+										<div class="truncate text-base-medium leading-tighter text-ink-gray-8">Ponder Admin</div>
+										<div class="mt-0.5 flex h-[1lh] items-center text-sm leading-tighter"><div class="fui-skeleton h-3 w-28 animate-pulse rounded-4 bg-surface-gray-3"></div></div>
+									</div>
+									<div class="ml-2"><span class="lucide-chevron-down size-4 text-ink-gray-7"></span></div>
+								</div>
+							</div>
+							<div class="min-h-0 flex-1 px-2 pb-10 pt-1">
+								<div class="mt-2 space-y-0.5">
+									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
+										<span class="lucide-chart-column size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Overview</span>
+									</div>
+									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/requests" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
+										<span class="lucide-inbox size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Requests</span>
+									</div>
+									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/people" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
+										<span class="lucide-users size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">People</span>
+									</div>
+									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/skills" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
+										<span class="lucide-sparkles size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Skills</span>
+									</div>
+									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/activity" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
+										<span class="lucide-history size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Activity</span>
+									</div>
+								</div>
+							</div>
+							<div class="px-2 py-2">
+								<div data-slot="sidebar-item" data-state="inactive" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 [@media(pointer:coarse)]:h-11">
+									<span class="lucide-arrow-left size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Back to chat</span>
+								</div>
+							</div>
+						</div>
+						<div data-slot="desktop-shell-content" class="flex min-w-0 flex-1 flex-col overflow-hidden">
+							<div>
+								<header class="z-10 flex min-h-12 flex-col justify-center border-b bg-surface-base px-3 sm:px-5">
+									<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
+										<div data-boot-title class="text-lg-semibold text-ink-gray-9">Overview</div>
+										<!-- A person or a skill, as Person.vue's header draws it while it loads. -->
+										<div data-boot-title-bar class="-ml-0.5 hidden items-center leading-tighter">
+											<span data-boot-parent class="rounded-4 px-0.5 py-1 text-lg-medium leading-tighter text-ink-gray-5"></span>
+											<span class="mx-0.5 text-base text-ink-gray-4">/</span>
+											<span class="flex px-0.5 py-1"><span class="fui-skeleton h-3.5 w-16 animate-pulse rounded-4 bg-surface-gray-3"></span></span>
+										</div>
+									</div>
+								</header>
+							</div>
+							<div data-slot="scroll-area" class="min-h-0 flex-1 overflow-hidden"><div data-slot="scroll-area-viewport" class="h-full w-full" data-boot-body-host></div></div>
+						</div>
+					</div>
+
+					<!-- Phones: MobileShell with the tab bar. -->
+					<div data-slot="mobile-shell" class="fixed inset-0 flex flex-col overflow-hidden md:hidden">
+						<div class="[@media(display-mode:standalone)]:pt-[env(safe-area-inset-top)]">
+							<header class="z-10 flex h-[52px] flex-col justify-center border-b bg-surface-base px-3">
+								<div class="relative flex h-full w-full items-center">
+									<div data-boot-avatar class="absolute start-0 top-1/2 z-[1] -translate-y-1/2 p-1"><div class="size-6 rounded-full bg-surface-gray-2"></div></div>
+									<div data-boot-title class="mx-12 min-w-0 flex-1 truncate text-center text-xl-semibold leading-tight text-ink-gray-9">Overview</div>
+																	</div>
+							</header>
+						</div>
+						<div data-slot="mobile-shell-scroll" class="flex-1 overflow-hidden bg-surface-base" data-boot-body-host></div>
+						<div class="grid shrink-0 auto-cols-fr grid-flow-col border-t border-outline-gray-2 bg-surface-elevation-2 [@media(display-mode:standalone)]:pb-[max(1rem,env(safe-area-inset-bottom))]">
+							<div data-boot-nav="/" class="flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-ink-gray-5 data-[state=active]:text-ink-gray-8">
+								<span class="lucide-chart-column size-6"></span><span class="text-xs-medium leading-tighter">Overview</span>
+							</div>
+							<div data-boot-nav="/requests" class="flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-ink-gray-5 data-[state=active]:text-ink-gray-8">
+								<span class="lucide-inbox block size-6"></span><span class="text-xs-medium leading-tighter">Requests</span>
+							</div>
+							<div data-boot-nav="/people" class="flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-ink-gray-5 data-[state=active]:text-ink-gray-8">
+								<span class="lucide-users size-6"></span><span class="text-xs-medium leading-tighter">People</span>
+							</div>
+							<div data-boot-nav="/skills" class="flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-ink-gray-5 data-[state=active]:text-ink-gray-8">
+								<span class="lucide-sparkles size-6"></span><span class="text-xs-medium leading-tighter">Skills</span>
+							</div>
+							<div data-boot-nav="/settings" class="flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-ink-gray-5 data-[state=active]:text-ink-gray-8">
+								<span class="lucide-settings size-6"></span><span class="text-xs-medium leading-tighter">Settings</span>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Overview while it loads: Overview.vue with its data missing. -->
+			<template id="boot-overview">
+				<div class="mx-auto w-full max-w-5xl space-y-8 px-3 pb-16 pt-4 sm:px-5 md:pt-6">
+					<div class="space-y-3">
+						<div class="text-base-semibold text-ink-gray-9">Today<span class="ml-1 text-sm font-normal text-ink-gray-5">· since midnight UTC</span></div>
+						<div data-slot="dashboard" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
+							<div data-boot-card class="relative w-full min-w-0 overflow-hidden rounded-4 border border-outline-gray-1 bg-surface-elevation-2 px-4 py-3">
+								<div class="relative flex min-w-0 flex-col gap-1.5">
+									<div class="truncate text-sm text-ink-gray-5" data-boot-label>Active people</div>
+									<div class="relative truncate text-3xl-semibold tabular-nums"><div class="fui-skeleton absolute inset-y-1 start-0 w-28 animate-pulse rounded-4 bg-surface-gray-3"></div><span class="invisible">—</span></div>
+									<div class="fui-skeleton my-0.5 h-4 w-32 animate-pulse rounded-4 bg-surface-gray-3"></div>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div class="space-y-3">
+						<div class="text-base-semibold text-ink-gray-9 md:hidden">Over time</div>
+						<div class="flex w-full items-center gap-1 rounded-4 bg-surface-gray-2 p-px md:hidden" data-boot-tabs="fluid"></div>
+						<div class="hidden min-h-7 items-center md:flex">
+							<div class="text-base-semibold text-ink-gray-9">Over time</div>
+							<div class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-4 bg-surface-gray-2 p-px" data-boot-tabs></div>
+						</div>
+						<div class="space-y-4">
+							<div data-slot="dashboard" data-boot-chart="Credits used per day" class="h-64 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:p-4"></div>
+							<div class="grid gap-4 md:grid-cols-2">
+								<div data-slot="dashboard" data-boot-chart="Active people per day" class="h-64 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:p-4"></div>
+								<div data-slot="dashboard" data-boot-chart="Credits by model" class="h-64 rounded-4 border border-outline-gray-1 bg-surface-elevation-2 p-3 md:p-4"></div>
+							</div>
+						</div>
+					</div>
+
+					<div class="space-y-3">
+						<div class="flex items-baseline justify-between">
+							<div class="text-base-semibold text-ink-gray-9">Who uses Ponder</div>
+							<div class="flex items-center gap-1 text-sm text-ink-gray-6">All people<span class="lucide-arrow-right size-3.5"></span></div>
+						</div>
+						<div class="-mx-3 hidden md:block">
+							<div data-slot="list-header" class="grid h-[33px] grid-cols-[minmax(0,1fr)_10rem_6rem_6rem_6rem] items-center border-b border-outline-gray-1 px-3 text-sm leading-tighter">
+								<span>Person</span><span>Credits today</span><span class="text-right">Last 14 days</span><span class="text-right">Replies</span><span class="text-right">Days active</span>
+							</div>
+						</div>
+						<div class="divide-y divide-outline-gray-1" data-boot-rows></div>
+					</div>
+
+					<p class="flex items-center gap-1.5 text-sm text-ink-gray-5"><span class="lucide-lock size-3.5 shrink-0"></span>Admins see how much people use Ponder, not what they write.</p>
+				</div>
+			</template>
+
+		</div>
+		<script>
+			// Fills the first screen for the page opened: its title, its tab, and Overview's body.
+			(() => {
+				const path = location.pathname.replace(/^\/admin/, "").replace(/\/+$/, "") || "/";
+				const phone = matchMedia("(max-width: 767px)").matches;
+				// Wider screens open /admin/settings as a dialog over Overview (router.ts).
+				const page = path === "/settings" && !phone ? "/" : path;
+				const section = "/" + page.split("/")[1];
+				const titles = { "/": "Overview", "/requests": "Requests", "/people": "People", "/skills": "Skills", "/activity": "Activity", "/settings": "Settings" };
+				const shell = document.getElementById("app");
+				const all = (selector, root = shell) => root.querySelectorAll(selector);
+
+				for (const item of all("[data-boot-nav]")) if (item.dataset.bootNav === section) item.dataset.state = "active";
+				// A person or a skill: its name is not known yet. Phones leave the header empty, as the page does while it loads.
+				const title = titles[page];
+				for (const element of all("[data-boot-title]")) title ? (element.textContent = title) : element.classList.add("hidden");
+				for (const element of all("[data-boot-title-bar]")) if (!title) element.classList.replace("hidden", "flex");
+				for (const element of all("[data-boot-parent]")) element.textContent = titles[section] ?? "";
+				for (const element of all("[data-boot-avatar]")) if (!title) element.classList.add("hidden");
+
+				if (page !== "/") return;
+				const body = document.getElementById("boot-overview").content;
+				const skeleton = (classes) => `<div class="fui-skeleton animate-pulse bg-surface-gray-3 ${classes}"></div>`;
+				const card = all("[data-boot-card]", body)[0];
+				for (const label of ["Replies", "Credits used", "Cost", "People out of credits"]) {
+					const copy = card.cloneNode(true);
+					copy.querySelector("[data-boot-label]").textContent = label;
+					if (label === "People out of credits") copy.classList.add("col-span-2", "sm:col-span-1");
+					card.parentElement.append(copy);
+				}
+				for (const tabs of all("[data-boot-tabs]", body)) {
+					const fluid = tabs.dataset.bootTabs === "fluid" ? "w-full" : "";
+					tabs.innerHTML = ["7 days", "14 days", "30 days"]
+						.map((label) => {
+							const on = label === "14 days" ? "bg-surface-elevation-3 shadow-base text-ink-gray-8" : "text-ink-gray-5";
+							return `<span class="${fluid ? "flex min-w-0 flex-1" : "inline-flex"}"><span class="inline-flex h-6.5 items-center justify-center whitespace-nowrap rounded-[7px] px-2 py-[5px] text-sm leading-[16.1px] ${on} ${fluid}">${label}</span></span>`;
+						})
+						.join("");
+				}
+				for (const chart of all("[data-boot-chart]", body))
+					chart.innerHTML = `<div class="flex h-full w-full min-w-0 flex-col gap-1.5"><div class="truncate text-p-base text-ink-gray-8">${chart.dataset.bootChart}</div><div class="relative min-h-0 flex-1 pb-3">${skeleton("absolute inset-0 rounded-4")}</div></div>`;
+				// ListSkeleton.vue as Overview uses it: one line and a small avatar on wider screens, two lines and a larger one on phones.
+				const names = ["w-32", "w-40", "w-28", "w-36", "w-44"];
+				const emails = ["w-44", "w-52", "w-40", "w-48", "w-56"];
+				for (const rows of all("[data-boot-rows]", body))
+					rows.innerHTML = names
+						.map(
+							(name, n) =>
+								`<div class="flex items-center gap-3 ${phone ? "py-3" : "py-2.5"}">${skeleton(`shrink-0 rounded-full ${phone ? "size-7" : "size-5"}`)}<div class="min-w-0 flex-1 space-y-1.5">${skeleton(`h-3.5 max-w-full rounded-4 ${name}`)}${phone ? skeleton(`h-3 max-w-full rounded-4 ${emails[n]}`) : ""}</div>${skeleton("h-3.5 w-12 shrink-0 rounded-4 md:w-24")}</div>`,
+						)
+						.join("");
+				for (const host of all("[data-boot-body-host]")) host.append(body.cloneNode(true));
+				// The skeletons pulse from the page's start, as the app's do once it mounts (main.ts), so the swap does not blink.
+				for (const animation of document.getAnimations()) if (animation.animationName === "pulse") animation.startTime = 0;
+			})();
+		</script>
 		<script type="module" src="/admin/main.ts"></script>
 	</body>
 </html>
