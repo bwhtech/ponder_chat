@@ -15,7 +15,10 @@ export default defineConfig({
 	workers: process.env.CI ? 2 : undefined,
 	timeout: 30_000,
 	expect: { timeout: 10_000 },
-	reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"], ["html", { open: "never" }]],
+	// In CI, results.json has each test's time, which e2e/shard.ts uses to split the shards.
+	reporter: process.env.CI
+		? [["github"], ["html", { open: "never" }], ["json", { outputFile: "playwright-report/results.json" }]]
+		: [["list"], ["html", { open: "never" }]],
 	use: {
 		baseURL: e2e.baseUrl,
 		trace: "retain-on-failure",

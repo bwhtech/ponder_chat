@@ -135,3 +135,15 @@ CI also runs `server/mcp.check.ts`, which checks what the browser can't reach, s
 ### Add an OpenRouter call to the fake
 
 If Ponder starts to call another OpenRouter endpoint, add a route for it to `e2e/fake/server.ts`. Get its address with the `url()` of the `OpenRouter` service (`server/openrouter/OpenRouter.ts`), so that the tests can send it to the fake. The fake logs each request that it has no route for.
+
+## Shards in CI
+
+CI splits the tests into 6 shards that run at the same time, each with its own Postgres and its own Ponder (`.github/workflows/ci.yml`). `e2e/shard.ts` makes the split from `e2e/durations.json`, the time of each test in an earlier CI run, so that the shards end at about the same time. A new test counts as the median test until the file is updated.
+
+To update the times after tests are added or changed:
+
+1. Download the `playwright-report-*` artifacts of a green CI run, and unzip them.
+2. Run `node e2e/shard.ts --update <each>/playwright-report/results.json`.
+3. Commit `e2e/durations.json`.
+
+To see a split, run `node e2e/shard.ts 2 6`. It prints the tests of shard 2 of 6, and their time on each worker.
