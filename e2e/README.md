@@ -42,7 +42,7 @@ To use another Postgres, set `E2E_DATABASE_URL`. The database's name must end in
 
 Tracing is on, and Ponder sends its traces to the fake, at `/v1/traces`. `fake.spans()` reads them (`tests/tracing.spec.ts`). To see the tests' traces in a local Jaeger instead, set `E2E_OTEL_ENDPOINT=http://127.0.0.1:4318` (README, "Tracing"). Then `tracing.spec.ts` fails, because the fake gets no spans.
 
-`tests/durability.spec.ts` starts a second Ponder on port 3596 (`E2E_DURABILITY_PORT`), with its own database `ponder_durability_e2e` on the same Postgres (`e2e/ponder.ts`). It stops that server with SIGKILL and SIGTERM in the middle of a reply, and starts it again. One server runs the workflow worker of a database, so this server can't share the database of the other tests. Its tests run one at a time.
+The durability tests (`tests/durability-*.spec.ts`, helpers in `e2e/durability.ts`) stop a Ponder with SIGKILL and SIGTERM in the middle of a reply, and start it again. One server runs the workflow worker of a database, so each of these files starts its own Ponder, with its own database `ponder_durability_<name>_e2e` on the same Postgres. The first file's server is on port 3596 (`E2E_DURABILITY_PORT`), and the others are on the ports below it. A file's tests run one at a time. The files run side by side.
 
 Python is off, because it needs Deno and Pyodide. To include it, run `npm run sandbox:setup` and set `E2E_PYTHON=1`.
 

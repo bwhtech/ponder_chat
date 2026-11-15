@@ -23,7 +23,7 @@ import type { McpCall } from "./calls.ts";
  *
  * Each server has two tools: find_order only reads, and add_note changes something.
  * find_order and add_note take SLOW_MS for an order that starts with "SLOW", so a test can stop
- * Ponder in the middle of the call (durability.spec.ts). The call is recorded first.
+ * Ponder in the middle of the call (tests/durability-crash.spec.ts). The call is recorded first.
  */
 const SLOW_MS = 6_000;
 export const SHOP_KEY = "shop-key";
