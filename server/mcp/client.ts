@@ -1,6 +1,7 @@
 import { createMCPClient, UnauthorizedError, type MCPClient } from "@ai-sdk/mcp";
-import { UnreadableSecret } from "../secrets.ts";
-import { guardedFetch } from "../net-guard.ts";
+import * as NetGuard from "../net/NetGuard.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import { UnreadableSecret } from "../secrets/Secrets.ts";
 import { ConnectorProblem, describeError, NeedsSignIn } from "./errors.ts";
 import { backgroundOAuth, freshCredentials, type ConnectorOAuth } from "./oauth.ts";
 import { readCredentials, setStatus, type Connection, type ServerInfo, type ToolInfo, type Transport } from "./store.ts";
@@ -8,7 +9,7 @@ import { toToolInfo } from "./tools.ts";
 
 /**
  * MCP clients. With oauth.ts, the only code that uses @ai-sdk/mcp. Every request goes
- * through the guarded fetch (net-guard.ts), so a server can't reach a private network,
+ * through the guarded fetch (net/NetGuard.ts), so a server can't reach a private network,
  * and transports refuse redirects.
  */
 const CONNECT_TIMEOUT_MS = 15_000;
@@ -19,9 +20,10 @@ const MAX_TOOLS = 200;
 
 export type Target = { url: string; transport: Transport; headers?: Record<string, string>; oauth?: ConnectorOAuth };
 
-export function openClient(target: Target): Promise<MCPClient> {
+export async function openClient(target: Target): Promise<MCPClient> {
+	const guard = await runPromise(NetGuard.NetGuard);
 	return createMCPClient({
-		transport: { type: target.transport, url: target.url, headers: target.headers, authProvider: target.oauth, fetch: guardedFetch, redirect: "error" },
+		transport: { type: target.transport, url: target.url, headers: target.headers, authProvider: target.oauth, fetch: guard.fetch, redirect: "error" },
 		clientName: "Ponder Chat",
 		version: "1.0.0",
 		initializationOptions: { timeout: CONNECT_TIMEOUT_MS },
@@ -63,7 +65,7 @@ export async function inspect(target: Target) {
 export async function targetFor(connection: Connection): Promise<Target> {
 	let credentials;
 	try {
-		credentials = readCredentials(connection);
+		credentials = await readCredentials(connection);
 	} catch (error) {
 		if (!(error instanceof UnreadableSecret)) throw error;
 		await setStatus(connection.id, "needs_sign_in", "Ponder can't read this connector's sign-in any more. Sign in again.");

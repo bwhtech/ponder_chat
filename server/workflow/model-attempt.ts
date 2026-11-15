@@ -2,14 +2,16 @@ import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { isStepCount, jsonSchema, streamText, tool, wrapLanguageModel, type TextStreamPart, type ToolSet } from "ai";
 import { FatalError, getStepMetadata, RetryableError } from "workflow";
+import * as Option from "effect/Option";
 import { isAuto } from "../../shared/auto-model.ts";
-import { answeringModel } from "../auto-router.ts";
 import { saveTokenRatio } from "../compaction/store.ts";
 import { measuredRatio } from "../compaction/tokens.ts";
+import * as AutoRouter from "../models/AutoRouter.ts";
+import { runPromise } from "../runtime/runtime.ts";
 import { callCost } from "../telemetry/cost.ts";
 import { tracingState } from "../tracing/state.ts";
 import { calledToolName } from "./connectors.ts";
-import { ModelCallRecord, settleEarlierAttempts, type CallUsage } from "../telemetry/model-calls.ts";
+import * as ModelCalls from "../telemetry/ModelCalls.ts";
 import type { ModelCall, ModelResponse, ModelToolCall } from "./model-call.ts";
 import { classifyModelError, FIRST_CHUNK_MS, ModelStalledError, NEXT_CHUNK_MS } from "./model-errors.ts";
 import { ChatModel } from "./model.ts";
@@ -21,9 +23,10 @@ import { RESET_STEP, storedPart, toolCallOf } from "./stream-parts.ts";
  */
 export async function runModelAttempt(call: ModelCall, writable: WritableStream<ModelCallStreamPart>): Promise<ModelResponse> {
 	const { stepId, attempt } = getStepMetadata();
-	const record = new ModelCallRecord(ModelCallRecord.id(call.runId, stepId, attempt), { threadId: call.threadId, user: call.owner, model: call.modelId });
-	// This attempt replaces the earlier ones, so none of them stays charged (model-calls.ts).
-	if (attempt > 1) await settleEarlierAttempts(call.threadId, call.runId, stepId, record.id);
+	const id = ModelCalls.recordId(call.runId, stepId, attempt);
+	const record = await runPromise(ModelCalls.ModelCalls.use((calls) => calls.record(id, { threadId: call.threadId, user: call.owner, model: call.modelId })));
+	// This attempt replaces the earlier ones, so none of them stays charged (telemetry/ModelCalls.ts).
+	if (attempt > 1) await runPromise(ModelCalls.ModelCalls.use((calls) => calls.settleEarlierAttempts(call.threadId, call.runId, stepId, record.id)));
 	return new ModelAttempt(call, attempt, record).run(writable);
 }
 
@@ -35,7 +38,7 @@ class ModelAttempt {
 	constructor(
 		private readonly call: ModelCall,
 		private readonly attempt: number,
-		private readonly record: ModelCallRecord,
+		private readonly record: ModelCalls.ModelCallRecord,
 	) {}
 
 	async run(writable: WritableStream<ModelCallStreamPart>): Promise<ModelResponse> {
@@ -64,7 +67,7 @@ class ModelAttempt {
 			// This step owns retries (model-errors.ts), so the AI SDK makes one request.
 			maxRetries: 0,
 			abortSignal: watchdog.signal,
-			// The call's cost is recorded by this attempt (model-calls.ts). A list of integrations
+			// The call's cost is recorded by this attempt (telemetry/ModelCalls.ts). A list of integrations
 			// replaces the global one, so the RunRecorder can't record it twice; only the trace's
 			// integration (server/tracing/setup.ts) gets the call, as a `chat <model>` span.
 			telemetry: traceOnly(),
@@ -95,9 +98,10 @@ class ModelAttempt {
 		const messages = (await result.response).messages.filter((message) => message.role === "assistant");
 		await this.started;
 		const usage = this.usage(finish, toolCalls);
-		await this.record.finish(usage, { stopped: await runStopped(this.call.runId) });
+		const stopped = await runStopped(this.call.runId);
+		await runPromise(this.record.finish(usage, { stopped }));
 		await this.measureRatio(usage.inputTokens);
-		const answeredBy = isAuto(this.call.modelId) ? await answeringModel(finish.response.modelId) : undefined;
+		const answeredBy = isAuto(this.call.modelId) ? Option.getOrUndefined(await runPromise(AutoRouter.AutoRouter.use((router) => router.answeringModel(finish.response.modelId)))) : undefined;
 		return { messages, toolCalls, finishReason: finish.finishReason, inputTokens: usage.inputTokens, ...(answeredBy && { answeredBy }) };
 	}
 
@@ -115,7 +119,7 @@ class ModelAttempt {
 	private async failed(error: unknown) {
 		const verdict = classifyModelError(error, this.attempt);
 		await this.started?.catch(() => undefined);
-		await this.record.fail(verdict.retry ? "retried" : "failed").catch((cause) => console.warn("model-attempt: could not record a failed call:", cause));
+		await runPromise(this.record.fail(verdict.retry ? "retried" : "failed")).catch((cause) => console.warn("model-attempt: could not record a failed call:", cause));
 		console.warn(`model-attempt: ${this.call.modelId} attempt ${this.attempt} failed (${verdict.retry ? `retry in ${verdict.afterMs} ms` : "no retry"}): ${verdict.reason}`);
 		return verdict.retry ? new RetryableError(verdict.reason, { retryAfter: verdict.afterMs }) : new FatalError(verdict.reason);
 	}
@@ -123,7 +127,7 @@ class ModelAttempt {
 	/** The model, with a tap on its stream that writes the `runs` row as soon as OpenRouter names the call. */
 	private model() {
 		const onGeneration = (id: string) => {
-			this.started ??= this.record.start(id).catch((error) => console.warn("model-attempt: could not record a started call:", error));
+			this.started ??= runPromise(this.record.start(id)).catch((error) => console.warn("model-attempt: could not record a started call:", error));
 		};
 		return wrapLanguageModel({
 			model: new ChatModel(this.call.modelId, this.call.threadId),
@@ -148,7 +152,7 @@ class ModelAttempt {
 		return Object.fromEntries(this.call.tools.map((spec) => [spec.name, tool({ description: spec.description, inputSchema: jsonSchema(spec.inputSchema) })]));
 	}
 
-	private usage(finish: Finish, toolCalls: ModelToolCall[]): CallUsage {
+	private usage(finish: Finish, toolCalls: ModelToolCall[]): ModelCalls.CallUsage {
 		return {
 			model: finish.response.modelId ?? this.call.modelId,
 			inputTokens: finish.usage.inputTokens ?? 0,

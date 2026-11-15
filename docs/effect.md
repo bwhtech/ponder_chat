@@ -13,11 +13,32 @@ Effect is `effect` 4.1.1. The agent docs in `~/src/t3code/.repos/effect-smol/` a
 | `server/runtime/route.ts` | `route(c, effect, errors?)`: the boundary for Hono routes. |
 | `server/runtime/step.ts` | `runStep(effect, rules?)`: the boundary for workflow steps. |
 | `server/runtime/main.ts` | `runMain(effect)`: the boundary for scripts. |
-| `server/runtime/Database.ts` | The `PgClient` layer (one pool) and `ping`. |
-| `server/config.ts` | `PonderConfig`: every environment variable. |
+| `server/runtime/Database.ts` | The `PgClient` layer (one pool), `ping`, and `pgCode` and `sqlMessage` for a `SqlError`. |
+| `server/runtime/Http.ts` | Effect's `HttpClient` on fetch, with its own spans off, and `requestProblem` for log lines. |
+| `server/config.ts` | `PonderConfig`: every environment variable. `readNow()` for code that needs a value before an effect can run. |
 | `server/tracing/Tracing.ts` | Effect's tracer on Ponder's OpenTelemetry provider, and `annotate`. |
 | `server/tracing/Logger.ts` | Effect's logger, in Ponder's console format. |
 | `server/db.ts` | **Temporary.** The postgres.js `sql` for modules not on Effect yet. Phase 3 removes it. |
+
+The platform services (Phase 1). Each module has its service, its errors, and the pure helpers that go with it:
+
+| Service | Module | What it does | Fails with |
+| --- | --- | --- | --- |
+| `Secrets` | `server/secrets/Secrets.ts` | `migrate`, `read(name)`, `info(name)`, `save(name, value, by)`, `seal(context, value)`, `unseal(context, stored)` | `UnreadableSecret`, `SqlError` |
+| `Settings` | `server/settings/Settings.ts` | `migrate`, `get` (kept 5 s), `update`, `setPdfTextOnServer`, `setCompactionModel`, `setAutoCostTier`. Types `AppSettings`, `AutoCostTier`. | `SqlError` |
+| `OpenRouter` | `server/openrouter/OpenRouter.ts` | `url(path)`, `modelsWithZdr`, `modelsWithZdrNow`, `contextWindow(id)`. Pure: `privateRouting`, `privateRoutingBody`, `HELD_BACK_TOOL_CALLS`. | nothing: a list that can't be read is none, and logged |
+| `OpenRouterKey` | `server/openrouter/OpenRouterKey.ts` | `key` (kept 1 min), `provider`, `status`, `check(key)`, `save(key, by)` | `NoOpenRouterKey`, `UnreadableSecret`, `SqlError` |
+| `Models` | `server/models/Models.ts` | `available`, `cached`, `pick(id)`, `privateModels`. Pure: `MODELS`, `AUTO_MODEL`. | nothing |
+| `AutoRouter` | `server/models/AutoRouter.ts` | `plugin`, `answeringModel(reported)`, `lastAnsweringModel(threadId)`, `modelWindow(id)` | `NoPrivateModel`, `SqlError` |
+| `NetGuard` | `server/net/NetGuard.ts` | `fetch` (the guarded fetch), `publicAgent`, `privateNetworksAllowed`, `mcpUrlProblem(address)`. Pure: `isPrivate`, `assertPublicHost`. | the fetch rejects as before |
+| `ObjectStore` | `server/files/ObjectStore.ts` | `enabled`, `put(key, data, type)`, `get(key)` | `ObjectStoreError` |
+| `Mailer` | `server/email/Mailer.ts` | `send(email)`. Pure: the emails (`signInEmail`, `inviteEmail`, ...). | `EmailNotSent` |
+| `Notify` | `server/notify/Notify.ts` | `admins(title, message, click?)` | nothing: a failure is logged |
+| `Runs` | `server/telemetry/Runs.ts` | `migrate` (with `charged_runs`), `insert(row)`, `usageReport(query)`. Constants `UNCHARGED_CALLS`, `TITLE_FUNCTION_ID`, `COMPACTION_FUNCTION_ID`. | `SqlError` |
+| `ModelCalls` | `server/telemetry/ModelCalls.ts` | `record(id, context)` gives an attempt's `start`, `finish`, `fail`; `settleEarlierAttempts`, `settle`, `stop`, `fillCosts`. Pure: `recordId`. | `SqlError` |
+| `Telemetry` | `server/telemetry/Telemetry.ts` | `setup`: registers the AI SDK's telemetry and migrates `runs`. Pure: `runTelemetry`. | `SqlError` |
+
+Plain modules, with no I/O and no environment: `server/hosts.ts` (`isLocalHost`, `originOf`; the hosts are `PonderConfig.hosts`), `server/validate.ts` (Hono's zod middleware: its schemas are the typed client's input types), `server/telemetry/cost.ts` (the workflow uses it) and `server/telemetry/run-recorder.ts` (the AI SDK's integration, a class that the SDK calls).
 
 ## House rules
 
@@ -37,7 +58,7 @@ Effect is `effect` 4.1.1. The agent docs in `~/src/t3code/.repos/effect-smol/` a
 14. **Tracing** goes to the provider of `server/tracing/setup.ts` (see "Tracing").
 15. **Tests.** `*.test.ts` with `@effect/vitest`. Test layers only for outside systems. No mocks of the logic under test, no sleeps or polling. The `*.check.ts` scripts stay and must pass.
 16. **Comments** say why, in short plain sentences. Move them with the code.
-17. **No shims.** Update every caller of a moved function. The only deliberate exceptions: `server/db.ts`'s `sql` (until Phase 3) and `runPromise` in `runtime.ts` (until the last caller is on Effect).
+17. **No shims.** Update every caller of a moved function. The only deliberate exceptions: `server/db.ts`'s `sql` (until Phase 3), `runPromise` in `runtime.ts` (until the last caller is on Effect), `PonderConfig.readNow()` (until auth.ts and mcp/oauth.ts are on Effect), and `Telemetry`'s `Effect.runPromiseWith` for the AI SDK's callbacks into `RunRecorder`, on the services of its layer.
 
 ## A service module
 
@@ -114,7 +135,8 @@ const config = yield* PonderConfig.PonderConfig;
 const steps = config.maxSteps; // CHAT_MAX_STEPS, default 10
 ```
 
-- The layer reads the environment once, when the runtime is built. Some modules read `process.env` at each call (notify.ts, secrets.ts, net-guard.ts, tracing/http.ts). Once they read `PonderConfig`, they see the value at start. Nothing changes the environment in production, but a check script that sets `process.env` (tracing.check.ts sets `OPENROUTER_BASE_URL`) must do it before the runtime is built.
+- The layer reads the environment once, when the runtime is built. Some modules read `process.env` at each call before (notify.ts, secrets.ts, net-guard.ts, tracing/http.ts). On `PonderConfig`, they see the value at start: `NOTIFY_URL`, the keys of `Secrets` and `MCP_ALLOW_PRIVATE_NETWORKS` (`NetGuard`) are read once. Nothing changes the environment in production, and the e2e server gets its environment before it starts. A check script that sets `process.env` must do it before the runtime is built: `server/mcp.check.ts` sets `MCP_ALLOW_PRIVATE_NETWORKS=1` at its top, and checks the strict guard on a `NetGuard` layer of its own (`PonderConfig.layerFromEnv({})`).
+- `PonderConfig.readNow()` reads the same config from the environment, synchronously, for code that needs a value before an effect can run: auth.ts makes Better Auth with the hosts when its module loads, and mcp/oauth.ts names them in sync getters. It is a boundary like `runPromise`: Phase 2 removes it.
 - Empty values keep the old rule of each module: `X ?? default` kept `""`; `X || default` and `if (!X)` did not. The field's comment says "Empty = missing" for the second kind.
 - `PONDER_TOOL_APPROVAL_SECRET`: the field is what the operator set. startup.ts still derives it from `BETTER_AUTH_SECRET` and writes it to `process.env` for workflow/approvals.ts. Phase 3 moves this to a value in the runtime.
 - Tests: `PonderConfig.layerFromEnv({ DATABASE_URL: url })`.
@@ -143,7 +165,8 @@ Differences from postgres.js that later phases must handle:
 - **A raw `vector` or `tsvector` column can't be read.** The client reads every column in binary and has no codec for them: it fails, or gives bytes. Select `embedding::text`, or compute in SQL (`<=>`, `ts_rank`). Ponder reads neither today.
 - **One statement per `sql.unsafe`.** postgres.js allowed `"select 1; select 2"`. Split them.
 - **`sql(rows)` becomes `sql.insert(rows)`, `sql(ids)` in `in (...)` becomes `sql.in(ids)`, `sql.begin` becomes `sql.withTransaction`, `sql.reserve` is `sql.reserve` (scoped).** `sql.json` is on `PgClient`, not on `SqlClient`: depend on `PgClient.PgClient`.
-- **`numeric` comes back as a string**, as before.
+- **`numeric` comes back as a string**, as before. `runs.cost_usd` is `numeric(12, 6)`: `"0.000123"`. Cast to `float8` in SQL where a number is wanted (`usageReport`, credits.ts).
+- **Parameters have a type.** A JS integer binds as `int4` (or `int8` past 2³¹), another number as `float8`, a boolean as `bool`, a `Date` as `timestamptz`; a string has no type, so Postgres takes the column's. A `float8` parameter goes into a `numeric` column by Postgres's assignment cast, and is rounded to the column's places, as postgres.js's text was. An `int4` works in `make_interval(days => ...)` and `limit`. A function that takes no `float8` gets an error for a non-integer number: cast the parameter in SQL.
 - **A `SqlError`'s `message` is the client's** ("PgConnection: Query failed"), not Postgres's. Postgres's message and code are on `error.reason.cause`. A log line that printed `error.message` of a postgres.js error printed Postgres's text: keep that by printing the cause's message.
 - Idle connections close after 60 seconds (postgres.js kept them).
 - **A row can be up to 1 GiB** (`maxMessageSize` in `server/runtime/Database.ts`), as with postgres.js. The client's default is 16 MiB, less than a long thread's `messages`.
@@ -151,6 +174,21 @@ Differences from postgres.js that later phases must handle:
 - **Interrupting a query waits for the client to cancel it** on the server: seconds, on a hung connection. A deadline that a person waits on runs the query in a fiber of its own, as `Database.pingWithin` does for /health.
 
 Until Phase 3 two pools run: postgres.js (`server/db.ts`) and `PgClient`. Up to 20 connections, plus better-auth's 5 and Workflow's own.
+
+## Outbound HTTP
+
+**Decision: Effect's `HttpClient` (`server/runtime/Http.ts`) for the services Ponder itself calls** (OpenRouter's API, ntfy, Cloudflare's email API). It is `FetchHttpClient`, so the requests are Node's fetch as before. A test gives a fake `HttpClient` (`HttpClient.make(...)` in a `Layer.succeed`) instead of a server.
+
+- The client's own spans are off (`HttpClient.TracerDisabledWhen`). `tracing/http.ts` already makes one span for each request, from undici's channels, with only what may leave Ponder. The client's span would be a second one, with the full address, and it would send a `traceparent` header, which `tracing/http.ts` says never goes out.
+- Timeouts are `Effect.timeout` with the old values (`AbortSignal.timeout` before): interrupting the request aborts the fetch. A timeout covers the request and the reading of its body, as the signal did.
+- A non-2xx answer is a value, not a failure, unless the code asks for `HttpClientResponse.filterStatusOk`. Bodies are decoded with `HttpClientResponse.schemaBodyJson` and a lenient `Schema` (optional and nullable fields), so a field OpenRouter adds or leaves out changes nothing.
+- Never log an `HttpClientError`'s message: it holds the address, with its query. `requestProblem(error)` gives what the old log lines printed: `HTTP 503`, fetch's own message, or AbortSignal.timeout's.
+- **Addresses that people or the model choose** go through `NetGuard` (`server/net/NetGuard.ts`): its `fetch` is the guarded fetch, unchanged (public addresses only, checked on each connection; a GET follows 3 checked redirects; other methods get the redirect as the answer). It stays a plain `typeof fetch`, because the libraries that use it (@ai-sdk/mcp) take one. Effect code that wants an `HttpClient` on it provides `FetchHttpClient.Fetch` with it. web_fetch uses `publicAgent` with undici directly. The agent closes with the runtime.
+- `ObjectStore` keeps aws4fetch, which signs each request and retries an answer of 5xx or 429 itself; `Effect.tryPromise((signal) => client.fetch(url, { signal }))` gives it the signal.
+
+## Errors of a service, and their messages
+
+Each failure a person or a caller can act on is a tagged error with a fixed message. Where the old error had the other side's answer in its message (Cloudflare's or the bucket's body), the new one has the status only: an answer can name an address or a file. `UnreadableSecret` names the secret ("openrouter_api_key") and the variable of its key, never a value. Where a log line printed a postgres.js error's message, it now prints `sqlMessage(error)`, Postgres's own text.
 
 ## Boundaries
 
@@ -211,6 +249,10 @@ export async function trustedPagesStep(threadId: string): Promise<string[]> {
 ### Scripts: `runMain(effect)`
 
 Runs the program on the app's runtime, prints a failure's Cause and sets exit code 1, then disposes the runtime so the pool closes. It does not exit the process.
+
+### Callbacks from a library: `Effect.runPromiseWith(context)`
+
+A library that calls Ponder back, such as the AI SDK's telemetry (`RunRecorder`), gets a plain function. The service that makes it takes its layer's context (`yield* Effect.context<never>()`) and runs the callback's effect on it, with the runtime's pool, logger and tracer (`server/telemetry/Telemetry.ts`). The effect handles its own failures: the callback never rejects.
 
 ### Code not on Effect yet: `runPromise(effect)`
 

@@ -2,12 +2,13 @@ import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
 import { isIP } from "node:net";
 import { fetch } from "undici";
-import { isPrivate, publicAgent } from "../net-guard.ts";
+import * as NetGuard from "../net/NetGuard.ts";
+import { runPromise } from "../runtime/runtime.ts";
 
 /**
  * web_fetch: reads a page on our own server, so no other company sees what is read.
  * The model picks the address, so a page must not reach this machine, the tailnet or
- * any private network (net-guard.ts), checked again on every redirect.
+ * any private network (net/NetGuard.ts), checked again on every redirect.
  */
 const MAX_BYTES = 3_000_000;
 const MAX_CHARS = 20_000;
@@ -38,6 +39,7 @@ export async function fetchPage(address: string): Promise<FetchedPage> {
 
 async function fetchFollowing(address: string) {
 	let url = checkedUrl(address);
+	const { publicAgent } = await runPromise(NetGuard.NetGuard);
 	for (let redirects = 0; ; redirects++) {
 		const response = await fetch(url, {
 			dispatcher: publicAgent,
@@ -61,7 +63,7 @@ function checkedUrl(address: string) {
 	if (url.username || url.password) throw new Error("Addresses with a user name or password cannot be read.");
 	const host = url.hostname.replace(/^\[|\]$/g, "");
 	// A connection to an IP address skips the lookup, so it is checked here.
-	if (isIP(host) && isPrivate(host)) throw new Error("That address is on a private network.");
+	if (isIP(host) && NetGuard.isPrivate(host)) throw new Error("That address is on a private network.");
 	return url;
 }
 

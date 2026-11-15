@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
+import type { SqlError } from "effect/sql/SqlError";
 import * as PonderConfig from "../config.ts";
 
 /**
@@ -52,3 +54,21 @@ export const pingWithin = Effect.fn("Database.pingWithin")(function* (limit: Dur
 		Effect.onError(() => Effect.forkDetach(Fiber.interrupt(fiber))),
 	);
 });
+
+/**
+ * The Postgres code of a failed query, such as "42P01" (no such table): postgres.js had it
+ * on the error, the Effect client has it on the reason's cause (docs/effect.md, "Database").
+ */
+export function pgCode(error: SqlError): string | undefined {
+	const cause = error.reason.cause;
+	return Predicate.hasProperty(cause, "code") && Predicate.isString(cause.code) ? cause.code : undefined;
+}
+
+/**
+ * A failed query's message as Postgres or the socket gave it, for a log line. The
+ * error's own message is the client's ("PgConnection: Query failed"); postgres.js printed Postgres's.
+ */
+export function sqlMessage(error: SqlError): string {
+	const cause = error.reason.cause;
+	return Predicate.hasProperty(cause, "message") && Predicate.isString(cause.message) ? cause.message : error.message;
+}

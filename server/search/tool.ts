@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { insertRun } from "../telemetry/store.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Runs from "../telemetry/Runs.ts";
 import { searchBackend } from "./backend.ts";
 import { fetchPage } from "./fetch-page.ts";
 import type { WebFetchInput, WebSearchInput } from "./schema.ts";
@@ -26,7 +27,7 @@ export async function executeWebSearch({ query }: WebSearchInput, { threadId, ow
 			return found;
 		});
 		// Credits are charged from `runs`, so a search costs the person what it cost us.
-		await insertRun({
+		const run: Runs.RunRow = {
 			id: randomUUID(),
 			parentId: null,
 			threadId,
@@ -41,7 +42,8 @@ export async function executeWebSearch({ query }: WebSearchInput, { threadId, ow
 			durationMs: Date.now() - started,
 			toolCalls: [{ name: `search:${backend.name}`, status: "ok" as const }],
 			finishReason: "stop",
-		});
+		};
+		await runPromise(Runs.Runs.use((runs) => runs.insert(run)));
 		if (!reply.results.length) return { query, results: [], error: "No results. Try other words." };
 		return { query, results: reply.results.map((result, index) => ({ n: index + 1, ...result })) };
 	} catch (error) {

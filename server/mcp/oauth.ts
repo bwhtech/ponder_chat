@@ -7,8 +7,10 @@ import {
 	type OAuthClientProvider,
 	type OAuthTokens,
 } from "@ai-sdk/mcp";
-import { hosts, originOf } from "../hosts.ts";
-import { assertPublicHost, guardedFetch, privateNetworksAllowed } from "../net-guard.ts";
+import * as PonderConfig from "../config.ts";
+import { originOf } from "../hosts.ts";
+import * as NetGuard from "../net/NetGuard.ts";
+import { runPromise } from "../runtime/runtime.ts";
 import { ConnectorProblem, describeError, NeedsSignIn } from "./errors.ts";
 import { saveCredentials, saveSignIn, takeSignIn, tokenExpiry, type Connection, type Credentials, type SignInSecret } from "./store.ts";
 
@@ -20,8 +22,17 @@ import { saveCredentials, saveSignIn, takeSignIn, tokenExpiry, type Connection, 
  */
 export const CALLBACK_PATH = "/oauth/mcp/callback";
 
+/**
+ * The hosts Ponder answers on (PONDER_HOSTS), for the sync getters of the SDK's provider
+ * below: read from the environment, as the runtime's config is (config.ts, readNow).
+ */
+const hosts = () => PonderConfig.readNow().hosts;
+
 /** The callback on every host Ponder answers on, so one registration works on all of them. */
-const callbackUrls = () => hosts.map((host) => `${originOf(host)}${CALLBACK_PATH}`);
+const callbackUrls = () => hosts().map((host) => `${originOf(host)}${CALLBACK_PATH}`);
+
+/** The guarded fetch (net/NetGuard.ts): public addresses only. */
+const guardedFetch = async () => (await runPromise(NetGuard.NetGuard)).fetch;
 
 type Options = {
 	redirectUrl: string;
@@ -49,7 +60,7 @@ export class ConnectorOAuth implements OAuthClientProvider {
 	get clientMetadata(): OAuthClientMetadata {
 		return {
 			client_name: "Ponder Chat",
-			client_uri: originOf(hosts[0]!),
+			client_uri: originOf(hosts()[0]!),
 			redirect_uris: callbackUrls(),
 			grant_types: ["authorization_code", "refresh_token"],
 			response_types: ["code"],
@@ -130,9 +141,9 @@ export class ConnectorOAuth implements OAuthClientProvider {
 	 */
 	async validateAuthorizationServerURL(_serverUrl: string | URL, authorizationServerUrl: string | URL) {
 		const url = new URL(authorizationServerUrl);
-		if (!privateNetworksAllowed()) {
+		if (!(await runPromise(NetGuard.NetGuard)).privateNetworksAllowed) {
 			if (url.protocol !== "https:") throw new ConnectorProblem("The server's sign-in is not on https.");
-			assertPublicHost(url);
+			NetGuard.assertPublicHost(url);
 		}
 		const client = this.credentials.client;
 		if (client?.client_secret && !client.issuer && !this.authorizationServerInformation()) this.discovered = await discoverAuthorizationServer(url);
@@ -149,8 +160,9 @@ async function discoverAuthorizationServer(server: URL): Promise<OAuthAuthorizat
 	];
 	let failure: unknown;
 	let answered = false;
+	const fetch = await guardedFetch();
 	for (const candidate of candidates) {
-		const response = await guardedFetch(new URL(candidate, server.origin), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }).catch((error) => {
+		const response = await fetch(new URL(candidate, server.origin), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(10_000) }).catch((error) => {
 			failure = error;
 			return undefined;
 		});
@@ -190,7 +202,7 @@ export async function startSignIn(input: {
 	const redirectUrl = `${input.origin}${CALLBACK_PATH}`;
 	// A new sign-in starts without tokens, so the SDK asks for a new authorization instead of refreshing.
 	const provider = new ConnectorOAuth({ ...input.credentials, tokens: undefined }, { redirectUrl, state });
-	const result = await auth(provider, { serverUrl: input.url, fetchFn: guardedFetch });
+	const result = await auth(provider, { serverUrl: input.url, fetchFn: await guardedFetch() });
 	if (result !== "REDIRECT" || !provider.authorizationUrl) throw new ConnectorProblem("The server did not ask for a sign-in.");
 	await saveSignIn(state, input.userId, input.connectionId, {
 		verifier: provider.verifier,
@@ -208,7 +220,7 @@ export async function finishSignIn(input: { userId: string; state: string; code:
 	const url = await input.url(signIn);
 	if (!url) throw new ConnectorProblem("The connector was removed during the sign-in.");
 	const provider = new ConnectorOAuth(signIn.secret.credentials, { redirectUrl: signIn.secret.redirectUrl, state: input.state, verifier: signIn.secret.verifier });
-	await auth(provider, { serverUrl: url, authorizationCode: input.code, callbackState: input.state, callbackIssuer: input.issuer, fetchFn: guardedFetch });
+	await auth(provider, { serverUrl: url, authorizationCode: input.code, callbackState: input.state, callbackIssuer: input.issuer, fetchFn: await guardedFetch() });
 	if (!provider.credentials.tokens?.access_token) throw new ConnectorProblem("The server did not give Ponder a token.");
 	return { connectionId: signIn.connectionId, draft: signIn.secret.draft, credentials: provider.credentials };
 }
@@ -242,7 +254,7 @@ export async function freshCredentials(connection: Connection, credentials: Cred
 	if (!pending) {
 		pending = (async () => {
 			const provider = backgroundOAuth(connection, credentials);
-			const result = await auth(provider, { serverUrl: connection.url, fetchFn: guardedFetch });
+			const result = await auth(provider, { serverUrl: connection.url, fetchFn: await guardedFetch() });
 			if (result !== "AUTHORIZED" || !provider.credentials.tokens?.access_token) throw new NeedsSignIn();
 			return provider.credentials;
 		})().finally(() => refreshing.delete(connection.id));

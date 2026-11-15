@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { openRouterUrl, privateRoutingBody } from "../openrouter.ts";
-import { openRouterKey } from "../openrouter-key.ts";
-import { insertRun } from "../telemetry/store.ts";
+import * as OpenRouter from "../openrouter/OpenRouter.ts";
+import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Runs from "../telemetry/Runs.ts";
 import type { Gate } from "./extract.ts";
 
 /**
@@ -14,7 +15,6 @@ import type { Gate } from "./extract.ts";
  */
 export const GATE_MODEL = process.env.PONDER_MEMORY_GATE_MODEL ?? "perplexity/pplx-decider-v1.2";
 const QUESTIONS_PATH = new URL("./gate.json", import.meta.url);
-const ENDPOINT = openRouterUrl("alpha/decisions");
 const THRESHOLD = 0.5;
 
 export function readGateQuestions() {
@@ -31,10 +31,11 @@ export const decisionGate: Gate = async ({ scope, turn, existing }) => {
 	const started = Date.now();
 	// The turn is data: it goes in `state`, apart from the questions.
 	const state = { saved_memories: existing.map((m) => m.text), person_said: turn.user, assistant_replied: turn.assistant };
-	const response = await fetch(ENDPOINT, {
+	const endpoint = await runPromise(OpenRouter.OpenRouter.useSync((openRouter) => openRouter.url("alpha/decisions")));
+	const response = await fetch(endpoint, {
 		method: "POST",
-		headers: { Authorization: `Bearer ${await openRouterKey()}`, "Content-Type": "application/json" },
-		body: JSON.stringify({ model: GATE_MODEL, state, questions: JSON.parse(await readGateQuestions()), provider: privateRoutingBody }),
+		headers: { Authorization: `Bearer ${await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.key))}`, "Content-Type": "application/json" },
+		body: JSON.stringify({ model: GATE_MODEL, state, questions: JSON.parse(await readGateQuestions()), provider: OpenRouter.privateRoutingBody }),
 	});
 	const body = (await response.json().catch(() => ({}))) as DecisionsResponse;
 	const save = body.answers?.save?.noul;
@@ -42,7 +43,7 @@ export const decisionGate: Gate = async ({ scope, turn, existing }) => {
 	if (!response.ok || typeof save !== "number") throw new Error(`Memory gate (${GATE_MODEL}): ${body.error?.message ?? `HTTP ${response.status}`}`);
 
 	// Not a generateText call, so it is written to `runs` here, as telemetry writes the others. Credits count it.
-	await insertRun({
+	const run: Runs.RunRow = {
 		id: randomUUID(),
 		parentId: null,
 		threadId: scope.threadId,
@@ -57,7 +58,8 @@ export const decisionGate: Gate = async ({ scope, turn, existing }) => {
 		durationMs: Date.now() - started,
 		toolCalls: [],
 		finishReason: "stop",
-	}).catch((error) => console.error("[memory] could not record the gate's run:", error));
+	};
+	await runPromise(Runs.Runs.use((runs) => runs.insert(run))).catch((error) => console.error("[memory] could not record the gate's run:", error));
 
 	const refused = typeof refuse === "number" && refuse >= THRESHOLD;
 	const pct = (p: number) => `${Math.round(p * 100)}%`;

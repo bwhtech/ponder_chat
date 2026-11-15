@@ -27,9 +27,9 @@ export class PonderConfig extends Context.Service<
 		// --- Database and sign-in
 		/** DATABASE_URL. Ponder's Postgres. Without it the clients try localhost, as postgres.js did. Empty = missing. */
 		readonly databaseUrl: Option.Option<Redacted.Redacted>;
-		/** BETTER_AUTH_SECRET. Signs sessions, and the keys of saved secrets come from it (secrets.ts). Empty = missing. */
+		/** BETTER_AUTH_SECRET. Signs sessions, and the keys of saved secrets come from it (secrets/Secrets.ts). Empty = missing. */
 		readonly betterAuthSecret: Option.Option<Redacted.Redacted>;
-		/** PONDER_ENCRYPTION_KEY. When set, sealed values use a key from it instead (secrets.ts). Empty = missing. */
+		/** PONDER_ENCRYPTION_KEY. When set, sealed values use a key from it instead (secrets/Secrets.ts). Empty = missing. */
 		readonly encryptionKey: Option.Option<Redacted.Redacted>;
 		/**
 		 * PONDER_TOOL_APPROVAL_SECRET, as the operator set it. Empty = missing. When it is
@@ -37,7 +37,7 @@ export class PonderConfig extends Context.Service<
 		 * environment for workflow/approvals.ts, which reads it there.
 		 */
 		readonly toolApprovalSecret: Option.Option<Redacted.Redacted>;
-		/** PONDER_HOSTS, split on commas; by default localhost and 127.0.0.1 on `port` (hosts.ts). */
+		/** PONDER_HOSTS, split on commas; by default localhost and 127.0.0.1 on `port` (hosts.ts used it). */
 		readonly hosts: ReadonlyArray<string>;
 		/** PORT, default "3500". Nitro listens on it; hosts' default uses it. */
 		readonly port: string;
@@ -49,15 +49,15 @@ export class PonderConfig extends Context.Service<
 		readonly development: boolean;
 
 		// --- OpenRouter and models
-		/** OPENROUTER_API_KEY, used when no key is saved in /admin (openrouter-key.ts). Empty = missing. */
+		/** OPENROUTER_API_KEY, used when no key is saved in /admin (openrouter/OpenRouterKey.ts). Empty = missing. */
 		readonly openRouterApiKey: Option.Option<Redacted.Redacted>;
 		/**
 		 * OPENROUTER_BASE_URL, default https://openrouter.ai/api, without a trailing slash
-		 * (openrouter.ts). The e2e tests point it at the fake. tracing/http.ts treats an empty
-		 * value as missing; openrouter.ts, which sends the requests, keeps it: this follows openrouter.ts.
+		 * (openrouter/OpenRouter.ts). The e2e tests point it at the fake. tracing/http.ts treats an empty
+		 * value as missing; OpenRouter.ts, which sends the requests, keeps it: this follows OpenRouter.ts.
 		 */
 		readonly openRouterBaseUrl: string;
-		/** CHAT_DEFAULT_MODEL, default Auto (models.ts). */
+		/** CHAT_DEFAULT_MODEL, default Auto (models/Models.ts). */
 		readonly defaultModel: string;
 		/** CHAT_MAX_STEPS, default 10: model calls in one reply (workflow/replies.ts). Number(), so a bad value is NaN, as before. */
 		readonly maxSteps: number;
@@ -81,9 +81,9 @@ export class PonderConfig extends Context.Service<
 		readonly embeddingModel: string;
 
 		// --- Credits
-		/** CHAT_DAILY_CREDITS, default 1000. A whole number ≥ 0, else the default. Only for the first start (settings.ts). */
+		/** CHAT_DAILY_CREDITS, default 1000. A whole number ≥ 0, else the default. Only for the first start (settings/Settings.ts). */
 		readonly dailyCredits: number;
-		/** CHAT_CREDITS_PER_USD, default 1000. The same rules (settings.ts). */
+		/** CHAT_CREDITS_PER_USD, default 1000. The same rules (settings/Settings.ts). */
 		readonly creditsPerUsd: number;
 
 		// --- Python sandbox (python/pyodide.ts)
@@ -103,7 +103,7 @@ export class PonderConfig extends Context.Service<
 		readonly path: string;
 
 		// --- Files, email, alerts
-		/** PONDER_S3_*: the bucket for attached files, when PONDER_S3_BUCKET and PONDER_S3_ENDPOINT are both set (object-store.ts). */
+		/** PONDER_S3_*: the bucket for attached files, when PONDER_S3_BUCKET and PONDER_S3_ENDPOINT are both set (files/ObjectStore.ts). */
 		readonly objectStore: Option.Option<{
 			readonly bucket: string;
 			/** Without a trailing slash. */
@@ -115,13 +115,13 @@ export class PonderConfig extends Context.Service<
 			/** PONDER_S3_REGION, default "auto" (R2). */
 			readonly region: string;
 		}>;
-		/** PONDER_EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_EMAIL_TOKEN, when all three are set (email.ts). Empty = missing. */
+		/** PONDER_EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_EMAIL_TOKEN, when all three are set (email/Mailer.ts). Empty = missing. */
 		readonly email: Option.Option<{ readonly from: string; readonly accountId: string; readonly token: Redacted.Redacted }>;
-		/** CLOUDFLARE_API_URL, default https://api.cloudflare.com/client/v4, without a trailing slash (email.ts). */
+		/** CLOUDFLARE_API_URL, default https://api.cloudflare.com/client/v4, without a trailing slash (email/Mailer.ts). */
 		readonly cloudflareApiUrl: string;
-		/** NOTIFY_URL: the ntfy topic for admin alerts (notify.ts). Anyone with it can read the alerts. Empty = missing. */
+		/** NOTIFY_URL: the ntfy topic for admin alerts (notify/Notify.ts). Anyone with it can read the alerts. Empty = missing. */
 		readonly notifyUrl: Option.Option<Redacted.Redacted>;
-		/** MCP_ALLOW_PRIVATE_NETWORKS === "1": connectors may reach private addresses, for the e2e tests (net-guard.ts). */
+		/** MCP_ALLOW_PRIVATE_NETWORKS === "1": connectors may reach private addresses, for the e2e tests (net/NetGuard.ts). */
 		readonly allowPrivateNetworks: boolean;
 
 		// --- Background work and tracing
@@ -149,7 +149,7 @@ const list = (value: string) =>
 		.filter(Boolean);
 const withoutTrailingSlash = (url: string) => url.replace(/\/$/, "");
 
-/** settings.ts's fromEnv: a whole number from the environment, ≥ 0, or the fallback. */
+/** The old settings.ts's fromEnv: a whole number from the environment, ≥ 0, or the fallback. */
 const wholeNumber = (value: string | undefined, fallback: number) => {
 	const number = Math.round(Number(value ?? fallback));
 	return Number.isFinite(number) && number >= 0 ? number : fallback;
@@ -245,7 +245,7 @@ const make = Effect.gen(function* () {
 		pythonMemoryMb: Number(env.PYTHON_MEMORY_MB ?? 1536),
 		path: env.PATH ?? "",
 
-		// object-store.ts checked `bucket && endpoint`: both set and not empty.
+		// The old object-store.ts checked `bucket && endpoint`: both set and not empty.
 		objectStore:
 			bucket && endpoint
 				? Option.some({
@@ -268,13 +268,24 @@ const make = Effect.gen(function* () {
 	});
 });
 
+const fromProcessEnv = ConfigProvider.layer(Effect.sync(() => ConfigProvider.fromEnv({ preserveEmptyStrings: true })));
+
 /**
  * The config from the process's environment, as it is when the layer is built. Empty
  * strings are kept, so `?? default` fields keep them as the old code did.
  */
-export const layer = Layer.effect(PonderConfig, make).pipe(
-	Layer.provide(ConfigProvider.layer(Effect.sync(() => ConfigProvider.fromEnv({ preserveEmptyStrings: true })))),
-);
+export const layer = Layer.effect(PonderConfig, make).pipe(Layer.provide(fromProcessEnv));
+
+/**
+ * The same config, read from the environment now, for code that needs a value before any
+ * effect can run: auth.ts builds Better Auth with the hosts when its module loads, and
+ * mcp/oauth.ts names them in sync getters of the AI SDK's OAuth provider. Reading the
+ * config only parses the environment, so it runs synchronously.
+ *
+ * TEMPORARY: Phase 2 puts auth and connectors on Effect, where they read the runtime's
+ * PonderConfig, and removes this.
+ */
+export const readNow = (): PonderConfig["Service"] => Effect.runSync(make.pipe(Effect.provide(fromProcessEnv)));
 
 /** The config from a given environment, for tests. */
 export const layerFromEnv = (env: Record<string, string>) =>

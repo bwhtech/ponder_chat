@@ -4,7 +4,7 @@ import { needsCacheMarks, withCacheMarks } from "./cache.ts";
 
 /**
  * The OpenRouter model of a reply's model calls (model-attempt.ts). It keeps only the
- * model id and the thread, and reads the key (openrouter-key.ts) for each call, so an
+ * model id and the thread, and reads the key (openrouter/OpenRouterKey.ts) for each call, so an
  * admin's new key applies at once and the key is never part of a step's input or result.
  */
 export class ChatModel implements LanguageModelV4 {
@@ -32,7 +32,7 @@ export class ChatModel implements LanguageModelV4 {
 	}
 
 	private async openrouter(): Promise<LanguageModelV4> {
-		const { HELD_BACK_TOOL_CALLS, privateRouting } = await import("../openrouter.ts");
+		const { HELD_BACK_TOOL_CALLS, privateRouting } = await import("../openrouter/OpenRouter.ts");
 		return (await openRouterProvider())(this.modelId, {
 			// usage.include makes OpenRouter report each call's cost, which credits are charged from.
 			usage: { include: true },
@@ -49,7 +49,7 @@ export class ChatModel implements LanguageModelV4 {
 	 * since the one it picks is known only after the call.
 	 */
 	private async routing() {
-		const { MODELS } = await import("../models.ts");
+		const { MODELS } = await import("../models/Models.ts");
 		const parser = { id: "file-parser" as const, pdf: { engine: "cloudflare-ai" as const } };
 		if (isAuto(this.modelId)) {
 			// The session keeps a chat on one model where it can, so the provider's cache still holds the chat.
@@ -61,20 +61,22 @@ export class ChatModel implements LanguageModelV4 {
 }
 
 /**
- * OpenRouter with the key admins set (openrouter-key.ts), which reads Postgres. A step
+ * OpenRouter with the key admins set (openrouter/OpenRouterKey.ts), which reads Postgres. A step
  * only so that the workflow bundle leaves out its imports: it is called inside the model
  * step, where a step runs as a plain function. It returns the provider and not the key,
  * so the key can never be saved as a step's result.
  */
 async function openRouterProvider() {
 	"use step";
-	const { openRouter } = await import("../openrouter-key.ts");
-	return openRouter();
+	const { runStep } = await import("../runtime/step.ts");
+	const OpenRouterKey = await import("../openrouter/OpenRouterKey.ts");
+	return runStep(OpenRouterKey.OpenRouterKey.use((key) => key.provider));
 }
 
-/** Auto's plugin (auto-router.ts), which reads the settings from Postgres: a step for the same reason as above. */
+/** Auto's plugin (models/AutoRouter.ts), which reads the settings from Postgres: a step for the same reason as above. */
 async function autoRouterSettings() {
 	"use step";
-	const { autoRouterPlugin } = await import("../auto-router.ts");
-	return autoRouterPlugin();
+	const { runStep } = await import("../runtime/step.ts");
+	const AutoRouter = await import("../models/AutoRouter.ts");
+	return runStep(AutoRouter.AutoRouter.use((router) => router.plugin));
 }

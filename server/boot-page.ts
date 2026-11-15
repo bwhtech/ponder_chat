@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import * as Option from "effect/Option";
 import type { Context, Next } from "hono";
 import type { SignedIn } from "./auth.ts";
 import { roleOf } from "./admins.ts";
 import { creditStatus } from "./credits.ts";
-import { cachedModels } from "./models.ts";
+import * as Models from "./models/Models.ts";
 import { runPromise } from "./runtime/runtime.ts";
 import { sessionOf } from "./session-cache.ts";
 import { activeSkills } from "./skills.ts";
@@ -50,7 +51,7 @@ export async function bootPage(c: Context, next: Next) {
 export type BootData = {
 	me: Awaited<ReturnType<typeof meOf>> | null;
 	threads?: Threads.ThreadSummary[];
-	models?: NonNullable<ReturnType<typeof cachedModels>>;
+	models?: Models.Pickable;
 	features?: { python: boolean };
 	skills?: { name: string; description: string }[];
 	/** The files of the chat's later code, for the page to prefetch once it has loaded (web/preload.ts). */
@@ -74,7 +75,8 @@ async function bootData(headers: Headers, prefetch: string[]): Promise<BootData>
 	const [me, threads, skills] = await Promise.all([meOf(session.user), runPromise(Threads.Threads.use((threads) => threads.list(session.user.id))), skillOptions()]);
 	// Only what is ready now: the models wait for OpenRouter on a cold start, and the page asks for them itself then.
 	const python = await settled(pythonReady);
-	return { me, threads, skills, models: cachedModels(), features: python === undefined ? undefined : { python }, prefetch };
+	const models = Option.getOrUndefined(await runPromise(Models.Models.use((models) => models.cached)));
+	return { me, threads, skills, models, features: python === undefined ? undefined : { python }, prefetch };
 }
 
 /** The value of a promise that has settled, or undefined: never waits. */

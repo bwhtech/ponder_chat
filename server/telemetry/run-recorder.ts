@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { StepResult, Telemetry, ToolSet } from "ai";
 import { callCost } from "./cost.ts";
-import { insertRun, type RunRow, type ToolCallRecord } from "./store.ts";
+import type { RunRow, ToolCallRecord } from "./Runs.ts";
 
 type Step = StepResult<ToolSet>;
 
@@ -21,9 +21,15 @@ const TEXT_OPERATIONS = new Set(["ai.streamText", "ai.generateText"]);
 /**
  * Telemetry integration that writes one `runs` row per text generation. It reads only usage,
  * tool names, timings and the runtime context that telemetry may see; never prompts or outputs.
+ *
+ * The AI SDK calls it, so it stays a plain class. `save` writes the row (Telemetry.ts runs
+ * Runs.insert for it) and logs its own failure: it never rejects.
  */
 export class RunRecorder implements Telemetry {
 	private runs = new Map<string, RunState>();
+
+	constructor(private readonly save: (run: RunRow) => Promise<void>) {}
+
 	// The run whose tool is executing, so a subagent call inside a tool links to its parent.
 	private parentRun = new AsyncLocalStorage<string>();
 
@@ -80,12 +86,7 @@ export class RunRecorder implements Telemetry {
 		const run = this.runs.get(callId);
 		if (!run) return;
 		this.runs.delete(callId);
-		try {
-			await insertRun(toRow(callId, run, finishReason(run)));
-		} catch (error) {
-			// Never log the row or the error's query text: keep it to the cause.
-			console.error(`telemetry: could not save run ${callId}:`, (error as Error).message);
-		}
+		await this.save(toRow(callId, run, finishReason(run)));
 	}
 }
 

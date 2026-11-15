@@ -1,4 +1,6 @@
-import { guardedFetch, mcpUrlProblem } from "../net-guard.ts";
+import * as Option from "effect/Option";
+import * as NetGuard from "../net/NetGuard.ts";
+import { runPromise } from "../runtime/runtime.ts";
 import { ConnectorProblem, describeError } from "./errors.ts";
 import type { AuthKind, Transport } from "./store.ts";
 
@@ -16,22 +18,25 @@ const TIMEOUT_MS = 10_000;
 const PROTOCOL_VERSION = "2025-06-18";
 
 export async function probe(address: string): Promise<ProbeResult> {
-	const problem = mcpUrlProblem(address);
-	if (problem) return { ok: false, message: problem };
+	// Every request goes through the guarded fetch (net/NetGuard.ts).
+	const guard = await runPromise(NetGuard.NetGuard);
+	const problem = guard.mcpUrlProblem(address);
+	if (Option.isSome(problem)) return { ok: false, message: problem.value };
 	const url = new URL(address);
+	const guardedFetch = guard.fetch;
 	try {
-		const http = await initialize(url);
-		if (http.status === 401) return found(url, "http", await authKind(url, http.headers));
+		const http = await initialize(guardedFetch, url);
+		if (http.status === 401) return found(url, "http", await authKind(guardedFetch, url, http.headers));
 		if (http.ok) {
 			const name = await serverName(http);
-			await endSession(url, http.headers.get("mcp-session-id"));
+			await endSession(guardedFetch, url, http.headers.get("mcp-session-id"));
 			return found(url, "http", "none", name);
 		}
 		await http.body?.cancel();
 		if ([400, 404, 405, 406, 415].includes(http.status)) {
 			const sse = await guardedFetch(url, { headers: { accept: "text/event-stream" }, signal: AbortSignal.timeout(TIMEOUT_MS) });
 			await sse.body?.cancel();
-			if (sse.status === 401) return found(url, "sse", await authKind(url, sse.headers));
+			if (sse.status === 401) return found(url, "sse", await authKind(guardedFetch, url, sse.headers));
 			if (sse.ok && sse.headers.get("content-type")?.startsWith("text/event-stream")) return found(url, "sse", "none");
 		}
 		if (http.status === 403) return found(url, "http", "headers");
@@ -51,7 +56,7 @@ function found(url: URL, transport: Transport, auth: AuthKind, name?: string): P
 	return { ok: true, transport, auth, name, message };
 }
 
-function initialize(url: URL) {
+function initialize(guardedFetch: typeof fetch, url: URL) {
 	return guardedFetch(url, {
 		method: "POST",
 		headers: { "content-type": "application/json", accept: "application/json, text/event-stream", "mcp-protocol-version": PROTOCOL_VERSION },
@@ -85,14 +90,14 @@ async function serverName(response: Response): Promise<string | undefined> {
 }
 
 /** Ends the session the probe opened, as the spec asks of clients that are done. */
-async function endSession(url: URL, sessionId: string | null) {
+async function endSession(guardedFetch: typeof fetch, url: URL, sessionId: string | null) {
 	if (!sessionId) return;
 	await guardedFetch(url, { method: "DELETE", headers: { "mcp-session-id": sessionId }, signal: AbortSignal.timeout(TIMEOUT_MS) })
 		.then((response) => response.body?.cancel())
 		.catch(() => undefined);
 }
 
-async function authKind(url: URL, headers: Headers): Promise<AuthKind> {
+async function authKind(guardedFetch: typeof fetch, url: URL, headers: Headers): Promise<AuthKind> {
 	if (/resource_metadata=/i.test(headers.get("www-authenticate") ?? "")) return "oauth";
 	const path = url.pathname === "/" ? "" : url.pathname.replace(/\/$/, "");
 	const candidates = [

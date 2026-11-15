@@ -1,6 +1,7 @@
 import { sql } from "./db.ts";
 import { currentRequest, extraCredits, migrateExtraCredits, type CreditRequest } from "./extra-credits.ts";
-import { getSettings, migrateSettings } from "./settings.ts";
+import { runPromise } from "./runtime/runtime.ts";
+import * as Settings from "./settings/Settings.ts";
 
 /**
  * Daily credits. Each person may spend a number of credits a day, and the count starts
@@ -8,13 +9,13 @@ import { getSettings, migrateSettings } from "./settings.ts";
  * 1000 credits per US dollar, one credit is $0.001. So a cheap model costs a fraction
  * of a credit per message and Claude Opus several credits.
  *
- * Spending is read from `charged_runs` (telemetry/store.ts): the `runs` that OpenRouter
+ * Spending is read from `charged_runs` (telemetry/Runs.ts): the `runs` that OpenRouter
  * charged for, except thread titles, which the app makes and the person did not ask for. Nothing is reserved up front: a person
  * with credits left can start a reply, and that one reply may take them past the limit.
  * The next one is refused. Replies have no length cap of their own: going over by one
  * reply is accepted.
  *
- * The default limit and the credits per dollar are in `settings` (settings.ts), which
+ * The default limit and the credits per dollar are in `settings` (settings/Settings.ts), which
  * admins change on /admin. A row in `credit_limits` sets one person's limit (from /admin,
  * an invite, or scripts/credits.ts). Extra credits for one day (extra-credits.ts) add to
  * the limit.
@@ -34,7 +35,7 @@ export type CreditStatus = {
 };
 
 export async function migrateCredits() {
-	await migrateSettings();
+	await runPromise(Settings.Settings.use((settings) => settings.migrate));
 	await sql`
 		create table if not exists credit_limits (
 			user_id text primary key,
@@ -47,7 +48,7 @@ export async function migrateCredits() {
 export async function creditStatus(user: string, now = new Date()): Promise<CreditStatus> {
 	const { start, day, resetsAt } = utcDay(now);
 	const [settings, [spent], [own], extra, request] = await Promise.all([
-		getSettings(),
+		runPromise(Settings.Settings.use((settings) => settings.get)),
 		sql<{ usd: number }[]>`
 			select coalesce(sum(cost_usd), 0)::float8 as usd from charged_runs
 			where "user" = ${user} and created_at >= ${start}`,

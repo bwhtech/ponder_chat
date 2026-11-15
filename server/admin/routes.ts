@@ -1,24 +1,31 @@
 import { isAPIError } from "better-auth/api";
 import { type Context, Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import * as Option from "effect/Option";
 import { z } from "zod";
 import { recordAdminEvent, type AdminEvent } from "../admin-events.ts";
 import { requireAdmin } from "../admins.ts";
 import { appOrigin, auth, type SignedInEnv } from "../auth.ts";
 import { setDailyCredits } from "../credits.ts";
 import { sql } from "../db.ts";
-import { creditAnswerEmail, inviteEmail, sendEmail } from "../email.ts";
+import * as Mailer from "../email/Mailer.ts";
 import { decideRequest, grantCredits, pendingCount, type Decision } from "../extra-credits.ts";
 import { allow, disallow, setInviteCredits } from "../invites.ts";
-import { checkOpenRouterKey, openRouterKeyStatus, saveOpenRouterKey } from "../openrouter-key.ts";
-import { privateModels } from "../models.ts";
-import { AUTO_COST_TIERS, getSettings, setAutoCostTier, setCompactionModel, setPdfTextOnServer, updateSettings } from "../settings.ts";
+import * as Models from "../models/Models.ts";
+import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Settings from "../settings/Settings.ts";
 import { MAX_BODY } from "../../shared/skill-file.ts";
 import { deleteSkill, getSkill, listSkills, saveSkill, setSkillEnabled, type SaveResult, type SkillDetail } from "../skills.ts";
 import { activityPage } from "./activity.ts";
 import { listAdmins, listPeople, personDetail } from "./people.ts";
 import { overview, requestsReport } from "./reports.ts";
 import { validate } from "../validate.ts";
+
+// What several routes read (settings/Settings.ts, openrouter/OpenRouterKey.ts, models/Models.ts).
+const currentSettings = Settings.Settings.use((settings) => settings.get);
+const keyStatus = OpenRouterKey.OpenRouterKey.use((key) => key.status);
+const privateModels = Models.Models.use((models) => models.privateModels);
 
 /**
  * The API behind /admin, mounted at /api/admin. Every route needs an admin (requireAdmin).
@@ -89,11 +96,11 @@ export const adminApi = new Hono<Env>()
 
 	// People
 
-	.get("/people", async (c) => c.json({ people: await listPeople(), settings: await getSettings() }))
+	.get("/people", async (c) => c.json({ people: await listPeople(), settings: await runPromise(currentSettings) }))
 
 	.get("/people/:id", async (c) => {
 		const detail = await personDetail(c.req.param("id"));
-		return detail ? c.json({ ...detail, settings: await getSettings() }) : c.json({ error: "No one here." }, 404);
+		return detail ? c.json({ ...detail, settings: await runPromise(currentSettings) }) : c.json({ error: "No one here." }, 404);
 	})
 
 	// An invited person's id is their email: the limit then waits in the invite (invites.ts).
@@ -179,60 +186,60 @@ export const adminApi = new Hono<Env>()
 
 	.get("/settings", async (c) =>
 		c.json({
-			...(await getSettings()),
+			...(await runPromise(currentSettings)),
 			admins: await listAdmins(),
-			openRouterKey: await openRouterKeyStatus(),
+			openRouterKey: await runPromise(keyStatus),
 			// Only models with a private (ZDR) endpoint: another would fall back to the chat's own model.
-			models: (await privateModels()).map(({ id, name }) => ({ id, name })),
+			models: (await runPromise(privateModels)).map(({ id, name }) => ({ id, name })),
 		}),
 	)
 
 	.put("/settings", body(z.object({ defaultDailyCredits: credits, creditsPerUsd: z.number().int().min(1).max(1_000_000_000) })), async (c) => {
 		const input = c.req.valid("json");
-		const { defaultDailyCredits, creditsPerUsd } = await getSettings();
-		await updateSettings(input, adminOf(c));
+		const { defaultDailyCredits, creditsPerUsd } = await runPromise(currentSettings);
+		await runPromise(Settings.Settings.use((settings) => settings.update(input, adminOf(c))));
 		await record(c, "update-settings", { before: { defaultDailyCredits, creditsPerUsd }, after: input });
-		return c.json(await getSettings());
+		return c.json(await runPromise(currentSettings));
 	})
 
-	// How PDFs reach models that can't read them (settings.ts). Saved at once, apart from the credits.
+	// How PDFs reach models that can't read them (settings/Settings.ts). Saved at once, apart from the credits.
 	.put("/settings/pdf-reading", body(z.object({ onServer: z.boolean() })), async (c) => {
 		const input = c.req.valid("json");
-		const before = { pdfTextOnServer: (await getSettings()).pdfTextOnServer };
-		await setPdfTextOnServer(input.onServer, adminOf(c));
+		const before = { pdfTextOnServer: (await runPromise(currentSettings)).pdfTextOnServer };
+		await runPromise(Settings.Settings.use((settings) => settings.setPdfTextOnServer(input.onServer, adminOf(c))));
 		await record(c, "set-pdf-reading", { before, after: { pdfTextOnServer: input.onServer } });
-		return c.json(await getSettings());
+		return c.json(await runPromise(currentSettings));
 	})
 
 	// The model that writes a chat's summary when it gets too long (compaction/summarize.ts). A model with a private (ZDR) endpoint.
 	.put("/settings/compaction-model", body(z.object({ model: z.string() })), async (c) => {
 		const input = c.req.valid("json");
-		const models = await privateModels();
+		const models = await runPromise(privateModels);
 		if (!models.some((model) => model.id === input.model)) return c.json({ error: "That model has no private endpoint now. Choose another." }, 400);
-		const before = { compactionModel: (await getSettings()).compactionModel };
-		await setCompactionModel(input.model, adminOf(c));
+		const before = { compactionModel: (await runPromise(currentSettings)).compactionModel };
+		await runPromise(Settings.Settings.use((settings) => settings.setCompactionModel(input.model, adminOf(c))));
 		await record(c, "set-compaction-model", { before, after: { compactionModel: input.model } });
-		return c.json(await getSettings());
+		return c.json(await runPromise(currentSettings));
 	})
 
-	// How much Auto may spend on a request (auto-router.ts).
-	.put("/settings/auto-cost-tier", body(z.object({ tier: z.enum(AUTO_COST_TIERS) })), async (c) => {
+	// How much Auto may spend on a request (models/AutoRouter.ts).
+	.put("/settings/auto-cost-tier", body(z.object({ tier: z.enum(Settings.AUTO_COST_TIERS) })), async (c) => {
 		const input = c.req.valid("json");
-		const before = { autoCostTier: (await getSettings()).autoCostTier };
-		await setAutoCostTier(input.tier, adminOf(c));
+		const before = { autoCostTier: (await runPromise(currentSettings)).autoCostTier };
+		await runPromise(Settings.Settings.use((settings) => settings.setAutoCostTier(input.tier, adminOf(c))));
 		await record(c, "set-auto-cost-tier", { before, after: { autoCostTier: input.tier } });
-		return c.json(await getSettings());
+		return c.json(await runPromise(currentSettings));
 	})
 
-	// Saved encrypted (secrets.ts), and only after OpenRouter accepts it: a wrong key would stop every reply.
+	// Saved encrypted (secrets/Secrets.ts), and only after OpenRouter accepts it: a wrong key would stop every reply.
 	.put("/settings/openrouter-key", validate("json", z.object({ key: z.string().trim().min(20).max(500) }), { error: "Paste the whole key." }), async (c) => {
 		const input = c.req.valid("json");
-		const problem = await checkOpenRouterKey(input.key);
-		if (problem) return c.json({ error: problem }, 400);
-		await saveOpenRouterKey(input.key, adminOf(c));
+		const problem = await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.check(input.key)));
+		if (Option.isSome(problem)) return c.json({ error: problem.value }, 400);
+		await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.save(input.key, adminOf(c))));
 		// That the key changed, never the key or any part of it.
 		await record(c, "set-openrouter-key");
-		return c.json(await openRouterKeyStatus());
+		return c.json(await runPromise(keyStatus));
 	})
 
 	// Skills (skills.ts): Markdown files of instructions, on for everyone or off.
@@ -317,7 +324,7 @@ async function answer(c: Context<Env>, decision: Decision) {
 	await record(c, `${decision.status === "approved" ? "approve" : "decline"}-request`, { target: userId, after: { request: id, ...decision } });
 	const [person] = await sql<{ email: string }[]>`select email from users where id = ${userId}`;
 	const granted = decision.status === "approved" ? decision.credits : null;
-	if (person) await sendEmail(creditAnswerEmail(person.email, appOrigin(c.req.raw.headers), granted)).catch(logEmailError);
+	if (person) await runPromise(Mailer.Mailer.use((mailer) => mailer.send(Mailer.creditAnswerEmail(person.email, appOrigin(c.req.raw.headers), granted)))).catch(logEmailError);
 	return c.json({ ok: true });
 }
 
@@ -325,7 +332,7 @@ async function answer(c: Context<Env>, decision: Decision) {
 async function emailInvites(c: Context<Env>, emails: string[]) {
 	const notSent: string[] = [];
 	for (const email of emails) {
-		await sendEmail(inviteEmail(email, appOrigin(c.req.raw.headers))).catch((error) => {
+		await runPromise(Mailer.Mailer.use((mailer) => mailer.send(Mailer.inviteEmail(email, appOrigin(c.req.raw.headers))))).catch((error) => {
 			logEmailError(error);
 			notSent.push(email);
 		});

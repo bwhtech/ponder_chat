@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
-import { privateRouting } from "../openrouter.ts";
-import { openRouter } from "../openrouter-key.ts";
 import { generateText, Output } from "ai";
 import { z } from "zod";
-import { runTelemetry } from "../telemetry.ts";
+import { privateRouting } from "../openrouter/OpenRouter.ts";
+import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import { runTelemetry } from "../telemetry/Telemetry.ts";
 import { decisionGate, GATE_MODEL, readGateQuestions } from "./decision-gate.ts";
 import type { MemoryScope, MemoryTurn } from "./types.ts";
 
@@ -89,7 +90,7 @@ export const llmWriter: Writer = async ({ gate, ...input }) => {
 		.join("\n");
 	const { scope } = input;
 	const { output } = await generateText({
-		model: (await openRouter())(MODEL, { usage: { include: true }, provider: privateRouting }),
+		model: (await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.provider)))(MODEL, { usage: { include: true }, provider: privateRouting }),
 		instructions: await readFile(PROMPT_PATH, "utf8"),
 		prompt: `${describe(input)}\n\n${note}`,
 		output: Output.object({ schema: decision }),

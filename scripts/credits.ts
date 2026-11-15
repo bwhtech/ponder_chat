@@ -4,6 +4,7 @@
 //   npx tsx scripts/credits.ts list
 import { sql } from "../server/db.ts";
 import { creditStatus, listDailyCredits, migrateCredits, setDailyCredits } from "../server/credits.ts";
+import { dispose } from "../server/runtime/runtime.ts";
 
 const [command, email, amount] = process.argv.slice(2);
 await migrateCredits();
@@ -33,4 +34,6 @@ if (command === "set" && email && Number.isInteger(Number(amount)) && Number(amo
 } else {
 	console.log("Usage: npx tsx scripts/credits.ts set <email> <credits a day> | reset <email> | list");
 }
+// The Effect runtime's pool too, which the settings are read on (server/settings/Settings.ts).
+await dispose();
 await sql.end();

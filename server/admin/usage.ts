@@ -1,10 +1,11 @@
 import { toCredits, utcDay } from "../credits.ts";
 import { sql } from "../db.ts";
-import { MODELS } from "../models.ts";
-import { getSettings } from "../settings.ts";
+import { MODELS } from "../models/Models.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Settings from "../settings/Settings.ts";
 
 /**
- * Usage for /admin, read from `charged_runs` (telemetry/store.ts): cost, model and time
+ * Usage for /admin, read from `charged_runs` (telemetry/Runs.ts): cost, model and time
  * only, never chat content. So credits and replies are counted as credits.ts counts them,
  * at today's credits per dollar.
  */
@@ -20,7 +21,7 @@ export class Usage {
 
 	static async load(days: number, user?: string) {
 		const dates = lastDays(days);
-		const { creditsPerUsd } = await getSettings();
+		const { creditsPerUsd } = await runPromise(Settings.Settings.use((settings) => settings.get));
 		const rows = await sql<{ user: string; day: string; usd: number; replies: number }[]>`
 			select "user", to_char((created_at at time zone 'utc')::date, 'YYYY-MM-DD') as day,
 				coalesce(sum(cost_usd), 0)::float8 as usd, (count(*) filter (where is_reply))::int as replies
@@ -79,7 +80,7 @@ export class Usage {
 
 /** Credits per model over the last `days` days, largest first, by the names people pick from. */
 export async function creditsByModel(days: number, user?: string) {
-	const { creditsPerUsd } = await getSettings();
+	const { creditsPerUsd } = await runPromise(Settings.Settings.use((settings) => settings.get));
 	const rows = await sql<{ model: string; usd: number }[]>`
 		select model, coalesce(sum(cost_usd), 0)::float8 as usd from charged_runs
 		where created_at >= ${new Date(`${lastDays(days)[0]}T00:00:00Z`)} ${user ? sql`and "user" = ${user}` : sql``}
@@ -97,7 +98,7 @@ export async function creditsByModel(days: number, user?: string) {
  * extra credits. Both tables are small, so they are read whole.
  */
 export async function limitsToday() {
-	const { defaultDailyCredits } = await getSettings();
+	const { defaultDailyCredits } = await runPromise(Settings.Settings.use((settings) => settings.get));
 	const [own, extra] = await Promise.all([
 		sql<{ user_id: string; daily_credits: number }[]>`select user_id, daily_credits from credit_limits`,
 		sql<{ user_id: string; credits: number }[]>`

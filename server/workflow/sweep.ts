@@ -1,4 +1,5 @@
-import { fillModelCallCosts } from "../telemetry/model-calls.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as ModelCalls from "../telemetry/ModelCalls.ts";
 import { finishEndedRuns } from "./replies.ts";
 
 /**
@@ -6,13 +7,13 @@ import { finishEndedRuns } from "./replies.ts";
  * (startup.ts), at start-up and then every SWEEP_MS. Two jobs, each on its own timer, so
  * a slow OpenRouter never keeps a thread looking busy:
  * - finish the runs that ended without saving their reply (replies.ts);
- * - get the cost of model calls that were cut short (telemetry/model-calls.ts).
+ * - get the cost of model calls that were cut short (telemetry/ModelCalls.ts).
  * A job still running when its time comes again is not started twice.
  */
 const SWEEP_MS = Math.max(1, Number(process.env.PONDER_SWEEP_SECONDS) || 60) * 1000;
 const JOBS = [
 	{ name: "finish ended runs", run: finishEndedRuns },
-	{ name: "get the cost of model calls", run: fillModelCallCosts },
+	{ name: "get the cost of model calls", run: () => runPromise(ModelCalls.ModelCalls.use((calls) => calls.fillCosts)) },
 ];
 const timers: ReturnType<typeof setInterval>[] = [];
 

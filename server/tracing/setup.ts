@@ -14,7 +14,7 @@ import { setTracingState, tracingState, type TracingState } from "./state.ts";
  *
  * Only what Ponder needs: a tracer provider, a batch of spans, an exporter. No automatic
  * instrumentations, no module hooks. Workflow (@workflow/core) makes its own spans once a
- * provider is registered. The AI SDK makes its own through @ai-sdk/otel (telemetry.ts).
+ * provider is registered. The AI SDK makes its own through @ai-sdk/otel (telemetry/Telemetry.ts).
  * HTTP spans come from http.ts. One reply is one trace through reply-trace.ts.
  */
 export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_ENDPOINT, exporter?: SpanExporter): Promise<TracingState | undefined> {

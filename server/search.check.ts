@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { lookup } from "node:dns/promises";
 import { searchBackend } from "./search/backend.ts";
-import { isPrivate } from "./net-guard.ts";
+import { isPrivate } from "./net/NetGuard.ts";
 import { fetchPage } from "./search/fetch-page.ts";
 import { executeWebFetch } from "./search/tool.ts";
 

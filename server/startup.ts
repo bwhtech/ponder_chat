@@ -12,17 +12,17 @@ import { migratePythonState } from "./python/state.ts";
 import { migrateConnectors } from "./mcp/store.ts";
 import { migrateCompaction } from "./compaction/store.ts";
 import { dispose, runPromise } from "./runtime/runtime.ts";
-import { migrateSecrets } from "./secrets.ts";
+import * as Secrets from "./secrets/Secrets.ts";
 import { migrateSkills } from "./skills.ts";
 import { seedStandardSkills } from "./standard-skills.ts";
 import * as Threads from "./threads/Threads.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
-import { setupTelemetry } from "./telemetry.ts";
+import * as Telemetry from "./telemetry/Telemetry.ts";
 import { stopTracing } from "./tracing/setup.ts";
 import { migrateApprovalUses } from "./workflow/approval-uses.ts";
 import { migrateThreadRuns } from "./workflow/runs.ts";
 import { checkWebBuild } from "./web-build.ts";
-import { modelsWithZdr } from "./openrouter.ts";
+import * as OpenRouter from "./openrouter/OpenRouter.ts";
 
 /**
  * What the server does once when it starts, before it answers requests: create and
@@ -35,8 +35,6 @@ export const pythonReady = new Promise<boolean>((resolve) => (resolvePython = re
 
 export async function startup() {
 	checkWebBuild();
-	// OpenRouter's list of private models, read now: the chat page's first screen shows them without waiting (boot-page.ts).
-	void modelsWithZdr();
 	// A failed migration still settles pythonReady, so the routes that wait on it don't hang.
 	try {
 		await runPromise(migrateAll);
@@ -65,7 +63,10 @@ export async function startup() {
  */
 const migrateAll = Effect.gen(function* () {
 	const threads = yield* Threads.Threads;
-	yield* Effect.promise(() => setupTelemetry());
+	// OpenRouter's list of private models, read now, in the background: the chat page's first
+	// screen shows them without waiting (boot-page.ts).
+	yield* OpenRouter.OpenRouter.use((openRouter) => openRouter.modelsWithZdrNow);
+	yield* Telemetry.Telemetry.use((telemetry) => telemetry.setup);
 	yield* threads.migrate;
 	// After threads: its tables reference them.
 	yield* Effect.promise(() => migrateCompaction());
@@ -74,7 +75,7 @@ const migrateAll = Effect.gen(function* () {
 	yield* Effect.promise(() => migrateCredits());
 	yield* Effect.promise(() => migrateInvites());
 	yield* Effect.promise(() => migrateAdminEvents());
-	yield* Effect.promise(() => migrateSecrets());
+	yield* Secrets.Secrets.use((secrets) => secrets.migrate);
 	yield* Effect.promise(() => migrateConnectors());
 	yield* Effect.promise(() => migrateSkills());
 	yield* Effect.promise(() => seedStandardSkills());

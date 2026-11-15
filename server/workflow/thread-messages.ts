@@ -1,12 +1,13 @@
 import { convertToModelMessages, type ModelMessage, type UIMessage } from "ai";
-import { modelWindow } from "../auto-router.ts";
+import * as Option from "effect/Option";
 import { loadSummary, tokenRatio } from "../compaction/store.ts";
 import { withSummary } from "../compaction/summary.ts";
 import { estimate, type Estimate } from "../compaction/tokens.ts";
 import { resolveFileParts } from "../file-context.ts";
-import { MODELS } from "../models.ts";
+import * as AutoRouter from "../models/AutoRouter.ts";
+import { MODELS } from "../models/Models.ts";
 import { runPromise } from "../runtime/runtime.ts";
-import { getSettings } from "../settings.ts";
+import * as Settings from "../settings/Settings.ts";
 import type { ActiveSkill } from "../skills.ts";
 import * as Threads from "../threads/Threads.ts";
 import { openAnswersSettled } from "./answered-again.ts";
@@ -49,7 +50,7 @@ export async function loadThreadContext(threadId: string, options: MessageOption
 		messages,
 		estimate: estimate(messages),
 		ratio: await tokenRatio(threadId, options.modelId),
-		window: (await modelWindow(options.modelId)) ?? null,
+		window: Option.getOrNull(await runPromise(AutoRouter.AutoRouter.use((router) => router.modelWindow(options.modelId)))),
 		...(summary && { through: thread[summary.covers - 1]?.id }),
 	};
 }
@@ -64,7 +65,7 @@ export async function loadThreadContext(threadId: string, options: MessageOption
  */
 export async function modelMessages(thread: UIMessage[], { owner, modelId, recalled, skills, connectors, keepReasoningOf }: MessageOptions): Promise<ModelMessage[]> {
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
-	const pdfAsText = !readsPdf && (await getSettings()).pdfTextOnServer;
+	const pdfAsText = !readsPdf && (await runPromise(Settings.Settings.use((settings) => settings.get))).pdfTextOnServer;
 	const resolved = await resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText });
 	const messages = await convertToModelMessages(resolved, {
 		convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),

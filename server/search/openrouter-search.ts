@@ -1,5 +1,6 @@
-import { openRouterUrl, privateRoutingBody } from "../openrouter.ts";
-import { openRouterKey } from "../openrouter-key.ts";
+import * as OpenRouter from "../openrouter/OpenRouter.ts";
+import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
+import { runPromise } from "../runtime/runtime.ts";
 import type { SearchBackend, SearchReply, SearchResult } from "./backend.ts";
 
 /**
@@ -10,7 +11,6 @@ import type { SearchBackend, SearchReply, SearchResult } from "./backend.ts";
  *
  * Calls Chat Completions directly, so the annotations come back as OpenRouter sends them.
  */
-const URL = openRouterUrl("v1/chat/completions");
 const MODEL = process.env.PONDER_SEARCH_MODEL ?? "z-ai/glm-5.3-flash";
 const MAX_RESULTS = 6;
 const MAX_TEXT = 3_000;
@@ -39,9 +39,10 @@ export class OpenRouterSearch implements SearchBackend {
 	}
 
 	private async complete(query: string): Promise<Completion> {
-		const response = await fetch(URL, {
+		const url = await runPromise(OpenRouter.OpenRouter.useSync((openRouter) => openRouter.url("v1/chat/completions")));
+		const response = await fetch(url, {
 			method: "POST",
-			headers: { authorization: `Bearer ${await openRouterKey()}`, "content-type": "application/json" },
+			headers: { authorization: `Bearer ${await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.key))}`, "content-type": "application/json" },
 			signal: AbortSignal.timeout(TIMEOUT_MS),
 			body: JSON.stringify({
 				model: MODEL,
@@ -50,7 +51,7 @@ export class OpenRouterSearch implements SearchBackend {
 					{ role: "user", content: query },
 				],
 				tools: [{ type: "openrouter:web_search", parameters: { engine: "exa", max_results: MAX_RESULTS, max_uses: 1 } }],
-				provider: privateRoutingBody,
+				provider: OpenRouter.privateRoutingBody,
 				usage: { include: true },
 			}),
 		});

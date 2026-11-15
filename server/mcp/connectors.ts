@@ -1,5 +1,7 @@
-import { mcpUrlProblem } from "../net-guard.ts";
-import { UnreadableSecret } from "../secrets.ts";
+import * as Option from "effect/Option";
+import * as NetGuard from "../net/NetGuard.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import { UnreadableSecret } from "../secrets/Secrets.ts";
 import { CALL_TIMEOUT_MS, forgetClient, inspect, targetFor, withConnection } from "./client.ts";
 import { ConnectorProblem, describeError, NeedsSignIn } from "./errors.ts";
 import { ConnectorOAuth, CALLBACK_PATH, finishSignIn, startSignIn } from "./oauth.ts";
@@ -112,8 +114,8 @@ function headerRecord(headers: { name: string; value: string }[]) {
 export async function addConnector(userId: string, origin: string, input: NewConnector): Promise<{ connector: ConnectorView } | { authorizeUrl: string }> {
 	const url = input.url.trim();
 	const name = input.name.trim();
-	const problem = mcpUrlProblem(url);
-	if (problem) throw new ConnectorProblem(problem);
+	const problem = await runPromise(NetGuard.NetGuard.useSync((guard) => guard.mcpUrlProblem(url)));
+	if (Option.isSome(problem)) throw new ConnectorProblem(problem.value);
 	if (await hasConnectionTo(userId, url)) throw new ConnectorProblem("You already have a connector for this server.");
 	const headers = headerRecord(input.headers);
 	if (input.clientSecret && !input.clientId) throw new ConnectorProblem("Enter the client ID that goes with the secret.");
@@ -150,7 +152,7 @@ export async function signInAgain(userId: string, origin: string, id: string) {
 	if (connection.auth !== "oauth") throw new ConnectorProblem("This connector does not use a sign-in.");
 	let credentials: Credentials = {};
 	try {
-		const saved = readCredentials(connection);
+		const saved = await readCredentials(connection);
 		credentials = { headers: saved.headers, client: saved.client, clientIsDynamic: saved.clientIsDynamic, authServer: saved.authServer };
 	} catch (error) {
 		if (!(error instanceof UnreadableSecret)) throw error;
@@ -239,7 +241,7 @@ export async function changeConnector(userId: string, id: string, change: Connec
 		const headers = headerRecord(change.headers);
 		let saved: Credentials = {};
 		try {
-			saved = readCredentials(connection);
+			saved = await readCredentials(connection);
 		} catch (error) {
 			if (!(error instanceof UnreadableSecret)) throw error;
 		}

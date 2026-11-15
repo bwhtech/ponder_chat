@@ -1,14 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { OAuthAuthorizationServerInformation, OAuthClientInformation, OAuthTokens } from "@ai-sdk/mcp";
 import { sql } from "../db.ts";
-import { seal, unseal, UnreadableSecret } from "../secrets.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Secrets from "../secrets/Secrets.ts";
 import type { AuthKind, ConnectorStatus as Status, Rule, Transport } from "../../shared/connectors.ts";
 
 /**
  * Connectors: the MCP servers each person connected, in Postgres. Every query is here.
  *
  * - mcp_connections: one row for each server a person connected. The credentials (header
- *   values, OAuth client and tokens) are one sealed JSON value (secrets.ts), bound to
+ *   values, OAuth client and tokens) are one sealed JSON value (secrets/Secrets.ts), bound to
  *   the row. What is not secret (status, expiry, tools, rules) is in plain columns.
  * - mcp_sign_ins: OAuth sign-ins in progress, for 10 minutes. Only a hash of the OAuth
  *   state is kept; the state itself is only in the URL.
@@ -153,12 +154,15 @@ const fromRow = (row: Row): Connection => ({
 
 const credentialsContext = (id: string) => `mcp_connections:${id}:credentials`;
 
-/** The connection's credentials. Throws UnreadableSecret when the key changed. */
-export function readCredentials(connection: Pick<Connection, "id" | "sealed">): Credentials {
-	return connection.sealed ? (JSON.parse(unseal(credentialsContext(connection.id), connection.sealed)) as Credentials) : {};
+/** The connection's credentials. Rejects with UnreadableSecret when the key changed. */
+export async function readCredentials(connection: Pick<Connection, "id" | "sealed">): Promise<Credentials> {
+	const { sealed } = connection;
+	if (!sealed) return {};
+	return JSON.parse(await runPromise(Secrets.Secrets.use((secrets) => secrets.unseal(credentialsContext(connection.id), sealed)))) as Credentials;
 }
 
-const sealCredentials = (id: string, credentials: Credentials) => seal(credentialsContext(id), JSON.stringify(credentials));
+const sealCredentials = (id: string, credentials: Credentials) =>
+	runPromise(Secrets.Secrets.use((secrets) => secrets.seal(credentialsContext(id), JSON.stringify(credentials))));
 
 /** When the access token expires, from the tokens as saved. Null when the server did not say. */
 export function tokenExpiry(credentials: Credentials) {
@@ -222,7 +226,7 @@ export async function insertConnection(input: NewConnection): Promise<Connection
 		insert into mcp_connections (id, user_id, name, slug, url, transport, auth, credentials, header_names, oauth_client_id,
 			expires_at, server_info, tools, tools_checked_at)
 		values (${id}, ${input.userId}, ${input.name}, ${input.slug}, ${input.url}, ${input.transport}, ${input.auth},
-			${sealCredentials(id, input.credentials)}, ${Object.keys(input.credentials.headers ?? {})}, ${input.oauthClientId},
+			${await sealCredentials(id, input.credentials)}, ${Object.keys(input.credentials.headers ?? {})}, ${input.oauthClientId},
 			${tokenExpiry(input.credentials)}, ${input.serverInfo ? sql.json(input.serverInfo) : null}, ${sql.json(input.tools as never)}, now())
 		on conflict do nothing
 		returning *`;
@@ -233,7 +237,7 @@ export async function insertConnection(input: NewConnection): Promise<Connection
 export async function saveCredentials(id: string, credentials: Credentials, status?: { status: Status; lastError?: string | null }) {
 	await sql`
 		update mcp_connections set
-			credentials = ${sealCredentials(id, credentials)},
+			credentials = ${await sealCredentials(id, credentials)},
 			header_names = ${Object.keys(credentials.headers ?? {})},
 			expires_at = ${tokenExpiry(credentials)},
 			status = ${status?.status ?? sql`status`},
@@ -297,10 +301,11 @@ const signInContext = (stateHash: string) => `mcp_sign_ins:${stateHash}`;
 
 export async function saveSignIn(state: string, userId: string, connectionId: string | null, secret: SignInSecret) {
 	const stateHash = hashState(state);
+	const sealed = await runPromise(Secrets.Secrets.use((secrets) => secrets.seal(signInContext(stateHash), JSON.stringify(secret))));
 	await sql`delete from mcp_sign_ins where expires_at < now()`;
 	await sql`
 		insert into mcp_sign_ins (state_hash, user_id, connection_id, secret, expires_at)
-		values (${stateHash}, ${userId}, ${connectionId}, ${seal(signInContext(stateHash), JSON.stringify(secret))},
+		values (${stateHash}, ${userId}, ${connectionId}, ${sealed},
 			now() + make_interval(mins => ${SIGN_IN_MINUTES}))`;
 }
 
@@ -311,9 +316,10 @@ export async function takeSignIn(state: string, userId: string): Promise<{ conne
 		delete from mcp_sign_ins where state_hash = ${stateHash} and user_id = ${userId} returning connection_id, secret, expires_at`;
 	if (!row || row.expires_at.getTime() < Date.now()) return undefined;
 	try {
-		return { connectionId: row.connection_id, secret: JSON.parse(unseal(signInContext(stateHash), row.secret)) as SignInSecret };
+		const secret = await runPromise(Secrets.Secrets.use((secrets) => secrets.unseal(signInContext(stateHash), row.secret)));
+		return { connectionId: row.connection_id, secret: JSON.parse(secret) as SignInSecret };
 	} catch (error) {
-		if (error instanceof UnreadableSecret) return undefined;
+		if (error instanceof Secrets.UnreadableSecret) return undefined;
 		throw error;
 	}
 }

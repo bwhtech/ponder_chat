@@ -153,10 +153,11 @@ export async function endReplyStream(writable: WritableStream<ModelCallStreamPar
 }
 
 /**
- * Settles the run's model calls that a crash cut short on their last attempt (model-calls.ts):
+ * Settles the run's model calls that a crash cut short on their last attempt (telemetry/ModelCalls.ts):
  * nothing ran again to settle them. They are not charged, and the sweep gets their cost.
  */
 async function settleModelCalls(threadId: string, runId: string) {
-	const { settleModelCalls } = await import("../telemetry/model-calls.ts");
-	await settleModelCalls(threadId, runId).catch((error) => console.warn(`steps: could not settle the model calls of run ${runId}:`, error));
+	const { runStep } = await import("../runtime/step.ts");
+	const ModelCalls = await import("../telemetry/ModelCalls.ts");
+	await runStep(ModelCalls.ModelCalls.use((calls) => calls.settle(threadId, runId))).catch((error) => console.warn(`steps: could not settle the model calls of run ${runId}:`, error));
 }

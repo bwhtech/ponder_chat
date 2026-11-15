@@ -4,7 +4,7 @@ import { errorType } from "./span.ts";
 
 /**
  * A span for each HTTP request Ponder makes: OpenRouter, MCP servers, web_fetch, search.
- * Both Node's fetch and the undici package (net-guard.ts, fetch-page.ts) report each
+ * Both Node's fetch and the undici package (net/NetGuard.ts, fetch-page.ts) report each
  * request on the `undici:request:*` channels, so one listener sees all of them.
  *
  * This takes the place of @opentelemetry/instrumentation-undici, which records the full

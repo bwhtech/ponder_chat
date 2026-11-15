@@ -1,29 +1,68 @@
+import * as Context from "effect/Context";
+import * as Effect from "effect/Effect";
+import * as HttpClient from "effect/http/HttpClient";
+import * as HttpClientRequest from "effect/http/HttpClientRequest";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Redacted from "effect/Redacted";
+import * as Schema from "effect/Schema";
+import * as PonderConfig from "../config.ts";
+
 /**
  * Email from Ponder: sign-in codes, invites, answers to requests for more credits, and the
  * notice of an email change. Sent with Cloudflare Email Service's REST
  * API when it is set up (PONDER_EMAIL_FROM, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_EMAIL_TOKEN);
  * otherwise, as on a laptop, the message is printed to the server log.
+ *
+ * CLOUDFLARE_API_URL points the calls at another server in place of Cloudflare's API,
+ * such as the end-to-end tests' fake (e2e/fake/).
  */
-type Email = { to: string; subject: string; text: string; html: string };
+export type Email = { to: string; subject: string; text: string; html: string };
 
-const from = process.env.PONDER_EMAIL_FROM;
-const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-const token = process.env.CLOUDFLARE_EMAIL_TOKEN;
-/** Another server in place of Cloudflare's API, such as the end-to-end tests' fake (e2e/fake/). */
-const api = (process.env.CLOUDFLARE_API_URL ?? "https://api.cloudflare.com/client/v4").replace(/\/$/, "");
-
-export async function sendEmail(email: Email) {
-	if (!from || !account || !token) {
-		console.log(`email (not sent, no sender set up) to ${email.to}: ${email.subject}\n${email.text}`);
-		return;
+/**
+ * Cloudflare did not send the email: its HTTP status, or none when it could not be reached
+ * (the cause). Not Cloudflare's answer, which can name the address.
+ */
+export class EmailNotSent extends Schema.TaggedError<EmailNotSent>()("EmailNotSent", {
+	status: Schema.optional(Schema.Number),
+	cause: Schema.optional(Schema.Defect()),
+}) {
+	override get message() {
+		return this.status === undefined ? "The email could not be sent." : `The email could not be sent (${this.status}).`;
 	}
-	const response = await fetch(`${api}/accounts/${account}/email/sending/send`, {
-		method: "POST",
-		headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-		body: JSON.stringify({ from, ...email }),
-	});
-	if (!response.ok) throw new Error(`The email could not be sent (${response.status}): ${await response.text()}`);
 }
+
+export class Mailer extends Context.Service<
+	Mailer,
+	{
+		/** Sends the email, or prints it to the log when no sender is set up. */
+		readonly send: (email: Email) => Effect.Effect<void, EmailNotSent>;
+	}
+>()("ponder/email/Mailer") {}
+
+const make = Effect.gen(function* () {
+	const config = yield* PonderConfig.PonderConfig;
+	const client = yield* HttpClient.HttpClient;
+
+	const send = Effect.fn("Mailer.send")(function* (email: Email) {
+		if (Option.isNone(config.email)) {
+			yield* Effect.log(`email (not sent, no sender set up) to ${email.to}: ${email.subject}\n${email.text}`);
+			return;
+		}
+		const { from, accountId, token } = config.email.value;
+		const request = HttpClientRequest.post(`${config.cloudflareApiUrl}/accounts/${accountId}/email/sending/send`).pipe(
+			HttpClientRequest.setHeader("Authorization", `Bearer ${Redacted.value(token)}`),
+			HttpClientRequest.bodyJsonUnsafe({ from, ...email }),
+		);
+		// The cause is fetch's own error: the client's names the address.
+		const response = yield* client.execute(request).pipe(Effect.catchTags({ HttpClientError: (error) => Effect.fail(new EmailNotSent({ cause: error.reason.cause })) }));
+		if (response.status < 200 || response.status >= 300) return yield* new EmailNotSent({ status: response.status });
+	});
+
+	return Mailer.of({ send });
+});
+
+export const layer = Layer.effect(Mailer, make);
 
 /**
  * The sign-in email: a 6-digit code, large so it is easy to read, and the link below it.

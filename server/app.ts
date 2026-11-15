@@ -21,17 +21,18 @@ import { askForCredits } from "./extra-credits.ts";
 import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
 import { memoryFor } from "./memory.ts";
 import { memoryApi } from "./memory/routes.ts";
-import { availableModels } from "./models.ts";
-import { notifyAdmins } from "./notify.ts";
+import * as Models from "./models/Models.ts";
+import * as Notify from "./notify/Notify.ts";
 import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
 import { searchThreads } from "./thread-search.ts";
 import * as Database from "./runtime/Database.ts";
 import { route } from "./runtime/route.ts";
+import { runPromise } from "./runtime/runtime.ts";
 import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
 import { threadResponse } from "./thread-cache.ts";
 import * as Threads from "./threads/Threads.ts";
-import { usageReport } from "./telemetry.ts";
+import * as Runs from "./telemetry/Runs.ts";
 import { recordReplySpan, withReplyTrace } from "./tracing/reply-trace.ts";
 import { validate } from "./validate.ts";
 import { WEB_BUILD } from "./web-build.ts";
@@ -132,7 +133,15 @@ const api = app
 	.get("/api/features", async (c) => c.json({ python: await pythonReady }))
 
 	// The models a person can pick (only those with Zero Data Retention), and the one picked when they have not chosen.
-	.get("/api/models", async (c) => c.json(await availableModels()))
+	.get("/api/models", (c) =>
+		route(
+			c,
+			Effect.map(
+				Models.Models.use((models) => models.available),
+				(available) => c.json(available),
+			),
+		),
+	)
 
 	// The skills that are on, for the $ menu: names and descriptions, not the instructions.
 	.get("/api/skills", async (c) => c.json({ skills: await skillOptions() }))
@@ -146,11 +155,9 @@ const api = app
 		if (status.remaining > 0) return c.json({ error: "You still have credits for today." }, 400);
 		if (!(await askForCredits(userOf(c)))) return c.json({ error: "You asked already. The admins have not answered yet." }, 409);
 		const { name, email } = c.get("user");
-		await notifyAdmins(
-			"Ponder Chat: credit request",
-			`${displayName(name, email)} asked for more credits (${status.used >= 100 ? Math.round(status.used) : status.used} of ${status.limit} used today).`,
-			`${appOrigin(c.req.raw.headers)}/admin/requests`,
-		);
+		const used = status.used >= 100 ? Math.round(status.used) : status.used;
+		const message = `${displayName(name, email)} asked for more credits (${used} of ${status.limit} used today).`;
+		await runPromise(Notify.Notify.use((notify) => notify.admins("Ponder Chat: credit request", message, `${appOrigin(c.req.raw.headers)}/admin/requests`)));
 		return c.json(await creditStatus(userOf(c)));
 	})
 
@@ -252,7 +259,15 @@ const api = app
 	})
 
 	// Tokens and cost of a person's runs, optionally for one thread.
-	.get("/api/usage", validate("query", usageQuery), async (c) => c.json(await usageReport({ user: userOf(c), thread: c.req.valid("query").thread })));
+	.get("/api/usage", validate("query", usageQuery), (c) =>
+		route(
+			c,
+			Effect.map(
+				Runs.Runs.use((runs) => runs.usageReport({ user: userOf(c), thread: c.req.valid("query").thread })),
+				(report) => c.json(report),
+			),
+		),
+	);
 
 /** The API's routes, for the typed client (web/api.ts). Import it as a type only, so no server code reaches the browser. */
 export type AppType = typeof api;

@@ -7,9 +7,11 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { Pool } from "pg";
 import { afterAdminCall, beforeAdminCall } from "./admin-auth-events.ts";
 import { sql } from "./db.ts";
-import { sendEmail, signInEmail } from "./email.ts";
-import { hosts, isLocalHost } from "./hosts.ts";
+import * as PonderConfig from "./config.ts";
+import * as Mailer from "./email/Mailer.ts";
+import { isLocalHost } from "./hosts.ts";
 import { applyInvite, isAllowed } from "./invites.ts";
+import { runPromise } from "./runtime/runtime.ts";
 import { forgetSessions } from "./session-cache.ts";
 
 /**
@@ -29,12 +31,14 @@ import { forgetSessions } from "./session-cache.ts";
  */
 
 const SIGN_IN_EXPIRES_IN = 15 * 60;
+// Better Auth takes the hosts when it is made, as this module loads: before an effect can run (config.ts, readNow).
+const { hosts } = PonderConfig.readNow();
 const NOT_INVITED = "This email is not invited to Ponder Chat.";
 
 export const auth = betterAuth({
 	appName: "Ponder Chat",
 	database: new Pool({ connectionString: process.env.DATABASE_URL, max: 5 }),
-	baseURL: { allowedHosts: hosts },
+	baseURL: { allowedHosts: [...hosts] },
 	trustedOrigins: hosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
 	// Tailscale Serve, Caddy and the Cloudflare Worker in front pass on the host the person used.
 	// Cloudflare names the visitor in cf-connecting-ip; Caddy's x-forwarded-for holds Cloudflare's address.
@@ -122,7 +126,8 @@ export const auth = betterAuth({
 			// Only invited emails get a link and code. The page looks the same either way.
 			sendMagicLink: async ({ email, url }, ctx) => {
 				if (!(await isAllowed(email))) return console.log(`sign-in: ${email} is not invited; no email sent`);
-				await sendEmail(signInEmail(email, await signInCode(email, ctx?.headers), url));
+				const message = Mailer.signInEmail(email, await signInCode(email, ctx?.headers), url);
+				await runPromise(Mailer.Mailer.use((mailer) => mailer.send(message)));
 			},
 		}),
 		emailOTP({
@@ -131,7 +136,7 @@ export const auth = betterAuth({
 			sendVerificationOTP: async ({ email, otp, type }) => {
 				if (type !== "sign-in") return console.log(`sign-in: no ${type} code is sent`);
 				if (!(await isAllowed(email))) return console.log(`sign-in: ${email} is not invited; no code sent`);
-				await sendEmail(signInEmail(email, otp));
+				await runPromise(Mailer.Mailer.use((mailer) => mailer.send(Mailer.signInEmail(email, otp))));
 			},
 		}),
 		admin({ bannedUserMessage: "This account is blocked. Ask the person who invited you." }),

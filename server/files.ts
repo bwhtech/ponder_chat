@@ -1,14 +1,16 @@
 import { randomBytes } from "node:crypto";
+import * as Option from "effect/Option";
 import { sql } from "./db.ts";
+import * as ObjectStore from "./files/ObjectStore.ts";
 import { prepareImage } from "./image-resize.ts";
-import { getObject, objectStoreEnabled, putObject } from "./object-store.ts";
 import { extractPdfText } from "./pdf-text.ts";
 import { pythonEnabled } from "./python/pyodide.ts";
-import { getSettings } from "./settings.ts";
+import { runPromise } from "./runtime/runtime.ts";
+import * as Settings from "./settings/Settings.ts";
 
 /**
  * Files people attach in the chat. Postgres holds what each file is; the bytes go to
- * the bucket when one is set up (object-store.ts, R2 when deployed), or into Postgres
+ * the bucket when one is set up (files/ObjectStore.ts, R2 when deployed), or into Postgres
  * too. Messages carry only `/api/files/<id>`, so threads stay small. Before a model call,
  * file-context.ts swaps each link for what the model can read.
  */
@@ -58,7 +60,7 @@ export async function saveFile(owner: string, file: File): Promise<{ file: Store
 	if (!checked) return { error: `"${file.name}" can't be read. It does not look like ${mediaType === "application/pdf" ? "a PDF" : "an image"}.` };
 	const stored = await storeFile(owner, file.name, checked.mediaType, checked.data);
 	// Read its text now, so the first reply does not wait for it (file-context.ts).
-	if (stored.mediaType === "application/pdf" && (await getSettings()).pdfTextOnServer) void pdfText(stored.id, { data: checked.data, text: null });
+	if (stored.mediaType === "application/pdf" && (await runPromise(Settings.Settings.use((settings) => settings.get))).pdfTextOnServer) void pdfText(stored.id, { data: checked.data, text: null });
 	return { file: stored };
 }
 
@@ -72,10 +74,11 @@ async function checkContent(data: Buffer, mediaType: string): Promise<{ data: Bu
 /** Stores bytes the server made (a file that Python wrote), the same way as an upload. */
 export async function storeFile(owner: string, name: string, mediaType: string, data: Buffer): Promise<StoredFile> {
 	const id = randomBytes(12).toString("base64url");
-	if (objectStoreEnabled) await putObject(objectKey(owner, id), data, mediaType);
+	const store = await runPromise(ObjectStore.ObjectStore);
+	if (store.enabled) await runPromise(store.put(objectKey(owner, id), data, mediaType));
 	await sql`
 		insert into files (id, owner, name, media_type, size, data)
-		values (${id}, ${owner}, ${name}, ${mediaType}, ${data.length}, ${objectStoreEnabled ? null : data})`;
+		values (${id}, ${owner}, ${name}, ${mediaType}, ${data.length}, ${store.enabled ? null : data})`;
 	return { id, url: `${URL_PREFIX}${id}`, name, mediaType, size: data.length };
 }
 
@@ -84,7 +87,8 @@ export async function loadFile(id: string, owner: string): Promise<LoadedFile | 
 	const [row] = await sql<{ owner: string; name: string; media_type: string; data: Buffer | null; text: string | null }[]>`
 		select owner, name, media_type, data, text from files where id = ${id} and owner = ${owner}`;
 	if (!row) return undefined;
-	const data = row.data ?? (objectStoreEnabled ? await getObject(objectKey(row.owner, id)) : undefined);
+	const store = await runPromise(ObjectStore.ObjectStore);
+	const data = row.data ?? (store.enabled ? Option.getOrUndefined(await runPromise(store.get(objectKey(row.owner, id)))) : undefined);
 	return data && { name: row.name, media_type: row.media_type, data, text: row.text };
 }
 

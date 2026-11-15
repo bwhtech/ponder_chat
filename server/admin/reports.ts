@@ -1,6 +1,7 @@
 import { sql } from "../db.ts";
 import { decidedRequests, pendingCount, pendingRequests } from "../extra-credits.ts";
-import { getSettings } from "../settings.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Settings from "../settings/Settings.ts";
 import { displayName, namesOf } from "./people.ts";
 import { creditsByModel, limitsToday, Usage } from "./usage.ts";
 
@@ -12,7 +13,7 @@ export async function overview(days: number) {
 		creditsByModel(days),
 		sql<{ id: string; name: string; email: string }[]>`select id, name, email from users`,
 		pendingCount(),
-		getSettings(),
+		runPromise(Settings.Settings.use((settings) => settings.get)),
 	]);
 	const everyone = usage.everyone();
 	const [yesterday, today] = everyone.slice(-2);

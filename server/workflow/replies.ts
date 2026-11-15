@@ -3,10 +3,10 @@ import type { UIMessage, UIMessageChunk } from "ai";
 import * as Option from "effect/Option";
 import { getRun, start } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
-import { settleModelCalls, stopModelCalls } from "../telemetry/model-calls.ts";
+import * as ModelCalls from "../telemetry/ModelCalls.ts";
 import { isAuto } from "../../shared/auto-model.ts";
-import { lastAnsweringModel } from "../auto-router.ts";
-import { pickModel } from "../models.ts";
+import * as AutoRouter from "../models/AutoRouter.ts";
+import * as Models from "../models/Models.ts";
 import { forgetPythonState } from "../python/state.ts";
 import { runPromise } from "../runtime/runtime.ts";
 import { pythonReady } from "../startup.ts";
@@ -52,7 +52,7 @@ export async function startReply(input: { threadId: string; owner: string; messa
 	const { threadId, owner, messages } = input;
 	const requested = Date.now();
 	if (!(await mayUse(threadId, owner))) return null;
-	const model = await pickModel(input.model);
+	const model = await runPromise(Models.Models.use((models) => models.pick(input.model)));
 	const python = await pythonReady;
 	const continued = continuedFrom(messages);
 	const started = await withThreadLock(threadId, async () => {
@@ -73,7 +73,7 @@ export async function startReply(input: { threadId: string; owner: string; messa
 			// The run reads the thread from the database, so it is saved first.
 			await runPromise(Threads.Threads.use((threads) => threads.save(threadId, owner, messages)));
 			// Under Auto, a reply carried on after an approval goes back to the model that wrote it.
-			const answeredBy = continued && isAuto(model.id) ? await lastAnsweringModel(threadId) : undefined;
+			const answeredBy = continued && isAuto(model.id) ? Option.getOrUndefined(await runPromise(AutoRouter.AutoRouter.use((router) => router.lastAnsweringModel(threadId)))) : undefined;
 			run = await start(chatTurn, [
 				{ threadId, owner, model: { id: model.id, name: model.name }, python, today: new Date().toDateString(), maxSteps: MAX_STEPS, continued, answeredBy },
 			]);
@@ -209,8 +209,8 @@ async function finishEndedRun(run: ThreadRun) {
 			if ((await activeRun(run.threadId))?.runId !== run.runId) return;
 			console.warn(`replies: run ${run.runId} ended (${status}) without saving its reply; saving what it wrote`);
 			try {
-				if (cancelled) await stopModelCalls(run.threadId, run.runId);
-				else await settleModelCalls(run.threadId, run.runId);
+				if (cancelled) await runPromise(ModelCalls.ModelCalls.use((calls) => calls.stop(run.threadId, run.runId)));
+				else await runPromise(ModelCalls.ModelCalls.use((calls) => calls.settle(run.threadId, run.runId)));
 				// Before the save, as chatTurn does (endReplyStream), so the saved reply ends where the page's does.
 				await endStream(run.runId, failed ? ENDED_ERROR : undefined);
 				const owner = await ownerOf(run.threadId);
@@ -275,7 +275,7 @@ async function cancelNow(run: ThreadRun, owner: string) {
 	} finally {
 		await finishRun(run.threadId, run.runId, run.model, { cancelled: true, continued: run.continued });
 		// The model call in flight runs to its end on OpenRouter; it costs the person no credits.
-		await stopModelCalls(run.threadId, run.runId).catch((error) => console.warn(`replies: could not mark the calls of run ${run.runId} stopped:`, error));
+		await runPromise(ModelCalls.ModelCalls.use((calls) => calls.stop(run.threadId, run.runId))).catch((error) => console.warn(`replies: could not mark the calls of run ${run.runId} stopped:`, error));
 	}
 }
 

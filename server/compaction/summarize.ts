@@ -1,18 +1,21 @@
 import { randomBytes } from "node:crypto";
 import { generateText, type UIMessage } from "ai";
+import * as Option from "effect/Option";
 import { isAuto } from "../../shared/auto-model.ts";
-import { autoRouterPlugin, modelWindow } from "../auto-router.ts";
-import { privateModels } from "../models.ts";
-import { privateRouting } from "../openrouter.ts";
-import { openRouter } from "../openrouter-key.ts";
-import { getSettings } from "../settings.ts";
-import { COMPACTION_FUNCTION_ID, runTelemetry, type RunContext } from "../telemetry.ts";
+import * as AutoRouter from "../models/AutoRouter.ts";
+import * as Models from "../models/Models.ts";
+import { privateRouting } from "../openrouter/OpenRouter.ts";
+import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Settings from "../settings/Settings.ts";
+import { COMPACTION_FUNCTION_ID } from "../telemetry/Runs.ts";
+import { runTelemetry, type RunContext } from "../telemetry/Telemetry.ts";
 import { SUMMARY_INSTRUCTIONS, summaryPrompt } from "./prompt.ts";
 import { budgetFor, DEFAULT_RATIO, estimateTokens } from "./tokens.ts";
 import { clipMiddle, renderTranscript } from "./transcript.ts";
 
 /**
- * Writes a chat's summary with the model admins chose (settings.ts), through a private
+ * Writes a chat's summary with the model admins chose (settings/Settings.ts), through a private
  * (ZDR) endpoint like every other call. The call goes to `runs` as "compaction", and is
  * charged to the person's credits, as memory and web search are.
  *
@@ -45,8 +48,9 @@ export async function writeSummary({ run, chatModel, previous, messages, ratio }
 	// Over the room, the oldest messages are cut first. The previous summary never is.
 	const room = Math.floor((limit - MAX_OUTPUT_TOKENS - corrected(SUMMARY_INSTRUCTIONS) - corrected(summaryPrompt(previous, "", nonce))) / Math.max(ratio, DEFAULT_RATIO));
 	const transcript = needed <= limit ? full : renderTranscript(messages, room, nonce);
+	const openRouter = await runPromise(OpenRouterKey.OpenRouterKey.use((key) => key.provider));
 	const { text, finishReason } = await generateText({
-		model: (await openRouter())(model, { usage: { include: true }, provider: privateRouting, ...(isAuto(model) && { plugins: [await autoRouterPlugin()] }) }),
+		model: openRouter(model, { usage: { include: true }, provider: privateRouting, ...(isAuto(model) && { plugins: [await runPromise(AutoRouter.AutoRouter.use((router) => router.plugin))] }) }),
 		instructions: SUMMARY_INSTRUCTIONS,
 		prompt: summaryPrompt(previous, transcript, nonce),
 		maxOutputTokens: MAX_OUTPUT_TOKENS,
@@ -61,13 +65,13 @@ export async function writeSummary({ run, chatModel, previous, messages, ratio }
 
 /** The chosen model when it is available and has room for `needed` tokens; else the chat's model. */
 async function summaryModel(chatModel: string, needed: number) {
-	const chosen = (await getSettings()).compactionModel;
+	const chosen = (await runPromise(Settings.Settings.use((settings) => settings.get))).compactionModel;
 	if (chosen === chatModel) return chatModel;
-	if (!(await privateModels()).some((model) => model.id === chosen)) return chatModel;
+	if (!(await runPromise(Models.Models.use((models) => models.privateModels))).some((model) => model.id === chosen)) return chatModel;
 	return (await roomFor(chosen)) >= needed ? chosen : chatModel;
 }
 
 /** The tokens one call to `model` may take: 90% of its window. */
 async function roomFor(model: string) {
-	return budgetFor(await modelWindow(model)).limit;
+	return budgetFor(Option.getOrUndefined(await runPromise(AutoRouter.AutoRouter.use((router) => router.modelWindow(model))))).limit;
 }

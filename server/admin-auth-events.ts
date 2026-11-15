@@ -1,7 +1,8 @@
 import { isAPIError } from "better-auth/api";
 import { recordAdminEvent } from "./admin-events.ts";
 import { sql } from "./db.ts";
-import { emailChangedEmail, sendEmail } from "./email.ts";
+import * as Mailer from "./email/Mailer.ts";
+import { runPromise } from "./runtime/runtime.ts";
 
 /**
  * Better Auth's admin endpoints in the admin activity log (admin-events.ts). The browser
@@ -121,7 +122,7 @@ function same(a: unknown, b: unknown) {
 /** A failed send does not fail the admin's change, which is made already. */
 async function noticeToOldEmail(oldEmail: string, newEmail: string, actor: { email: string; name?: string | null }) {
 	const admin = actor.name?.trim() ? `${actor.name.trim()} (${actor.email})` : actor.email;
-	await sendEmail(emailChangedEmail(oldEmail, newEmail, admin)).catch((error) =>
+	await runPromise(Mailer.Mailer.use((mailer) => mailer.send(Mailer.emailChangedEmail(oldEmail, newEmail, admin)))).catch((error) =>
 		console.error("email: the notice of an email change could not be sent:", error instanceof Error ? error.message : error),
 	);
 }
