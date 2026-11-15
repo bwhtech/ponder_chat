@@ -91,6 +91,13 @@ export async function startTracing(endpoint = process.env.OTEL_EXPORTER_OTLP_END
 const EXPORT_TIMEOUT_MS = 2_000;
 
 /**
+ * The name of the span that @effect/sql-pg makes for a statement: the client's database
+ * option, else its user name option, else "postgres" (effect/sql/Statement's spanName).
+ * runtime/Database.ts gives the client only a URL, so it is "postgres". Database.test.ts checks it.
+ */
+export const SQL_STATEMENT_SPAN = "postgres";
+
+/**
  * Where spans go: `<endpoint>/v1/traces`. The endpoint must be an http or https address,
  * such as http://127.0.0.1:4318. Without the scheme, "localhost:4318" would parse as an
  * address of scheme "localhost:" and send nothing.
@@ -128,9 +135,17 @@ export async function stopTracing(timeoutMs = 2_000) {
 	clearTimeout(timer);
 }
 
-/** Samples a span when its parent was sampled; drops a span that has no parent. */
+/**
+ * Samples a span when its parent was sampled; drops a span that has no parent.
+ *
+ * Also drops the span that Effect's SQL client makes for each statement
+ * (SQL_STATEMENT_SPAN). postgres.js made none, and a reply runs many statements:
+ * Ponder's own spans around the work, such as thread.load, say enough. A statement's span
+ * has no children, so nothing loses its parent.
+ */
 const onlyInsideTraces = {
-	shouldSample(parentContext: Context) {
+	shouldSample(parentContext: Context, _traceId: string, spanName: string) {
+		if (spanName === SQL_STATEMENT_SPAN) return { decision: 0 as const, traceState: trace.getSpanContext(parentContext)?.traceState };
 		const parent = trace.getSpanContext(parentContext);
 		const sampled = parent && isSpanContextValid(parent) && (parent.traceFlags & TraceFlags.SAMPLED) !== 0;
 		return { decision: sampled ? (2 as const) : (0 as const), traceState: parent?.traceState };

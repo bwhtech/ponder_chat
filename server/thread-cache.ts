@@ -1,6 +1,8 @@
 import { gzipSync } from "node:zlib";
 import type { Context } from "hono";
-import { loadThread, threadUpdatedAt } from "./db.ts";
+import * as Option from "effect/Option";
+import { runPromise } from "./runtime/runtime.ts";
+import * as Threads from "./threads/Threads.ts";
 import { latestRun } from "./workflow/runs.ts";
 
 /**
@@ -17,7 +19,7 @@ const MAX_BYTES = 64 * 1024 * 1024;
 let bytes = 0;
 
 export async function threadResponse(c: Context, id: string, owner: string) {
-	const updatedAt = await threadUpdatedAt(id, owner);
+	const updatedAt = Option.getOrNull(await runPromise(Threads.Threads.use((threads) => threads.updatedAt(id, owner))));
 	const run = await latestRun(id);
 	const running = Boolean(run && !run.finished);
 	// The model kept erroring: the page offers Retry (workflow/chat.ts).
@@ -29,7 +31,7 @@ export async function threadResponse(c: Context, id: string, owner: string) {
 	const headers = { ETag: etag, "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
 	if (c.req.header("If-None-Match")?.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) return c.body(null, 304, headers);
 
-	const entry = cached(id, etag) ?? remember(id, etag, JSON.stringify({ messages: await loadThread(id), running, failed }));
+	const entry = cached(id, etag) ?? remember(id, etag, JSON.stringify({ messages: await runPromise(Threads.Threads.use((threads) => threads.load(id))), running, failed }));
 	if (/\bgzip\b/.test(c.req.header("Accept-Encoding") ?? "")) {
 		return c.body(new Uint8Array(entry.gzip), 200, { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" });
 	}

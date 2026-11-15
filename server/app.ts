@@ -7,6 +7,7 @@ import { etag } from "hono/etag";
 import type { hc } from "hono/client";
 import { HTTPException } from "hono/http-exception";
 import { createUIMessageStreamResponse, type UIMessage } from "ai";
+import * as Effect from "effect/Effect";
 import { z } from "zod";
 import { ARTIFACT_CDNS } from "../shared/cdns.ts";
 import { adminApi } from "./admin/routes.ts";
@@ -17,7 +18,6 @@ import { bootPage, meOf, skillOptions } from "./boot-page.ts";
 import { sessionOf } from "./session-cache.ts";
 import { creditStatus } from "./credits.ts";
 import { askForCredits } from "./extra-credits.ts";
-import { listThreads, renameThread, sql } from "./db.ts";
 import { loadFile, MAX_FILE_BYTES, saveFile } from "./files.ts";
 import { memoryFor } from "./memory.ts";
 import { memoryApi } from "./memory/routes.ts";
@@ -25,9 +25,12 @@ import { availableModels } from "./models.ts";
 import { notifyAdmins } from "./notify.ts";
 import { chatLimit, creditRequestLimit, limitPerPerson, searchLimit, uploadLimit as uploadRate, type RateLimit } from "./rate-limit.ts";
 import { searchThreads } from "./thread-search.ts";
+import * as Database from "./runtime/Database.ts";
+import { route } from "./runtime/route.ts";
 import { pythonReady } from "./startup.ts";
 import { isFirstMessage, nameThread } from "./thread-title.ts";
 import { threadResponse } from "./thread-cache.ts";
+import * as Threads from "./threads/Threads.ts";
 import { usageReport } from "./telemetry.ts";
 import { recordReplySpan, withReplyTrace } from "./tracing/reply-trace.ts";
 import { validate } from "./validate.ts";
@@ -71,15 +74,15 @@ app.use("*", async (c, next) => {
 	if (!c.req.path.startsWith("/api/") && !c.res.headers.has("Content-Security-Policy")) c.res.headers.set("Content-Security-Policy", PAGE_POLICY);
 });
 
-// For the uptime checks: the server answers and its database does. 503 otherwise.
-app.get("/health", async (c) => {
-	try {
-		await Promise.race([sql`select 1`, new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 3000))]);
-		return c.text("ok");
-	} catch {
-		return c.text("database unavailable", 503);
-	}
-});
+// For the uptime checks: the server answers and its database does, within 3 seconds. 503 otherwise.
+// The reference for a thin route (docs/effect.md): one effect, its failures mapped to answers.
+const databaseUnavailable = (_: unknown, c: Context) => c.text("database unavailable", 503);
+app.get("/health", (c) =>
+	route(c, Database.ping.pipe(Effect.timeout("3 seconds"), Effect.map(() => c.text("ok"))), {
+		SqlError: databaseUnavailable,
+		TimeoutError: databaseUnavailable,
+	}),
+);
 
 // The end of a connector's OAuth sign-in (mcp/routes.ts). It reads the session itself.
 app.get("/oauth/mcp/callback", oauthCallback);
@@ -152,17 +155,30 @@ const api = app
 	})
 
 	// The list revalidates by its content and goes gzipped; one thread has its own cache (thread-cache.ts).
-	.get("/api/threads", compress(), etag(), async (c) => c.json({ threads: await listThreads(userOf(c)) }))
+	.get("/api/threads", compress(), etag(), (c) =>
+		route(
+			c,
+			Effect.map(
+				Threads.Threads.use((threads) => threads.list(userOf(c))),
+				(threads) => c.json({ threads }),
+			),
+		),
+	)
 
 	// Search in the person's chats (thread-search.ts). Before /api/threads/:id, which would take "search" as an id.
 	.get("/api/threads/search", perPerson(searchLimit), validate("query", searchQuery), async (c) =>
 		c.json({ threads: await searchThreads(userOf(c), c.req.valid("query").q) }),
 	)
 
-	.patch("/api/threads/:id", validate("json", threadTitle), async (c) => {
-		const renamed = await renameThread(c.req.param("id"), userOf(c), c.req.valid("json").title);
-		return renamed ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404);
-	})
+	.patch("/api/threads/:id", validate("json", threadTitle), (c) =>
+		route(
+			c,
+			Effect.map(
+				Threads.Threads.use((threads) => threads.rename(c.req.param("id"), userOf(c), c.req.valid("json").title)),
+				(renamed) => (renamed ? c.json({ ok: true }) : c.json({ error: "Not found" }, 404)),
+			),
+		),
+	)
 
 	// A reply still running stops first (workflow/replies.ts).
 	.delete("/api/threads/:id", async (c) =>

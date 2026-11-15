@@ -33,10 +33,23 @@ export function failed(active: Span, error: unknown) {
 	active.setAttribute("error.type", errorType(error));
 }
 
+/**
+ * The kind of an error, for `error.type`: its code, its tag (an Effect error), or its class
+ * name. An Effect SQL failure (effect/sql/SqlError) has the Postgres code or the socket's
+ * code on its reason's cause, where postgres.js had it on the error, so that comes first.
+ * Also used for Effect spans (Tracing.ts). Never the message.
+ */
 export function errorType(error: unknown): string {
 	if (error && typeof error === "object") {
 		const code = (error as { code?: unknown }).code;
 		if (typeof code === "string" && /^[\w.-]{1,40}$/.test(code)) return code;
+		const { _tag: tag, reason } = error as { _tag?: unknown; reason?: { _tag?: unknown; cause?: unknown } };
+		if (tag === "SqlError" && reason && typeof reason === "object") {
+			const inner = errorType(reason.cause);
+			if (inner !== "_OTHER" && inner !== "Error") return inner;
+			if (typeof reason._tag === "string" && /^\w{1,40}$/.test(reason._tag)) return reason._tag;
+		}
+		if (typeof tag === "string" && /^\w{1,40}$/.test(tag)) return tag;
 		const name = (error as { name?: unknown }).name;
 		if (typeof name === "string" && /^\w{1,40}$/.test(name)) return name;
 	}

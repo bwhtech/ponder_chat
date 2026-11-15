@@ -1,8 +1,9 @@
 import { hkdfSync } from "node:crypto";
+import * as Effect from "effect/Effect";
 import { migrateAdminEvents } from "./admin-events.ts";
 import { migrateAuth } from "./auth.ts";
 import { migrateCredits } from "./credits.ts";
-import { migrate, sql } from "./db.ts";
+import { sql } from "./db.ts";
 import { migrateFiles } from "./files.ts";
 import { migrateInvites } from "./invites.ts";
 import { setupMemory } from "./memory.ts";
@@ -10,9 +11,11 @@ import { checkSandbox } from "./python/pyodide.ts";
 import { migratePythonState } from "./python/state.ts";
 import { migrateConnectors } from "./mcp/store.ts";
 import { migrateCompaction } from "./compaction/store.ts";
+import { dispose, runPromise } from "./runtime/runtime.ts";
 import { migrateSecrets } from "./secrets.ts";
 import { migrateSkills } from "./skills.ts";
 import { seedStandardSkills } from "./standard-skills.ts";
+import * as Threads from "./threads/Threads.ts";
 import { TOOL_APPROVAL_SECRET_ENV } from "./workflow/approval-secret.ts";
 import { setupTelemetry } from "./telemetry.ts";
 import { stopTracing } from "./tracing/setup.ts";
@@ -36,7 +39,7 @@ export async function startup() {
 	void modelsWithZdr();
 	// A failed migration still settles pythonReady, so the routes that wait on it don't hang.
 	try {
-		await migrateAll();
+		await runPromise(migrateAll);
 	} catch (error) {
 		resolvePython(false);
 		throw error;
@@ -54,27 +57,34 @@ export async function startup() {
 	console.log(`Ponder Chat is ready. Python is ${(await pythonReady) ? "on" : "off"}.`);
 }
 
-async function migrateAll() {
-	await setupTelemetry();
-	await migrate();
+/**
+ * The tables, one after another, in this order. It is the first effect the runtime runs,
+ * so it builds the runtime (runtime/runtime.ts). The modules not on Effect yet run as they
+ * are, in Effect.promise: their failure is a defect, which runPromise throws as the error
+ * itself, as before. Later phases put each module's own Effect in its place.
+ */
+const migrateAll = Effect.gen(function* () {
+	const threads = yield* Threads.Threads;
+	yield* Effect.promise(() => setupTelemetry());
+	yield* threads.migrate;
 	// After threads: its tables reference them.
-	await migrateCompaction();
-	await migrateAuth();
-	await migrateFiles();
-	await migrateCredits();
-	await migrateInvites();
-	await migrateAdminEvents();
-	await migrateSecrets();
-	await migrateConnectors();
-	await migrateSkills();
-	await seedStandardSkills();
-	setToolApprovalSecret();
-	await migratePythonState();
-	await migrateThreadRuns();
-	await migrateApprovalUses();
-	await setupMemory();
-	resolvePython(await checkSandbox());
-}
+	yield* Effect.promise(() => migrateCompaction());
+	yield* Effect.promise(() => migrateAuth());
+	yield* Effect.promise(() => migrateFiles());
+	yield* Effect.promise(() => migrateCredits());
+	yield* Effect.promise(() => migrateInvites());
+	yield* Effect.promise(() => migrateAdminEvents());
+	yield* Effect.promise(() => migrateSecrets());
+	yield* Effect.promise(() => migrateConnectors());
+	yield* Effect.promise(() => migrateSkills());
+	yield* Effect.promise(() => seedStandardSkills());
+	yield* Effect.sync(setToolApprovalSecret);
+	yield* Effect.promise(() => migratePythonState());
+	yield* Effect.promise(() => migrateThreadRuns());
+	yield* Effect.promise(() => migrateApprovalUses());
+	yield* Effect.promise(() => setupMemory());
+	resolvePython(yield* Effect.promise(() => checkSandbox()));
+});
 
 /**
  * Waits until no other Ponder Chat server runs workflow workers on this database, and then
@@ -136,6 +146,8 @@ function stopCleanly(world: { close?: () => Promise<void> }, stopSweeps: () => v
 			// The sweep needs the database, which closes below.
 			stopSweeps();
 			await world.close?.();
+			// The Effect runtime's pool (runtime/runtime.ts), then db.ts's, which also holds the worker lock.
+			await dispose();
 			await sql.end({ timeout: 3 });
 			// The spans of the steps that just stopped, and any still waiting in the batch.
 			// Last, and for 2 seconds at most, so a collector that is down never costs the database its clean stop.

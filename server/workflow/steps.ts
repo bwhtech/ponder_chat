@@ -76,9 +76,10 @@ async function writeCompactionState(writable: WritableStream<ModelCallStreamPart
 export async function recallMemoryStep(threadId: string, owner: string): Promise<{ guidance: string; recalled: string }> {
 	"use step";
 	return contextStep("memory", `thread ${threadId}`, async () => {
-		const { loadThread } = await import("../db.ts");
+		const { runStep } = await import("../runtime/step.ts");
+		const Threads = await import("../threads/Threads.ts");
 		const { memoryForRun } = await import("../memory.ts");
-		return memoryForRun({ threadId, user: owner }, await loadThread(threadId));
+		return memoryForRun({ threadId, user: owner }, await runStep(Threads.Threads.use((threads) => threads.load(threadId))));
 	});
 }
 recallMemoryStep.maxRetries = CONTEXT_STEP_RETRIES;
@@ -99,9 +100,10 @@ export async function webSearchStep(input: WebSearchInput, threadId: string, own
 export async function trustedPagesStep(threadId: string): Promise<string[]> {
 	"use step";
 	return contextStep("trusted pages", `thread ${threadId}`, async () => {
-		const { loadThread } = await import("../db.ts");
+		const { runStep } = await import("../runtime/step.ts");
+		const Threads = await import("../threads/Threads.ts");
 		const { trustedPageKeys } = await import("../search/trusted-pages.ts");
-		return trustedPageKeys(await loadThread(threadId));
+		return trustedPageKeys(await runStep(Threads.Threads.use((threads) => threads.load(threadId))));
 	});
 }
 trustedPagesStep.maxRetries = CONTEXT_STEP_RETRIES;

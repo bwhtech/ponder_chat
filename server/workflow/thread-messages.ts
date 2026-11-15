@@ -3,11 +3,12 @@ import { modelWindow } from "../auto-router.ts";
 import { loadSummary, tokenRatio } from "../compaction/store.ts";
 import { withSummary } from "../compaction/summary.ts";
 import { estimate, type Estimate } from "../compaction/tokens.ts";
-import { loadThread } from "../db.ts";
 import { resolveFileParts } from "../file-context.ts";
 import { MODELS } from "../models.ts";
+import { runPromise } from "../runtime/runtime.ts";
 import { getSettings } from "../settings.ts";
 import type { ActiveSkill } from "../skills.ts";
+import * as Threads from "../threads/Threads.ts";
 import { openAnswersSettled } from "./answered-again.ts";
 import { citationPartText } from "./citations.ts";
 import { addConnectorNote, connectorCallsInHistory } from "./connector-messages.ts";
@@ -41,7 +42,7 @@ export type ThreadContext = {
 
 /** The thread as the model reads it, with its saved summary in place of the messages it covers. */
 export async function loadThreadContext(threadId: string, options: MessageOptions): Promise<ThreadContext> {
-	const thread = await loadThread(threadId);
+	const thread = await runPromise(Threads.Threads.use((threads) => threads.load(threadId)));
 	const summary = await loadSummary(threadId, thread);
 	const messages = await modelMessages(withSummary(thread, summary), options);
 	return {

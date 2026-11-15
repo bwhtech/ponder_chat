@@ -4,11 +4,12 @@ import type { Context, Next } from "hono";
 import type { SignedIn } from "./auth.ts";
 import { roleOf } from "./admins.ts";
 import { creditStatus } from "./credits.ts";
-import { listThreads } from "./db.ts";
 import { cachedModels } from "./models.ts";
+import { runPromise } from "./runtime/runtime.ts";
 import { sessionOf } from "./session-cache.ts";
 import { activeSkills } from "./skills.ts";
 import { pythonReady } from "./startup.ts";
+import * as Threads from "./threads/Threads.ts";
 import { WEB_BUILD } from "./web-build.ts";
 
 /**
@@ -48,7 +49,7 @@ export async function bootPage(c: Context, next: Next) {
 /** The same answers as GET /api/me, /api/threads, /api/models, /api/features and /api/skills. */
 export type BootData = {
 	me: Awaited<ReturnType<typeof meOf>> | null;
-	threads?: Awaited<ReturnType<typeof listThreads>>;
+	threads?: Threads.ThreadSummary[];
 	models?: NonNullable<ReturnType<typeof cachedModels>>;
 	features?: { python: boolean };
 	skills?: { name: string; description: string }[];
@@ -70,7 +71,7 @@ export async function skillOptions() {
 async function bootData(headers: Headers, prefetch: string[]): Promise<BootData> {
 	const session = await sessionOf(headers);
 	if (!session) return { me: null };
-	const [me, threads, skills] = await Promise.all([meOf(session.user), listThreads(session.user.id), skillOptions()]);
+	const [me, threads, skills] = await Promise.all([meOf(session.user), runPromise(Threads.Threads.use((threads) => threads.list(session.user.id))), skillOptions()]);
 	// Only what is ready now: the models wait for OpenRouter on a cold start, and the page asks for them itself then.
 	const python = await settled(pythonReady);
 	return { me, threads, skills, models: cachedModels(), features: python === undefined ? undefined : { python }, prefetch };

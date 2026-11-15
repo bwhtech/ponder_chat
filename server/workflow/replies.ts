@@ -1,15 +1,17 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { UIMessage, UIMessageChunk } from "ai";
+import * as Option from "effect/Option";
 import { getRun, start } from "workflow/api";
 import { WorkflowRunNotFoundError } from "workflow/errors";
-import { deleteThread, loadThread, saveThread, threadOwner, updateThread } from "../db.ts";
 import { settleModelCalls, stopModelCalls } from "../telemetry/model-calls.ts";
 import { isAuto } from "../../shared/auto-model.ts";
 import { lastAnsweringModel } from "../auto-router.ts";
 import { pickModel } from "../models.ts";
 import { forgetPythonState } from "../python/state.ts";
+import { runPromise } from "../runtime/runtime.ts";
 import { pythonReady } from "../startup.ts";
 import { forgetThread } from "../thread-cache.ts";
+import * as Threads from "../threads/Threads.ts";
 import { linkToReply, recordReplySpan, tracingOn, withReplyTrace } from "../tracing/reply-trace.ts";
 import { approvalsUsedBy, forgetApprovalUses, releaseApprovals, useApprovals } from "./approval-uses.ts";
 import { answersIn, settledChunks, stillAsked, withUncertainOutcomes, type Answer } from "./answered-again.ts";
@@ -60,7 +62,7 @@ export async function startReply(input: { threadId: string; owner: string; messa
 		const asked = continued ? messages.at(-1)! : undefined;
 		const answers = asked ? answersIn(asked) : [];
 		if (asked && answers.length) {
-			const saved = (await loadThread(threadId)).find((message) => message.id === asked.id && message.role === "assistant");
+			const saved = (await runPromise(Threads.Threads.use((threads) => threads.load(threadId)))).find((message) => message.id === asked.id && message.role === "assistant");
 			if (!stillAsked(saved, answers) || !(await useApprovals(threadId, answers))) return answeredAgain(threadId, owner, asked, answers);
 		}
 		if (previous) await cancel(previous, owner);
@@ -69,7 +71,7 @@ export async function startReply(input: { threadId: string; owner: string; messa
 		let run: { runId: string };
 		try {
 			// The run reads the thread from the database, so it is saved first.
-			await saveThread(threadId, owner, messages);
+			await runPromise(Threads.Threads.use((threads) => threads.save(threadId, owner, messages)));
 			// Under Auto, a reply carried on after an approval goes back to the model that wrote it.
 			const answeredBy = continued && isAuto(model.id) ? await lastAnsweringModel(threadId) : undefined;
 			run = await start(chatTurn, [
@@ -101,13 +103,13 @@ export async function startReply(input: { threadId: string; owner: string; messa
  */
 async function answeredAgain(threadId: string, owner: string, asked: UIMessage, answers: Answer[]) {
 	console.warn(`replies: thread ${threadId} answered approvals that were used already or are not asked; nothing runs`);
-	let messages = await loadThread(threadId);
+	let messages = await runPromise(Threads.Threads.use((threads) => threads.load(threadId)));
 	if (!(await activeRun(threadId))) {
 		const at = messages.findIndex((message) => message.id === asked.id && message.role === "assistant");
 		const settled = at === -1 ? undefined : withUncertainOutcomes(messages[at]!, answers);
 		if (settled) {
 			messages = messages.map((message, index) => (index === at ? settled : message));
-			await updateThread(threadId, owner, messages);
+			await runPromise(Threads.Threads.use((threads) => threads.update(threadId, owner, messages)));
 		}
 	}
 	const saved = messages.find((message) => message.id === asked.id && message.role === "assistant");
@@ -151,10 +153,10 @@ export async function stopReply(threadId: string, owner: string): Promise<boolea
 /** Deletes the person's thread, after its reply stops. What the reply writes after this is not saved (reply.ts). */
 export async function deleteChat(threadId: string, owner: string): Promise<boolean> {
 	const deleted = await withThreadLock(threadId, async () => {
-		if ((await threadOwner(threadId)) !== owner) return false;
+		if ((await ownerOf(threadId)) !== owner) return false;
 		const run = await activeRun(threadId);
 		if (run) await cancel(run, owner);
-		if (!(await deleteThread(threadId, owner))) return false;
+		if (!(await runPromise(Threads.Threads.use((threads) => threads.remove(threadId, owner))))) return false;
 		await forgetRuns(threadId);
 		await forgetApprovalUses(threadId);
 		return true;
@@ -211,7 +213,7 @@ async function finishEndedRun(run: ThreadRun) {
 				else await settleModelCalls(run.threadId, run.runId);
 				// Before the save, as chatTurn does (endReplyStream), so the saved reply ends where the page's does.
 				await endStream(run.runId, failed ? ENDED_ERROR : undefined);
-				const owner = await threadOwner(run.threadId);
+				const owner = await ownerOf(run.threadId);
 				if (owner) await saveReply(run.threadId, owner, run.runId, run.model, { cancelled, failed, continued: run.continued });
 			} finally {
 				// Finished even when the save fails, so the thread does not look busy forever.
@@ -279,7 +281,12 @@ async function cancelNow(run: ThreadRun, owner: string) {
 
 /** The person's thread, or a thread id nobody has taken yet. */
 async function mayUse(threadId: string, owner: string) {
-	return ((await threadOwner(threadId)) ?? owner) === owner;
+	return ((await ownerOf(threadId)) ?? owner) === owner;
+}
+
+/** Whose thread this is, or undefined for a new one. */
+async function ownerOf(threadId: string) {
+	return Option.getOrUndefined(await runPromise(Threads.Threads.use((threads) => threads.owner(threadId))));
 }
 
 /** A thread that ends on an assistant message carries on that message (an approval was answered). */

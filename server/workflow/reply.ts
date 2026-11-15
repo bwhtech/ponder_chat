@@ -1,8 +1,9 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { UIMessageChunk } from "ai";
 import { getRun } from "workflow/api";
-import { loadThread, updateThread } from "../db.ts";
 import { rememberTurn } from "../memory.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Threads from "../threads/Threads.ts";
 import { replayReply } from "./replay.ts";
 import { toUIChunks } from "./reply-chunks.ts";
 import { finishRun, type Continued } from "./runs.ts";
@@ -76,7 +77,7 @@ const STATUS_PARTS = new Set(["step-start", "data-compaction"]);
 
 async function saveReplyNow(threadId: string, owner: string, runId: string, model: string, { cancelled, failed, continued }: { cancelled: boolean; failed: boolean; continued: Continued | null }) {
 	const untilTail = cancelled || failed;
-	const messages = await loadThread(threadId);
+	const messages = await runPromise(Threads.Threads.use((threads) => threads.load(threadId)));
 	// After the person answers an approval, the run carries on the thread's last assistant
 	// message, as the browser does: its stream starts with the results of the approved
 	// tools, for calls made in that message. The stream replays on that message as it was
@@ -91,7 +92,7 @@ async function saveReplyNow(threadId: string, owner: string, runId: string, mode
 		if (at === -1) messages.push(reply);
 		else messages[at] = reply;
 		// Only into the thread as it is: a thread deleted while the reply was written stays deleted.
-		if (await updateThread(threadId, owner, messages)) rememberTurn({ threadId, user: owner }, messages);
+		if (await runPromise(Threads.Threads.use((threads) => threads.update(threadId, owner, messages)))) rememberTurn({ threadId, user: owner }, messages);
 	}
 	await finishRun(threadId, runId, model, { cancelled, failed, continued });
 }

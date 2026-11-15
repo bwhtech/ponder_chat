@@ -1,4 +1,5 @@
-import { loadThread } from "../db.ts";
+import { runPromise } from "../runtime/runtime.ts";
+import * as Threads from "../threads/Threads.ts";
 import { modelMessages } from "../workflow/thread-messages.ts";
 import { span } from "../tracing/span.ts";
 import { superseded } from "../workflow/runs.ts";
@@ -10,6 +11,7 @@ export type { CompactionState, CompactRequest, CompactResult };
 
 /** One compaction (compaction.ts), with the database and the summarizer. Run by the chat workflow's compactStep. */
 export async function compact(request: CompactRequest, options: { lastAttempt: boolean; status: (state: CompactionState) => Promise<void> }) {
+	const loadThread = (threadId: string) => runPromise(Threads.Threads.use((threads) => threads.load(threadId)));
 	const deps = { loadThread, loadSummary, saveSummary, superseded, writeSummary, modelMessages, status: options.status, log: console.error };
 	// Counts and the outcome only: never the summary or the messages (tracing/privacy.ts).
 	return span("compaction.run", { "ponder.between_steps": request.mode === "turn", "ponder.last_attempt": options.lastAttempt }, async (active) => {
