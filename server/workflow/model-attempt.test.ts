@@ -188,6 +188,8 @@ describe.skipIf(!url)("a last attempt's stall", () => {
 		Effect.gen(function* () {
 			const fake = fakeModel();
 			const { writable } = fakeWritable("none");
+			// Its own table: this test runs before the `runs` row tests make it, on a fresh database (CI).
+			yield* Runs.Runs.use((runs) => runs.migrate).pipe(Effect.provide(layerWith(fake.model)));
 			const attempt = yield* ModelAttempt.run(call(`wrun_stall_last_${tag}`), writable, { stepId: "step_1", attempt: 3 }).pipe(Effect.provide(layerWith(fake.model)), Effect.flip, Effect.forkChild);
 			yield* Deferred.await(fake.called);
 			yield* TestClock.adjust(Duration.millis(FIRST_CHUNK_MS));
