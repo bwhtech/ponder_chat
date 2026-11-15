@@ -27,7 +27,7 @@ import * as Threads from "../threads/Threads.ts";
 import { inReplyTrace, linkToReply, recordReplySpan, tracingOn } from "../tracing/reply-trace.ts";
 import { answersIn, settledChunks, stillAsked, withUncertainOutcomes, type Answer } from "./answered-again.ts";
 import * as ApprovalUses from "./approval-uses.ts";
-import { replyStream, saveReply } from "./reply.ts";
+import { messageIdFor, replyStream, saveReply } from "./reply.ts";
 import * as ThreadRuns from "./runs.ts";
 import type { Continued, ThreadRun } from "./runs.ts";
 import * as WorkflowRuns from "./WorkflowRuns.ts";
@@ -240,6 +240,25 @@ const make = Effect.gen(function* () {
 		return { runId, model: model.id, followed: false };
 	});
 
+	/**
+	 * The page shows a question as soon as the run that asked it ends its stream, but the run
+	 * saves its reply a step later (chat.ts). An answer can come in between, and the saved
+	 * thread then has no question for it: it would read as answered already, run nothing,
+	 * and the page would load the thread and show the question again. So an answer to the
+	 * active run's own message waits for that run to save, up to 10 seconds (whenFinished).
+	 * Not under the thread's lock: the save does not take it, and Stop must not wait.
+	 */
+	const untilQuestionSaved = Effect.fnUntraced(function* (threadId: string, messages: UIMessage[], continued: Continued | null) {
+		const asked = continued ? messages.at(-1) : undefined;
+		const answers = asked ? answersIn(asked) : [];
+		const running = Option.getOrUndefined(yield* runs.active(threadId));
+		if (!asked || !answers.length || !running) return;
+		if (sameContinuation(running.continued, continued)) return;
+		if ((running.continued?.messageId ?? messageIdFor(running.runId)) !== asked.id) return;
+		const saved = (yield* threads.load(threadId)).find((message) => message.id === asked.id && message.role === "assistant");
+		if (!stillAsked(saved, answers)) yield* whenFinished(threadId);
+	});
+
 	const start = Effect.fn("Replies.start")(function* (input: StartInput) {
 		const { threadId, owner, messages } = input;
 		const checking = yield* Clock.currentTimeMillis;
@@ -250,6 +269,7 @@ const make = Effect.gen(function* () {
 		const model = yield* models.pick(input.model);
 		const python = yield* sandbox.ready;
 		const continued = continuedFrom(messages);
+		yield* untilQuestionSaved(threadId, messages, continued);
 		const started = yield* runs.withLock(threadId, startRun(input, model, python, checked));
 		// The run goes on if the request closes; the page reconnects with follow.
 		const stream = "stream" in started ? started.stream : yield* provided(replyStream(started.runId, started.model, { continued })).pipe(inReplyTrace(started.runId));

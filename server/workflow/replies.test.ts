@@ -128,6 +128,41 @@ describe.skipIf(!base)("replies that race", () => {
 			}).pipe(onFakeWorkflow),
 		);
 
+		it.effect("an answer that comes before the run saved its question waits for the save, and starts a run", () =>
+			Effect.gen(function* () {
+				const threadId = `thread-early-answer-${tag}`;
+				const replies = yield* Replies.Replies;
+				const threads = yield* Threads.Threads;
+				const runs = yield* ThreadRuns.ThreadRuns;
+				const asking = yield* replies.start({ threadId, owner, messages: [message("m1", "Add a note")] });
+				// The run asked, and its stream ended: the page shows the question and the person answers it.
+				const question = (state: "approval-requested" | "approval-responded"): UIMessage => ({
+					id: `msg-${asking.runId}`,
+					role: "assistant",
+					parts: [
+						{
+							type: "dynamic-tool",
+							toolName: "connector_call",
+							toolCallId: "c1",
+							input: {},
+							state,
+							approval: state === "approval-requested" ? { id: "a1" } : { id: "a1", approved: false, reason: "The person denied this." },
+						} as UIMessage["parts"][number],
+					],
+				});
+				const first = workflow.started.length;
+				const answer = yield* Effect.forkChild(replies.start({ threadId, owner, messages: [message("m1", "Add a note"), question("approval-responded")] }));
+				// The run saves its reply a step after its stream ends (chat.ts).
+				yield* Effect.sleep("300 millis");
+				yield* threads.update(threadId, owner, [message("m1", "Add a note"), question("approval-requested")]);
+				yield* runs.finish(threadId, asking.runId, "test-model");
+
+				const answered = yield* Fiber.join(answer);
+				assert.strictEqual(workflow.started.length, first + 1, "the answer starts a run");
+				assert.strictEqual(answered.runId, workflow.started.at(-1));
+			}).pipe(onFakeWorkflow),
+		);
+
 		it.effect("Stop and delete at the same time cancel the run once, and the thread is gone", () =>
 			Effect.gen(function* () {
 				const threadId = `thread-stop-delete-${tag}`;
