@@ -13,7 +13,10 @@ const app = createApp(App).use(router);
 // admin.html draws the frame with skeletons before any code runs. Mounting replaces it, so
 // mount only once there is something to draw in its place: who is signed in, the logo and the
 // first page's code. They load at the same time. Signed out leaves for the sign-in page instead.
-void Promise.all([askViewer(), loadLogos(), router.isReady().then(() => true, () => false)]).then(([, , ready]) => {
+// The logo waits 1.5 seconds at most: a request that hangs must not keep the page from drawing.
+// A later answer still shows the logo (brand.ts is reactive).
+const logoOrTimeout = Promise.race([loadLogos(), new Promise<void>((resolve) => setTimeout(resolve, 1500))]);
+void Promise.all([askViewer(), logoOrTimeout, router.isReady().then(() => true, () => false)]).then(([, , ready]) => {
 	if (viewer.value === undefined && !viewerError.value) return;
 	// Without its code the page would mount empty inside the frame. The frame stays, and says so.
 	if (!ready) return showLoadError();

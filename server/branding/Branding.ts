@@ -69,7 +69,9 @@ export class Branding extends Context.Service<
 
 const make = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
-	const cached = yield* Ref.make(Option.none<Map<Theme, Logo>>());
+	// The logos in memory, and a count of the changes made in this process. A read keeps its rows
+	// only if no change came while it ran: else it could put back a logo just replaced or removed.
+	const cached = yield* Ref.make({ changes: 0, logos: Option.none<Map<Theme, Logo>>() });
 
 	const migrate = Effect.gen(function* () {
 		yield* sql`
@@ -91,12 +93,14 @@ const make = Effect.gen(function* () {
 	// The rows are two at most, each a small image: all of them stay in memory until one changes.
 	const all = Effect.gen(function* () {
 		const known = yield* Ref.get(cached);
-		if (Option.isSome(known)) return known.value;
+		if (Option.isSome(known.logos)) return known.logos.value;
 		const rows = yield* findAll(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 		const logos = new Map(rows.map((row) => [row.theme, { data: Buffer.from(row.data), mediaType: row.media_type, version: row.updated_at.getTime() }] as const));
-		yield* Ref.set(cached, Option.some(logos));
+		yield* Ref.update(cached, (now) => (now.changes === known.changes ? { changes: now.changes, logos: Option.some(logos) } : now));
 		return logos;
 	});
+
+	const forget = Ref.update(cached, (now) => ({ changes: now.changes + 1, logos: Option.none<Map<Theme, Logo>>() }));
 
 	const versions = Effect.map(all, (logos): LogoVersions => ({ light: logos.get("light")?.version ?? null, dark: logos.get("dark")?.version ?? null }));
 
@@ -109,13 +113,13 @@ const make = Effect.gen(function* () {
 			values (${theme}, ${image.data}, ${image.mediaType}, ${by}, now())
 			on conflict (theme) do update set data = excluded.data, media_type = excluded.media_type, updated_by = excluded.updated_by, updated_at = excluded.updated_at
 			returning updated_at`;
-		yield* Ref.set(cached, Option.none());
+		yield* forget;
 		return { ...image, version: row.updated_at.getTime() } satisfies Logo;
 	});
 
 	const remove = Effect.fn("Branding.remove")(function* (theme: Theme) {
 		const rows = yield* sql`delete from branding_logos where theme = ${theme} returning theme`;
-		yield* Ref.set(cached, Option.none());
+		yield* forget;
 		return rows.length > 0;
 	});
 
