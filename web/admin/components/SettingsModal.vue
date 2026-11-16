@@ -2,12 +2,13 @@
 import { Button, SettingsContent, SettingsDialog, SettingsNavGroup, SettingsNavItem, SettingsPanel, SettingsSidebar } from "frappe-ui";
 import { ref, watch } from "vue";
 import { useRoute } from "vue-router";
+import BrandingPanel from "./BrandingPanel.vue";
 import GeneralPanel from "./GeneralPanel.vue";
 
 /**
  * Settings on wider screens: frappe-ui's SettingsDialog, opened from the account menu or
- * with Cmd+Shift+, (Ctrl+Shift+,). One tab for now, General. Changes not saved are
- * dropped when it closes.
+ * with Cmd+Shift+, (Ctrl+Shift+,). Two tabs: General, and Branding (the logo). Changes not
+ * saved are dropped when it closes.
  */
 const open = defineModel<boolean>("open", { default: false });
 const tab = ref("general");
@@ -25,11 +26,18 @@ watch(() => route.fullPath, () => (open.value = false));
 					<template #prefix><span class="lucide-settings size-4 text-ink-gray-6" aria-hidden="true" /></template>
 					General
 				</SettingsNavItem>
+				<SettingsNavItem value="branding" class="!text-sm [@media(pointer:coarse)]:!h-11">
+					<template #prefix><span class="lucide-palette size-4 text-ink-gray-6" aria-hidden="true" /></template>
+					Branding
+				</SettingsNavItem>
 			</SettingsNavGroup>
 		</SettingsSidebar>
 		<SettingsContent>
 			<SettingsPanel value="general">
 				<GeneralPanel />
+			</SettingsPanel>
+			<SettingsPanel value="branding">
+				<BrandingPanel />
 			</SettingsPanel>
 		</SettingsContent>
 		<!-- Close, as in the chat's Settings. After the content, so the dialog does not open with focus on it. -->

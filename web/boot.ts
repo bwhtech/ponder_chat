@@ -1,14 +1,17 @@
 import type { client, Answer } from "./api";
+import type { LogoVersions } from "./brand";
 
 /**
  * What the server put in the page for its first screen (server/boot-page.ts): who is
- * signed in (null when nobody is), their chats, the models, the skills and the features.
+ * signed in (null when nobody is), their chats, the models, the skills, the features and the logos.
  * The same answers as the API's, so the page draws without asking it first. Each is used
  * once, by the first load; later loads ask the API. In development (npm run dev) the page
  * has none, and every load asks.
  */
 type Boot = {
 	me?: Answer<typeof client.api.me.$get> | null;
+	/** The logos an admin set (brand.ts). */
+	logos?: LogoVersions;
 	threads?: Answer<typeof client.api.threads.$get>["threads"];
 	models?: Answer<typeof client.api.models.$get>;
 	features?: Answer<typeof client.api.features.$get>;

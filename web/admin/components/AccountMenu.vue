@@ -3,6 +3,7 @@ import { Avatar, Dropdown, SidebarHeader } from "frappe-ui";
 import { computed } from "vue";
 import { useRouter } from "vue-router";
 import { signOut } from "../../account";
+import BrandLogo from "../../BrandLogo.vue";
 import { useThemeMenu } from "../../theme-menu";
 import { isMobile } from "../lib/viewport";
 import { settingsOpen, viewer } from "../store";
@@ -31,5 +32,5 @@ const menu = computed(() => [
 		</button>
 	</Dropdown>
 	<!-- The same header as the chat's sidebar, so both look like one app. -->
-	<SidebarHeader v-else title="Ponder Admin" :subtitle="me" logo="/logo.png" :menu-items="menu" />
+	<SidebarHeader v-else title="Ponder Admin" :subtitle="me" :logo="BrandLogo" :menu-items="menu" />
 </template>

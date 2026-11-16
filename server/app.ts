@@ -15,6 +15,7 @@ import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import type { SignedInEnv } from "./auth.ts";
 import * as Auth from "./auth/Auth.ts";
+import * as Branding from "./branding/Branding.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
 import * as Credits from "./credits/Credits.ts";
 import * as Files from "./files.ts";
@@ -84,6 +85,33 @@ app.get("/health", (c) =>
 
 // The end of a connector's OAuth sign-in (mcp/routes.ts). It reads the session itself.
 app.get("/oauth/mcp/callback", oauthCallback);
+
+// The organisation's logo (branding/Branding.ts). Before the session check: the sign-in page shows it.
+// Which logos an admin set; the pages show Ponder's own (web/public/logo-*.svg) for the others (web/brand.ts).
+app.get("/api/brand", (c) => route(c, Effect.map(Branding.Branding.use((branding) => branding.versions), (logos) => c.json({ logos }))));
+
+// A logo's image. Its address carries its version (?v=), so a browser keeps it for good; a new logo has a new address.
+app.get("/api/brand/logo/:theme", async (c) => {
+	const theme = c.req.param("theme");
+	if (!Branding.isTheme(theme)) return c.json({ error: "Not found" }, 404);
+	return route(
+		c,
+		Effect.map(
+			Branding.Branding.use((branding) => branding.logo(theme)),
+			Option.match({
+				onNone: () => c.json({ error: "Not found" }, 404),
+				onSome: (logo) =>
+					c.body(new Uint8Array(logo.data), 200, {
+						"Content-Type": logo.mediaType,
+						"Cache-Control": c.req.query("v") === String(logo.version) ? "public, max-age=31536000, immutable" : "no-cache",
+						"X-Content-Type-Options": "nosniff",
+						// An SVG opened on its own is a page: no script, no loads, styles inside it only.
+						"Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+					}),
+			}),
+		),
+	);
+});
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
 app.on(["GET", "POST"], "/api/auth/*", (c) => route(c, Auth.Auth.use((auth) => auth.handler(c.req.raw))));

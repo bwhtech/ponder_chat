@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="web/public/logo.png" alt="" width="64" height="64">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="web/public/logo-dark.svg">
+    <img src="web/public/logo-light.svg" alt="" width="64" height="64">
+  </picture>
 </p>
 
 <h1 align="center">Ponder Chat</h1>
@@ -241,7 +244,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 | Requests | Requests for more credits that wait, with Approve and Decline. Below: the answers of the last 30 days. |
 | People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
 | Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
-| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the summary model for long chats (see "Long chats"), the OpenRouter key and the list of admins. On a phone, Settings is a page in the tab bar. |
+| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the summary model for long chats (see "Long chats"), the OpenRouter key and the list of admins. Its Branding tab sets the organisation's logo, for light and dark mode (see "Logo"). On a phone, Settings is a page in the tab bar, with Branding under General. |
 | Activity | Each change an admin made, newest first: who did it, to whom, what changed and when. A click on a name shows that person's events only. Read only. On a phone, it is in the account menu. |
 
 - Admins see usage only. The admin API reads `runs` (cost, model, time), `sessions` (device and time) and the number of threads. It never returns messages or thread titles.
@@ -250,6 +253,12 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
 - The admin activity log is the `admin_events` table (`server/admin/AdminEvents.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/auth/AdminAuthEvents.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
 - An admin can change a person's email with Better Auth's `/api/auth/admin/update-user`. The admin can then sign in to that account with the new address. So each email change is logged, and the old address gets an email that names the new address and the admin.
+
+### Logo
+
+Ponder's logo is Lucide's message-square with a sparkle, in frappe-ui's `ink-gray-8` on `surface-base`, with a dark version from the same tokens' dark values. `scripts/logo.ts` draws `web/public/logo-light.svg`, `logo-dark.svg`, the favicon and the app icons from it.
+
+An admin can replace it in Settings, Branding: an SVG, PNG, JPEG or WebP up to 1 MB, for light mode, dark mode or both. Dark mode without its own logo shows the light one. The images are in the `branding_logos` table (`server/branding/Branding.ts`). An SVG is kept as it is; a raster image becomes a PNG of at most 512px. `GET /api/brand` says which logos are set, and `GET /api/brand/logo/<theme>?v=<version>` sends one; both answer without sign-in, because the sign-in page shows the logo. The chat page gets the versions in its boot data. The pages show the logo in the sidebar, on the sign-in page, above a new chat and as the tab's icon (`web/brand.ts`, `web/BrandLogo.vue`).
 
 ### Durable replies
 

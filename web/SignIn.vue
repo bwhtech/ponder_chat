@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandLogo from "./BrandLogo.vue";
 import { Alert, Button, FormControl } from "frappe-ui";
 import { nextTick, ref, watch } from "vue";
 import { sendSignInLink, signInWithCode } from "./account";
@@ -97,7 +98,7 @@ function useAnotherEmail() {
 	<main class="flex min-h-dvh items-center justify-center bg-surface-base px-4 text-ink-gray-8" data-slot="sign-in">
 		<div class="flex w-full max-w-sm flex-col gap-8">
 			<div class="flex flex-col items-center gap-3 text-center">
-				<img src="/logo.png" alt="" class="mb-1 size-11" />
+				<BrandLogo class="mb-1 size-11" />
 				<h1 class="text-4xl-semibold text-ink-gray-9">Sign in to Ponder Chat</h1>
 				<p class="text-p-base text-ink-gray-6">We'll email you a code and a link. No password needed.</p>
 			</div>

@@ -1,5 +1,6 @@
 import { createApp } from "vue";
 import App from "./App.vue";
+import { loadLogos } from "./brand";
 import "./style.css";
 
 // The width of a thin scrollbar, which the transcript reserves on both sides (style.css, .scroll-gutter-match).
@@ -9,6 +10,9 @@ probe.style.cssText = "position:absolute;visibility:hidden;overflow:auto;scrollb
 document.body.append(probe);
 document.documentElement.style.setProperty("--scroll-gutter", `${probe.offsetWidth - probe.clientWidth}px`);
 probe.remove();
+
+// From the boot data when the server sent it, so the first screen has the right logo.
+void loadLogos();
 
 // The open thread lives in the URL (?t=<id>); App loads it.
 createApp(App).mount("#app");

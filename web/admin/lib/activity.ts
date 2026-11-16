@@ -61,12 +61,19 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 		details: [`${tierName(before.autoCostTier)} → ${tierName(after.autoCostTier)}`],
 	}),
 	"set-openrouter-key": () => ({ text: "Changed the OpenRouter key", details: [] }),
+	"set-logo": (_, after) => ({ text: `Changed the logo for ${themeName(after.theme)}`, details: [] }),
+	"remove-logo": (before) => ({ text: `Removed the logo for ${themeName(before.theme)}`, details: [] }),
 	"create-skill": (_, after) => ({ text: `Created the skill ${skillName(after)}`, details: [] }),
 	"update-skill": (before, after) => ({ text: `Edited the skill ${skillName(after)}`, details: skillChanges(before, after) }),
 	"enable-skill": (_, after) => ({ text: `Turned on the skill ${skillName(after)}`, details: [] }),
 	"disable-skill": (_, after) => ({ text: `Turned off the skill ${skillName(after)}`, details: [] }),
 	"delete-skill": (before) => ({ text: `Deleted the skill ${skillName(before)}`, details: [] }),
 };
+
+/** The logo's theme (server/branding/Branding.ts). */
+function themeName(theme: unknown) {
+	return theme === "dark" ? "dark mode" : "light mode";
+}
 
 function updateText(before: Fields, after: Fields) {
 	const what = [before.email !== after.email && "the email", before.name !== after.name && "the name"].filter(Boolean);

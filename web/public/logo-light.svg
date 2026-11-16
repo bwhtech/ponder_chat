@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <defs>
+    <mask id="gap" maskUnits="userSpaceOnUse" x="-2" y="-2" width="28" height="28">
+      <rect x="-2" y="-2" width="28" height="28" fill="#fff"/>
+      <circle cx="19" cy="5" r="5.8" fill="#000"/>
+    </mask>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="#ffffff"/>
+  <rect x="2" y="2" width="508" height="508" rx="114" fill="none" stroke="#ededed" stroke-width="4"/>
+  <g transform="translate(112 112) scale(12)" fill="none" stroke="#171717" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+    <path mask="url(#gap)" d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/>
+    <g transform="translate(19 5) scale(0.46) translate(-12 -12)"><path fill="#171717" stroke-width="2" d="M12 1.5C12.9 8.2 15.8 11.1 22.5 12C15.8 12.9 12.9 15.8 12 22.5C11.1 15.8 8.2 12.9 1.5 12C8.2 11.1 11.1 8.2 12 1.5Z"/></g>
+  </g>
+</svg>
