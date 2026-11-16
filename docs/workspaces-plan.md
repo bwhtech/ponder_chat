@@ -17,7 +17,6 @@ Planned. Nothing is built.
 | Private workspace | A workspace that only its owner and the people they add can use. Anyone makes one. |
 | Owner | The person who made the workspace. |
 | Member | A person the owner added. Each member can ask, or can ask and edit. |
-| Editor | A member who can edit. In an organisation workspace, the people listed are editors, because everyone can already ask. |
 | Document | A file in a workspace. Its text is kept in the database. |
 | Passage | A part of a document's text, about 1,000 characters, with its embedding. The unit that search returns. |
 
@@ -27,6 +26,7 @@ Planned. Nothing is built.
 | --- | --- | --- |
 | Teams | None. The owner adds people one by one. | An internal tool with tens of people does not need teams yet. Teams can come later without changing this model. |
 | Who makes what | An admin makes organisation workspaces. Anyone makes private workspaces. | Org-wide content needs one person who is responsible for it. |
+| Who edits an organisation workspace | Admins only. Everyone else can ask. | Enough for the first release. Editors who are not admins are in "Later". |
 | Finding people | `GET /api/people?q=` searches every account by name or email, for any signed-in person. | Everyone in the organisation can see everyone. The prototype's people picker needs it. |
 | Chats | A chat stays private to the person who wrote it, also in a shared workspace. Members share instructions and documents, never chats. | The privacy rule that admins see usage only must also hold for workspace owners. |
 | Admins | An admin edits organisation workspaces. An admin cannot open a private workspace unless its owner adds them. | Same reason. The admin page shows counts of private workspaces only. |
@@ -103,10 +103,10 @@ Access is in one function, `Workspaces.accessOf(userId, workspaceId)`. It return
 
 | Workspace | Owner | Member | Admin | Anyone else |
 | --- | --- | --- | --- | --- |
-| Organisation | `owner` | `edit` (editors) | `edit` | `ask` |
+| Organisation | `owner` | — | `edit` | `ask` |
 | Private | `owner` | `ask` or `edit` | `none`, unless added | `none` |
 
-Only the owner changes the members of a private workspace. Only an admin changes an organisation workspace's editors, or changes its kind. Every read and write of a workspace, a document or a passage goes through `accessOf`.
+Only the owner changes the members of a private workspace. Only an admin changes an organisation workspace, or changes a workspace's kind. Every read and write of a workspace, a document or a passage goes through `accessOf`.
 
 ## API
 
@@ -137,7 +137,7 @@ A workspace that the person cannot use answers 404, never 403, so a request does
 
 - **Layout.** Rename `Workspace.vue` to `Shell.vue`. Add a "Workspaces" section above "Chats" in `ChatsPanel.vue`, and the same rows in `SidebarPlaceholder.vue`, so nothing moves when the panel loads.
 - **Sidebar rows.** Organisation workspaces first, then workspaces that others shared, then the person's own. Each row has an icon for its kind: a building, people, or a lock.
-- **Chats list.** "Chats" shows only chats outside a workspace. A workspace's chats are on its page. Search finds all chats.
+- **Chats list.** "Chats" shows all of the person's chats, also the ones in a workspace. Each workspace chat shows its workspace. Two layouts to try in the prototype first: the date groups stay and each row has a small workspace label, or the chats are grouped by workspace. The workspace page also lists its own chats.
 - **Workspace page (`?w=<id>`).** A header with the name, the "Shared with" badge, Share (for the owner, and for admins on organisation workspaces) and a menu. Then the composer, "Your chats here", and a side panel with instructions, documents and "Shared with". On a phone, the side panel goes under the chats.
 - **Composer.** A workspace chip goes in `PromptInputTools`, beside the model selector. A new chat can pick a workspace. In a chat that has one, the chip shows its name and cannot change.
 - **Dialogs.** New workspace and Share, each loaded on first use with a `DialogFrame` placeholder, as Settings is. The people picker is frappe-ui's `Combobox` with `filterable: false`. It calls `/api/people` and shows the name with the email under it.
@@ -175,6 +175,7 @@ Each pull request ships alone, and each one updates the README. The first one al
 
 - Connectors in a workspace. Add an `mcp_servers` table for the shared definition, as `docs/connectors-plan.md` plans. Each member signs in once to each server, and their connection points to the server.
 - Teams, if adding people one by one becomes too slow.
+- Editors for organisation workspaces who are not admins.
 - DOCX, XLSX and HTML documents, as Flow reads them.
 - A strict "workspace only" mode, with a "Search the web" button when the workspace has no answer.
 - Source chips under an answer that name the document and the passage.
@@ -191,5 +192,4 @@ Each pull request ships alone, and each one updates the README. The first one al
 
 1. Who pays for embeddings: the uploader's credits, or nobody?
 2. Is half of the context window the right inline limit for Ponder, or should it be lower to keep the cost down?
-3. Should "Chats" in the sidebar also show workspace chats, with the workspace's name beside each one?
-4. Do organisation workspaces need editors in the first release, or are admins enough?
+3. Which OCR service reads a scanned PDF, which has no text layer for `pdf-text.ts` to read.
