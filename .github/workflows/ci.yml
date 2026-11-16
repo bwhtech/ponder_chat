@@ -21,19 +21,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      # Blobless, not shallow: the whole history, with each file's content fetched when it is read.
       - name: Check out repo
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
+      - uses: ./.github/actions/setup
 
       - name: Check the web app's types
         run: npm run typecheck
@@ -43,10 +39,6 @@ jobs:
 
       - name: Check the tests' types
         run: npm run typecheck:e2e
-
-      # The tests that need Postgres skip here, without TEST_DATABASE_URL; the e2e job runs them.
-      - name: Run the server's unit tests
-        run: npm run test
 
       - name: Check which pages web_fetch reads without asking
         run: npx tsx server/trusted-pages.check.ts
@@ -75,45 +67,82 @@ jobs:
       - name: Check the reply loop's retries, stream and approvals
         run: npx tsx server/workflow/loop.check.ts
 
-  e2e:
+  # The server's unit tests, all of them, on a Postgres of their own.
+  unit:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    services:
-      postgres:
-        image: pgvector/pgvector:pg18
-        env:
-          POSTGRES_USER: ponder
-          POSTGRES_PASSWORD: ponder
-          POSTGRES_DB: postgres
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ponder"
-          --health-interval 2s
-          --health-timeout 5s
-          --health-retries 30
-    env:
-      E2E_DATABASE_URL: postgres://ponder:ponder@127.0.0.1:5432/ponder_e2e
+    timeout-minutes: 10
     steps:
+      # Blobless, not shallow: the whole history, with each file's content fetched when it is read.
       - name: Check out repo
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
+      # In the background, so the image downloads while the dependencies install.
+      # Its data is in memory (tmpfs): nothing needs to outlive the job.
+      - name: Start Postgres
+        run: |
+          (docker run -d --name pg --tmpfs /var/lib/postgresql -p 5432:5432 \
+            -e POSTGRES_USER=ponder -e POSTGRES_PASSWORD=ponder -e POSTGRES_DB=postgres \
+            pgvector/pgvector:pg18 > /tmp/pg.log 2>&1 &)
 
-      - name: Install dependencies
-        run: npm ci
+      - uses: ./.github/actions/setup
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 120); do
+            docker exec pg pg_isready -U ponder -h 127.0.0.1 > /dev/null 2>&1 && exit 0
+            sleep 0.5
+          done
+          cat /tmp/pg.log; docker logs pg; exit 1
 
       # On the service's own "postgres" database, which the e2e tests do not use (vitest.config.ts).
       - name: Run the server's unit tests, with Postgres
         run: npm run test
         env:
           TEST_DATABASE_URL: postgres://ponder:ponder@127.0.0.1:5432/postgres
+
+  # The end-to-end tests, in shards that each take about the same time (e2e/shard.ts, from
+  # e2e/durations.json). Each shard has its own Postgres and its own Ponder.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    env:
+      E2E_DATABASE_URL: postgres://ponder:ponder@127.0.0.1:5432/ponder_e2e
+      SHARDS: 6
+    name: e2e (${{ matrix.shard }} of 6)
+    steps:
+      # Blobless, not shallow: the whole history, with each file's content fetched when it is read.
+      - name: Check out repo
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+
+      # In the background, so the image downloads while the dependencies install.
+      # Its data is in memory (tmpfs): nothing needs to outlive the job.
+      - name: Start Postgres
+        run: |
+          (docker run -d --name pg --tmpfs /var/lib/postgresql -p 5432:5432 \
+            -e POSTGRES_USER=ponder -e POSTGRES_PASSWORD=ponder -e POSTGRES_DB=postgres \
+            pgvector/pgvector:pg18 > /tmp/pg.log 2>&1 &)
+
+      - uses: ./.github/actions/setup
+
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 120); do
+            docker exec pg pg_isready -U ponder -h 127.0.0.1 > /dev/null 2>&1 && exit 0
+            sleep 0.5
+          done
+          cat /tmp/pg.log; docker logs pg; exit 1
 
       - name: Find the Playwright version
         id: playwright
@@ -123,30 +152,34 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+          key: playwright-shell-${{ runner.os }}-${{ steps.playwright.outputs.version }}
 
-      # Skips the download when the cache has it, and installs the system libraries either way.
+      # Only the headless shell, which headless tests use. The runner image already has the
+      # system libraries that Chromium needs (it ships Google Chrome), so there is no apt step.
+      # Skips the download when the cache has it.
       - name: Install Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --only-shell chromium
 
       - name: Build Ponder
         run: npm run build
 
       - name: Run the end-to-end tests
-        run: npx playwright test
+        run: npx playwright test $(node e2e/shard.ts ${{ matrix.shard }} $SHARDS)
 
       # The connector checks write to the database that the tests made, which has Ponder's tables.
       - name: Run the connector checks
+        if: ${{ matrix.shard == 1 }}
         run: npx tsx server/mcp.check.ts
         env:
           DATABASE_URL: ${{ env.E2E_DATABASE_URL }}
           BETTER_AUTH_SECRET: ci-secret-for-the-checks-0123456789abcdef
 
+      # results.json has each test's time: `node e2e/shard.ts --update` reads it.
       - name: Upload the test report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.shard }}
           path: |
             playwright-report/
             test-results/
