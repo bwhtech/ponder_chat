@@ -16,7 +16,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: node_modules
-        key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+        key: node-modules-${{ runner.os }}-node24-${{ hashFiles('package.json', 'package-lock.json') }}
 
     - name: Install dependencies
       if: steps.modules.outputs.cache-hit != 'true'
