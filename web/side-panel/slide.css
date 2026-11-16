@@ -1,0 +1,25 @@
+/* The side panel's slide in and out: the panel's (SidePanel.vue) and its stand-in's (PanelPlaceholder.vue). */
+.side-panel-enter-active,
+.side-panel-leave-active {
+	transition:
+		opacity 180ms var(--ease-out-strong, ease-out),
+		transform 220ms var(--ease-out-strong, ease-out);
+}
+.side-panel-enter-from,
+.side-panel-leave-to {
+	opacity: 0;
+	transform: translateX(24px);
+}
+@media (max-width: 1023px) {
+	.side-panel-enter-from,
+	.side-panel-leave-to {
+		opacity: 1;
+		transform: translateX(100%);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.side-panel-enter-from,
+	.side-panel-leave-to {
+		transform: none;
+	}
+}

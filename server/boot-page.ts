@@ -56,7 +56,11 @@ export type BootData = {
 	models?: Models.Pickable;
 	features?: { python: boolean };
 	skills?: { name: string; description: string }[];
-	/** The files of the chat's later code, for the page to prefetch once it has loaded (web/preload.ts). */
+	/**
+	 * The files of the chat's later code and of what a first tap waits for, for the page to prefetch
+	 * once it has loaded (web/preload.ts). For an admin, the admin pages' files too, so the Admin
+	 * item of the account menu opens them from the cache.
+	 */
 	prefetch?: string[];
 };
 
@@ -72,7 +76,7 @@ export const meOf = Effect.fn("BootPage.me")(function* ({ id, email, name }: Pic
 /** GET /api/skills: the skills that are on, for the $ menu. Names and descriptions, not the instructions. */
 export const skillOptions = Skills.Skills.use((skills) => skills.active).pipe(Effect.map((skills) => skills.map(({ name, description }) => ({ name, description }))));
 
-const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetch: string[]) {
+const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetch: WebBuild.Prefetch) {
 	const session = yield* Auth.Auth.use((auth) => auth.session(headers));
 	if (Option.isNone(session)) return { me: null } satisfies BootData;
 	const { user } = session.value;
@@ -83,8 +87,14 @@ const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetc
 	// Only what is ready now: the models wait for OpenRouter on a cold start, and the page asks for them itself then.
 	const python = Option.getOrUndefined(yield* Sandbox.Sandbox.use((sandbox) => sandbox.readyNow));
 	const models = Option.getOrUndefined(yield* Models.Models.use((models) => models.cached));
-	return { me, threads, skills, models, features: python === undefined ? undefined : { python }, prefetch } satisfies BootData;
+	const features = python === undefined ? undefined : { python };
+	return { me, threads, skills, models, features, prefetch: prefetchFor(me.user.role, prefetch) } satisfies BootData;
 });
+
+/** Everyone's files, and for an admin the admin pages' after them: only admins can open those. */
+export function prefetchFor(role: Accounts.Role, { everyone, admins }: WebBuild.Prefetch) {
+	return role === "admin" ? [...everyone, ...admins] : everyone;
+}
 
 /** JSON in a script tag that never runs. "<" is escaped, so a chat's title cannot close the tag. */
 function script(data: BootData) {

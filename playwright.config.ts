@@ -9,9 +9,9 @@ export default defineConfig({
 	testDir: "e2e/tests",
 	fullyParallel: true,
 	forbidOnly: Boolean(process.env.CI),
-	// A retry records a trace of the failure, and a test that passes only on its retry still fails the run.
-	retries: process.env.CI ? 1 : 0,
-	failOnFlakyTests: Boolean(process.env.CI),
+	// No retries: a test that fails once fails the run, and its trace is kept (retain-on-failure).
+	// A test that needs a retry has a bug to find.
+	retries: 0,
 	workers: process.env.CI ? 2 : undefined,
 	timeout: 30_000,
 	expect: { timeout: 10_000 },

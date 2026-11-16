@@ -21,6 +21,8 @@ const chatContent = [
 	...aiElements,
 	`${here}web/**/*.{html,vue,ts}`,
 	`!${here}web/admin/**`,
+	// admin.html draws /admin's first screen with the admin's classes, which the chat never uses.
+	`!${here}web/admin.html`,
 ];
 
 /** @type {import('tailwindcss').Config} */

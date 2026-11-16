@@ -1,7 +1,7 @@
 /**
  * Ponder's build (.output/, from `npm run build`) as the tests run it: on a new, empty
  * database, with every OpenRouter call and email sent to the fake. start.ts starts the
- * server that most tests share; durability.spec.ts starts its own, because it stops it.
+ * server that most tests share; each durability file starts its own, because it stops it (durability.ts).
  */
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import postgres from "postgres";

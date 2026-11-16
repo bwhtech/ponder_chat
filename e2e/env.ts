@@ -4,11 +4,9 @@ const fakePort = Number(process.env.E2E_FAKE_PORT ?? 3598);
 /** The test MCP servers (mcp/server.ts): the open and key servers, and the one with OAuth. */
 const mcpPort = Number(process.env.E2E_MCP_PORT ?? 3599);
 const mcpOAuthPort = Number(process.env.E2E_MCP_OAUTH_PORT ?? 3600);
-/** The Ponder that durability.spec.ts stops and starts again, on its own database. */
+/** The Ponders that the durability tests stop and start again: slot 0's port, and the ports below it. */
 const durabilityPort = Number(process.env.E2E_DURABILITY_PORT ?? 3596);
 const databaseUrl = process.env.E2E_DATABASE_URL ?? "postgres://ponder:ponder@127.0.0.1:55433/ponder_e2e";
-const durabilityDatabase = new URL(databaseUrl);
-durabilityDatabase.pathname = "/ponder_durability_e2e";
 
 export const e2e = {
 	port,
@@ -21,5 +19,14 @@ export const e2e = {
 	mcpUrl: `http://127.0.0.1:${mcpPort}`,
 	mcpOAuthUrl: `http://127.0.0.1:${mcpOAuthPort}`,
 	databaseUrl,
-	durabilityDatabaseUrl: durabilityDatabase.href,
+	/**
+	 * The Ponder of one durability file (durability.ts): its port, and its own database on
+	 * the same Postgres. One server holds the workflow worker of a database, so each file
+	 * that stops its server needs its own.
+	 */
+	durability(slot: number, name: string) {
+		const database = new URL(databaseUrl);
+		database.pathname = `/ponder_durability_${name}_e2e`;
+		return { port: durabilityPort - slot, databaseUrl: database.href };
+	},
 };
