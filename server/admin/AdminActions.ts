@@ -5,6 +5,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as Auth from "../auth/Auth.ts";
+import * as Branding from "../branding/Branding.ts";
 import * as Credits from "../credits/Credits.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
 import * as Mailer from "../email/Mailer.ts";
@@ -18,7 +19,7 @@ import * as AdminReports from "./AdminReports.ts";
 
 /**
  * What admins change on /admin (admin/routes.ts): people's limits and roles, bans, invites,
- * requests for more credits, and the settings.
+ * requests for more credits, the settings and the logo.
  *
  * Role, ban and sign-out go through Better Auth's admin plugin (auth.api), which checks
  * the admin's session again (the request's headers) and ends a banned person's sessions.
@@ -103,6 +104,10 @@ export class AdminActions extends Context.Service<
 		readonly setAutoCostTier: (actor: Actor, tier: Settings.AutoCostTier) => Effect.Effect<Settings.AppSettings, SqlError>;
 		/** Saves the key once OpenRouter accepts it: a wrong key would stop every reply. The key's state after it. */
 		readonly setOpenRouterKey: (actor: Actor, key: string) => Effect.Effect<OpenRouterKey.KeyStatus, KeyRefused | SqlError>;
+		/** Sets the organisation's logo for a theme (branding/Branding.ts). Which logos are set, after it. */
+		readonly setLogo: (actor: Actor, theme: Branding.Theme, upload: Buffer) => Effect.Effect<Branding.LogoVersions, Branding.LogoRefused | SqlError>;
+		/** Back to Ponder's logo for a theme. Which logos are set, after it. */
+		readonly removeLogo: (actor: Actor, theme: Branding.Theme) => Effect.Effect<Branding.LogoVersions, SqlError>;
 		/** Answers a request for more credits, then emails the person, with a link to `origin`. A failed email does not undo the answer. */
 		readonly answer: (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) => Effect.Effect<void, AnsweredAlready | SqlError>;
 	}
@@ -121,6 +126,7 @@ const make = Effect.gen(function* () {
 	const credits = yield* Credits.Credits;
 	const extraCredits = yield* ExtraCredits.ExtraCredits;
 	const settings = yield* Settings.Settings;
+	const branding = yield* Branding.Branding;
 	const openRouterKey = yield* OpenRouterKey.OpenRouterKey;
 	const models = yield* Models.Models;
 	const mailer = yield* Mailer.Mailer;
@@ -265,6 +271,18 @@ const make = Effect.gen(function* () {
 		return yield* openRouterKey.status;
 	});
 
+	// The log keeps the type and size of the image, not the image.
+	const setLogo = Effect.fn("AdminActions.setLogo")(function* (actor: Actor, theme: Branding.Theme, upload: Buffer) {
+		const logo = yield* branding.save(theme, upload, actor.id);
+		yield* record(actor, "set-logo", { after: { theme, mediaType: logo.mediaType, bytes: logo.data.length } });
+		return yield* branding.versions;
+	});
+
+	const removeLogo = Effect.fn("AdminActions.removeLogo")(function* (actor: Actor, theme: Branding.Theme) {
+		if (yield* branding.remove(theme)) yield* record(actor, "remove-logo", { before: { theme } });
+		return yield* branding.versions;
+	});
+
 	const answer = Effect.fn("AdminActions.answer")(function* (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) {
 		const userId = yield* extraCredits.decide(requestId, decision, actor.id);
 		if (Option.isNone(userId)) return yield* new AnsweredAlready();
@@ -290,6 +308,8 @@ const make = Effect.gen(function* () {
 		setCompactionModel,
 		setAutoCostTier,
 		setOpenRouterKey,
+		setLogo,
+		removeLogo,
 		answer,
 	});
 });

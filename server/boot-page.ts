@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import type { Context, Next } from "hono";
 import * as Auth from "./auth/Auth.ts";
+import * as Branding from "./branding/Branding.ts";
 import * as Credits from "./credits/Credits.ts";
 import * as Models from "./models/Models.ts";
 import * as Accounts from "./people/Accounts.ts";
@@ -14,7 +15,7 @@ import * as WebBuild from "./web-build.ts";
 
 /**
  * The chat page (dist/index.html) with what its first screen needs: who is signed in, with
- * their credits, their chats, the models, the skills and the features. Without it the
+ * their credits, their chats, the models, the skills, the features and the logos. Without it the
  * page asks for them once its code runs, and the chats only after /api/me answers: two
  * round trips after the code, each a second or more on a slow phone network.
  *
@@ -49,9 +50,11 @@ export async function bootPage(c: Context, next: Next) {
 	return c.body(body, 200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-cache" });
 }
 
-/** The same answers as GET /api/me, /api/threads, /api/models, /api/features and /api/skills. */
+/** The same answers as GET /api/me, /api/threads, /api/models, /api/features, /api/skills and /api/brand. */
 export type BootData = {
 	me: Effect.Success<ReturnType<typeof meOf>> | null;
+	/** The logos an admin set, for signed-out pages too: the sign-in page shows the logo. */
+	logos: Branding.LogoVersions;
 	threads?: Threads.ThreadSummary[];
 	models?: Models.Pickable;
 	features?: { python: boolean };
@@ -77,8 +80,11 @@ export const meOf = Effect.fn("BootPage.me")(function* ({ id, email, name }: Pic
 export const skillOptions = Skills.Skills.use((skills) => skills.active).pipe(Effect.map((skills) => skills.map(({ name, description }) => ({ name, description }))));
 
 const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetch: WebBuild.Prefetch) {
-	const session = yield* Auth.Auth.use((auth) => auth.session(headers));
-	if (Option.isNone(session)) return { me: null } satisfies BootData;
+	const { session, logos } = yield* Effect.all(
+		{ session: Auth.Auth.use((auth) => auth.session(headers)), logos: Branding.Branding.use((branding) => branding.versions) },
+		{ concurrency: "unbounded" },
+	);
+	if (Option.isNone(session)) return { me: null, logos } satisfies BootData;
 	const { user } = session.value;
 	const { me, threads, skills } = yield* Effect.all(
 		{ me: meOf(user), threads: Threads.Threads.use((threads) => threads.list(user.id)), skills: skillOptions },
@@ -88,7 +94,7 @@ const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetc
 	const python = Option.getOrUndefined(yield* Sandbox.Sandbox.use((sandbox) => sandbox.readyNow));
 	const models = Option.getOrUndefined(yield* Models.Models.use((models) => models.cached));
 	const features = python === undefined ? undefined : { python };
-	return { me, threads, skills, models, features, prefetch: prefetchFor(me.user.role, prefetch) } satisfies BootData;
+	return { me, logos, threads, skills, models, features, prefetch: prefetchFor(me.user.role, prefetch) } satisfies BootData;
 });
 
 /** Everyone's files, and for an admin the admin pages' after them: only admins can open those. */

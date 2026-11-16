@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
 import { me } from "./account";
+import BrandLogo from "./BrandLogo.vue";
 import ThreadRowsSkeleton from "./ThreadRowsSkeleton.vue";
 
 /**
@@ -17,7 +18,7 @@ defineProps<{ sheet?: boolean; name: string }>();
 		<!-- frappe-ui's SidebarHeader, drawn without its menu. -->
 		<div class="flex h-12 shrink-0 items-center px-1">
 			<div class="flex h-10 w-full items-center rounded-4 px-1.5">
-				<div class="size-7 shrink-0 overflow-hidden rounded-[6px]"><img src="/logo.png" class="h-full w-full object-cover" alt="" /></div>
+				<div class="size-7 shrink-0 overflow-hidden rounded-[6px]"><BrandLogo class="size-full" /></div>
 				<div class="ml-2 flex flex-1 flex-col truncate text-left">
 					<div class="truncate text-base-medium leading-tighter text-ink-gray-8">Ponder Chat</div>
 					<div class="mt-0.5 truncate text-sm leading-tighter text-ink-gray-6">{{ name }}</div>
@@ -55,7 +56,7 @@ defineProps<{ sheet?: boolean; name: string }>();
 	<div v-else class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]" aria-busy="true">
 		<div class="-mx-1 -mt-2 flex h-12 shrink-0 items-center px-1">
 			<div class="flex h-10 w-full items-center rounded-4 px-1.5">
-				<div class="size-7 shrink-0 overflow-hidden rounded-[6px]"><img src="/logo.png" class="h-full w-full object-cover" alt="" /></div>
+				<div class="size-7 shrink-0 overflow-hidden rounded-[6px]"><BrandLogo class="size-full" /></div>
 				<div class="ml-2 flex flex-1 flex-col truncate text-left">
 					<div class="truncate text-base-medium leading-tighter text-ink-gray-8">Ponder Chat</div>
 					<div class="mt-0.5 truncate text-sm leading-tighter text-ink-gray-6">{{ name }}</div>

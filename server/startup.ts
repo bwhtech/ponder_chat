@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Scope from "effect/Scope";
 import * as AdminEvents from "./admin/AdminEvents.ts";
 import * as Auth from "./auth/Auth.ts";
+import * as Branding from "./branding/Branding.ts";
 import * as Credits from "./credits/Credits.ts";
 import * as Files from "./files.ts";
 import * as Invites from "./people/Invites.ts";
@@ -85,6 +86,7 @@ const migrateAll = Effect.gen(function* () {
 	yield* Invites.Invites.use((invites) => invites.migrate);
 	yield* AdminEvents.AdminEvents.use((events) => events.migrate);
 	yield* Secrets.Secrets.use((secrets) => secrets.migrate);
+	yield* Branding.Branding.use((branding) => branding.migrate);
 	yield* ConnectorStore.ConnectorStore.use((store) => store.migrate);
 	yield* Skills.Skills.use((skills) => skills.migrate);
 	yield* seedStandardSkills();

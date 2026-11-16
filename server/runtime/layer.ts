@@ -1,5 +1,6 @@
 import * as Layer from "effect/Layer";
 import * as People from "../admin/layer.ts";
+import * as Branding from "../branding/Branding.ts";
 import * as CompactionStore from "../compaction/store.ts";
 import * as Summarizer from "../compaction/summarize.ts";
 import * as PonderConfig from "../config.ts";
@@ -67,7 +68,7 @@ export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer).pipe(
 		),
 	),
 	Layer.provideMerge(Layer.mergeAll(Models.layer, OpenRouterKey.layer, Runs.layer)),
-	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer, Settings.layer, NetGuard.layer, ObjectStore.layer, Mailer.layer, Notify.layer, PdfText.layer)),
+	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer, Settings.layer, Branding.layer, NetGuard.layer, ObjectStore.layer, Mailer.layer, Notify.layer, PdfText.layer)),
 	Layer.provideMerge(Layer.mergeAll(Database.layer, Http.layer)),
 	Layer.provideMerge(PonderConfig.layer),
 	Layer.provideMerge(Layer.mergeAll(Tracing.layer, Logger.layer)),

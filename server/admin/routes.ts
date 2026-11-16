@@ -1,10 +1,12 @@
 import { type Context, Hono, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { z } from "zod";
 import type { SignedInEnv } from "../auth.ts";
 import * as Auth from "../auth/Auth.ts";
+import * as Branding from "../branding/Branding.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { route } from "../runtime/route.ts";
@@ -59,6 +61,12 @@ const skillBody = z.object({
 	enabled: z.boolean().default(false),
 	/** When the admin's copy was loaded; absent for a new skill. */
 	expectedUpdatedAt: z.string().datetime().optional(),
+});
+
+// A little over the logo's limit, for the form around it. Larger is refused before it is read.
+const logoLimit = bodyLimit({
+	maxSize: Branding.MAX_LOGO_BYTES + 64 * 1024,
+	onError: (c) => c.json({ error: "The logo is larger than 1 MB." }, 413),
 });
 
 // The overview covers 7, 14 or 30 days; any other value is 14.
@@ -218,6 +226,25 @@ export const adminApi = new Hono<Env>()
 			KeyRefused: (error, c) => c.json({ error: error.reason }, 400),
 		}),
 	)
+
+	// The organisation's logo for light or dark mode (branding/Branding.ts). The upload is a form, read
+	// by the route, as the chat's files are (app.ts). Each answers with which logos are set after it.
+	.put("/branding/logo/:theme", logoLimit, async (c) => {
+		const theme = c.req.param("theme");
+		if (!Branding.isTheme(theme)) return c.json({ error: "Not found" }, 404);
+		const file = (await c.req.formData()).get("file");
+		if (!(file instanceof File)) return c.json({ error: "No image in the upload." }, 400);
+		const upload = Buffer.from(await file.arrayBuffer());
+		return route(c, Effect.map(actions((service) => service.setLogo(actorOf(c), theme, upload)), (logos) => c.json({ logos })), {
+			LogoRefused: (error, c) => c.json({ error: error.message }, 400),
+		});
+	})
+
+	.delete("/branding/logo/:theme", async (c) => {
+		const theme = c.req.param("theme");
+		if (!Branding.isTheme(theme)) return c.json({ error: "Not found" }, 404);
+		return route(c, Effect.map(actions((service) => service.removeLogo(actorOf(c), theme)), (logos) => c.json({ logos })));
+	})
 
 	// Skills (skills.ts): Markdown files of instructions, on for everyone or off.
 

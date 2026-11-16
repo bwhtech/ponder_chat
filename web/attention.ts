@@ -1,4 +1,5 @@
 import { onScopeDispose, watch, type Ref } from "vue";
+import { faviconUrl } from "./brand";
 
 /**
  * Tells a person who switched tabs that Ponder Chat needs them: a count on the favicon and in
@@ -9,8 +10,6 @@ import { onScopeDispose, watch, type Ref } from "vue";
  */
 const FINISH_GRACE_MS = 2_000;
 const BASE_TITLE = "Ponder Chat";
-/** The favicon without a badge; index.html links the same one. */
-const ICON = "/favicon.png";
 
 class Attention {
 	private count = 0;
@@ -41,7 +40,7 @@ class Attention {
 		const mine = ++this.rendering;
 		const label = this.count > 9 ? "9+" : String(this.count);
 		document.title = this.count ? `(${label}) ${BASE_TITLE}` : BASE_TITLE;
-		const icon = this.count ? await this.badged(label) : ICON;
+		const icon = this.count ? await this.badged(label) : faviconUrl();
 		if (mine === this.rendering) setFavicon(icon);
 	}
 
@@ -50,7 +49,7 @@ class Attention {
 		const size = 64;
 		const canvas = Object.assign(document.createElement("canvas"), { width: size, height: size });
 		const context = canvas.getContext("2d");
-		if (!context) return ICON;
+		if (!context) return faviconUrl();
 		context.drawImage(await this.baseImage(), 0, 0, size, size);
 		context.fillStyle = "#e03636";
 		context.beginPath();
@@ -69,7 +68,7 @@ class Attention {
 			const image = new Image();
 			image.onload = () => resolve(image);
 			image.onerror = reject;
-			image.src = ICON;
+			image.src = faviconUrl();
 		});
 		return this.base;
 	}

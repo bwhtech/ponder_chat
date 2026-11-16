@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button, Sidebar, SidebarHeader, type DropdownOptions } from "frappe-ui";
 import { me } from "./account";
+import BrandLogo from "./BrandLogo.vue";
 import CreditMeter from "./CreditMeter.vue";
 import ThreadList from "./ThreadList.vue";
 
@@ -16,7 +17,7 @@ const emit = defineEmits<{ select: [id: string]; newChat: [] }>();
 
 <template>
 	<Sidebar v-if="!sheet" class="hidden border-r border-outline-gray-1 md:flex" width="16rem" :collapsible="false" aria-label="Chats">
-		<SidebarHeader title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" />
+		<SidebarHeader title="Ponder Chat" :subtitle="name" :logo="BrandLogo" :menu-items="menu" />
 		<div class="flex min-h-0 flex-1 flex-col px-2">
 			<ThreadList scroll :highlight="highlight" @select="emit('select', $event)" />
 		</div>
@@ -30,7 +31,7 @@ const emit = defineEmits<{ select: [id: string]; newChat: [] }>();
 		</div>
 	</Sidebar>
 	<div v-else class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
-		<SidebarHeader title="Ponder Chat" :subtitle="name" logo="/logo.png" :menu-items="menu" class="-mx-1 -mt-2" />
+		<SidebarHeader title="Ponder Chat" :subtitle="name" :logo="BrandLogo" :menu-items="menu" class="-mx-1 -mt-2" />
 		<Button variant="outline" size="md" icon-left="lucide-square-pen" class="w-full !justify-start !px-2 bg-surface-base" @click="emit('newChat')">New chat</Button>
 		<ThreadList :highlight="highlight" @select="emit('select', $event)" />
 		<div v-if="me" class="border-t border-outline-gray-1 pt-2">

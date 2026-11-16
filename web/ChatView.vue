@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import BrandLogo from "./BrandLogo.vue";
 import type { FileUIPart, UIMessage } from "ai";
 import { Button } from "frappe-ui";
 import { Alert, OutOfCredits } from "./lazy-alert";
@@ -499,7 +500,7 @@ function replyModelId(message: UIMessage) {
 				v-if="landing"
 				class="gap-4 !pb-8 sm:!justify-end sm:!pb-6"
 			>
-				<img src="/logo.png" alt="" class="size-11" />
+				<BrandLogo class="size-11" />
 				<div class="space-y-2">
 					<p class="text-4xl-semibold text-ink-gray-9">What's on your mind?</p>
 					<p class="mx-auto max-w-sm text-balance text-p-base text-ink-gray-6 dark:text-ink-gray-7">Ask anything.</p>
