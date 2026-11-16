@@ -13,7 +13,7 @@ type Boot = {
 	models?: Answer<typeof client.api.models.$get>;
 	features?: Answer<typeof client.api.features.$get>;
 	skills?: Answer<typeof client.api.skills.$get>["skills"];
-	/** The files of the chat's later code, to prefetch (preload.ts). */
+	/** The files of the chat's later code and of what a first tap waits for, and for an admin /admin's, to prefetch (preload.ts). */
 	prefetch?: string[];
 };
 

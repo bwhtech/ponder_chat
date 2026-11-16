@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { Alert, Badge, Button, Dropdown, Skeleton, TabButtons } from "frappe-ui";
+import { Alert, Badge, Button, Dropdown, TabButtons } from "frappe-ui";
 import { dialog } from "./dialogs";
 import { onMounted, ref } from "vue";
 import { canUndo, fetchMemory, forgetMemory, KIND_LABELS, undoSave, updateMemory, type Memory, type MemoryOverview, type MemorySave } from "./memory";
 import { when } from "./dates";
 import EmptyState from "./EmptyState.vue";
+import MemoryIntro from "./MemoryIntro.vue";
+import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
 import { useThreads } from "./threads";
 
 /** What Ponder remembers about the person, the decisions behind it, and the prompt that decides. */
@@ -102,10 +104,7 @@ async function undo(save: MemorySave) {
 <template>
 	<div data-slot="memory-view" class="scroll-fade-y scrollbar-thin [--scroll-fade-range:40px] [--scroll-fade-size:40px] min-h-0 flex-1 overflow-y-auto sm:[scrollbar-gutter:stable_both-edges]">
 		<div class="mx-auto w-full max-w-[720px] space-y-5 px-4 py-6 sm:px-5">
-			<p class="text-p-base text-ink-gray-6">
-				Ponder remembers what you tell it about yourself, your work and how you like answers, and uses it in new chats so you don't have to repeat
-				yourself. It never keeps passwords, contact details, ID numbers, health details, or what you say about other people.
-			</p>
+			<MemoryIntro />
 
 			<EmptyState v-if="loadError" icon="lucide-circle-alert" title="Your memory could not load" :body="loadError" alert>
 				<Button label="Try again" @click="load" />
@@ -118,21 +117,7 @@ async function undo(save: MemorySave) {
 			/>
 			<TabButtons v-if="!loadError" v-model="tab" :options="tabs" />
 
-			<!-- Rows shaped like memories while they load: a line of text, then its kind and age. -->
-			<ul
-				v-if="!overview && !loadError"
-				class="divide-y divide-outline-gray-1 rounded-6 border border-outline-gray-2"
-				aria-busy="true"
-				aria-label="Loading memories"
-			>
-				<li v-for="width in ['w-4/5', 'w-3/5', 'w-2/3']" :key="width" class="space-y-2 px-3 py-3">
-					<Skeleton :class="['h-4 rounded-4', width]" />
-					<div class="flex items-center gap-2">
-						<Skeleton class="h-4 w-14 rounded-full" />
-						<Skeleton class="h-3 w-16 rounded-4" />
-					</div>
-				</li>
-			</ul>
+			<MemoryRowsSkeleton v-if="!overview && !loadError" />
 
 			<template v-if="overview && !loadError">
 				<div v-if="tab === 'memories'">

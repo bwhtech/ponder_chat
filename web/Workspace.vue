@@ -6,7 +6,9 @@ import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch 
 import { me, refreshCredits, signOut } from "./account";
 import { openSettings, settings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
+import { pendingDialog } from "./dialogs";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
+import { modelMenuAsked } from "./models";
 import { once } from "./once";
 import SidebarPlaceholder from "./SidebarPlaceholder.vue";
 import { afterLoad, prefetchChat } from "./preload";
@@ -19,10 +21,22 @@ import { useThreads } from "./threads";
  * the Memory page. The header at the top of the sidebar opens the account menu, as on /admin.
  */
 const { current, currentThread, messages, running, failed, loading, revision, refresh, open, start } = useThreads();
+// What answers a tap at once while the code it opens loads (stand-ins.ts): one small chunk,
+// fetched once the page has drawn.
+const loadStandIns = once(() => import("./stand-ins"));
+const standIn = <K extends keyof Awaited<ReturnType<typeof loadStandIns>>>(name: K) => defineAsyncComponent(() => loadStandIns().then((module) => module[name]));
+const SettingsPlaceholder = standIn("SettingsPlaceholder");
+const MemoryPlaceholder = standIn("MemoryPlaceholder");
+const PanelPlaceholder = standIn("PanelPlaceholder");
+const DialogPlaceholder = standIn("DialogPlaceholder");
+const PageOpening = standIn("PageOpening");
+onMounted(() => void loadStandIns().catch(() => undefined));
 // What the first page does not show loads when it opens: Settings, Memory and the side panel.
-const SettingsModal = defineAsyncComponent(() => import("./settings/SettingsModal.vue"));
-const MemoryView = defineAsyncComponent(() => import("./MemoryView.vue"));
-const SidePanel = defineAsyncComponent(() => import("./side-panel/SidePanel.vue"));
+// Until each is here, its stand-in in its shape answers the tap. The overlays wait 100ms
+// first, so a quick load never flashes one; Memory takes the page at once.
+const SettingsModal = defineAsyncComponent({ loader: () => import("./settings/SettingsModal.vue"), loadingComponent: SettingsPlaceholder, delay: 100 });
+const MemoryView = defineAsyncComponent({ loader: () => import("./MemoryView.vue"), loadingComponent: MemoryPlaceholder, delay: 0 });
+const SidePanel = defineAsyncComponent({ loader: () => import("./side-panel/SidePanel.vue"), loadingComponent: PanelPlaceholder, delay: 100 });
 // Each stays once it has opened, so it can play its closing transition.
 const settingsUsed = ref(false);
 const panelUsed = ref(false);
@@ -70,6 +84,8 @@ const view = ref<"chat" | "memory">(viewInUrl());
 addEventListener("popstate", () => (view.value = viewInUrl()));
 // The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
 watch([current, view], closePanel);
+// A tap on the model button before its menu's code came (models.ts) is for that chat only.
+watch(current, () => (modelMenuAsked.value = false));
 
 function viewInUrl() {
 	return new URL(location.href).searchParams.get("view") === "memory" ? "memory" : "chat";
@@ -116,11 +132,31 @@ if (back.searchParams.get("settings") === "connectors") {
 	else if (id) void import("./connectors/api").then(({ loadConnectors }) => loadConnectors()).then(() => toast.success("Connected"));
 }
 
+// Admin is its own page, which on a phone on a slow network takes seconds to start drawing. The
+// tap closes the menu and says so at once (PageOpening.vue), on the click, not on the touch: on an
+// iPhone, what a touch adds to the page can lose its click. Back from /admin out of the browser's
+// cache (bfcache), the page is as it was left, so the note goes.
+// If the person stops the navigation (Escape, the Stop button), the note goes too: the Navigation
+// API says so where it exists, and after OPENING_MAX_MS the note goes anyway.
+const openingAdmin = ref(false);
+const OPENING_MAX_MS = 20_000;
+function openAdmin() {
+	sheetOpen.value = false;
+	openingAdmin.value = true;
+	const stop = () => (openingAdmin.value = false);
+	(window as { navigation?: EventTarget }).navigation?.addEventListener("navigateerror", stop, { once: true });
+	setTimeout(stop, OPENING_MAX_MS);
+	location.assign("/admin");
+}
+const backFromCache = (event: PageTransitionEvent) => event.persisted && (openingAdmin.value = false);
+addEventListener("pageshow", backFromCache);
+onBeforeUnmount(() => removeEventListener("pageshow", backFromCache));
+
 // Memory, Admin (for admins), Settings, Theme and Sign out.
 const theme = useThemeMenu();
 const menu = computed(() => [
 	{ label: "Memory", icon: "lucide-brain", onClick: showMemory },
-	...(me.value?.user.role === "admin" ? [{ label: "Admin", icon: "lucide-shield", onClick: () => location.assign("/admin") }] : []),
+	...(me.value?.user.role === "admin" ? [{ label: "Admin", icon: "lucide-shield", onClick: openAdmin }] : []),
 	{ label: "Connectors", icon: "lucide-plug", onClick: () => showSettings("connectors") },
 	{ label: "Settings", icon: "lucide-settings", onClick: () => showSettings() },
 	theme(),
@@ -184,5 +220,7 @@ function onSaved() {
 
 		<SettingsModal v-if="settingsUsed" />
 		<CreditRequestWatch v-if="requestWaited" />
+		<DialogPlaceholder v-if="pendingDialog" :request="pendingDialog" />
+		<PageOpening v-if="openingAdmin" label="Opening admin…" />
 	</div>
 </template>
