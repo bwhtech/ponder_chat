@@ -1,18 +1,22 @@
 <script setup lang="ts">
 import { Button, Dialog, Skeleton } from "frappe-ui";
-import { computed, onBeforeUnmount, ref, shallowRef } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { ApiError } from "../api";
 import { when } from "../dates";
 import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
 import { dialogTitle, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
 import { stepView } from "./document-log";
 import { DETAILS_NOTE, fetchDocumentLog, fileSize, retryDocument, STATUS_LABELS, type LogEntry, type WorkspaceDocument } from "./documents";
+import { Poller } from "./poller";
 
 /**
  * A document's Details, for people who can edit the workspace: the indexing log in order
  * (server/workspaces/documents/log.ts), with the pages a model read and why, the time and
  * cost of each step, and any error. A failed document offers "Try again". While it is
- * Reading, the log is read again every few seconds, and the side panel hears of each change.
+ * Reading and the dialog is open, the log is read again every few seconds, and the side
+ * panel hears of each change. Closing the dialog keeps it mounted for its transition, so
+ * the polls stop on close, not on unmount.
  */
 const props = defineProps<{ request: Extract<WorkspaceDialogRequest, { kind: "document" }> }>();
 const open = computed({ get: () => workspaceDialog.open, set: (value) => (workspaceDialog.open = value) });
@@ -23,29 +27,30 @@ const steps = shallowRef<LogEntry[]>();
 const loadError = ref("");
 const retrying = ref(false);
 const views = computed(() => steps.value?.map((entry) => ({ entry, view: stepView(entry) })));
-let timer: ReturnType<typeof setTimeout> | undefined;
-let closed = false;
+const poller = new Poller(load);
 
-void load();
-onBeforeUnmount(() => {
-	closed = true;
-	clearTimeout(timer);
+poller.start(0);
+watch(open, (now) => {
+	if (!now) poller.stop();
 });
+onBeforeUnmount(() => poller.stop());
 
-async function load() {
-	clearTimeout(timer);
+/** Reads the log; the wait before reading it again, or null. */
+async function load(current: () => boolean) {
 	loadError.value = "";
 	try {
 		const log = await fetchDocumentLog(props.request.workspaceId, doc.value.id);
-		if (closed) return;
+		if (!current()) return null;
 		steps.value = log.steps;
 		changed(log.document);
 	} catch (error) {
-		if (closed) return;
+		if (!current()) return null;
 		// A poll that fails keeps the steps it has; only a first load shows the error.
 		if (!steps.value) loadError.value = (error as Error).message;
+		// Deleted, or the person may no longer edit the workspace: asking again will not help.
+		if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return null;
 	}
-	if (!closed && doc.value.status === "reading") timer = setTimeout(load, POLL_MS);
+	return open.value && doc.value.status === "reading" ? POLL_MS : null;
 }
 
 function changed(next: WorkspaceDocument) {
@@ -58,7 +63,7 @@ async function retry() {
 	retrying.value = true;
 	try {
 		changed(await retryDocument(props.request.workspaceId, doc.value.id));
-		await load();
+		poller.start(0);
 	} catch (error) {
 		toast.error((error as Error).message);
 	} finally {
@@ -68,7 +73,7 @@ async function retry() {
 
 function retryFirstLoad() {
 	steps.value = undefined;
-	void load();
+	poller.start(0);
 }
 </script>
 
