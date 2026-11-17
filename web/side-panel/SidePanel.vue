@@ -9,6 +9,7 @@ import { slideCount } from "../artifacts/slides";
 import { panelHeader } from "./header";
 import { panelStandIn } from "./look";
 import { closePanel, fileKind, panelItem } from "./panel";
+import PdfPagesPlaceholder from "./PdfPagesPlaceholder.vue";
 import TableView from "./TableView.vue";
 import TextView from "./TextView.vue";
 import "./slide.css";
@@ -17,9 +18,10 @@ import "./slide.css";
  * The panel at the right of the chat, for a file or an artifact. On a wide screen it sits
  * beside the chat; on a narrower one it covers the page. Mount it once, in the shell's row.
  * pdf.js loads the first time a PDF opens, not with the app. The first time, the panel slides
- * in, unless its stand-in (PanelPlaceholder.vue) already has while this code loaded.
+ * in, unless its stand-in (PanelPlaceholder.vue) already has while this code loaded. While
+ * pdf.js loads, a page-shaped skeleton shows at once (no delay).
  */
-const PdfPages = defineAsyncComponent(() => import("./PdfPages.vue"));
+const PdfPages = defineAsyncComponent({ loader: () => import("./PdfPages.vue"), loadingComponent: PdfPagesPlaceholder, delay: 0 });
 
 const item = panelItem;
 const artifact = computed(() => (item.value?.type === "artifact" ? item.value.artifact.value : null));
@@ -79,17 +81,17 @@ onBeforeUnmount(() => {
 				<span :class="[header.icon, header.ink, 'size-4 shrink-0']" aria-hidden="true" />
 				<h2 class="min-w-0 truncate text-base-medium text-ink-gray-9" :title="header.title">{{ header.title }}</h2>
 				<span v-if="header.meta" class="shrink-0 whitespace-nowrap text-sm text-ink-gray-5">{{ header.meta }}</span>
-				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
+				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2 [@media(pointer:coarse)]:gap-4">
 					<TabButtons v-if="artifact?.kind === 'html' && !artifact.writing" v-model="pageView" :options="pageViews" class="mr-1" />
 					<Button v-if="canPresent" variant="ghost" icon-left="lucide-play" label="Present" class="mr-1" @click="presenting = true" />
-					<Button v-if="artifact" variant="ghost" :icon="copied ? 'lucide-check' : 'lucide-copy'" :tooltip="copied ? 'Copied' : header.copyLabel" :aria-label="header.copyLabel" :disabled="artifact.writing" @click="copy" />
-					<a v-if="header.download" :href="header.download.url" :download="header.download.name" :aria-label="`Download ${header.download.name}`" title="Download" class="panel-icon">
+					<Button v-if="artifact" variant="ghost" :icon="copied ? 'lucide-check' : 'lucide-copy'" :tooltip="copied ? 'Copied' : header.copyLabel" :aria-label="header.copyLabel" :disabled="artifact.writing" class="touch-target" @click="copy" />
+					<a v-if="header.download" :href="header.download.url" :download="header.download.name" :aria-label="`Download ${header.download.name}`" title="Download" class="panel-icon touch-target">
 						<span class="lucide-download size-4" aria-hidden="true" />
 					</a>
-					<a v-if="file" :href="file.url" target="_blank" rel="noreferrer noopener" aria-label="Open in a new tab" title="Open in a new tab" class="panel-icon">
+					<a v-if="file" :href="file.url" target="_blank" rel="noreferrer noopener" aria-label="Open in a new tab" title="Open in a new tab" class="panel-icon touch-target">
 						<span class="lucide-external-link size-4" aria-hidden="true" />
 					</a>
-					<Button variant="ghost" icon="lucide-x" tooltip="Close (Esc)" aria-label="Close" @click="closePanel" />
+					<Button variant="ghost" icon="lucide-x" tooltip="Close (Esc)" aria-label="Close" class="touch-target" @click="closePanel" />
 				</div>
 			</header>
 

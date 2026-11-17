@@ -35,8 +35,8 @@ onMounted(() => (panelStandIn.shown = true));
 			<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-outline-gray-1 pl-4 pr-2 sm:pl-5">
 				<span :class="[header.icon, header.ink, 'size-4 shrink-0']" aria-hidden="true" />
 				<h2 class="min-w-0 truncate text-base-medium text-ink-gray-9" :title="header.title">{{ header.title }}</h2>
-				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2">
-					<Button variant="ghost" icon="lucide-x" aria-label="Close" @click="closePanel" />
+				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2 [@media(pointer:coarse)]:gap-4">
+					<Button variant="ghost" icon="lucide-x" aria-label="Close" class="touch-target" @click="closePanel" />
 				</div>
 			</header>
 			<div class="min-h-0 flex-1 overflow-hidden" :class="header.inset ? 'bg-surface-gray-1' : ''">
