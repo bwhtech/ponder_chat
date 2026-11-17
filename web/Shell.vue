@@ -25,7 +25,7 @@ import WorkspacePlaceholder from "./workspaces/WorkspacePlaceholder.vue";
  * open chat, the Memory page or a workspace. The header at the top of the sidebar opens the
  * account menu, as on /admin.
  */
-const { current, currentThread, currentWorkspace, messages, running, failed, loading, revision, refresh, open, start } = useThreads();
+const { current, currentThread, currentWorkspace, messages, running, failed, loading, revision, refresh, open, resume, start } = useThreads();
 // What answers a tap at once while the code it opens loads (stand-ins.ts): one small chunk,
 // fetched once the page has drawn.
 const loadStandIns = once(() => import("./stand-ins"));
@@ -98,6 +98,10 @@ addEventListener("popstate", () => {
 const page = computed(() => (view.value === "memory" ? "memory" : openWorkspaceId.value ? "workspace" : "chat"));
 // The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
 watch([current, page], closePanel);
+// Back to the chat from Memory or a workspace, by a click or by Back: its chat mounts again,
+// with the messages it has now, not the ones it opened with. Before the render, so it never
+// draws the older ones.
+watch(page, (now, before) => now === "chat" && before !== "chat" && resume());
 // A tap on the model button before its menu's code came (models.ts) is for that chat only.
 watch(current, () => (modelMenuAsked.value = false));
 

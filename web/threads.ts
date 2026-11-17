@@ -67,6 +67,7 @@ export function useThreads() {
 		reload,
 		refresh,
 		open,
+		resume,
 		prefetch,
 		remember,
 		start,
@@ -115,15 +116,32 @@ async function fetchList(): Promise<ThreadSummary[] | undefined> {
 }
 
 async function open(id: string, { push = true } = {}) {
-	// Open already, behind a workspace page: only the URL goes back to it.
+	// Open already, behind a workspace page or Memory: only the URL goes back to it. Its chat
+	// mounts again, and the shell calls resume() for that.
 	if (id === current.value) return void (new URL(location.href).searchParams.get("t") !== id && setUrl(id, push));
+	const loaded = load(id);
+	setUrl(id, push);
+	await loaded;
+}
+
+/**
+ * The open thread's chat mounts again, back from Memory or a workspace page (Shell.vue).
+ * `messages` still holds the thread as it opened; the chat's own messages since then are in
+ * the cache (remember), so it shows those, and asks the server. A new thread that has
+ * sent nothing has no copy, and nothing to restore.
+ */
+function resume() {
+	if (peekThread(current.value)) void load(current.value);
+}
+
+/** Shows the thread from this device at once, then asks the server for a newer copy. */
+async function load(id: string) {
 	const token = ++opening;
 	// The messages change with the id, so the chat never mounts the new thread with the old one's messages.
 	const peeked = peekThread(id);
 	if (peeked) show(peeked);
 	else loading.value = true;
 	current.value = id;
-	setUrl(id, push);
 
 	const cached = peeked ?? (await readThread(id));
 	if (token !== opening) return;

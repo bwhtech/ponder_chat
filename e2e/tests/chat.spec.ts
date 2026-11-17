@@ -1,4 +1,5 @@
 import { chat, expect, test } from "../fixtures.ts";
+import { createWorkspace } from "../workspaces.ts";
 
 test.beforeEach(async ({ person, page }) => {
 	void person;
@@ -138,4 +139,59 @@ test("New chat starts an empty chat", async ({ page }) => {
 	await page.getByRole("button", { name: "New chat" }).click();
 	await expect(page.getByText("What's on your mind?")).toBeVisible();
 	await expect(chat.messages(page)).toHaveCount(0);
+});
+
+test("a chat keeps every message after Memory or a workspace page, and sends with all of them", async ({ page, person, fake }) => {
+	test.setTimeout(60_000);
+	const name = `Returns ${person.id.slice(0, 6)}`;
+	await createWorkspace(page, name);
+	// The new workspace shows in the list after a reload.
+	await page.reload();
+	// A reply that fails, and Retry: the chat's messages are a new list from then on.
+	await fake.chat({ match: "First question, return test", steps: [{ error: { status: 400, message: "The provider refused the request." } }] });
+	await chat.send(page, "First question, return test");
+	await expect(page.getByText("Something went wrong")).toBeVisible();
+	await fake.chat({ match: "First question, return test", steps: [{ text: "It works now." }] });
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(chat.reply(page)).toContainText("It works now.");
+	await chat.idle(page);
+	const id = new URL(page.url()).searchParams.get("t")!;
+	await chat.send(page, "Second question, return test");
+	await expect(chat.reply(page)).toContainText("You said: Second question");
+	await chat.idle(page);
+	await expect(chat.messages(page)).toHaveCount(4);
+
+	const workspaceRow = page.locator('[data-slot="workspace-rows"]').getByRole("button", { name });
+	const threadRow = page.getByRole("navigation", { name: "Threads" }).getByText("First question, return test");
+	const workspaceHeading = page.getByRole("heading", { name, level: 1 });
+	const openWorkspace = async () => {
+		await workspaceRow.click();
+		await expect(workspaceHeading).toBeVisible();
+	};
+	const openMemory = async () => {
+		await page.getByRole("button", { name: /Ponder Chat/ }).first().click();
+		await page.getByRole("menuitem", { name: "Memory" }).click();
+		await expect(page.getByRole("heading", { name: "Memory", level: 1 })).toBeVisible();
+	};
+	const ways: [string, () => Promise<unknown>, () => Promise<unknown>][] = [
+		["a workspace page, then the chat in the list", openWorkspace, () => threadRow.click()],
+		["a workspace page, then Back", openWorkspace, () => page.goBack()],
+		["Memory, then the chat in the list", openMemory, () => threadRow.click()],
+		["Memory, then Back", openMemory, () => page.goBack()],
+	];
+	for (const [title, away, back] of ways) {
+		await test.step(title, async () => {
+			await away();
+			await back();
+			await expect(page).toHaveURL(new RegExp(`[?&]t=${id}`));
+			await expect(chat.messages(page)).toHaveCount(4);
+		});
+	}
+
+	// The next reply goes on from all 4 messages, and the server keeps 6.
+	await chat.send(page, "Third question, return test");
+	await expect(chat.reply(page)).toContainText("You said: Third question");
+	await chat.idle(page);
+	const saved = async () => ((await (await page.request.get(`/api/threads/${id}`)).json()) as { messages: unknown[] }).messages.length;
+	await expect.poll(saved).toBe(6);
 });
