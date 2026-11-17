@@ -105,6 +105,7 @@ onBeforeUnmount(() => clearInterval(timer));
 										</template>
 									</SidebarItem>
 									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
+									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Workspaces" icon="lucide-layers" route="/workspaces" :active="route.path === '/workspaces'" />
 									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Activity" icon="lucide-history" route="/activity" :active="route.path === '/activity'" />
 								</div>
 							</SidebarSection>

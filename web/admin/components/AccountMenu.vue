@@ -8,17 +8,22 @@ import { useThemeMenu } from "../../theme-menu";
 import { isMobile } from "../lib/viewport";
 import { settingsOpen, viewer } from "../store";
 
-/** Settings, Activity on phones, back to chat, theme and sign out. `compact` is the avatar for a mobile header. */
+/** Settings, Workspaces and Activity on phones, back to chat, theme and sign out. `compact` is the avatar for a mobile header. */
 defineProps<{ compact?: boolean }>();
 
 const me = computed(() => viewer.value?.user.name || viewer.value?.user.email.split("@")[0] || "");
 const router = useRouter();
 const theme = useThemeMenu();
 
-// Phones have no room for Activity in the tab bar, so it is here; wider screens have it in the sidebar.
+// Phones have no room for Workspaces and Activity in the tab bar, so they are here; wider screens have them in the sidebar.
 const menu = computed(() => [
 	{ label: "Settings", icon: "lucide-settings", onClick: () => (isMobile.value ? void router.push("/settings") : (settingsOpen.value = true)) },
-	...(isMobile.value ? [{ label: "Activity", icon: "lucide-history", onClick: () => void router.push("/activity") }] : []),
+	...(isMobile.value
+		? [
+				{ label: "Workspaces", icon: "lucide-layers", onClick: () => void router.push("/workspaces") },
+				{ label: "Activity", icon: "lucide-history", onClick: () => void router.push("/activity") },
+			]
+		: []),
 	{ label: "Back to chat", icon: "lucide-message-circle", onClick: () => location.assign("/") },
 	theme(),
 	{ label: "Sign out", icon: "lucide-log-out", onClick: () => void signOut() },

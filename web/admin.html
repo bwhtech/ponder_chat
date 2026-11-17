@@ -61,6 +61,9 @@
 									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/skills" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
 										<span class="lucide-sparkles size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Skills</span>
 									</div>
+									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/workspaces" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
+										<span class="lucide-layers size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Workspaces</span>
+									</div>
 									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/activity" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
 										<span class="lucide-history size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Activity</span>
 									</div>
@@ -180,7 +183,7 @@
 				// Wider screens open /admin/settings as a dialog over Overview (router.ts).
 				const page = path === "/settings" && !phone ? "/" : path;
 				const section = "/" + page.split("/")[1];
-				const titles = { "/": "Overview", "/requests": "Requests", "/people": "People", "/skills": "Skills", "/activity": "Activity", "/settings": "Settings" };
+				const titles = { "/": "Overview", "/requests": "Requests", "/people": "People", "/skills": "Skills", "/workspaces": "Workspaces", "/activity": "Activity", "/settings": "Settings" };
 				const shell = document.getElementById("app");
 				const all = (selector, root = shell) => root.querySelectorAll(selector);
 
