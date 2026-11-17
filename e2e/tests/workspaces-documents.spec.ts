@@ -27,7 +27,9 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 	const tag = person.id.slice(0, 6);
 	const { id, slug } = await createWorkspace(page, `Office handbook ${tag}`);
 	await page.goto(`/?w=${slug}`);
-	await expect(documents(page).getByText("No documents yet.")).toBeVisible();
+	// No documents yet: the section offers Upload.
+	await expect(documents(page).getByRole("button", { name: "Upload" })).toBeEnabled();
+	await expect(rows(page)).toHaveCount(0);
 
 	await test.step("a file the server can't read shows why", async () => {
 		await picker(page).setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: Buffer.from("not a document") });
@@ -44,7 +46,7 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 		const leaveRow = row(page, "leave-policy.md");
 		await expect(leaveRow).toContainText("Reading…");
 		await expect(leaveRow).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
-		await expect(leaveRow).toContainText("Ready");
+		await expect(leaveRow).not.toContainText("Reading…");
 		await expect(documents(page).getByRole("alert")).toHaveCount(0);
 	});
 
@@ -99,15 +101,9 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 		await page.getByRole("menuitem", { name: "Details" }).click();
 		const details = page.getByRole("dialog", { name: "manual.pdf" });
 		const steps = details.locator('[data-slot="document-step"]');
-		await expect(steps).toHaveText([/^Uploaded/, /^Read the text/, /^Page 2 read by a model/, /^Split into passages/, /^Embedded batch 1/, /^Ready/]);
-		await expect(details.locator('[data-step="parsed"]')).toContainText("LiteParse · 2 pages");
-		// The scan went to the model, which says why and what it cost.
-		await expect(details.locator('[data-step="page-read"]')).toContainText("Page 2 read by a model");
-		await expect(details.locator('[data-step="page-read"]')).toContainText("A scan, with no text");
-		await expect(details.locator('[data-step="page-read"]')).toContainText("$0.0018");
-		await expect(details.locator('[data-step="chunked"]')).toContainText("Split into passages");
-		await expect(details.locator('[data-step="embedded"]')).toContainText("Embedded batch 1");
-		await expect(details.locator('[data-step="ready"]')).toContainText("in total");
+		// Plain steps: the scanned page was read from a picture. Models and costs are the admin's.
+		await expect(steps).toHaveText(["Uploaded · PDF, 2 pages", "Read page 2 from a picture", "Indexed", "Ready"]);
+		await expect(details).not.toContainText("$");
 		await expect(details.getByRole("button", { name: "Try again" })).toHaveCount(0);
 		// No text of the document is in the log.
 		await expect(details).not.toContainText("Exit site care");
@@ -118,7 +114,9 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 	await test.step("a person who can only ask sees the name and status, and no Details, upload or delete", async () => {
 		await asker.page.goto(`/?w=${slug}`);
 		const manual = row(asker.page, "manual.pdf");
-		await expect(manual).toContainText("Ready");
+		await expect(manual).toHaveAttribute("data-status", "ready");
+		// Ready needs no word, and the size is for editors.
+		await expect(manual).toHaveText("manual.pdf");
 		await expect(manual.getByRole("button")).toHaveCount(0);
 		await expect(documents(asker.page).getByRole("button")).toHaveCount(0);
 		await expect(asker.page.locator('[data-slot="document-picker"]')).toHaveCount(0);
@@ -146,16 +144,16 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 	const scan = row(page, "scan.pdf");
 	await expect(scan).toHaveAttribute("data-status", "failed", { timeout: 60_000 });
 	await expect(scan.locator('[data-slot="document-status"]')).toContainText("Failed");
-	await expect(scan.locator('[data-slot="document-error"]')).toHaveText("Page 2 has no text, and the model could not read it.");
+	await expect(scan.locator('[data-slot="document-error"]')).toHaveText("Page 2 could not be read.");
 
 	await test.step("Details name the page and the model's error", async () => {
 		await scan.getByRole("button", { name: "Actions for “scan.pdf”" }).click();
 		await page.getByRole("menuitem", { name: "Details" }).click();
 		const details = page.getByRole("dialog", { name: "scan.pdf" });
-		await expect(details.locator('[data-step="page-read"]')).toContainText("Page 2 read by a model");
+		await expect(details.locator('[data-step="page-read"]')).toContainText("Could not read page 2");
 		await expect(details.locator('[data-step="page-read"] [data-slot="document-step-error"]')).toHaveText("The fake page model is down.");
-		await expect(details.locator('[data-step="failed"]')).toContainText("Failed while reading a page with a model");
-		await expect(details.locator('[data-step="failed"]')).toContainText("Page 2");
+		// Said once: no second step for the run that failed on that page.
+		await expect(details.locator('[data-step="failed"]')).toHaveCount(0);
 		await expect(details.getByRole("button", { name: "Try again" })).toBeVisible();
 		await details.getByRole("button", { name: "Close" }).first().click();
 		await expect(details).toHaveCount(0);
@@ -166,7 +164,7 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 		await expect(scan).toHaveAttribute("data-status", "reading");
 		await expect(scan.locator('[data-slot="document-error"]')).toHaveCount(0);
 		await expect(scan).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
-		await expect(scan.locator('[data-slot="document-status"]')).toContainText("Ready");
+		await expect(scan.locator('[data-slot="document-status"]')).not.toContainText("Failed");
 
 		await scan.getByRole("button", { name: "Actions for “scan.pdf”" }).click();
 		await page.getByRole("menuitem", { name: "Details" }).click();

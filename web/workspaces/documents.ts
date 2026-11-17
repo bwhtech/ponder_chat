@@ -57,8 +57,16 @@ export function fileSize(bytes: number) {
 
 export const STATUS_LABELS: Record<DocumentStatus, string> = { reading: "Reading…", ready: "Ready", failed: "Failed" };
 
-/** The Details view's footnote, in the dialog and in its stand-in. */
-export const DETAILS_NOTE = "Reading documents is paid by the app, not from your credits.";
+/**
+ * Why a document failed, in a few plain words, for its row; Details has the rest. A page the
+ * model could not read is named by its number (server/workspaces/documents/read-pdf.ts). The
+ * server's "Try again." goes, as the row has the button.
+ */
+export function failureReason(error: string | null) {
+	const page = /^Page (\d+)\b/.exec(error ?? "");
+	if (page) return `Page ${page[1]} could not be read.`;
+	return error?.replace(/\s*Try again\.$/, "").trim() || "It could not be read.";
+}
 
 /** A PDF's icon, or a text file's. */
 export function documentIcon(document: Pick<WorkspaceDocument, "mediaType">) {

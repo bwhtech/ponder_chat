@@ -10,8 +10,8 @@ import { money } from "../lib/format";
 
 /**
  * One organisation document's indexing log (GET /api/admin/workspaces/:id/documents/:doc/log),
- * read only: each step, the pages a model read, the time, the cost and any error. The steps
- * read as they do in the workspace's Details view (web/workspaces/document-log.ts).
+ * read only: each step, the pages a model read, the time, the cost and any error, in full
+ * (web/workspaces/document-log.ts, stepView). Editors' Details show the same log in plain steps.
  */
 const props = defineProps<{ workspaceId: string; document: OrgDocument | null }>();
 const open = defineModel<boolean>("open", { required: true });

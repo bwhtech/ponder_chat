@@ -9,9 +9,10 @@ import { openWorkspaceDialog } from "./dialogs";
 
 /**
  * The workspace's documents, in its side panel. Everyone who can ask sees each document's
- * name and status. People who can edit also see its size and why it failed, upload (the
- * button, or files dropped on the panel: WorkspaceAside.vue calls `upload`), delete, open
- * its Details (the indexing log) and "Try again" a document that failed. The file picker
+ * name, and its status while it is not Ready. People who can edit also see its size and why
+ * it failed, upload (the button, or files dropped on the panel: WorkspaceAside.vue calls
+ * `upload`), delete, open its Details (the indexing log) and "Try again" a document that
+ * failed. The file picker
  * offers only the types the server reads; a file it refuses gets the server's reason. The
  * page polls while one is Reading (WorkspacePage.vue); `changed` hands it the new list
  * after each change here.
@@ -123,8 +124,6 @@ function askDelete(document: WorkspaceDocument) {
 				@delete="askDelete(document)"
 			/>
 		</ul>
-
-		<p v-else class="text-p-sm text-ink-gray-6">No documents yet.</p>
 
 		<ul v-if="errors.length" class="space-y-1" role="alert" data-slot="document-upload-errors">
 			<li v-for="error in errors" :key="error" class="break-words text-p-sm text-ink-red-6">{{ error }}</li>

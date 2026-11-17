@@ -2,21 +2,20 @@
 import { Button, Dialog, Skeleton } from "frappe-ui";
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ApiError } from "../api";
-import { when } from "../dates";
 import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
 import { dialogTitle, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
-import { stepView } from "./document-log";
-import { DETAILS_NOTE, fetchDocumentLog, fileSize, retryDocument, STATUS_LABELS, type LogEntry, type WorkspaceDocument } from "./documents";
+import { plainSteps } from "./document-log";
+import { fetchDocumentLog, retryDocument, type LogEntry, type WorkspaceDocument } from "./documents";
 import { Poller } from "./poller";
 
 /**
- * A document's Details, for people who can edit the workspace: the indexing log in order
- * (server/workspaces/documents/log.ts), with the pages a model read and why, the time and
- * cost of each step, and any error. A failed document offers "Try again". While it is
- * Reading and the dialog is open, the log is read again every few seconds, and the side
- * panel hears of each change. Closing the dialog keeps it mounted for its transition, so
- * the polls stop on close, not on unmount.
+ * A document's Details, for people who can edit the workspace: the indexing log in plain
+ * steps (document-log.ts, plainSteps), such as the pages read from a picture, and what went
+ * wrong. Models, times and costs are the admin's (/admin/workspaces). A failed document
+ * offers "Try again". While it is Reading and the dialog is open, the log is read again
+ * every few seconds, and the side panel hears of each change. Closing the dialog keeps it
+ * mounted for its transition, so the polls stop on close, not on unmount.
  */
 const props = defineProps<{ request: Extract<WorkspaceDialogRequest, { kind: "document" }> }>();
 const open = computed({ get: () => workspaceDialog.open, set: (value) => (workspaceDialog.open = value) });
@@ -26,7 +25,7 @@ const doc = shallowRef<WorkspaceDocument>(props.request.document);
 const steps = shallowRef<LogEntry[]>();
 const loadError = ref("");
 const retrying = ref(false);
-const views = computed(() => steps.value?.map((entry) => ({ entry, view: stepView(entry) })));
+const shown = computed(() => steps.value && plainSteps(steps.value));
 const poller = new Poller(load);
 
 poller.start(0);
@@ -80,36 +79,20 @@ function retryFirstLoad() {
 <template>
 	<Dialog v-model:open="open" :title="dialogTitle(request)" size="lg">
 		<div class="space-y-4" data-slot="document-details">
-			<p class="text-p-sm text-ink-gray-6">
-				<span :class="{ 'text-ink-red-6': doc.status === 'failed' }" data-slot="document-details-status">{{ STATUS_LABELS[doc.status] }}</span>
-				<span> · {{ fileSize(doc.size) }} · Uploaded {{ when(doc.createdAt) }}</span>
-			</p>
-
-			<EmptyState v-if="loadError" icon="lucide-wifi-off" title="The details could not load" :body="loadError" alert class="!py-8">
+			<EmptyState v-if="loadError" icon="lucide-circle-alert" title="The details could not load" :body="loadError" alert class="!py-8">
 				<Button label="Try again" @click="retryFirstLoad" />
 			</EmptyState>
-			<template v-else>
-				<ol v-if="!views" class="divide-y divide-outline-gray-1" aria-busy="true" aria-label="Loading the steps">
-					<li v-for="width in ['w-24', 'w-32', 'w-28', 'w-20']" :key="width" class="py-2.5">
-						<div class="flex h-[1lh] items-center justify-between text-sm"><Skeleton :class="['h-3 rounded-4', width]" /><Skeleton class="h-3 w-12 rounded-4" /></div>
-						<div class="flex h-[1lh] items-center text-p-sm"><Skeleton class="h-2.5 w-48 max-w-full rounded-4" /></div>
-					</li>
-				</ol>
-				<ol v-else class="divide-y divide-outline-gray-1" aria-label="Steps" data-slot="document-steps">
-					<li v-for="({ entry, view }, index) in views" :key="`${entry.generation}:${entry.step}:${index}`" class="py-2.5" data-slot="document-step" :data-step="entry.step">
-						<div class="flex items-baseline justify-between gap-3">
-							<p class="min-w-0 text-sm" :class="view.tone === 'failed' ? 'text-ink-red-6' : 'text-ink-gray-8'">{{ view.title }}</p>
-							<p class="shrink-0 text-sm tabular-nums text-ink-gray-6">
-								{{ [view.time, view.cost].filter(Boolean).join(" · ") }}
-							</p>
-						</div>
-						<p v-if="view.facts" class="break-words text-p-sm text-ink-gray-6">{{ view.facts }}</p>
-						<p v-if="view.error" class="mt-0.5 break-words text-p-sm text-ink-red-6" data-slot="document-step-error">{{ view.error }}</p>
-					</li>
-				</ol>
-			</template>
-
-			<p class="text-p-sm text-ink-gray-5">{{ DETAILS_NOTE }}</p>
+			<ol v-else-if="!shown" class="space-y-3" aria-busy="true" aria-label="Loading the steps">
+				<li v-for="width in ['w-36', 'w-44', 'w-20']" :key="width" class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></li>
+			</ol>
+			<ol v-else class="space-y-3" aria-label="Steps" data-slot="document-steps">
+				<li v-for="(step, index) in shown" :key="index" data-slot="document-step" :data-step="step.step">
+					<p class="text-sm" :class="step.failed ? 'text-ink-red-6' : 'text-ink-gray-8'">
+						{{ step.title }}<span v-if="step.facts" class="text-ink-gray-6">{{ ` · ${step.facts}` }}</span>
+					</p>
+					<p v-if="step.error" class="mt-0.5 break-words text-p-sm text-ink-gray-6" data-slot="document-step-error">{{ step.error }}</p>
+				</li>
+			</ol>
 
 			<div class="flex justify-end gap-2 pt-2">
 				<Button label="Close" @click="open = false" />

@@ -17,7 +17,7 @@ import WorkspaceHeading from "./WorkspaceHeading.vue";
 import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, workspaceByKey, type WorkspaceDetail } from "./store";
 
 /**
- * A workspace (`?w=<slug>`): its name and who can use it, the composer, whose new chat is in
+ * A workspace (`?w=<slug>`): its name, the composer, whose new chat is in
  * this workspace, the person's own chats in it, and a side panel with the instructions, the
  * documents and its people (under the chats on a phone). The sidebar's row draws the header
  * at once; the rest fills in when the workspace loads. A workspace the person cannot use is
@@ -27,7 +27,7 @@ import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, w
  * this page's scroller (style.css).
  */
 const props = defineProps<{ slugOrId: string }>();
-const emit = defineEmits<{ openChat: [id: string]; ask: [message: FirstMessage]; deleted: [] }>();
+const emit = defineEmits<{ openChat: [id: string]; ask: [message: FirstMessage]; deleted: []; newChat: [] }>();
 
 const { refresh: refreshThreads } = useThreads();
 const detail = shallowRef<WorkspaceDetail>();
@@ -145,8 +145,10 @@ function askDelete() {
 
 	<div v-if="missing || loadError" class="min-h-0 flex-1 overflow-y-auto">
 		<div class="mx-auto w-full max-w-[1120px] px-4 sm:px-5">
-			<EmptyState v-if="missing" icon="lucide-folder-x" title="This workspace was not found" body="It may have been deleted, or you may not have access to it." />
-			<EmptyState v-else icon="lucide-wifi-off" title="This workspace could not load" :body="loadError" alert>
+			<EmptyState v-if="missing" icon="lucide-circle-alert" title="No workspace here" body="It was deleted, or it isn't shared with you.">
+				<Button label="New chat" @click="emit('newChat')" />
+			</EmptyState>
+			<EmptyState v-else icon="lucide-circle-alert" title="This workspace could not load" :body="loadError" alert>
 				<Button label="Try again" @click="load" />
 			</EmptyState>
 		</div>
@@ -161,7 +163,7 @@ function askDelete() {
 			<div class="min-w-0 space-y-8">
 				<p v-if="summary?.description" class="text-p-base text-ink-gray-6">{{ summary.description }}</p>
 				<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
-				<WorkspaceChats :workspace-id="workspaceId" @open="emit('openChat', $event)" />
+				<WorkspaceChats :workspace-id="workspaceId" :shared="Boolean(summary && (summary.kind === 'org' || summary.memberCount))" @open="emit('openChat', $event)" />
 			</div>
 			<WorkspaceAside :workspace="summary" :detail="detail" @edit="edit" @documents="documentsChanged" />
 		</div>
