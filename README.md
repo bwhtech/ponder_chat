@@ -539,6 +539,6 @@ A chat can grow longer than its model can read. `server/compaction/` and `server
 | Memory | `server/memory.ts`, `server/memory/`, `web/MemoryView.vue` |
 | Connectors (MCP) | `server/mcp/`, `server/workflow/connectors.ts`, `server/net/NetGuard.ts`, `web/connectors/`, `web/settings/` |
 | Tracing | `server/tracing/`, `server/plugins/tracing.ts`, `deploy/jaeger.*` |
-| Chat page | `web/ChatView.vue`, `web/Workspace.vue` |
-| Components | The [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) package. `web/side-panel/panel.ts` is its file viewer (`provideFileViewer` in `web/Workspace.vue`). |
+| Chat page | `web/ChatView.vue`, `web/Shell.vue` |
+| Components | The [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) package. `web/side-panel/panel.ts` is its file viewer (`provideFileViewer` in `web/Shell.vue`). |
 | End-to-end tests, the fake OpenRouter and the test MCP servers | `e2e/`, `playwright.config.ts` |
