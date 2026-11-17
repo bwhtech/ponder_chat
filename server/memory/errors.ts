@@ -46,6 +46,15 @@ export class EmbeddingFailed extends Schema.TaggedError<EmbeddingFailed>()("Embe
 	}
 }
 
+/** An embedding call that did not end in time: the request was aborted. */
+export class EmbeddingTimedOut extends Schema.TaggedError<EmbeddingTimedOut>()("EmbeddingTimedOut", {
+	model: Schema.String,
+}) {
+	override get message() {
+		return `Embeddings (${this.model}) timed out`;
+	}
+}
+
 /** The HTTP status of a failed AI SDK call, when the provider answered. */
 export function statusOf(error: unknown): number | undefined {
 	return APICallError.isInstance(error) ? error.statusCode : undefined;

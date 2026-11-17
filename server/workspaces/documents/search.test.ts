@@ -8,8 +8,11 @@
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import type { UIMessage } from "ai";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
+import * as TestClock from "effect/testing/TestClock";
 import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
 import { chooseInline, inlineBudget, MAX_INLINE_CHARS } from "./budget.ts";
 import { EMBED_COST, meaning, startFakeOpenRouter } from "./fake-openrouter.ts";
@@ -61,7 +64,9 @@ const Credits = await import("../../credits/Credits.ts");
 const Settings = await import("../../settings/Settings.ts");
 const Workspaces = await import("../Workspaces.ts");
 const { passageStore } = await import("./passages.ts");
-const { searchWorkspace, workspaceTurn } = await import("./turn.ts");
+const { RETRIEVAL_BUDGET, searchWorkspace, workspaceTurn } = await import("./turn.ts");
+const { EMBED_TIMEOUT } = await import("../../openrouter/embeddings.ts");
+const { excerptsBlock } = await import("../prompt.ts");
 
 const MODEL = "qwen/qwen3-embedding-8b";
 const ana = `ana-${tag}`;
@@ -210,5 +215,39 @@ describe.skipIf(!base)("workspace search", () => {
 		assert.match(turn.excerpts, /^<workspace_excerpts>\n\[1\] long \(page 1\)\nExit site care\./);
 		// Someone who can't ask there gets nothing.
 		assert.ok(Option.isNone(await runPromise(workspaceTurn({ owner: `nobody-${tag}`, workspaceId: ids.ward, threadId, modelId: "test/model" }))));
+	});
+
+	/** The next embedding call never ends. Gives when it came. */
+	function hangEmbedding() {
+		let came = () => {};
+		const arrived = new Promise<void>((resolve) => (came = resolve));
+		openRouter.gate = (kind) => (kind === "embedding" ? (came(), new Promise<void>(() => {})) : undefined);
+		return arrived;
+	}
+	/** Runs `effect` on the test clock, and moves it by `duration` once the hung call came. */
+	const afterHang = <A, E>(effect: Effect.Effect<A, E, any>, duration: Duration.Input) =>
+		runPromise(
+			Effect.gen(function* () {
+				const arrived = hangEmbedding();
+				const fiber = yield* Effect.forkChild(effect);
+				yield* Effect.promise(() => arrived);
+				yield* TestClock.adjust(duration);
+				return yield* Fiber.join(fiber);
+			}).pipe(Effect.provide(TestClock.layer()), Effect.ensuring(Effect.sync(() => (openRouter.gate = undefined)))),
+		);
+
+	it("gives a turn its documents but no excerpts when the search does not end in its budget", async () => {
+		const threadId = `turn-${tag}`;
+		const turn = Option.getOrThrow(await afterHang(workspaceTurn({ owner: bob, workspaceId: ids.ward, threadId, modelId: "test/model" }), RETRIEVAL_BUDGET));
+		assert.strictEqual(turn.excerpts, excerptsBlock([]));
+		assert.deepStrictEqual(
+			turn.documents?.map((document) => document.name),
+			["dosing", "stale"],
+		);
+	});
+
+	it("aborts an embedding call that does not end in time, with a typed error", async () => {
+		const failed = await afterHang(Effect.flip(searchWorkspace({ owner: bob, workspaceId: ids.ward, threadId: `thread-${tag}`, query: "vancomycin", documentIds: [docs.ward] })), EMBED_TIMEOUT);
+		assert.strictEqual(failed._tag, "EmbeddingTimedOut");
 	});
 });

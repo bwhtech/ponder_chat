@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto";
 import type { OpenRouterProvider } from "@openrouter/ai-sdk-provider";
 import { embedMany } from "ai";
 import * as Clock from "effect/Clock";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as Ref from "effect/Ref";
 import type { SqlError } from "effect/sql/SqlError";
 import * as PonderConfig from "../config.ts";
 import type { UnreadableSecret } from "../secrets/Secrets.ts";
-import { EmbeddingFailed, statusOf } from "../memory/errors.ts";
+import { EmbeddingFailed, EmbeddingTimedOut, statusOf } from "../memory/errors.ts";
 import * as Runs from "../telemetry/Runs.ts";
 import { privateRouting } from "./OpenRouter.ts";
 import * as OpenRouterKey from "./OpenRouterKey.ts";
@@ -25,11 +26,18 @@ export type SystemRun = { id: string; functionId: Runs.SystemFunctionId; user: s
 
 export type Embedder = {
 	readonly model: string;
-	/** One vector for each value, in order. */
-	readonly embedMany: (values: ReadonlyArray<string>, run: SystemRun) => Effect.Effect<number[][], EmbeddingError>;
+	/**
+	 * One vector for each value, in order. Each call to OpenRouter (the AI SDK's own tries
+	 * included) may take `timeout` at most; then it is aborted, and the batch fails with
+	 * EmbeddingTimedOut.
+	 */
+	readonly embedMany: (values: ReadonlyArray<string>, run: SystemRun, timeout?: Duration.Input) => Effect.Effect<number[][], EmbeddingError>;
 };
 
-export type EmbeddingError = EmbeddingFailed | OpenRouterKey.NoOpenRouterKey | UnreadableSecret | SqlError;
+export type EmbeddingError = EmbeddingFailed | EmbeddingTimedOut | OpenRouterKey.NoOpenRouterKey | UnreadableSecret | SqlError;
+
+/** One call at most, by default: a memory or a search is one short text. Indexing gives longer (Indexer.ts). */
+export const EMBED_TIMEOUT = Duration.seconds(30);
 
 /** The embedder, on the services of the environment it is made in. */
 export const makeEmbedder = Effect.gen(function* () {
@@ -43,11 +51,15 @@ export const makeEmbedder = Effect.gen(function* () {
 	// that is seen, each value is a call of its own, and one `runs` row adds them up.
 	const oneAtATime = yield* Ref.make(false);
 
-	const call = (provider: OpenRouterProvider, values: ReadonlyArray<string>) =>
+	// The AI SDK sets no deadline of its own: the timeout interrupts the call, which aborts the request.
+	const call = (provider: OpenRouterProvider, values: ReadonlyArray<string>, timeout: Duration.Input) =>
 		Effect.tryPromise({
 			try: (signal) => embedMany({ model: provider.textEmbeddingModel(model, { provider: privateRouting }), values: [...values], abortSignal: signal }),
 			catch: embeddingFailed,
-		}).pipe(Effect.map((result): Usage => ({ embeddings: result.embeddings, tokens: result.usage.tokens, costUsd: costOf(result.providerMetadata), calls: 1 })));
+		}).pipe(
+			Effect.timeoutOrElse({ duration: timeout, orElse: () => Effect.fail(new EmbeddingTimedOut({ model })) }),
+			Effect.map((result): Usage => ({ embeddings: result.embeddings, tokens: result.usage.tokens, costUsd: costOf(result.providerMetadata), calls: 1 })),
+		);
 
 	// The vectors of the calls that worked in a batch that failed, by the run's id: the
 	// batch's next try (a workflow step tried again) pays only for the values that failed.
@@ -58,10 +70,10 @@ export const makeEmbedder = Effect.gen(function* () {
 	 * fails fails the batch, but only once every call has ended, so the ones that worked are
 	 * counted and kept.
 	 */
-	const eachAlone = Effect.fnUntraced(function* (provider: OpenRouterProvider, values: ReadonlyArray<string>, runId: string) {
+	const eachAlone = Effect.fnUntraced(function* (provider: OpenRouterProvider, values: ReadonlyArray<string>, runId: string, timeout: Duration.Input) {
 		const vectors = kept.get(runId) ?? new Map<string, number[]>();
 		const todo = [...new Set(values)].filter((value) => !vectors.has(value));
-		const tries = yield* Effect.forEach(todo, (value) => Effect.result(call(provider, [value])), { concurrency: CALLS_AT_ONCE });
+		const tries = yield* Effect.forEach(todo, (value) => Effect.result(call(provider, [value], timeout)), { concurrency: CALLS_AT_ONCE });
 		const done = tries.flatMap((tried, index) => (tried._tag === "Success" ? [[todo[index], tried.success] as const] : []));
 		for (const [value, usage] of done) vectors.set(value, usage.embeddings[0]);
 		const usage = addUp(done.map(([, usage]) => usage));
@@ -80,22 +92,23 @@ export const makeEmbedder = Effect.gen(function* () {
 		for (const oldest of kept.keys()) if (kept.size > KEPT_RUNS) kept.delete(oldest);
 	};
 
-	const embedValues = Effect.fnUntraced(function* (provider: OpenRouterProvider, values: ReadonlyArray<string>, runId: string) {
-		if (values.length > 1 && (yield* Ref.get(oneAtATime))) return yield* eachAlone(provider, values, runId);
-		return yield* call(provider, values).pipe(
+	const embedValues = Effect.fnUntraced(function* (provider: OpenRouterProvider, values: ReadonlyArray<string>, runId: string, timeout: Duration.Input) {
+		if (values.length > 1 && (yield* Ref.get(oneAtATime))) return yield* eachAlone(provider, values, runId, timeout);
+		return yield* call(provider, values, timeout).pipe(
 			Effect.map((usage): Outcome => ({ usage, failure: null })),
 			Effect.catchTags({
-				EmbeddingFailed: (error) => (error.status === 404 && values.length > 1 ? Effect.andThen(Ref.set(oneAtATime, true), eachAlone(provider, values, runId)) : Effect.fail(error)),
+				EmbeddingFailed: (error) =>
+					error.status === 404 && values.length > 1 ? Effect.andThen(Ref.set(oneAtATime, true), eachAlone(provider, values, runId, timeout)) : Effect.fail(error),
 			}),
 		);
 	});
 
 	// No span of its own: memory.recall, memory.save and the indexing steps say enough.
-	const embedAll = Effect.fnUntraced(function* (values: ReadonlyArray<string>, run: SystemRun) {
+	const embedAll = Effect.fnUntraced(function* (values: ReadonlyArray<string>, run: SystemRun, timeout: Duration.Input = EMBED_TIMEOUT) {
 		// Made for each call, because the key can change (OpenRouterKey.ts).
 		const provider = yield* keys.provider;
 		const started = yield* Clock.currentTimeMillis;
-		const { usage, failure } = yield* embedValues(provider, values, run.id);
+		const { usage, failure } = yield* embedValues(provider, values, run.id, timeout);
 		const durationMs = (yield* Clock.currentTimeMillis) - started;
 		// A batch that failed still paid for the calls that worked. Its row has an id of its own:
 		// the batch's next try saves its row under the run's id.
@@ -130,7 +143,7 @@ const KEPT_RUNS = 4;
 
 type Usage = { embeddings: number[][]; tokens: number; costUsd: number | null; calls: number };
 /** What the calls of a batch paid for, and the first failure. */
-type Outcome = { usage: Usage; failure: EmbeddingFailed | null };
+type Outcome = { usage: Usage; failure: EmbeddingFailed | EmbeddingTimedOut | null };
 
 function addUp(parts: ReadonlyArray<Usage>): Usage {
 	const costs = parts.flatMap((part) => (part.costUsd === null ? [] : [part.costUsd]));

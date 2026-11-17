@@ -33,6 +33,8 @@ import { documentStore, type DocumentRow } from "./store.ts";
  * name. Logs and spans have ids and counts only: never a name or the text.
  */
 export type IndexRequest = { documentId: string; generation: number };
+/** One embedding call of a batch of 96 passages at most; then the step fails, and Workflow tries it again. */
+const INDEX_TIMEOUT = "2 minutes";
 export type Prepared = { state: "gone" } | { state: "failed" } | { state: "chunked"; batches: number };
 export type IndexStage = "parse" | "page-read" | "chunk" | "embed" | "finish";
 export type IndexOutcome = "gone" | "ready" | "failed";
@@ -172,7 +174,7 @@ const make = Effect.gen(function* () {
 		if (todo.length === 0) return;
 		const started = yield* Clock.currentTimeMillis;
 		const runId = `workspace-index:${row.id}:${row.generation}:${batch}`;
-		const vectors = yield* embedder.embedMany(todo.map(embeddingText), { id: runId, functionId: "workspace-index", user: row.added_by, threadId: null });
+		const vectors = yield* embedder.embedMany(todo.map(embeddingText), { id: runId, functionId: "workspace-index", user: row.added_by, threadId: null }, INDEX_TIMEOUT);
 		const ms = (yield* Clock.currentTimeMillis) - started;
 		// Passage ids are the same in each run: a run that a newer one overtook must not write into its passages.
 		yield* fenced(row, (locked) =>

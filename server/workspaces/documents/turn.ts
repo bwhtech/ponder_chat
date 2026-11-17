@@ -28,6 +28,12 @@ import { documentStore } from "./store.ts";
 export const EXCERPTS = 8;
 /** A question longer than this is cut before it is embedded. */
 const MAX_QUERY = 4_000;
+/**
+ * The excerpts of a turn may take this long, the embedding of the question and the search
+ * together; then the reply goes on without them. The reply's model call waits for them, and
+ * its own watchdog starts only after.
+ */
+export const RETRIEVAL_BUDGET = "5 seconds";
 
 export type TurnInput = { owner: string; workspaceId: string; threadId: string; modelId: string };
 export type SearchInput = { owner: string; workspaceId: string; threadId: string; query: string; documentIds: ReadonlyArray<string> };
@@ -57,10 +63,12 @@ export const searchWorkspace = Effect.fn("workspace.search")(function* ({ owner,
 	return found;
 });
 
-/** The <workspace_excerpts> block for the latest message. A search that fails leaves it out, and the reply goes on. */
+/** The <workspace_excerpts> block for the latest message. A search that fails or takes too long leaves it out, and the reply goes on. */
 const excerptsFor = Effect.fnUntraced(function* (input: Omit<SearchInput, "query">) {
 	const query = latestText(yield* Threads.Threads.use((threads) => threads.load(input.threadId)));
+	// The timeout interrupts the search, which aborts the embedding request.
 	const found = yield* searchWorkspace({ ...input, query }).pipe(
+		Effect.timeout(RETRIEVAL_BUDGET),
 		Effect.catch((error) => Effect.as(Effect.logWarning(`workspace documents: search failed in workspace ${input.workspaceId}:`, problem(error)), [] as Excerpt[])),
 	);
 	return excerptsBlock(found);

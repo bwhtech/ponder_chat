@@ -24,7 +24,7 @@ export async function embedPassagesStep(request: IndexRequest, batch: number): P
 	// OpenRouter may be busy for a while: wait longer than Workflow's second between tries.
 	await runStep(
 		Indexer.Indexer.use((indexer) => indexer.embedBatch(request, batch)),
-		{ retryable: { EmbeddingFailed: { retryAfter: 15_000 } }, fatal: ["NoOpenRouterKey", "UnreadableSecret"] },
+		{ retryable: { EmbeddingFailed: { retryAfter: 15_000 }, EmbeddingTimedOut: { retryAfter: 15_000 } }, fatal: ["NoOpenRouterKey", "UnreadableSecret"] },
 	);
 }
 embedPassagesStep.maxRetries = 5;
