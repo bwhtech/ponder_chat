@@ -67,8 +67,12 @@ export class Threads extends Context.Service<
 		readonly save: (id: string, owner: string, messages: UIMessage[], workspaceId?: string) => Effect.Effect<void, SqlError>;
 		/** Saves a reply into the person's thread. False, and nothing saved, when the thread was deleted. */
 		readonly update: (id: string, owner: string, messages: UIMessage[]) => Effect.Effect<boolean, SqlError>;
-		/** A person's threads, newest first, at most 200. Untitled threads are named by their first message. */
-		readonly list: (owner: string) => Effect.Effect<ThreadSummary[], SqlError>;
+		/**
+		 * A person's threads, newest first, at most 200. Untitled threads are named by their first
+		 * message. With a workspace, only the person's threads in it, chosen before the limit: a
+		 * workspace's older chats are not crowded out by newer chats elsewhere.
+		 */
+		readonly list: (owner: string, workspaceId?: string) => Effect.Effect<ThreadSummary[], SqlError>;
 		/** Renames the person's thread; an empty title goes back to the first message. False when it is not theirs. */
 		readonly rename: (id: string, owner: string, title: string) => Effect.Effect<boolean, SqlError>;
 		/** Deletes the person's thread. False when it is not theirs. */
@@ -134,13 +138,13 @@ const make = Effect.gen(function* () {
 		execute: (id) => sql`select owner from threads where id = ${id}`,
 	});
 	const findSummaries = SqlSchema.findAll({
-		Request: Schema.String,
+		Request: Schema.Struct({ owner: Schema.String, workspaceId: Schema.NullOr(Schema.String) }),
 		Result: SummaryRow,
-		execute: (owner) => sql`
+		execute: ({ owner, workspaceId }) => sql`
 			select id, title, updated_at, jsonb_array_length(messages) as messages,
 				jsonb_path_query_first(messages, '$[*] ? (@.role == "user").parts[*] ? (@.type == "text").text') #>> '{}' as first,
 				workspace_id
-			from threads where owner = ${owner}
+			from threads where owner = ${owner} ${workspaceId === null ? sql`` : sql`and workspace_id = ${workspaceId}`}
 			order by updated_at desc limit 200`,
 	});
 
@@ -180,8 +184,8 @@ const make = Effect.gen(function* () {
 		return rows.length > 0;
 	});
 
-	const list = Effect.fn("Threads.list")(function* (owner: string) {
-		const rows = yield* findSummaries(owner).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+	const list = Effect.fn("Threads.list")(function* (owner: string, workspaceId?: string) {
+		const rows = yield* findSummaries({ owner, workspaceId: workspaceId ?? null }).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 		return rows.map(
 			(row): ThreadSummary => ({
 				id: row.id,

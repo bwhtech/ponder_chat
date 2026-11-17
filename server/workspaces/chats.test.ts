@@ -153,6 +153,27 @@ describe.skipIf(!base)("chats in a workspace", () => {
 			}).pipe(onFakeWorkflow),
 		);
 
+		it.effect("lists a person's chats in a workspace before the limit, so newer chats elsewhere do not hide them", () =>
+			Effect.gen(function* () {
+				const threads = yield* Threads.Threads;
+				const inNotes = `chat-a-${tag}`;
+				// Ana's chat in the same workspace is hers: never in Bob's list.
+				yield* Replies.Replies.use((replies) => replies.start({ threadId: `chat-ana-${tag}`, owner: ana, messages: [message("m1", "Mine")], workspaceId: ids.notes }));
+				yield* Effect.forEach(Array.from({ length: 201 }, (_, index) => index), (index) => threads.save(`chat-newer-${index}-${tag}`, bob, [message("m1", `Newer ${index}`)]), { discard: true });
+				assert.notInclude((yield* threads.list(bob)).map((thread) => thread.id), inNotes);
+				const listed = yield* threads.list(bob, ids.notes);
+				assert.include(
+					listed.map((thread) => thread.id),
+					inNotes,
+				);
+				assert.notInclude(
+					listed.map((thread) => thread.id),
+					`chat-ana-${tag}`,
+				);
+				assert.ok(listed.every((thread) => thread.workspaceId === ids.notes));
+			}).pipe(onFakeWorkflow),
+		);
+
 		it.effect("a new chat in a workspace the person can't use is not found, and nothing is saved", () =>
 			Effect.gen(function* () {
 				const threadId = `chat-dan-${tag}`;

@@ -127,6 +127,7 @@ const userOf = (c: Context<Env>) => c.get("user").id;
 const perPerson = (limit: LimitName, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
 
 // A repeated or odd query value is ignored, not refused.
+const threadListQuery = z.object({ workspace: z.string().max(100).optional() });
 const searchQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
 const threadTitle = z.object({ title: z.string().optional().transform((title) => (title ?? "").slice(0, 120)) });
 // The messages are the AI SDK's UIMessages, which the workflow reads; only the shape is checked here.
@@ -194,11 +195,12 @@ const api = app
 	)
 
 	// The list revalidates by its content and goes gzipped; one thread has its own cache (thread-cache.ts).
-	.get("/api/threads", compress(), etag(), (c) =>
+	// `?workspace=<id>`: only the person's chats in that workspace (the workspace page's "Your chats").
+	.get("/api/threads", compress(), etag(), validate("query", threadListQuery), (c) =>
 		route(
 			c,
 			Effect.map(
-				Threads.Threads.use((threads) => threads.list(userOf(c))),
+				Threads.Threads.use((threads) => threads.list(userOf(c), c.req.valid("query").workspace)),
 				(threads) => c.json({ threads }),
 			),
 		),
