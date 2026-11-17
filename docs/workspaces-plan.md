@@ -6,7 +6,11 @@ The design comes from the prototype at https://sketch.netchamp.dev/u/nagariahuss
 
 ## Status
 
-Pull request 1, the server part, is built: the tables without documents, `accessOf`, the API, people search, `threads.workspace_id` and the instructions in the prompt (`server/workspaces/`). The pages of pull request 1 come next.
+Pull request 1, the server part, is built: the tables, `accessOf`, the API, people search, `threads.workspace_id` and the instructions in the prompt (`server/workspaces/`).
+
+The server part of pull request 2 is built too (`server/workspaces/documents/`): upload, the indexing workflow, the indexing log and "Try again", inline documents or excerpts and `workspace_search` on each turn, the system function ids in `charged_runs`, and memory embeddings in `runs`. On the test questions, the top-8 hit rate is 30 of 31 (97%) with `google/gemini-embedding-2`. The Details view, the admin page and the "System" line on the usage page come next.
+
+Found while building it: through OpenRouter with Zero Data Retention, `google/gemini-embedding-2` takes one text for each call (a call with two or more answers 404). The embedder then sends each passage alone, 8 at a time, and keeps one `runs` row for the batch. A 10 MB text is then about 12,000 calls. A model that takes batches under Zero Data Retention (for example `google/gemini-embedding-001` or `qwen/qwen3-embedding-8b`) would be faster, but a change of `PONDER_EMBEDDING_MODEL` also indexes memory again.
 
 ## Words
 

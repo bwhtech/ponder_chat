@@ -215,7 +215,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 
 ### Workspaces
 
-A workspace holds a name, a description and instructions for chats. A chat can be in one workspace. The plan, with documents and the pages, is in `docs/workspaces-plan.md`. The server part of the first pull request is built. The pages come next.
+A workspace holds a name, a description, instructions and documents for chats. A chat can be in one workspace. The plan is in `docs/workspaces-plan.md`.
 
 - Kinds: an organisation workspace is for everyone, and only an admin makes one. A private workspace is for its owner and the people the owner adds. Anyone makes one.
 - Access (`server/workspaces/access.ts`): `Workspaces.accessOf` gives `none`, `ask`, `edit` or `owner`. In an organisation workspace, the owner is `owner`, admins `edit` and everyone else `ask`. In a private workspace, the owner is `owner`, each member has the access the owner gave, and everyone else is `none`. An admin is `none` there too, until the owner adds them. A deleted workspace is `none` for everyone.
@@ -223,16 +223,28 @@ A workspace holds a name, a description and instructions for chats. A chat can b
 - Chats stay private to the person who wrote them, also in a shared workspace. Members share the instructions, never the chats.
 - The first message of a new chat sets its workspace (`threads.workspace_id`). It never changes. The server checks the person's access on each message. A person who was removed can still read the chat, but gets a 403 when they send.
 - The instructions go in the system prompt in a `<workspace>` block, after Ponder's own rules, so the prompt cache keeps them. A fixed guidance text calls the block data from people, which never overrides Ponder's rules (`server/workspaces/prompt.ts`).
-- Changes to organisation workspaces go to the admin activity log. Deleting a workspace marks it deleted, and its chats stay, in no workspace.
+- Changes to organisation workspaces go to the admin activity log. Deleting a workspace marks it deleted and deletes its documents. Its chats stay, in no workspace.
+
+Documents (`server/workspaces/documents/`):
+
+- An upload takes the same files and the same 10 MB limit as a chat attachment, without images: PDF, text, Markdown, CSV, TSV and JSON. The bytes go to the bucket under `workspaces/<workspace>/<document>`, or into Postgres when no bucket is set up.
+- A workflow run indexes it (`Indexer.ts`, `index-workflow.ts`): it reads the text once (a PDF with LiteParse, and picture pages with a model), splits it into passages by structure, each with a location line, embeds them 96 at a time with `PONDER_EMBEDDING_MODEL`, and marks the document `ready` or `failed`. A run that a crash cut short goes on from the batch it was in. At start-up, documents that another embedding model indexed are indexed again.
+- Each step goes to the document's indexing log (`workspace_document_log`): numbers, page numbers, model names and errors, never the text. The cost of a step is read from its `runs` row.
+- Indexing and search cost no credits. Their model calls are in `runs` as system spend (`workspace-index`, `workspace-pdf`, `workspace-search`), in the name of the uploader or the asker. `charged_runs` leaves out every system function id (`Runs.SYSTEM_FUNCTION_IDS`), titles and memory embeddings too.
+- In a chat turn, the ready documents go whole into the system prompt as `<document>` blocks when they fit in half of the model's window and in 300,000 characters. Otherwise the largest go to search first. For the documents in search, the 8 best passages for the person's message go with it in a `<workspace_excerpts>` block, and the model gets `workspace_search(query)`, bound to the chat's workspace. Search mixes pgvector and full text with reciprocal rank fusion, over the current model's passages of ready documents in that workspace only.
 
 | Route | Who | Answer |
 | --- | --- | --- |
 | `GET /api/workspaces` | Anyone | `{ workspaces }`: the workspaces the person can use, organisation ones first, then shared, then their own. Also in the boot data. |
 | `POST /api/workspaces` | Anyone for `private`, admins for `org` | `{ workspace }` (201) |
-| `GET /api/workspaces/:id` | `ask` and above | `{ workspace }`. `members` is null except for a person who can share it. |
+| `GET /api/workspaces/:id` | `ask` and above | `{ workspace }`. `members` is null except for a person who can share it. `documents`: `{ id, name, mediaType, size, status, error, createdAt }`, oldest first; `status` is `reading`, `ready` or `failed`. |
 | `PATCH /api/workspaces/:id` | `edit` and above | `{ workspace }`: name, description, instructions, icon |
 | `PUT /api/workspaces/:id/sharing` | The owner of a private workspace, an admin for an organisation one | `{ workspace }`: kind and members. Only an admin changes the kind. |
 | `DELETE /api/workspaces/:id` | The same as sharing | `{ ok: true }` |
+| `POST /api/workspaces/:id/documents` | `edit` and above | A form with `file`. `{ document }` (201), `reading`. 400 with `{ error }` for a file that is not a document, 413 over 10 MB. |
+| `DELETE /api/workspaces/:id/documents/:doc` | `edit` and above | `{ ok: true }`. Its passages and log go with it. |
+| `GET /api/workspaces/:id/documents/:doc/log` | `edit` and above | `{ document, steps }`. Each step: `{ generation, step, at, detail, costUsd }`. |
+| `POST /api/workspaces/:id/documents/:doc/retry` | `edit` and above | "Try again": `{ document }`, `reading` again. 409 unless the document failed. |
 | `GET /api/people?q=` | Anyone | `{ people }`: at most 20, by name or email, with id, name and email |
 | `POST /api/chat` | `ask` and above | The body takes `workspaceId`, read on a new chat's first message only. |
 
