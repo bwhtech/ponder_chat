@@ -230,4 +230,57 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		const share = events.find((event: { action: string }) => event.action === "share-workspace");
 		assert.deepInclude(share.after, { workspace: ids.org, kind: "org", name: "Handbook" });
 	});
+
+	it("names no workspace that is private now, also one deleted while private, and keeps the name of one deleted while for everyone", async () => {
+		const madeForEveryone = (name: string) =>
+			runPromise(
+				Workspaces.Workspaces.use((workspaces) =>
+					workspaces.create(actor("admin"), { kind: "org", name, description: `${name} description`, instructions: `${name} instructions`, icon: null }),
+				),
+			);
+		const hidden = await madeForEveryone(`Obsidian Harbour ${tag}`);
+		const gone = await madeForEveryone(`Velvet Quarry ${tag}`);
+		const kept = await madeForEveryone(`Copper Atlas ${tag}`);
+		await runPromise(
+			Workspaces.Workspaces.use((workspaces) =>
+				Effect.gen(function* () {
+					yield* workspaces.update(actor("admin"), hidden.id, { name: `Obsidian Lighthouse ${tag}`, instructions: "Longer instructions here." });
+					yield* workspaces.share(actor("admin"), hidden.id, { kind: "private", members: [{ userId: who.bob, access: "ask" }] });
+					yield* workspaces.share(actor("admin"), gone.id, { kind: "private", members: [] });
+					yield* workspaces.remove(actor("admin"), gone.id);
+					yield* workspaces.remove(actor("admin"), kept.id);
+				}),
+			),
+		);
+
+		const answer = await call("admin", "/api/admin/activity");
+		for (const secret of ["Obsidian", "Lighthouse", "Velvet", "Quarry", hidden.id, gone.id, who.bob]) {
+			assert.notInclude(answer.text, secret, `"${secret}" is in the answer`);
+		}
+		type Event = { action: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null };
+		const { events } = JSON.parse(answer.text) as { events: Event[] };
+		const of = (action: string) => events.filter((event) => event.action === action);
+		assert.include(
+			of("create-workspace").map((event) => event.after?.name),
+			`Copper Atlas ${tag}`,
+		);
+		assert.deepStrictEqual(
+			of("delete-workspace").map((event) => event.before?.name),
+			[`Copper Atlas ${tag}`],
+		);
+		// Still says what happened, as “Made a workspace private”, with nothing that tells which.
+		const madePrivate = of("share-workspace").filter((event) => event.after?.kind === "private");
+		assert.deepStrictEqual(
+			madePrivate.map((event) => [event.before, event.after]),
+			[
+				[{ kind: "org" }, { kind: "private" }],
+				[{ kind: "org" }, { kind: "private" }],
+			],
+		);
+		const unnamed = events.filter((event) => event.action.endsWith("-workspace") && event.before?.name === undefined && event.after?.name === undefined);
+		assert.lengthOf(unnamed, 5, "two made, one edited, two made private");
+		for (const event of unnamed) {
+			assert.deepStrictEqual([...Object.keys(event.before ?? {}), ...Object.keys(event.after ?? {})].filter((key) => key !== "kind"), [], "a private workspace's event keeps its kind only");
+		}
+	});
 });

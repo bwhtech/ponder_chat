@@ -28,8 +28,9 @@ export type Activity = {
 };
 
 /**
- * `workspaces` names the organisation workspaces that sharing events point to: those
- * events keep the workspace's id only.
+ * `workspaces` names the workspaces that are for everyone now, deleted or not. The events
+ * of any other workspace keep its kind only (docs/workspaces-plan.md: admins see private
+ * workspaces as totals).
  */
 export function toActivity(row: EventRow, names: Map<string, Named>, workspaces = new Map<string, string>()): Activity {
 	const { before, after } = WORKSPACE_ACTIONS.has(row.action) ? workspaceChanges(row, workspaces) : row;
@@ -47,21 +48,33 @@ export function toActivity(row: EventRow, names: Map<string, Named>, workspaces 
 /** The events of organisation workspaces (workspaces/Workspaces.ts). */
 export const WORKSPACE_ACTIONS = new Set(["create-workspace", "update-workspace", "share-workspace", "delete-workspace"]);
 
-/** The workspace ids that sharing events point to, to name them. */
-export function sharedWorkspaceIds(rows: ReadonlyArray<EventRow>) {
-	return [...new Set(rows.flatMap((row) => (row.action === "share-workspace" && typeof row.after?.workspace === "string" ? [row.after.workspace] : [])))];
+/** The ids of the workspaces these events are about, to learn which are for everyone now. */
+export function workspaceIds(rows: ReadonlyArray<EventRow>) {
+	return [...new Set(rows.flatMap((row) => (WORKSPACE_ACTIONS.has(row.action) ? [workspaceOf(row)].filter((id) => id !== undefined) : [])))];
 }
 
 /**
- * A workspace's instructions can be 20,000 characters, twice in an update: the page gets
- * their length, and whether they changed, not the text. A sharing event gets the
- * workspace's name while it is for everyone.
+ * A workspace that is private now, or that the log cannot tell, keeps only its kind: the
+ * page still says "Made a workspace private". A workspace's instructions can be 20,000
+ * characters, twice in an update: the page gets their length, and whether they changed,
+ * not the text. A sharing event gets the workspace's name.
  */
 function workspaceChanges(row: EventRow, workspaces: Map<string, string>) {
+	const id = workspaceOf(row);
+	const name = id === undefined ? undefined : workspaces.get(id);
+	if (name === undefined) return { before: row.before && kindOnly(row.before), after: row.after && kindOnly(row.after) };
 	const before = row.before && withoutInstructions(row.before);
 	const after = row.after && withoutInstructions(row.after, row.before);
-	const name = after && row.action === "share-workspace" ? workspaces.get(String(after.workspace)) : undefined;
-	return { before, after: after && name ? { ...after, name } : after };
+	return { before, after: after && row.action === "share-workspace" ? { ...after, name } : after };
+}
+
+function workspaceOf(row: EventRow) {
+	const id = row.after?.workspace ?? row.before?.workspace;
+	return typeof id === "string" ? id : undefined;
+}
+
+function kindOnly(fields: Record<string, unknown>) {
+	return "kind" in fields ? { kind: fields.kind } : {};
 }
 
 function withoutInstructions(fields: Record<string, unknown>, before?: Record<string, unknown> | null) {

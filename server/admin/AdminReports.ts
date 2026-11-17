@@ -11,7 +11,7 @@ import { utcDay } from "../credits/Credits.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
 import * as Invites from "../people/Invites.ts";
 import * as Settings from "../settings/Settings.ts";
-import { type Activity, type Named, PAGE, sharedWorkspaceIds, toActivity, unknownTarget } from "./activity.ts";
+import { type Activity, type Named, PAGE, workspaceIds, toActivity, unknownTarget } from "./activity.ts";
 import * as AdminEvents from "./AdminEvents.ts";
 import { deviceName, displayName, type Person, PersonRow, toPerson } from "./people.ts";
 import * as Runs from "../telemetry/Runs.ts";
@@ -317,10 +317,11 @@ const make = Effect.gen(function* () {
 	});
 
 	// Organisation workspaces only: an admin sees no private workspace's name, also one they made private.
+	// Deleted ones too: a workspace deleted while for everyone keeps its name; one deleted while private stays private.
 	const findOrgNames = SqlSchema.findAll({
 		Request: Schema.Array(Schema.String),
 		Result: Schema.Struct({ id: Schema.String, name: Schema.String }),
-		execute: (ids) => sql`select id, name from workspaces where id in ${sql.in(ids)} and kind = 'org' and deleted_at is null`,
+		execute: (ids) => sql`select id, name from workspaces where id in ${sql.in(ids)} and kind = 'org'`,
 	});
 	const orgWorkspaceNames = (ids: ReadonlyArray<string>) =>
 		ids.length
@@ -358,7 +359,7 @@ const make = Effect.gen(function* () {
 		const rows = yield* adminEvents.list({ olderThan, people: filter?.ids, limit: PAGE + 1 });
 		const page = rows.slice(0, PAGE);
 		const names = yield* namesOf([...new Set(page.flatMap((row) => [row.actor_id, row.target ?? ""]).filter(Boolean))]);
-		const workspaces = yield* orgWorkspaceNames(sharedWorkspaceIds(page));
+		const workspaces = yield* orgWorkspaceNames(workspaceIds(page));
 		return {
 			events: page.map((row) => toActivity(row, names, workspaces)),
 			next: rows.length > PAGE ? page.at(-1)!.id : null,

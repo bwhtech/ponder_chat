@@ -76,7 +76,7 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"delete-workspace": (before) => ({ text: `Deleted ${theWorkspace(before)}`, details: [] }),
 };
 
-/** “the workspace “Handbook””, or “a workspace”: a sharing event names its workspace only while it is for everyone (server/admin/activity.ts). */
+/** “the workspace “Handbook””, or “a workspace”: the server names a workspace only while it is for everyone (server/admin/activity.ts). */
 function theWorkspace(fields: Fields) {
 	return typeof fields.name === "string" ? `the workspace “${fields.name}”` : "a workspace";
 }
