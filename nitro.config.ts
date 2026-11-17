@@ -20,6 +20,10 @@ export default defineConfig({
 	// Not lazy: Nitro then calls it with `next`, which it needs.
 	handlers: [{ route: "/.well-known/workflow/v1/flow", middleware: true, lazy: false, handler: "./server/tracing/flow-middleware.ts" }],
 	buildPlugins: [workerFiles()],
+	// LiteParse (workspace PDFs) loads its native core and starts its worker from files next
+	// to its own, which a bundle would not have. So it stays a package in .output/server/node_modules,
+	// copied whole ("*"), with its native build for this platform.
+	traceDeps: ["@llamaindex/liteparse*", "@llamaindex/liteparse-linux-x64-gnu*"],
 });
 
 /**
