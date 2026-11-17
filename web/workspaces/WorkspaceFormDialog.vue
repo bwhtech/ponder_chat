@@ -13,6 +13,8 @@ import { createWorkspace, isAdmin, updateWorkspace } from "./store";
 const props = defineProps<{ request: Extract<WorkspaceDialogRequest, { kind: "new" | "edit" }> }>();
 const open = computed({ get: () => workspaceDialog.open, set: (value) => (workspaceDialog.open = value) });
 const editing = props.request.kind === "edit" ? props.request.workspace : null;
+/** The field the dialog opens in (frappe-ui's Dialog focuses the `[autofocus]` one). */
+const focusInstructions = props.request.kind === "edit" && props.request.focus === "instructions";
 
 const form = reactive({
 	name: editing?.name ?? "",
@@ -51,10 +53,10 @@ async function save() {
 <template>
 	<Dialog v-model:open="open" :title="dialogTitle(request)" size="lg">
 		<form class="space-y-4" @submit.prevent="save">
-			<FormControl v-model="form.name" label="Name" :placeholder="NAME_PLACEHOLDER" :error="nameError" autofocus />
+			<FormControl v-model="form.name" label="Name" :placeholder="NAME_PLACEHOLDER" :error="nameError" :autofocus="!focusInstructions" />
 			<FormControl v-model="form.description" type="textarea" label="Description (optional)" :placeholder="DESCRIPTION_PLACEHOLDER" :rows="2" />
 			<FormControl v-if="request.kind === 'new' && isAdmin" v-model="form.kind" type="select" label="Who can use it" :options="KIND_OPTIONS" />
-			<FormControl v-model="form.instructions" type="textarea" label="Instructions (optional)" :placeholder="INSTRUCTIONS_PLACEHOLDER" :rows="6" />
+			<FormControl v-model="form.instructions" type="textarea" label="Instructions (optional)" :placeholder="INSTRUCTIONS_PLACEHOLDER" :rows="6" :autofocus="focusInstructions" />
 			<ErrorMessage v-if="error" :message="error" />
 			<div class="flex justify-end gap-2 pt-2">
 				<Button label="Cancel" @click="open = false" />

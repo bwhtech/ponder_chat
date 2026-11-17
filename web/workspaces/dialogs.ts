@@ -11,7 +11,8 @@ import type { WorkspaceDetail } from "./store";
 export type WorkspaceDialogRequest =
 	/** `onMade` opens the new workspace as the sidebar does, so it takes the place of Memory too. */
 	| { kind: "new"; onMade: (slug: string) => void }
-	| { kind: "edit"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
+	/** `focus` starts in Instructions, for "Add" by the empty Instructions; otherwise in Name. */
+	| { kind: "edit"; workspace: WorkspaceDetail; focus?: "instructions"; onSaved: (workspace: WorkspaceDetail) => void }
 	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
 	| { kind: "document"; workspaceId: string; document: WorkspaceDocument; onChanged: (document: WorkspaceDocument) => void };
 

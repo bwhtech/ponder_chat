@@ -16,7 +16,7 @@ import WorkspacePeople from "./WorkspacePeople.vue";
  * workspace loads, the headings and their buttons stay, and skeleton lines stand in for the values.
  */
 const props = defineProps<{ workspace?: WorkspaceSummary; detail?: WorkspaceDetail }>();
-const emit = defineEmits<{ edit: []; documents: [documents: WorkspaceDocument[]] }>();
+const emit = defineEmits<{ edit: [focus: "instructions"]; documents: [documents: WorkspaceDocument[]] }>();
 
 /** Long instructions show their first lines until asked for all. */
 const LONG = 600;
@@ -54,7 +54,7 @@ const drop = useFileDrop(
 					aria-label="Add instructions"
 					class="touch-target -mr-2"
 					data-slot="workspace-add-instructions"
-					@click="emit('edit')"
+					@click="emit('edit', 'instructions')"
 				/>
 			</div>
 			<div v-if="!detail" class="space-y-1.5" aria-busy="true">

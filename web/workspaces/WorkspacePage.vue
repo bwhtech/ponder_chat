@@ -108,8 +108,9 @@ function documentsChanged(documents: WorkspaceDocument[]) {
 	if (reading.value) startPolling();
 }
 
-function edit() {
-	if (detail.value) openWorkspaceDialog({ kind: "edit", workspace: detail.value, onSaved: (saved) => (detail.value = saved) });
+/** From the header, the dialog starts in Name; from "Add" by the empty Instructions, in Instructions. */
+function edit(focus?: "instructions") {
+	if (detail.value) openWorkspaceDialog({ kind: "edit", workspace: detail.value, focus, onSaved: (saved) => (detail.value = saved) });
 }
 
 function share() {
@@ -137,7 +138,7 @@ function askDelete() {
 		<div class="workspace-gutter-match flex min-w-0 items-center gap-2">
 			<slot name="start" />
 			<h1 v-if="missing || loadError" class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9">Workspace</h1>
-			<WorkspaceHeading v-else-if="summary" :workspace="summary" :ready="Boolean(detail)" @edit="edit" @share="share" @delete="askDelete" />
+			<WorkspaceHeading v-else-if="summary" :workspace="summary" :ready="Boolean(detail)" @edit="edit()" @share="share" @delete="askDelete" />
 			<div v-else class="flex h-[1lh] min-w-0 flex-1 items-center text-lg-semibold"><Skeleton class="h-4 w-48 max-w-full rounded-4" /></div>
 			<slot name="end" />
 		</div>

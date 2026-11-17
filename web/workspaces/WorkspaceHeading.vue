@@ -24,8 +24,8 @@ onBeforeUnmount(() => wideScreen.removeEventListener("change", onWidth));
 const shares = computed(() => canShare(props.workspace));
 const menu = computed(() => [
 	...(wide.value ? [] : [{ label: "Share", icon: "lucide-share-2", onClick: () => emit("share") }]),
-	{ label: "Edit workspace", icon: "lucide-pencil", onClick: () => emit("edit") },
-	{ label: "Delete workspace", icon: "lucide-trash-2", theme: "red" as const, onClick: () => emit("delete") },
+	{ label: "Edit", icon: "lucide-pencil", onClick: () => emit("edit") },
+	{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: () => emit("delete") },
 ]);
 </script>
 

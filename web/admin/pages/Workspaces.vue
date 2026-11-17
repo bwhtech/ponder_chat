@@ -136,8 +136,8 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 				<h2 class="text-base-semibold text-ink-gray-9">Private workspaces</h2>
 				<div data-slot="dashboard" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
 					<NumberCard title="Workspaces" :loading="loading" :value="privateTotals?.workspaces ?? null" :format="count" />
-					<NumberCard title="Ready" :loading="loading" :value="privateTotals?.documents.ready ?? null" :format="count" />
-					<NumberCard title="Failed" :loading="loading" :value="privateTotals?.documents.failed ?? null" :format="count" />
+					<NumberCard title="Documents ready" :loading="loading" :value="privateTotals?.documents.ready ?? null" :format="count" />
+					<NumberCard title="Documents failed" :loading="loading" :value="privateTotals?.documents.failed ?? null" :format="count" />
 					<NumberCard title="Cost to index" :loading="loading" :value="privateTotals?.costUsd ?? null" :format="money" />
 				</div>
 
