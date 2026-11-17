@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { displayName as nameToShow } from "../../shared/display-name";
 import { Avatar, Button, Combobox, Select } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { searchPeople, type Member, type Person } from "./store";
@@ -64,7 +65,7 @@ function remove(id: string) {
 }
 
 function displayName(person: Person) {
-	return person.name.trim() || person.email.split("@")[0]!;
+	return nameToShow(person.name, person.email);
 }
 
 const ACCESS_OPTIONS = [

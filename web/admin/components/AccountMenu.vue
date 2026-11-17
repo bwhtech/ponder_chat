@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { displayName } from "../../../shared/display-name";
 import { Avatar, Dropdown, SidebarHeader } from "frappe-ui";
 import { computed } from "vue";
 import { useRouter } from "vue-router";
@@ -11,7 +12,7 @@ import { settingsOpen, viewer } from "../store";
 /** Settings, Workspaces and Activity on phones, back to chat, theme and sign out. `compact` is the avatar for a mobile header. */
 defineProps<{ compact?: boolean }>();
 
-const me = computed(() => viewer.value?.user.name || viewer.value?.user.email.split("@")[0] || "");
+const me = computed(() => viewer.value ? displayName(viewer.value.user.name, viewer.value.user.email) : "");
 const router = useRouter();
 const theme = useThemeMenu();
 

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { displayName } from "../shared/display-name";
 import { Button, Skeleton } from "frappe-ui";
 import { toast } from "./toasts";
 import { provideFileViewer } from "frappe-ui-ai-elements";
@@ -200,7 +201,7 @@ const menu = computed(() => [
 	{ label: "Sign out", icon: "lucide-log-out", onClick: () => void signOut() },
 ]);
 /** People have no name until they set one, so the start of the email stands in. */
-const name = computed(() => me.value?.user.name.trim() || me.value?.user.email.split("@")[0] || "");
+const name = computed(() => me.value ? displayName(me.value.user.name, me.value.user.email) : "");
 
 function newThread() {
 	sheetOpen.value = false;

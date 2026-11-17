@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { displayName } from "../../../shared/display-name";
 import { Button, PageHeader, PageHeaderMobile } from "frappe-ui";
 import { NumberCard } from "frappe-ui/charts";
 import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "frappe-ui/list";
@@ -42,7 +43,7 @@ function openLog(workspace: OrgWorkspace, document: OrgDocument) {
 	logOpen.value = true;
 }
 
-const ownerName = (workspace: OrgWorkspace) => workspace.owner.name || workspace.owner.email.split("@")[0] || "Removed account";
+const ownerName = (workspace: OrgWorkspace) => (workspace.owner.email ? displayName(workspace.owner.name, workspace.owner.email) : workspace.owner.name) || "Removed account";
 const documentCount = (n: number) => (n === 1 ? "1 document" : `${count(n)} documents`);
 const cost = (usd: number | null) => (usd === null ? "—" : money(usd));
 const statusTone = (document: OrgDocument) => (document.status === "failed" ? "text-ink-red-6" : document.status === "reading" ? "text-ink-gray-6" : "text-ink-gray-8");
