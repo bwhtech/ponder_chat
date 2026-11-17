@@ -9,6 +9,7 @@ import { useThreads } from "../threads";
 import { openWorkspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
+import { Poller } from "./poller";
 import WorkspaceAside from "./WorkspaceAside.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
 import WorkspaceComposer from "./WorkspaceComposer.vue";
@@ -60,41 +61,38 @@ async function load() {
 /**
  * While a document is Reading, the workspace is read again, a little less often each time
  * (2 s up to 10 s), until none is. A failed poll changes nothing on the page; the next one
- * tries again. An answer asked for before a change in the side panel is dropped: it may not
- * have the new document yet.
+ * tries again, unless the workspace is gone. An answer asked for before a change in the
+ * side panel is dropped: it may not have the new document yet. One chain of polls runs at a
+ * time, and none once the page is left (poller.ts).
  */
 const POLL_FIRST_MS = 2000;
 const POLL_MAX_MS = 10_000;
-let pollTimer: ReturnType<typeof setTimeout> | undefined;
+const poller = new Poller(poll);
 let pollDelay = POLL_FIRST_MS;
 let changes = 0;
 const reading = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading")));
-watch(reading, (now) => (now ? startPolling() : stopPolling()));
-onBeforeUnmount(stopPolling);
+watch(reading, (now) => (now ? startPolling() : poller.stop()));
+onBeforeUnmount(() => poller.stop());
 
 function startPolling() {
-	stopPolling();
 	pollDelay = POLL_FIRST_MS;
-	pollTimer = setTimeout(poll, pollDelay);
+	poller.start(pollDelay);
 }
 
-function stopPolling() {
-	clearTimeout(pollTimer);
-	pollTimer = undefined;
-}
-
-async function poll() {
+/** Reads the workspace again; the wait before the next read, or null. */
+async function poll(current: () => boolean) {
 	const mine = asked;
 	const seen = changes;
 	try {
 		const fresh = await fetchWorkspace(props.id);
-		if (mine === asked && seen === changes) detail.value = fresh;
-	} catch {
-		// Offline for a moment: the next poll tries again.
+		if (current() && mine === asked && seen === changes) detail.value = fresh;
+	} catch (error) {
+		// Deleted, or shared no more: asking again will not help. Offline for a moment: the next poll tries again.
+		if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return null;
 	}
-	if (mine !== asked || !reading.value) return;
+	if (!current() || mine !== asked || !reading.value) return null;
 	pollDelay = Math.min(POLL_MAX_MS, pollDelay * 1.5);
-	pollTimer = setTimeout(poll, pollDelay);
+	return pollDelay;
 }
 
 /** An upload, a delete or "Try again" in the side panel. */

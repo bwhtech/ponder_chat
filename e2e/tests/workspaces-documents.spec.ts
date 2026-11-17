@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import type { ReceivedCall } from "../fake/script.ts";
 import { chat, expect, test } from "../fixtures.ts";
 import { scanPdf } from "../pdfs.ts";
-import { createWorkspace, documentOf, newPerson, share, textFile } from "../workspaces.ts";
+import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady } from "../workspaces.ts";
 
 /**
  * Workspace documents (docs/workspaces-plan.md, "Tests", 7 to 9): an editor uploads a document,
@@ -181,6 +181,88 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 		await page.getByRole("dialog", { name: "Delete this document?" }).getByRole("button", { name: "Delete" }).click();
 		await expect(rows(page)).toHaveCount(0);
 		expect(await documentOf(page, id, "scan.pdf")).toBeUndefined();
+	});
+});
+
+test("10. the page stops reading a Reading document again once Details close, the document is gone or the person leaves", async ({ page, person }) => {
+	test.setTimeout(90_000);
+	const tag = person.id.slice(0, 6);
+	const id = await createWorkspace(page, `Polls ${tag}`);
+	const documentId = await uploadReady(page, id, textFile("notes.md", "Notes."));
+	const workspacePath = `/api/workspaces/${id}`;
+	const logPath = `/api/workspaces/${id}/documents/${documentId}/log`;
+
+	// The document stays Reading for the page, so it keeps polling, and each workspace answer takes a moment.
+	await page.route(
+		(url) => url.pathname === workspacePath,
+		async (route) => {
+			if (route.request().method() !== "GET") return route.fallback();
+			const response = await route.fetch();
+			const body = (await response.json()) as { workspace: { documents: { status: string }[] } };
+			for (const document of body.workspace.documents) document.status = "reading";
+			await new Promise((resolve) => setTimeout(resolve, 1500));
+			await route.fulfill({ response, json: body });
+		},
+	);
+	await page.route(
+		(url) => url.pathname === logPath,
+		async (route) => {
+			const response = await route.fetch();
+			if (!response.ok()) return route.fulfill({ response });
+			const body = (await response.json()) as { document: { status: string } };
+			body.document.status = "reading";
+			await route.fulfill({ response, json: body });
+		},
+	);
+	const sent = { workspace: 0, log: 0 };
+	page.on("request", (request) => {
+		const path = new URL(request.url()).pathname;
+		if (request.method() === "GET" && path === workspacePath) sent.workspace++;
+		if (path === logPath) sent.log++;
+	});
+	/** Nothing more is asked for in the next few seconds, longer than any wait between polls here. */
+	const quiet = async (kind: keyof typeof sent, ms: number) => {
+		const before = sent[kind];
+		await page.waitForTimeout(ms);
+		expect(sent[kind], `${kind} requests after it should stop`).toBe(before);
+	};
+	const notes = row(page, "notes.md");
+	const openDetails = async () => {
+		await notes.getByRole("button", { name: "Actions for “notes.md”" }).click();
+		await page.getByRole("menuitem", { name: "Details" }).click();
+		return page.getByRole("dialog", { name: "notes.md" });
+	};
+
+	await page.goto(`/?w=${id}`);
+	await expect(notes).toHaveAttribute("data-status", "reading");
+
+	await test.step("closing Details stops reading the log", async () => {
+		const details = await openDetails();
+		await expect.poll(() => sent.log, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
+		await details.getByRole("button", { name: "Close" }).first().click();
+		await expect(details).toHaveCount(0);
+		await quiet("log", 5000);
+	});
+
+	await test.step("leaving the workspace while it is being read stops reading it", async () => {
+		const asked = sent.workspace;
+		await expect.poll(() => sent.workspace, { timeout: 15_000 }).toBeGreaterThan(asked);
+		// The poll's answer is still on its way.
+		await page.getByRole("button", { name: "New chat" }).first().click();
+		await expect(page).not.toHaveURL(/[?&]w=/);
+		// Longer than the longest wait between polls (10 s).
+		await quiet("workspace", 12_000);
+	});
+
+	await test.step("a deleted document's log is not asked for again", async () => {
+		await page.goto(`/?w=${id}`);
+		const details = await openDetails();
+		await expect.poll(() => sent.log, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
+		await expect(details.locator('[data-slot="document-step"]').first()).toBeVisible();
+		const gone = page.waitForResponse((response) => new URL(response.url()).pathname === logPath && response.status() === 404, { timeout: 10_000 });
+		expect((await page.request.delete(`/api/workspaces/${id}/documents/${documentId}`)).ok()).toBe(true);
+		await gone;
+		await quiet("log", 5000);
 	});
 });
 
