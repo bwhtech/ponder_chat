@@ -2,7 +2,7 @@ import { test as base, expect, type APIRequestContext, type Page } from "@playwr
 import { randomBytes } from "node:crypto";
 import postgres from "postgres";
 import { e2e } from "./env.ts";
-import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
+import type { ChatScript, MemoryScript, PageScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
 
 /**
  * What the tests share:
@@ -30,6 +30,11 @@ export class Fake {
 
 	async memory(script: MemoryScript) {
 		await this.post("/__fake/memory", script);
+	}
+
+	/** How the page model reads a PDF page that holds `script.match` (pdfs.ts, scanPdf). */
+	async page(script: PageScript) {
+		await this.post("/__fake/page", script);
 	}
 
 	/** The summary of long chats whose transcript contains `match`. */

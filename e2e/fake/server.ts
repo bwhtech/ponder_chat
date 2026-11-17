@@ -1,7 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MODELS } from "../../server/models/Models.ts";
-import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
+import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type PageScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
 
 /**
  * A fake OpenRouter, and a fake Cloudflare email API, for the end-to-end tests. Ponder
@@ -14,6 +14,9 @@ import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, t
  * - web search: url_citation annotations (`SearchScript`);
  * - memory: the decision gate and the writer (`MemoryScript`), and embeddings;
  * - chat summaries, when a chat gets too long (`SummaryScript`);
+ * - the PDF pages a workspace document sends to a model (`PageScript`), and in a workspace
+ *   chat, the line of its documents or excerpts that best matches the question, so a test
+ *   sees which of them reached the model;
  * - the list of models with private (ZDR) endpoints: every model Ponder lists, with
  *   a 1M-token window, except GLM 5.3's small one (SMALL_WINDOW).
  * - what a streamed reply cost, by its generation id (`GET /api/v1/generation`).
@@ -36,6 +39,7 @@ export function fakeApp() {
 	const exports: string[] = [];
 	const summaryScripts: SummaryScript[] = [];
 	const summaries: ReceivedSummary[] = [];
+	const pageScripts: PageScript[] = [];
 	/** How many calls each step of a script has had, for `failFirst`. */
 	const attempts = new Map<string, number>();
 	const app = new Hono();
@@ -46,6 +50,7 @@ export function fakeApp() {
 	app.post("/__fake/search", async (c) => (searches.unshift(await c.req.json()), c.json({ ok: true })));
 	app.post("/__fake/memory", async (c) => (memories.unshift(await c.req.json()), c.json({ ok: true })));
 	app.post("/__fake/summary", async (c) => (summaryScripts.unshift(await c.req.json()), c.json({ ok: true })));
+	app.post("/__fake/page", async (c) => (pageScripts.unshift(await c.req.json()), c.json({ ok: true })));
 	const since = (query: string | undefined) => Number(query ?? 0);
 	app.get("/__fake/emails", (c) => c.json(emails.filter((email) => email.to === c.req.query("to") && email.at >= since(c.req.query("since")))));
 	app.get("/__fake/spans", (c) => c.json({ spans, exports }));
@@ -70,6 +75,11 @@ export function fakeApp() {
 	app.post("/api/v1/chat/completions", async (c) => {
 		const body = (await c.req.json()) as Completion;
 		const messages = body.messages ?? [];
+		const pdf = pagePdf(messages);
+		if (pdf) {
+			const { status, answer } = pageReply(body.model, pdf, pageScripts, attempts);
+			return c.json(answer, status as 200);
+		}
 		if (body.tools?.some((tool) => tool.type === "openrouter:web_search")) return c.json(searchReply(body.model, latestUserText(messages), searches));
 		const schema = body.response_format?.json_schema?.schema?.properties ?? {};
 		if ("title" in schema) return c.json(jsonReply(body.model, { title: titleOf(latestUserText(messages)) }));
@@ -158,7 +168,7 @@ export function startFake(port: number) {
 
 // --- Chat replies -------------------------------------------------------------
 
-type Message = { role: string; content: string | { type: string; text?: string }[] | null };
+type Message = { role: string; content: string | { type: string; text?: string; file?: { filename?: string; file_data?: string } }[] | null };
 type Completion = {
 	model: string;
 	stream?: boolean;
@@ -186,12 +196,16 @@ let generationCount = 0;
 /**
  * The step for this call: the turn's script, at the number of model calls made since the person's message.
  * With no script, "You said: <message>", and in a workspace chat also the first line of the workspace's
- * instructions, so a test can see that they reached the model (workspaces.spec.ts).
+ * instructions and the line of its documents that best matches the message, so a test can see that
+ * they reached the model (workspaces.spec.ts, workspaces-documents.spec.ts).
  */
 function chatStep(messages: Message[], scripts: ChatScript[], system: string): { step: Step; key: string } {
 	const said = latestUserText(messages);
 	const script = scripts.find((candidate) => said.includes(candidate.match));
-	if (!script) return { step: { text: [`You said: ${said}`, workspaceLine(system)].filter(Boolean).join("\n\n") }, key: "" };
+	if (!script) {
+		const question = withoutExcerpts(said);
+		return { step: { text: [`You said: ${question}`, workspaceLine(system), documentLine(system, said, question)].filter(Boolean).join("\n\n") }, key: "" };
+	}
 	const lastUser = messages.findLastIndex((message) => message.role === "user");
 	const callsSince = messages.slice(lastUser + 1).filter((message) => message.role === "assistant").length;
 	const summarized = messages.some((message) => message.role === "user" && textOf(message.content).startsWith("<summary>"));
@@ -338,6 +352,76 @@ function workspaceLine(system: string) {
 	const block = /<workspace name="([^"]*)">\n([^\n]*)/.exec(system);
 	return block ? `Workspace “${block[1]}” says: ${block[2]}` : "";
 }
+
+// --- Workspace documents ------------------------------------------------------
+
+/** The person's message without the <workspace_excerpts> block that Ponder puts before it. */
+function withoutExcerpts(said: string) {
+	return said.replace(/<workspace_excerpts>[\s\S]*?<\/workspace_excerpts>\n*/g, "").trim();
+}
+
+/**
+ * The line of the workspace's text that shares the most words with the question, as a model
+ * that answers from it would quote it: from a whole document in the system prompt, “From the
+ * document “<name>”: …”, or from an excerpt with the message, “From the excerpt “<location>”: …”.
+ * "" when no line shares a word, or outside a workspace.
+ */
+function documentLine(system: string, said: string, question: string) {
+	const words = new Set(wordsOf(question).filter((word) => word.length > 3));
+	if (words.size === 0) return "";
+	const candidates: { source: string; line: string }[] = [];
+	for (const [, name, text] of system.matchAll(/<document name="([^"]*)">\n([\s\S]*?)\n<\/document>/g)) {
+		for (const line of text.split("\n")) candidates.push({ source: `the document “${name}”`, line });
+	}
+	const excerpts = /<workspace_excerpts>\n([\s\S]*?)\n<\/workspace_excerpts>/.exec(said)?.[1] ?? "";
+	for (const excerpt of excerpts.split(/\n\n(?=\[\d+\] )/)) {
+		const [location = "", ...lines] = excerpt.split("\n");
+		for (const line of lines) candidates.push({ source: `the excerpt “${location.replace(/^\[\d+\] /, "")}”`, line });
+	}
+	let best: { source: string; line: string; score: number } | undefined;
+	for (const candidate of candidates) {
+		const score = wordsOf(candidate.line).filter((word) => words.has(word)).length;
+		if (score > (best?.score ?? 0)) best = { ...candidate, score };
+	}
+	return best ? `From ${best.source}: ${best.line.trim()}` : "";
+}
+
+function wordsOf(text: string) {
+	return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+/** The one-page PDF of a page read (page-reader.ts), as text; none for any other call. */
+function pagePdf(messages: Message[]) {
+	for (const message of messages) {
+		if (typeof message.content === "string" || !message.content) continue;
+		for (const part of message.content) {
+			const data = part.type === "file" ? part.file?.file_data : undefined;
+			if (data?.startsWith("data:application/pdf;base64,")) {
+				const page = Number(/page-(\d+)\.pdf/.exec(part.file?.filename ?? "")?.[1] ?? 0);
+				return { page, text: Buffer.from(data.slice(data.indexOf(",") + 1), "base64").toString("latin1") };
+			}
+		}
+	}
+	return undefined;
+}
+
+/**
+ * The page model's answer: the script's text, or its refusal for the first `failFirst` calls.
+ * A refusal is a 400, which the page reader does not try again, so each read is one call.
+ */
+function pageReply(model: string, pdf: { page: number; text: string }, scripts: PageScript[], attempts: Map<string, number>) {
+	const script = scripts.find((candidate) => pdf.text.includes(candidate.match));
+	const key = `page#${script?.match ?? ""}#${pdf.page}`;
+	const attempt = (attempts.get(key) ?? 0) + 1;
+	attempts.set(key, attempt);
+	if (script && attempt <= (script.failFirst ?? 0)) {
+		return { status: 400, answer: { error: { code: 400, message: script.error ?? "The fake model could not read this page." } } };
+	}
+	const text = script?.text ?? `Page ${pdf.page}, as the fake model read it.`;
+	return { status: 200, answer: { ...textReply(model, { text, cost: PAGE_COST }, 1_200), id: `gen-fake-page-${Date.now()}-${attempt}` } };
+}
+
+const PAGE_COST = 0.0018;
 
 // --- Traces -------------------------------------------------------------------
 

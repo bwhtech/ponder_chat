@@ -1,7 +1,7 @@
-import type { Browser, Page } from "@playwright/test";
-import type postgres from "postgres";
+import type { Page } from "@playwright/test";
 import { e2e } from "../env.ts";
-import { chat, expect, randomIp, signIn, test, uniqueEmail, type Fake, type Person } from "../fixtures.ts";
+import { chat, expect, test } from "../fixtures.ts";
+import { newPerson } from "../workspaces.ts";
 
 /**
  * Workspaces and sharing (docs/workspaces-plan.md, "Tests"): a person makes a workspace with
@@ -153,14 +153,6 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 		await other.context.close();
 	}
 });
-
-/** Another person, signed in in a browser of their own. */
-async function newPerson(browser: Browser, db: postgres.Sql, fake: Fake, title: string): Promise<{ page: Page; person: Person; context: Awaited<ReturnType<Browser["newContext"]>> }> {
-	const context = await browser.newContext({ baseURL: e2e.baseUrl, extraHTTPHeaders: { "cf-connecting-ip": randomIp() } });
-	const page = await context.newPage();
-	const person = await signIn(page, db, fake, uniqueEmail(title));
-	return { page, person, context };
-}
 
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');
 const aside = (page: Page) => page.locator('[data-slot="workspace-aside"]');
