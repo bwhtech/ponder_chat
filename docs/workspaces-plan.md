@@ -120,6 +120,30 @@ Some model calls are made by the app, not for one person's reply. They cost no c
 4. **Each row names who caused it.** `user` is the uploader for indexing and the asker for a search, so an admin can see who causes the spend. `thread_id` is set for a search. Indexing rows get the document id in their run id (`workspace-index:<document>:<batch>`), so a document's cost can be added up, also after the document is deleted.
 5. **Admin usage page.** Add a "System" line: the cost for each system function id, for the same days as the rest of the page. It does not count against anyone's credits.
 
+### Indexing log
+
+Each document keeps a log of what was done to it, so a person can see why a document failed or which pages a model read, and an admin can see what indexing costs.
+
+1. **One row for each step** in `workspace_document_log`. Only the indexing workflow writes rows. Nothing updates or deletes a row, except when the document is deleted.
+
+   | Step | What the row keeps |
+   | --- | --- |
+   | `uploaded` | Size, media type, who uploaded it |
+   | `parsed` | Engine (`liteparse` or `pdf-text`), page count, characters, time |
+   | `page-read` | Page number, why it was sent (`picture` or `scan`), model, time, cost, OK or failed and the error |
+   | `chunked` | Number of passages |
+   | `embedded` | One row for each batch: passages, model, time, cost |
+   | `ready` or `failed` | Total time, total cost, and for `failed` the step and the error |
+   | `reindexed` | Why: the embedding model changed, or a person asked |
+
+2. **No document text in the log.** A row keeps numbers, page numbers, model names and error messages, never the text of a page or a passage. The error of a model call is cut to 300 characters, as OpenRouter errors are now.
+3. **The cost in the log comes from `runs`.** Each `page-read` and `embedded` row keeps its `runs` id. The cost shown is read from `runs`, so the two never disagree. This includes a cost that the sweep fills in later.
+4. **Who sees the log.**
+   - People who can edit the workspace: a "Details" view on each document in the side panel. It shows the steps, the pages that a model read, the time and any error. A failed document shows its error and a "Try again" button.
+   - People who can only ask: the status only (Reading, Ready, Failed).
+   - Admins on `/admin/workspaces`: for organisation workspaces, the full log. For private workspaces, the counts, cost and errors, with no workspace or document names, as for the rest of private workspaces.
+5. **Server logs and traces.** One log line when indexing starts, ends or fails, with the document id and workspace id only. One trace for each indexing run (`workspace.index`), with a child span for each step (`workspace.parse`, `workspace.page-read`, `workspace.embed`). Add these names to `KNOWN_NAMES` in `server/tracing/privacy.ts`. `tracing.check.ts` must show that no document name or text gets into these spans.
+
 ## Database
 
 ```sql
@@ -137,6 +161,10 @@ workspace_documents (
 	id, workspace_id → workspaces on delete cascade,
 	name, media_type, size, object_key, text,
 	status ('reading' | 'ready' | 'failed'), error, added_by, created_at
+)
+workspace_document_log (
+	id, document_id → workspace_documents on delete cascade, workspace_id,
+	step, detail jsonb, run_id → runs (null when no model call), created_at
 )
 workspace_passages (
 	id, document_id → workspace_documents on delete cascade, workspace_id,
@@ -195,8 +223,8 @@ A workspace that the person cannot use answers 404, never 403, so a request does
 ## Pull requests
 
 1. **Workspaces and sharing.** The tables without documents, `accessOf`, the API, people search, `threads.workspace_id`, instructions in the prompt, the rename to `Shell.vue`, the sidebar, the workspace page, the dialogs and the composer chip. A person can make a workspace with instructions, share it, and chat in it.
-2. **Documents.** Upload, text extraction, the indexing workflow, inline or search on each turn, `workspace_search`, and the Reading, Ready and Failed states. The system function ids in `charged_runs`, and memory embeddings kept in `runs`.
-3. **Admin page.** `/admin/workspaces`, audit events for organisation workspaces, and the "System" line on the usage page.
+2. **Documents.** Upload, text extraction, the indexing workflow, inline or search on each turn, `workspace_search`, and the Reading, Ready and Failed states. The system function ids in `charged_runs`, and memory embeddings kept in `runs`. The indexing log, the Details view and "Try again".
+3. **Admin page.** `/admin/workspaces` with the indexing log, audit events for organisation workspaces, and the "System" line on the usage page.
 
 Each pull request ships alone, and each one updates the README. The first one also changes the "no organisation" lines in `docs/pilot-plan.md` and `docs/memory.md`.
 
@@ -216,8 +244,11 @@ Each pull request ships alone, and each one updates the README. The first one al
   5. A removes B, and B can no longer send in that chat.
   6. An admin makes an organisation workspace, and every person sees it.
   7. A document goes from Reading to Ready, and an answer uses one of its passages.
+  8. An editor opens the document's Details and sees its steps. A person who can only ask does not see them.
+  9. A document that fails shows its error, and "Try again" makes it Ready.
 - **Embeddings in end-to-end tests.** The fake OpenRouter (`e2e/fake/server.ts`) already answers embedding calls for memory. Make sure its vectors put a question near the passage it is about.
 - **Traces.** Add each new span name to `KNOWN_NAMES`. Extend `tracing.check.ts` to show that no workspace name, document name or passage text gets into a trace.
+- **Indexing log.** A unit test runs the workflow on a PDF with one picture page and a fake model. It checks the rows in order, that each cost matches its `runs` row, and that no row holds page text.
 
 ## Later
 
