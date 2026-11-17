@@ -14,6 +14,7 @@ import * as Logger from "effect/Logger";
 import * as PonderConfig from "../config.ts";
 import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
 import * as Database from "../runtime/Database.ts";
+import * as Runs from "../telemetry/Runs.ts";
 import { EmbeddingFailed } from "./errors.ts";
 import type { Extractor } from "./extract.ts";
 import { makePgvectorIndex } from "./pgvector-index.ts";
@@ -27,7 +28,8 @@ let embeddingsDown = false;
 const embedder = new MockEmbeddingModelV4({
 	doEmbed: async ({ values }) => {
 		if (embeddingsDown) throw new Error("embeddings down");
-		return { embeddings: values.map(meaning), warnings: [] };
+		// What OpenRouter's provider gives: tokens, and the cost in its metadata.
+		return { embeddings: values.map(meaning), usage: { tokens: values.length * 5 }, providerMetadata: { openrouter: { usage: { cost: 0.00001 } } }, warnings: [] };
 	},
 });
 const provider = { textEmbeddingModel: () => embedder } as unknown as OpenRouterProvider;
@@ -38,7 +40,7 @@ const key = Layer.succeed(
 );
 
 const url = process.env.TEST_DATABASE_URL;
-const layer = Layer.mergeAll(Database.layer, key).pipe(Layer.provideMerge(PonderConfig.layerFromEnv(url ? { DATABASE_URL: url } : {})));
+const layer = Runs.layer.pipe(Layer.provideMerge(Layer.mergeAll(Database.layer, key)), Layer.provideMerge(PonderConfig.layerFromEnv(url ? { DATABASE_URL: url } : {})));
 
 const run = Math.random().toString(36).slice(2, 10);
 const owner = (name: string) => `test-${run}-${name}`;
@@ -50,6 +52,7 @@ describe.skipIf(!url)("the pgvector index", () => {
 	it.layer(layer, { excludeTestServices: true })((it) => {
 		it.effect("finds a person's memories by meaning and by words, best first, and only theirs", () =>
 			Effect.gen(function* () {
+				yield* Runs.Runs.use((runs) => runs.migrate);
 				const index = yield* makePgvectorIndex;
 				const cook = owner("cook");
 				yield* index.upsert([
@@ -69,6 +72,28 @@ describe.skipIf(!url)("the pgvector index", () => {
 				// Upsert replaces a memory's text.
 				yield* index.upsert([{ id: `${cook}-3`, owner: cook, text: "Runs half marathons" }]);
 				assert.deepStrictEqual((yield* index.search(cook, "marathon", 1)), [`${cook}-3`]);
+			}),
+		);
+
+		it.effect("keeps each embedding call in runs, for the person, as the app's spend that costs no credits", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const index = yield* makePgvectorIndex;
+				const spender = owner("spender");
+				yield* index.upsert([{ id: `${spender}-1`, owner: spender, text: "Likes tea" }]);
+				yield* index.search(spender, "tea", 1);
+				const rows = yield* sql<{ id: string; function_id: string; input_tokens: number; cost: number }>`
+					select id, function_id, input_tokens, cost_usd::float8 as cost from runs where "user" = ${spender} order by created_at`;
+				assert.deepStrictEqual(
+					rows.map((row) => [row.function_id, row.input_tokens, row.cost]),
+					[
+						["memory-embed", 5, 0.00001],
+						["memory-embed", 5, 0.00001],
+					],
+				);
+				assert.match(rows[0].id, /^memory-embed:/);
+				const charged = yield* sql<{ count: number }>`select count(*)::int as count from charged_runs where "user" = ${spender}`;
+				assert.strictEqual(charged[0].count, 0);
 			}),
 		);
 
@@ -118,6 +143,7 @@ describe.skipIf(!url)("the pgvector index", () => {
 				yield* sql`delete from memory_vectors where owner like ${like}`;
 				yield* sql`delete from memories where owner like ${like}`;
 				yield* sql`delete from memory_saves where owner like ${like}`;
+				yield* sql`delete from runs where "user" like ${like}`;
 			}),
 		);
 	});
