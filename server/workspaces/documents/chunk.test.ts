@@ -142,14 +142,24 @@ describe("chunkDocument", () => {
 		assert.include(headerOnly.map((passage) => passage.content).join("\n"), HEADER);
 	});
 
-	it("keeps every line of the input in some passage", () => {
+	it("drops rows of empty cells, so a page of text that LiteParse took for a table header is split as text", () => {
+		const text = Array.from({ length: 60 }, (_, index) => `Check the exit site ${index}.`).join(" ");
+		const markdown = [`| ${text} |`, "|---|---|", "|  |  |", "|  |  |", "|  |  |"].join("\n");
+		const passages = chunkDocument({ name: "Manual", pages: [{ page: 264, markdown }], headings: "numbered" });
+		assert.isAbove(passages.length, 1);
+		for (const passage of passages) assert.isAtMost(passage.content.length, TARGET);
+		assert.include(squash(passages.map((passage) => passage.content).join("\n")), squash(text));
+		assert.notInclude(passages.map((passage) => passage.content).join("\n"), "|  |  |");
+	});
+
+	it("keeps every line of text of the input in some passage", () => {
 		for (let seed = 1; seed <= 60; seed++) {
 			const pages = randomPages(seed);
 			for (const headings of ["numbered", "levels"] as const) {
 				const passages = chunkDocument({ name: "Doc", pages, headings });
 				const all = squash(passages.map((passage) => passage.content).join("\n"));
 				for (const page of pages) {
-					for (const line of page.markdown.split("\n").filter((one) => one.trim() !== "")) {
+					for (const line of page.markdown.split("\n").filter((one) => /[\p{L}\p{N}]/u.test(one))) {
 						assert.include(all, squash(line), `seed ${seed}, ${headings}: lost ${JSON.stringify(line.slice(0, 80))}`);
 					}
 				}
@@ -184,6 +194,7 @@ function randomPages(seed: number): DocumentPage[] {
 		() => `| ${words(2)} | ${words(3)} |`,
 		() => Array.from({ length: 1 + count(4) }, () => `| ${words(2)} | ${words(2)} |`).join("\n"),
 		() => "| Drug | Dose |\n| --- | --- |",
+		() => `| ${words(count(600))} |\n|---|---|\n|  |  |\n|  |  |`,
 		() => `| Long | ${words(700)} |`,
 		() => "```\nconst dose = 10;\n\n| not a table |\n```",
 		() => "Text then a pipe line\n| A | B |\nand more text",

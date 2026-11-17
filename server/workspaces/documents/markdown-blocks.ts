@@ -76,7 +76,9 @@ function headingLine(raw: RawBlock, rule: HeadingRule) {
 /** Pipe lines are a table only with a separator line under the first; else they are text, such as one "| a | b |" line. */
 function withPlace(raw: RawBlock, page: number | null, path: string[]): Block {
 	if (raw.kind !== "table" || !SEPARATOR.test(raw.lines[1] ?? "")) return { kind: "text", text: raw.lines.join("\n"), page, path };
-	return { kind: "table", header: raw.lines.slice(0, 2).join("\n"), rows: raw.lines.slice(2), page, path };
+	// A row of empty cells says nothing. LiteParse writes them under a page of text that it took for a table's header.
+	const rows = raw.lines.slice(2).filter((row) => /[\p{L}\p{N}]/u.test(row));
+	return { kind: "table", header: raw.lines.slice(0, 2).join("\n"), rows, page, path };
 }
 
 const HEADING = /^#{1,6}\s+\S/;
