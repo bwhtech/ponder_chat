@@ -17,6 +17,9 @@ import type { IndexedMemory, MemoryIndex } from "./types.ts";
  *
  * Memories per person are few, so the person's rows are scanned exactly; no vector index
  * is needed, and the vector width follows the embedding model (PONDER_EMBEDDING_MODEL).
+ * Each row keeps the model that made it. A vector of another model is in another space,
+ * and may have another width, so search reads only the current model's rows, and
+ * `counts` tells the store to rebuild when any row is another model's.
  *
  * The `embedding` column is never read: the client has no codec for a vector
  * (docs/effect.md, "Database"). Search computes the distance in SQL.
@@ -32,7 +35,7 @@ const K = 60;
 export type IndexError = EmbeddingError;
 
 const IdRow = Schema.Struct({ id: Schema.String });
-const CountRow = Schema.Struct({ count: Schema.Number });
+const CountsRow = Schema.Struct({ current: Schema.Number, outdated: Schema.Number });
 
 /** The `runs` row of one embedding call: for the person, or for no one when a rebuild embeds many people's memories. */
 const memoryRun = (owners: ReadonlyArray<string>) => ({
@@ -61,6 +64,8 @@ export const makePgvectorIndex = Effect.gen(function* () {
 					text text not null,
 					embedding vector not null
 				)`;
+			// Rows from before this column have no model: they count as outdated, and are rebuilt.
+			yield* sql`alter table memory_vectors add column if not exists model text`;
 			yield* sql`create index if not exists memory_vectors_owner on memory_vectors (owner)`;
 			yield* Ref.set(migrated, true);
 		}),
@@ -71,18 +76,18 @@ export const makePgvectorIndex = Effect.gen(function* () {
 			memories.map((m) => m.text),
 			memoryRun(memories.map((m) => m.owner)),
 		);
-		const rows = memories.map((m, i) => ({ ...m, embedding: vectorLiteral(embeddings[i]) }));
+		const rows = memories.map((m, i) => ({ ...m, embedding: vectorLiteral(embeddings[i]), model: embedder.model }));
 		if (!Arr.isArrayNonEmpty(rows)) return;
 		yield* sql`
 			insert into memory_vectors ${sql.insert(rows)}
-			on conflict (id) do update set owner = excluded.owner, text = excluded.text, embedding = excluded.embedding`;
+			on conflict (id) do update set owner = excluded.owner, text = excluded.text, embedding = excluded.embedding, model = excluded.model`;
 	});
 
 	const findBest = SqlSchema.findAll({
-		Request: Schema.Struct({ owner: Schema.String, query: Schema.String, vector: Schema.String, limit: Schema.Number }),
+		Request: Schema.Struct({ owner: Schema.String, model: Schema.String, query: Schema.String, vector: Schema.String, limit: Schema.Number }),
 		Result: IdRow,
-		execute: ({ owner, query, vector, limit }) => sql`
-			with scoped as (select id, text, embedding from memory_vectors where owner = ${owner}),
+		execute: ({ owner, model, query, vector, limit }) => sql`
+			with scoped as (select id, text, embedding from memory_vectors where owner = ${owner} and model = ${model}),
 			by_meaning as (
 				select id, row_number() over (order by embedding <=> ${vector}::vector) as rank
 				from scoped order by embedding <=> ${vector}::vector limit ${CANDIDATES}
@@ -100,10 +105,12 @@ export const makePgvectorIndex = Effect.gen(function* () {
 			) ranked
 			group by id order by sum(score) desc limit ${limit}`,
 	});
-	const findCount = SqlSchema.findAll({
-		Request: Schema.Void,
-		Result: CountRow,
-		execute: () => sql`select count(*)::int as count from memory_vectors`,
+	const findCounts = SqlSchema.findAll({
+		Request: Schema.String,
+		Result: CountsRow,
+		execute: (model) => sql`
+			select count(*) filter (where model = ${model})::int as current, count(*) filter (where model is distinct from ${model})::int as outdated
+			from memory_vectors`,
 	});
 
 	// No spans of their own: they run inside memory.recall, memory.save and the Memory page's calls.
@@ -120,7 +127,7 @@ export const makePgvectorIndex = Effect.gen(function* () {
 		search: Effect.fnUntraced(function* (owner: string, query: string, limit: number) {
 			yield* migrate;
 			const [embedding] = yield* embedder.embedMany([query], memoryRun([owner]));
-			const rows = yield* findBest({ owner, query, vector: vectorLiteral(embedding), limit }).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+			const rows = yield* findBest({ owner, model: embedder.model, query, vector: vectorLiteral(embedding), limit }).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 			return rows.map((row) => row.id);
 		}),
 		rebuild: Effect.fnUntraced(function* (memories: IndexedMemory[]) {
@@ -128,10 +135,10 @@ export const makePgvectorIndex = Effect.gen(function* () {
 			yield* sql`delete from memory_vectors`;
 			if (memories.length) yield* write(memories);
 		}),
-		count: Effect.gen(function* () {
+		counts: Effect.gen(function* () {
 			yield* migrate;
-			const [row] = yield* findCount(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die }));
-			return row.count;
+			const [row] = yield* findCounts(embedder.model).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+			return row;
 		}),
 	};
 	return index;

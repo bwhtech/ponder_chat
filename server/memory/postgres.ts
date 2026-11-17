@@ -88,7 +88,7 @@ export class MemoryStore extends Context.Service<
 		readonly saves: (scope: MemoryScope, options?: { threadId?: string; limit?: number }) => Effect.Effect<MemorySave[], SqlError>;
 		/** Creates the tables of memories and of the save log. */
 		readonly migrate: Effect.Effect<void, SqlError>;
-		/** Rebuilds the index from Postgres when the two disagree. */
+		/** Rebuilds the index from Postgres when the two disagree, or when any row is from another embedding model. */
 		readonly syncIndex: Effect.Effect<void, IndexError>;
 		/** The person's memories, for the Memory page. */
 		readonly list: (scope: MemoryScope) => Effect.Effect<StoredMemory[], SqlError>;
@@ -320,7 +320,10 @@ export const makeWith = Effect.fnUntraced(function* ({ extract, index, recallAll
 	const syncIndex = Effect.gen(function* () {
 		if (!index) return;
 		const rows = yield* findInUse(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die }));
-		if ((yield* index.count) === rows.length) return;
+		const { current, outdated } = yield* index.counts;
+		if (current === rows.length && outdated === 0) return;
+		// After a change of PONDER_EMBEDDING_MODEL: search reads only the new model's rows until this ends.
+		if (outdated) yield* Effect.log(`memory: ${outdated} rows of the search index are from another embedding model`);
 		yield* index.rebuild(rows.map(toIndexed));
 		yield* Effect.log(`memory: rebuilt the search index with ${rows.length} memories`);
 	});
