@@ -136,7 +136,7 @@ function pickWorkspace(id: string) {
 
 function newWorkspace() {
 	sheetOpen.value = false;
-	openWorkspaceDialog({ kind: "new" });
+	openWorkspaceDialog({ kind: "new", onMade: pickWorkspace });
 }
 
 /** A question on a workspace page: a new chat in that workspace, which sends it at once (first-message.ts). */

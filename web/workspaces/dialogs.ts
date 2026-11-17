@@ -9,7 +9,8 @@ import type { WorkspaceDetail } from "./store";
  * the dialog can play its closing transition.
  */
 export type WorkspaceDialogRequest =
-	| { kind: "new" }
+	/** `onMade` opens the new workspace as the sidebar does, so it takes the place of Memory too. */
+	| { kind: "new"; onMade: (id: string) => void }
 	| { kind: "edit"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
 	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
 	| { kind: "document"; workspaceId: string; document: WorkspaceDocument; onChanged: (document: WorkspaceDocument) => void };

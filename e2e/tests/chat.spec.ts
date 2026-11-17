@@ -171,7 +171,7 @@ test("a chat keeps every message after Memory or a workspace page, and sends wit
 	const openMemory = async () => {
 		await page.getByRole("button", { name: /Ponder Chat/ }).first().click();
 		await page.getByRole("menuitem", { name: "Memory" }).click();
-		await expect(page.getByRole("heading", { name: "Memory", level: 1 })).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Memory", exact: true, level: 1 })).toBeVisible();
 	};
 	const ways: [string, () => Promise<unknown>, () => Promise<unknown>][] = [
 		["a workspace page, then the chat in the list", openWorkspace, () => threadRow.click()],

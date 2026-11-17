@@ -3,14 +3,14 @@ import { Button, Dialog, ErrorMessage, FormControl } from "frappe-ui";
 import { computed, reactive, ref } from "vue";
 import { toast } from "../toasts";
 import { dialogTitle, KIND_OPTIONS, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
-import { createWorkspace, isAdmin, showWorkspace, updateWorkspace } from "./store";
+import { createWorkspace, isAdmin, updateWorkspace } from "./store";
 
 /**
  * New workspace, and Edit workspace: the name, what it is for, and the instructions every
  * chat in it follows. Only an admin chooses who can use a new one: anyone else makes a
  * private workspace, and shares it afterwards.
  */
-const props = defineProps<{ request: Exclude<WorkspaceDialogRequest, { kind: "share" }> }>();
+const props = defineProps<{ request: Extract<WorkspaceDialogRequest, { kind: "new" | "edit" }> }>();
 const open = computed({ get: () => workspaceDialog.open, set: (value) => (workspaceDialog.open = value) });
 const editing = props.request.kind === "edit" ? props.request.workspace : null;
 
@@ -36,7 +36,7 @@ async function save() {
 			toast.success("Workspace saved");
 		} else {
 			const made = await createWorkspace({ ...fields, kind: isAdmin.value ? form.kind : "private" });
-			showWorkspace(made.id);
+			props.request.onMade(made.id);
 			toast.success(`Made “${made.name}”`);
 		}
 		open.value = false;
