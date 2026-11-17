@@ -3,7 +3,7 @@ import type { WorkspaceDocument } from "./documents";
 import type { WorkspaceDetail } from "./store";
 
 /**
- * The workspace dialogs: New workspace, Edit workspace, Share and a document's Details (WorkspaceDialogs.vue). Their
+ * The workspace dialogs: New workspace, Instructions, Share and a document's Details (WorkspaceDialogs.vue). Their
  * code loads the first time one opens; meanwhile the shell draws the dialog's frame and fields
  * (WorkspaceDialogPlaceholder.vue), as it does for Settings. `request` stays after closing, so
  * the dialog can play its closing transition.
@@ -11,8 +11,7 @@ import type { WorkspaceDetail } from "./store";
 export type WorkspaceDialogRequest =
 	/** `onMade` opens the new workspace as the sidebar does, so it takes the place of Memory too. */
 	| { kind: "new"; onMade: (slug: string) => void }
-	/** `focus` starts in Instructions, for "Add" by the empty Instructions; otherwise in Name. */
-	| { kind: "edit"; workspace: WorkspaceDetail; focus?: "instructions"; onSaved: (workspace: WorkspaceDetail) => void }
+	| { kind: "instructions"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
 	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
 	| { kind: "document"; workspaceId: string; document: WorkspaceDocument; onChanged: (document: WorkspaceDocument) => void };
 
@@ -55,15 +54,14 @@ export const KIND_OPTIONS = [
 	{ label: "Everyone in the organisation", value: "org" },
 ];
 
-/** The New and Edit form's placeholders, in the dialog and in its stand-in. */
+/** The placeholders of New workspace and Instructions, in the dialogs and in their stand-in. */
 export const NAME_PLACEHOLDER = "e.g. HR policies";
-export const DESCRIPTION_PLACEHOLDER = "e.g. Policies and forms for ward staff";
 export const INSTRUCTIONS_PLACEHOLDER = "Additional instructions passed to the AI agent";
 
 /** The dialog's title, in the dialog and in its stand-in. */
 export function dialogTitle(request: WorkspaceDialogRequest) {
 	if (request.kind === "new") return "New workspace";
-	if (request.kind === "edit") return "Edit workspace";
+	if (request.kind === "instructions") return "Instructions";
 	if (request.kind === "document") return request.document.name;
 	return `Share “${request.workspace.name}”`;
 }

@@ -11,12 +11,13 @@ import WorkspacePeople from "./WorkspacePeople.vue";
  * The workspace page's side panel: the instructions that every chat here follows, its
  * documents, and its people (once it has more than its owner). Beside the chats on a wide
  * screen, under them on a phone. For people who can edit, files dropped anywhere on the panel
- * are uploaded, and an empty section is its heading with an action that fills it; for people
- * who can only ask, empty sections are not shown. While the
+ * are uploaded, an empty section is its heading with an action that fills it, and filled
+ * instructions have Edit in the same place; for people who can only ask, empty sections are
+ * not shown. While the
  * workspace loads, the headings and their buttons stay, and skeleton lines stand in for the values.
  */
 const props = defineProps<{ workspace?: WorkspaceSummary; detail?: WorkspaceDetail }>();
-const emit = defineEmits<{ edit: [focus: "instructions"]; documents: [documents: WorkspaceDocument[]] }>();
+const emit = defineEmits<{ instructions: []; documents: [documents: WorkspaceDocument[]] }>();
 
 /** Long instructions show their first lines until asked for all. */
 const LONG = 600;
@@ -47,14 +48,13 @@ const drop = useFileDrop(
 			<div class="flex h-7 items-center justify-between">
 				<h2 id="workspace-instructions-heading" class="text-base-semibold text-ink-gray-9">Instructions</h2>
 				<Button
-					v-if="detail && !instructions"
+					v-if="detail && editable"
 					variant="ghost"
-					icon-left="lucide-plus"
-					label="Add"
-					aria-label="Add instructions"
+					:icon-left="instructions ? 'lucide-pencil' : 'lucide-plus'"
+					:label="instructions ? 'Edit' : 'Add'"
 					class="touch-target -mr-2"
-					data-slot="workspace-add-instructions"
-					@click="emit('edit', 'instructions')"
+					:data-slot="instructions ? 'workspace-edit-instructions' : 'workspace-add-instructions'"
+					@click="emit('instructions')"
 				/>
 			</div>
 			<div v-if="!detail" class="space-y-1.5" aria-busy="true">

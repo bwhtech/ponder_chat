@@ -20,7 +20,7 @@ Embedding model: `qwen/qwen3-embedding-8b`, from 18 November 2026. Through OpenR
 
 | Word | Meaning |
 | --- | --- |
-| Workspace | A name, a description, instructions and documents. A chat can belong to one workspace. |
+| Workspace | A name, instructions and documents. A chat can belong to one workspace. (A description column exists, but the app does not ask for it or show it for now.) |
 | Organisation workspace | A workspace that everyone can use. Only an admin makes one. |
 | Private workspace | A workspace that only its owner and the people they add can use. Anyone makes one. |
 | Owner | The person who made the workspace. |
@@ -239,9 +239,9 @@ A workspace that the person cannot use answers 404, never 403, so a request does
 - **Layout.** Rename `Workspace.vue` to `Shell.vue`. Add a "Workspaces" section above "Chats" in `ChatsPanel.vue`, and the same rows in `SidebarPlaceholder.vue`, so nothing moves when the panel loads.
 - **Sidebar rows.** Organisation workspaces first, then workspaces that others shared, then the person's own. Each row has an icon for its kind: a building, people, or a lock.
 - **Chats list.** "Chats" shows all of the person's chats, also the ones in a workspace, in the same date groups. A row shows only the chat's title, so titles are not cut short. The chat itself shows its workspace: a breadcrumb in its header ("Dialysis unit / Exit-site care") links back to the workspace page, and the composer's placeholder names it ("Ask in Dialysis unit"). The workspace page also lists its own chats.
-- **Workspace page (`?w=<slug>`).** A header with the name, Share (for the owner, and for admins on organisation workspaces) and a menu; Edit for a member who can edit. Then the composer, "Your chats", and a side panel with instructions, documents and "People" (once someone other than the owner can use it). Share in the header is the one place to change who can use it. Files dropped anywhere on the side panel are uploaded. On a phone, the side panel goes under the chats.
+- **Workspace page (`?w=<slug>`).** A header with the name, Share (for the owner, and for admins on organisation workspaces) and a menu with Delete. People who can edit rename the workspace by its title, in place: a click or Enter makes it a field of the same size, Enter or leaving the field saves the name only, Escape cancels, and an empty name is not taken. Then the composer, "Your chats", and a side panel with instructions, documents and "People" (once someone other than the owner can use it). Share in the header is the one place to change who can use it. Files dropped anywhere on the side panel are uploaded. "Add" (empty) or "Edit" (filled) on the Instructions heading row opens a dialog with only the instructions, and saves only them. On a phone, the side panel goes under the chats.
 - **Composer.** A new chat picks a workspace with a menu in `PromptInputTools`, beside the model selector. Once a chat has a workspace, the menu goes, and the placeholder names the workspace.
-- **Dialogs.** New workspace and Share, each loaded on first use with a `DialogFrame` placeholder, as Settings is. The people picker is frappe-ui's `Combobox` with `filterable: false`. It calls `/api/people` and shows the name with the email under it.
+- **Dialogs.** New workspace (name, instructions, and who can use it for an admin), Instructions and Share, each loaded on first use with a `DialogFrame` placeholder, as Settings is. The people picker is frappe-ui's `Combobox` with `filterable: false`. It calls `/api/people` and shows the name with the email under it.
 - **Admin.** A "Workspaces" page at `/admin/workspaces`. Add it in three places: `router.ts`, the navigation in `App.vue`, and the boot navigation in `admin.html`.
 - **Rules.** Follow the ponder-ui skill: loading, empty and error states for each list, no layout shift on load, screenshots at 1440×900 and 390×844 in light and dark.
 

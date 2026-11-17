@@ -5,7 +5,7 @@ import { computed } from "vue";
 import { me } from "../account";
 import DialogFrame from "../DialogFrame.vue";
 import ShareRow from "./ShareRow.vue";
-import { closeWorkspaceDialog, DESCRIPTION_PLACEHOLDER, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
+import { closeWorkspaceDialog, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
 import { isAdmin, type Member, type Person } from "./store";
 
 /**
@@ -15,12 +15,10 @@ import { isAdmin, type Member, type Person } from "./store";
  * and FormControl, as DialogPlaceholder.vue does.
  */
 const request = computed(() => workspaceDialog.request);
-const form = computed(() => {
-	const value = request.value;
-	if (!value || value.kind === "share" || value.kind === "document") return null;
-	const workspace = value.kind === "edit" ? value.workspace : null;
-	return { name: workspace?.name ?? "", description: workspace?.description ?? "", instructions: workspace?.instructions ?? "", kind: value.kind === "new" && isAdmin.value };
-});
+/** New workspace: its empty form. */
+const form = computed(() => (request.value?.kind === "new" ? { kind: isAdmin.value } : null));
+/** Instructions: the text the dialog opens with. */
+const instructions = computed(() => (request.value?.kind === "instructions" ? request.value.workspace.instructions : null));
 const sharing = computed(() => {
 	const value = request.value;
 	if (value?.kind !== "share") return null;
@@ -47,14 +45,7 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 				<template v-if="form">
 					<div class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Name</div>
-						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base" :class="form.name ? 'text-ink-gray-8' : 'text-ink-gray-4'">{{ form.name || NAME_PLACEHOLDER }}</div>
-					</div>
-					<div class="space-y-1.5">
-						<div class="text-sm leading-tighter text-ink-gray-6">Description (optional)</div>
-						<div
-							class="h-[calc(2lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm"
-							:class="form.description ? 'text-ink-gray-8' : 'text-ink-gray-4'"
-						>{{ form.description || DESCRIPTION_PLACEHOLDER }}</div>
+						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">{{ NAME_PLACEHOLDER }}</div>
 					</div>
 					<div v-if="form.kind" class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Who can use it</div>
@@ -62,12 +53,15 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 					</div>
 					<div class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Instructions (optional)</div>
-						<div
-							class="h-[calc(6lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm"
-							:class="form.instructions ? 'text-ink-gray-8' : 'text-ink-gray-4'"
-						>{{ form.instructions || INSTRUCTIONS_PLACEHOLDER }}</div>
+						<div class="h-[calc(6lh+0.875rem)] overflow-hidden rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm text-ink-gray-4">{{ INSTRUCTIONS_PLACEHOLDER }}</div>
 					</div>
 				</template>
+				<!-- The Instructions dialog's one field: 10 rows. -->
+				<div
+					v-else-if="instructions !== null"
+					class="h-[calc(10lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm"
+					:class="instructions ? 'text-ink-gray-8' : 'text-ink-gray-4'"
+				>{{ instructions || INSTRUCTIONS_PLACEHOLDER }}</div>
 				<template v-else-if="request.kind === 'document'">
 					<ol class="space-y-3" aria-busy="true">
 						<li v-for="width in ['w-36', 'w-44', 'w-20']" :key="width" class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></li>

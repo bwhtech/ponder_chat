@@ -20,7 +20,7 @@ export type WorkspaceDetail = Answer<(typeof client.api.workspaces)[":id"]["$get
 export type Person = { id: string; name: string; email: string };
 export type MemberAccess = "ask" | "edit";
 export type Member = Person & { access: MemberAccess };
-export type WorkspaceInput = { kind?: "org" | "private"; name: string; description: string; instructions: string };
+export type WorkspaceInput = { kind?: "org" | "private"; name: string; instructions: string };
 
 export const workspaces = ref<WorkspaceSummary[]>([]);
 /** The list came from the server: until then the sidebar shows skeleton rows. */
@@ -98,7 +98,8 @@ export async function createWorkspace(input: WorkspaceInput) {
 	return workspace;
 }
 
-export async function updateWorkspace(id: string, changes: Omit<WorkspaceInput, "kind">) {
+/** Only the fields given change: the title renames, the Instructions dialog sets the instructions. */
+export async function updateWorkspace(id: string, changes: Partial<Omit<WorkspaceInput, "kind">>) {
 	const { workspace } = await unwrap(client.api.workspaces[":id"].$patch({ param: { id: encodeURIComponent(id) }, json: changes }), "The workspace could not be saved.");
 	await loadWorkspaces();
 	return workspace;

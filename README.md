@@ -215,7 +215,10 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 
 ### Workspaces
 
-A workspace holds a name, a description, instructions and documents for chats. A chat can be in one workspace. The plan is in `docs/workspaces-plan.md`.
+A workspace holds a name, instructions and documents for chats. A chat can be in one workspace. The plan is in `docs/workspaces-plan.md`.
+
+- Editing: people who can edit rename a workspace by its title on the workspace page (Enter or leaving the field saves, Escape cancels). "Add" or "Edit" by its Instructions opens a dialog with only the instructions. The ⋯ menu has Delete only.
+- A workspace still has a description in the database and the API, but the app does not ask for it or show it for now.
 
 - Kinds: an organisation workspace is for everyone, and only an admin makes one. A private workspace is for its owner and the people the owner adds. Anyone makes one.
 - Access (`server/workspaces/access.ts`): `Workspaces.accessOf` gives `none`, `ask`, `edit` or `owner`. In an organisation workspace, the owner is `owner`, admins `edit` and everyone else `ask`. In a private workspace, the owner is `owner`, each member has the access the owner gave, and everyone else is `none`. An admin is `none` there too, until the owner adds them. A deleted workspace is `none` for everyone.

@@ -14,7 +14,7 @@ import WorkspaceAside from "./WorkspaceAside.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
 import WorkspaceComposer from "./WorkspaceComposer.vue";
 import WorkspaceHeading from "./WorkspaceHeading.vue";
-import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, workspaceByKey, type WorkspaceDetail } from "./store";
+import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
 
 /**
  * A workspace (`?w=<slug>`): its name, the composer, whose new chat is in
@@ -108,9 +108,26 @@ function documentsChanged(documents: WorkspaceDocument[]) {
 	if (reading.value) startPolling();
 }
 
-/** From the header, the dialog starts in Name; from "Add" by the empty Instructions, in Instructions. */
-function edit(focus?: "instructions") {
-	if (detail.value) openWorkspaceDialog({ kind: "edit", workspace: detail.value, focus, onSaved: (saved) => (detail.value = saved) });
+/**
+ * A new name from the title shows at once; the sidebar and a chat's breadcrumb follow once it
+ * is saved. If saving fails, the old name comes back.
+ */
+async function rename(name: string) {
+	const before = detail.value;
+	if (!before) return;
+	changes++;
+	detail.value = { ...before, name };
+	try {
+		const saved = await updateWorkspace(before.id, { name });
+		if (detail.value?.id === saved.id) detail.value = saved;
+	} catch (error) {
+		if (detail.value?.id === before.id) detail.value = { ...detail.value, name: before.name };
+		toast.error((error as Error).message);
+	}
+}
+
+function editInstructions() {
+	if (detail.value) openWorkspaceDialog({ kind: "instructions", workspace: detail.value, onSaved: (saved) => (detail.value = saved) });
 }
 
 function share() {
@@ -138,7 +155,7 @@ function askDelete() {
 		<div class="workspace-gutter-match flex min-w-0 items-center gap-2">
 			<slot name="start" />
 			<h1 v-if="missing || loadError" class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9">Workspace</h1>
-			<WorkspaceHeading v-else-if="summary" :workspace="summary" :ready="Boolean(detail)" @edit="edit()" @share="share" @delete="askDelete" />
+			<WorkspaceHeading v-else-if="summary" :workspace="summary" :ready="Boolean(detail)" @rename="rename" @share="share" @delete="askDelete" />
 			<div v-else class="flex h-[1lh] min-w-0 flex-1 items-center text-lg-semibold"><Skeleton class="h-4 w-48 max-w-full rounded-4" /></div>
 			<slot name="end" />
 		</div>
@@ -162,11 +179,10 @@ function askDelete() {
 	>
 		<div class="mx-auto grid w-full max-w-[1120px] gap-8 px-4 pb-10 pt-6 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
 			<div class="min-w-0 space-y-8">
-				<p v-if="summary?.description" class="text-p-base text-ink-gray-6">{{ summary.description }}</p>
 				<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
 				<WorkspaceChats :workspace-id="workspaceId" :shared="Boolean(summary && (summary.kind === 'org' || summary.memberCount))" @open="emit('openChat', $event)" />
 			</div>
-			<WorkspaceAside :workspace="summary" :detail="detail" @edit="edit" @documents="documentsChanged" />
+			<WorkspaceAside :workspace="summary" :detail="detail" @instructions="editInstructions" @documents="documentsChanged" />
 		</div>
 	</div>
 </template>

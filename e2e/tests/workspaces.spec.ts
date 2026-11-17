@@ -7,7 +7,8 @@ import { createWorkspace, newPerson } from "../workspaces.ts";
  * Workspaces and sharing (docs/workspaces-plan.md, "Tests"): a person makes a workspace with
  * instructions and shares it; the people in it ask with those instructions; nobody else can
  * find it; chats stay their writers' own; and a person who is removed can read their chat
- * but not send in it. An admin's workspace for everyone shows for everyone.
+ * but not send in it. An admin's workspace for everyone shows for everyone. The owner renames
+ * a workspace by its title, and adds or edits its instructions from their own section.
  *
  * The fake model echoes the first line of a workspace's instructions (fake/server.ts), so a
  * reply shows that they reached the model.
@@ -29,7 +30,8 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await a.page.getByRole("button", { name: "New workspace" }).click();
 		const dialog = a.page.getByRole("dialog", { name: "New workspace" });
 		await dialog.getByLabel("Name").fill(name);
-		await dialog.getByLabel("Description (optional)").fill("Questions about leave");
+		// No description to ask for.
+		await expect(dialog.getByLabel(/Description/)).toHaveCount(0);
 		await dialog.getByLabel("Instructions").fill(`${marker}\nKeep answers short.`);
 		// Not an admin: no choice of who can use it.
 		await expect(dialog.getByLabel("Who can use it")).toHaveCount(0);
@@ -63,7 +65,10 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		// Only the owner shares or deletes; B can only ask, so B changes nothing.
 		await expect(b.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
 		await expect(b.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
-		await expect(b.page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+		// The title is plain text, and the instructions have no editor.
+		await expect(b.page.getByRole("button", { name: "Rename", exact: true })).toHaveCount(0);
+		await expect(instructionsSection(b.page)).toContainText(marker);
+		await expect(instructionsSection(b.page).getByRole("button")).toHaveCount(0);
 		// No chat of B's in it yet: no "Your chats".
 		await expect(b.page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
 
@@ -162,6 +167,79 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	}
 });
 
+test("the owner renames a workspace by its title, and adds and edits its instructions on their own", async ({ page, person, fake }) => {
+	const tag = person.id.slice(0, 6);
+	const name = `Ward rota ${tag}`;
+	const renamed = `Night rota ${tag}`;
+	const first = `Answer from the rota, ref ${tag}.`;
+	const second = `Answer from the night rota, ref ${tag}.`;
+	const question = `Who is on nights this week, ${tag}?`;
+	const { slug } = await createWorkspace(page, name);
+	await page.goto(`/?w=${slug}`);
+	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+	const field = page.getByRole("textbox", { name: "Workspace name" });
+
+	await test.step("Escape keeps the name, and so does an empty one", async () => {
+		await page.getByRole("button", { name: "Rename", exact: true }).click();
+		await expect(field).toBeFocused();
+		await expect(field).toHaveValue(name);
+		await field.fill("Not this name");
+		await field.press("Escape");
+		await expect(field).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Rename", exact: true })).toBeFocused();
+		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+
+		await page.keyboard.press("Enter");
+		await field.fill("  ");
+		await field.press("Enter");
+		await expect(field).toHaveCount(0);
+		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+	});
+
+	await test.step("Enter renames it: the sidebar follows, and the address keeps its slug", async () => {
+		await page.getByRole("button", { name: "Rename", exact: true }).click();
+		await field.fill(renamed);
+		await field.press("Enter");
+		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
+		await expect(workspaceRows(page).getByRole("button", { name: renamed })).toBeVisible();
+		await expect(workspaceRows(page).getByRole("button", { name })).toHaveCount(0);
+		await expect(page).toHaveURL(new RegExp(`[?&]w=${escape(slug)}$`));
+		await page.reload();
+		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
+	});
+
+	await test.step("Add opens the instructions on their own, and Edit opens them again", async () => {
+		await instructionsSection(page).getByRole("button", { name: "Add", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "Instructions" });
+		await expect(dialog.getByLabel("Instructions")).toBeFocused();
+		await expect(dialog.getByLabel("Name")).toHaveCount(0);
+		await dialog.getByLabel("Instructions").fill(first);
+		await dialog.getByRole("button", { name: "Save" }).click();
+		await expect(dialog).toHaveCount(0);
+		await expect(aside(page).getByText(first)).toBeVisible();
+		await expect(instructionsSection(page).getByRole("button", { name: "Add", exact: true })).toHaveCount(0);
+
+		await instructionsSection(page).getByRole("button", { name: "Edit", exact: true }).click();
+		await expect(dialog.getByLabel("Instructions")).toHaveValue(first);
+		await dialog.getByLabel("Instructions").fill(second);
+		await dialog.getByRole("button", { name: "Save" }).click();
+		await expect(dialog).toHaveCount(0);
+		await expect(aside(page).getByText(second)).toBeVisible();
+		// The rename is kept.
+		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
+	});
+
+	await test.step("A chat in it follows the new instructions, under the new name", async () => {
+		await chat.send(page, question);
+		await expect(chat.reply(page)).toContainText(`Workspace “${renamed}” says: ${second}`);
+		await chat.idle(page);
+		await expect(page.locator('[data-slot="chat-breadcrumb"]')).toContainText(renamed);
+		const [call] = await fake.calls(question);
+		expect(call.system).toContain(second);
+		expect(call.system).not.toContain(first);
+	});
+});
+
 test("a workspace made from the Memory page opens in its place", async ({ page, person }) => {
 	const name = `From memory ${person.id.slice(0, 6)}`;
 	await page.goto("/?view=memory");
@@ -191,4 +269,5 @@ test("an older link by a workspace's id opens it, with the slug in its place", a
 
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');
 const aside = (page: Page) => page.locator('[data-slot="workspace-aside"]');
+const instructionsSection = (page: Page) => aside(page).getByRole("region", { name: "Instructions" });
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
