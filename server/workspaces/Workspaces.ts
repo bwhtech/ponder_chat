@@ -109,6 +109,13 @@ export class Workspaces extends Context.Service<
 		readonly accessOf: (userId: string, workspaceId: string) => Effect.Effect<Access, SqlError>;
 		/** Succeeds when the person can use the workspace at `needed` or above: not found when they can't use it at all. */
 		readonly check: (userId: string, workspaceId: string, needed: "ask" | "edit") => Effect.Effect<void, WorkspaceNotFound | WorkspaceRefused | SqlError>;
+		/**
+		 * `check`, inside the caller's transaction, with the workspace's row locked until it
+		 * ends: a delete waits for it, and it waits for a delete. The caller then inserts what
+		 * belongs to the workspace (a chat, a document) in the same transaction, so nothing is
+		 * added to a workspace that a delete has let go. Keep the transaction short.
+		 */
+		readonly admit: (userId: string, workspaceId: string, needed: "ask" | "edit") => Effect.Effect<void, WorkspaceNotFound | WorkspaceRefused | SqlError>;
 		/** The workspaces the person can use: organisation ones first, then those shared with them, then their own; by name. */
 		readonly list: (userId: string) => Effect.Effect<WorkspaceSummary[], SqlError>;
 		/** By its id or its slug: the page's address has the slug, and older links the id. */
@@ -206,6 +213,14 @@ const make = Effect.gen(function* () {
 		yield* withAccess(userId, workspaceId, needed);
 	});
 
+	// FOR KEY SHARE: admissions do not wait for each other or for a rename, only for a delete's FOR UPDATE.
+	// Read committed: after a delete commits, the row is read again and no longer matches.
+	const admit = Effect.fn("Workspaces.admit")(function* (userId: string, workspaceId: string, needed: "ask" | "edit") {
+		const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null for key share`;
+		if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
+		yield* withAccess(userId, workspaceId, needed);
+	});
+
 	const list = Effect.fn("Workspaces.list")(function* (userId: string) {
 		const admin = yield* accounts.isAdmin(userId);
 		const found = yield* rows.summaries(userId);
@@ -297,6 +312,9 @@ const make = Effect.gen(function* () {
 		const before = yield* detail(workspaceId, found.access, found.admin);
 		const keys = yield* sql.withTransaction(
 			Effect.gen(function* () {
+				// Waits for the chats and documents being added now (admit), and they wait for this.
+				const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null for update`;
+				if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
 				yield* sql`update workspaces set deleted_at = now(), updated_at = now() where id = ${workspaceId}`;
 				yield* sql`delete from workspace_members where workspace_id = ${workspaceId}`;
 				// The chats stay their writers', in no workspace.
@@ -316,7 +334,7 @@ const make = Effect.gen(function* () {
 		return Option.map(yield* rows.detail(workspaceId), (row) => ({ name: row.name, instructions: row.instructions }));
 	});
 
-	return Workspaces.of({ migrate, accessOf, check, list, get, create, update, share, remove, instructionsFor });
+	return Workspaces.of({ migrate, accessOf, check, admit, list, get, create, update, share, remove, instructionsFor });
 });
 
 export const layer = Layer.effect(Workspaces, make);

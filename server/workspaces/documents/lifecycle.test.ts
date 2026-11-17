@@ -8,9 +8,10 @@ import { readFileSync } from "node:fs";
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
+import { base, blockedBy, holdRows, USERS_TABLE, useTestSchema } from "../test-env.ts";
 import { startFakeOpenRouter } from "./fake-openrouter.ts";
 import type { Documents as DocumentsTag } from "./Documents.ts";
 import type { IndexRequest, Indexer as IndexerTag } from "./Indexer.ts";
@@ -185,6 +186,32 @@ describe.skipIf(!base)("workspace document lifecycle", () => {
 		assert.deepStrictEqual(await indexer((service) => service.prepare(asked.at(-1)!)), { state: "gone" });
 		openRouter.gate = undefined;
 		assert.strictEqual(calls.length, 0);
+	});
+
+	it("an upload that races the workspace's delete adds no document to it, and leaves no file", async () => {
+		const workspaceId = await newWorkspace("Racing uploads");
+		const existing = await upload(workspaceId, "existing.md");
+		const outcome = await runPromise(
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				// The delete stops at the document the test holds, with the workspace taken.
+				const hold = yield* holdRows(sql, sql`select id from workspace_documents where id = ${existing.id} for update`);
+				const deleting = yield* Effect.forkChild(Workspaces.Workspaces.use((workspaces) => workspaces.remove(ana, workspaceId)));
+				const deleter = yield* blockedBy(sql, hold.pid);
+				const uploading = yield* Effect.forkChild(Effect.flip(Documents.Documents.use((documents) => documents.upload(ana, workspaceId, file("late.md", manual("heparin dose"))))));
+				yield* Effect.raceFirst(Effect.asVoid(Fiber.await(uploading)), Effect.asVoid(blockedBy(sql, deleter)));
+				yield* hold.release;
+				yield* Fiber.join(deleting);
+				return yield* Fiber.join(uploading);
+			}).pipe(Effect.provide(services)),
+		);
+		assert.strictEqual(outcome._tag, "WorkspaceNotFound");
+		const left = await database((sql) => sql<{ count: number }>`select count(*)::int as count from workspace_documents where workspace_id = ${workspaceId}`);
+		assert.strictEqual(left[0].count, 0);
+		assert.deepStrictEqual(
+			[...bucket.objects.keys()].filter((key) => key.startsWith(`workspaces/${workspaceId}/`)),
+			[],
+		);
 	});
 
 	it("an embedding call that a newer run overtakes writes nothing into the new run's passages", async () => {

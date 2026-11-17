@@ -9,12 +9,13 @@ import { afterAll, assert, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import type { UIMessage } from "ai";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { Hono } from "hono";
 import type { WorkflowReadableStream } from "workflow/api";
 import type { ChatTurn } from "../workflow/chat.ts";
-import { base, USERS_TABLE, useTestSchema } from "./test-env.ts";
+import { base, blockedBy, holdRows, USERS_TABLE, useTestSchema } from "./test-env.ts";
 
 const tag = Math.random().toString(36).slice(2, 10);
 const schema = `test_workspace_chats_${tag}`;
@@ -185,6 +186,32 @@ describe.skipIf(!base)("chats in a workspace", () => {
 				assert.deepStrictEqual((yield* read(ana, threadId)).messages, []);
 				const detail = yield* Workspaces.Workspaces.use((workspaces) => workspaces.get(ana, ids.notes));
 				assert.notInclude(JSON.stringify(detail), threadId);
+			}).pipe(onFakeWorkflow),
+		);
+
+		it.effect("a first message that races the workspace's delete is not saved into the workspace", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const workspaces = yield* Workspaces.Workspaces;
+				const replies = yield* Replies.Replies;
+				const racing = (yield* workspaces.create(actor(ana), { kind: "org", name: "Racing", description: "", instructions: "", icon: null })).id;
+				// A chat already in it, whose row the test holds: the delete stops there, with the workspace taken.
+				const held = `chat-held-${tag}`;
+				yield* replies.start({ threadId: held, owner: bob, messages: [message("m1", "Hi")], workspaceId: racing });
+				const hold = yield* holdRows(sql, sql`select id from threads where id = ${held} for update`);
+				const deleting = yield* Effect.forkChild(workspaces.remove(actor(ana), racing));
+				const deleter = yield* blockedBy(sql, hold.pid);
+
+				const threadId = `chat-racing-${tag}`;
+				const sending = yield* Effect.forkChild(Effect.flip(replies.start({ threadId, owner: dan, messages: [message("m1", "Am I in?")], workspaceId: racing })));
+				// The first message waits for the delete; one that does not wait is saved at once.
+				yield* Effect.raceFirst(Effect.asVoid(Fiber.await(sending)), Effect.asVoid(blockedBy(sql, deleter)));
+				yield* hold.release;
+				yield* Fiber.join(deleting);
+				const refused = yield* Fiber.join(sending);
+				assert.strictEqual(refused._tag, "WorkspaceNotFound");
+				assert.deepStrictEqual(yield* Threads.Threads.use((threads) => threads.owner(threadId)), Option.none());
+				assert.deepStrictEqual(yield* Threads.Threads.use((threads) => threads.workspaceOf(held)), Option.none());
 			}).pipe(onFakeWorkflow),
 		);
 

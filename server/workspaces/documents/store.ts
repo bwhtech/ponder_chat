@@ -156,15 +156,19 @@ export function documentStore(sql: PgClient.PgClient, objects: ObjectStore.Objec
 		find: (workspaceId: string, documentId: string) => decoded(findOne({ workspaceId, documentId })),
 		byId: (documentId: string) => decoded(findById(documentId)),
 
-		/** Stores the bytes, then the row. The caller adds the first log row in the same transaction. */
-		create: Effect.fnUntraced(function* (document: NewDocument) {
+		/** Stores the bytes in the bucket, when one is set up, and gives their key. Before the row's transaction: no bucket call holds one open. */
+		putBytes: Effect.fnUntraced(function* (document: NewDocument) {
 			const key = objects.enabled ? `workspaces/${document.workspaceId}/${document.id}` : null;
 			if (key) yield* objects.put(key, document.data, document.mediaType);
-			yield* sql`
+			return key;
+		}),
+
+		/** The row, with the bytes when there is no bucket key. The caller adds the first log row in the same transaction. */
+		insert: (document: NewDocument, key: string | null) =>
+			sql`
 				insert into workspace_documents (id, workspace_id, name, media_type, size, object_key, data, added_by)
 				values (${document.id}, ${document.workspaceId}, ${document.name}, ${document.mediaType}, ${document.data.length}, ${key},
-					${key ? null : document.data}, ${document.addedBy})`;
-		}),
+					${key ? null : document.data}, ${document.addedBy})`.pipe(Effect.asVoid),
 
 		bytes: Effect.fnUntraced(function* (row: DocumentRow) {
 			if (row.object_key) return yield* objects.get(row.object_key);
@@ -232,7 +236,8 @@ export type DocumentStore = {
 	readonly list: (workspaceId: string) => Effect.Effect<DocumentSummary[], SqlError>;
 	readonly find: (workspaceId: string, documentId: string) => Effect.Effect<Option.Option<DocumentRow>, SqlError>;
 	readonly byId: (documentId: string) => Effect.Effect<Option.Option<DocumentRow>, SqlError>;
-	readonly create: (document: NewDocument) => Effect.Effect<void, SqlError | ObjectStore.ObjectStoreError>;
+	readonly putBytes: (document: NewDocument) => Effect.Effect<string | null, ObjectStore.ObjectStoreError>;
+	readonly insert: (document: NewDocument, key: string | null) => Effect.Effect<void, SqlError>;
 	readonly bytes: (row: DocumentRow) => Effect.Effect<Option.Option<Buffer>, SqlError | ObjectStore.ObjectStoreError>;
 	readonly text: (documentId: string) => Effect.Effect<Option.Option<string>, SqlError>;
 	readonly saveText: (documentId: string, text: string) => Effect.Effect<void, SqlError>;

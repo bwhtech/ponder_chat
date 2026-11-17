@@ -214,6 +214,8 @@ Access is in one function, `Workspaces.accessOf(userId, workspaceId)`. It return
 | Organisation | `owner` | — | `edit` | `ask` |
 | Private | `owner` | `ask` or `edit` | `none`, unless added | `none` |
 
+Adding to a workspace and deleting it take turns on the workspace's row. A new chat's first message and an upload lock it (`for key share`), check again that it is live and that the person may use it, and insert the chat or the document in the same short transaction (`Workspaces.admit`). A delete locks it first (`for update`), so it waits for those, and they wait for it and then find it deleted. The bucket upload and the start of the indexing run are outside that transaction; an upload that is refused there deletes its object.
+
 Only the owner changes the members of a private workspace. Only an admin changes an organisation workspace, or changes a workspace's kind. Every read and write of a workspace, a document or a passage goes through `accessOf`.
 
 ## API

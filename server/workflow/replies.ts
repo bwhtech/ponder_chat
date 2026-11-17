@@ -162,6 +162,7 @@ const make = Effect.gen(function* () {
 	const cache = yield* ThreadCache.ThreadCache;
 	const pythonStates = yield* PythonState.PythonState;
 	const workspaces = yield* Workspaces.Workspaces;
+	const sql = yield* PgClient.PgClient;
 	// Work that the request does not wait for (a thread's title) runs here, and stops with the runtime.
 	const scope = yield* Effect.scope;
 	// What the reply's save and stream (reply.ts) and the title (thread-title.ts) run on: these
@@ -191,10 +192,21 @@ const make = Effect.gen(function* () {
 	const workspaceFor = Effect.fnUntraced(function* (input: StartInput) {
 		const isNew = Option.isNone(yield* ownerOf(input.threadId));
 		const workspaceId = isNew ? input.workspaceId : Option.getOrUndefined(yield* threads.workspaceOf(input.threadId));
-		if (!workspaceId) return undefined;
-		if (atLeast(yield* workspaces.accessOf(input.owner, workspaceId), "ask")) return workspaceId;
+		if (!workspaceId) return { workspaceId: undefined, isNew };
+		if (atLeast(yield* workspaces.accessOf(input.owner, workspaceId), "ask")) return { workspaceId, isNew };
 		return yield* isNew ? new Workspaces.WorkspaceNotFound({ workspaceId }) : new WorkspaceAccessLost({ threadId: input.threadId });
 	});
+
+	/**
+	 * Saves the thread. A new chat joins its workspace in one transaction with the workspace
+	 * locked and checked again (Workspaces.admit): a delete that came after workspaceFor wins,
+	 * and the chat is not saved into a workspace that let its chats go.
+	 */
+	const saveThread = (input: StartInput, workspaceId: string | undefined, isNew: boolean) => {
+		const save = threads.save(input.threadId, input.owner, input.messages, workspaceId);
+		if (!workspaceId || !isNew) return save;
+		return sql.withTransaction(Effect.andThen(workspaces.admit(input.owner, workspaceId, "ask"), save)).pipe(Effect.catchTags({ WorkspaceRefused: Effect.die }));
+	};
 
 	/** Cancels a run and saves what it wrote so far, inside the run's trace (server/tracing/reply-trace.ts). */
 	const cancel = (run: ThreadRun, owner: string) =>
@@ -246,7 +258,7 @@ const make = Effect.gen(function* () {
 	/** Under the thread's lock: the run that answers the thread, a new one or the one already going. */
 	const startRun = Effect.fnUntraced(function* (input: StartInput, model: Models.ChatModel, python: boolean, requested: number) {
 		const { threadId, owner, messages } = input;
-		const workspaceId = yield* workspaceFor(input);
+		const { workspaceId, isNew } = yield* workspaceFor(input);
 		const continued = continuedFrom(messages);
 		const previous = Option.getOrUndefined(yield* runs.active(threadId));
 		if (previous && sameContinuation(previous.continued, continued)) return { runId: previous.runId, model: previous.model, followed: true };
@@ -262,7 +274,7 @@ const make = Effect.gen(function* () {
 		const carriesOn = continued && tracingOn() ? Option.getOrUndefined(yield* runs.latest(threadId))?.runId : undefined;
 		const runId = yield* Effect.gen(function* () {
 			// The run reads the thread from the database, so it is saved first.
-			yield* threads.save(threadId, owner, messages, workspaceId);
+			yield* saveThread(input, workspaceId, isNew);
 			// Under Auto, a reply carried on after an approval goes back to the model that wrote it.
 			const answeredBy = continued && isAuto(model.id) ? Option.getOrUndefined(yield* router.lastAnsweringModel(threadId)) : undefined;
 			// Set here, so the prompt does not read the clock inside the workflow (chat.ts).

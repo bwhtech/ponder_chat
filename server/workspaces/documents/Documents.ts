@@ -129,12 +129,18 @@ const make = Effect.gen(function* () {
 		if (mediaType === PDF_TYPE && !Buffer.from(data.subarray(0, 1024)).includes("%PDF-")) return yield* new DocumentRefused({ reason: "not-pdf" });
 		const id = randomUUID();
 		const name = file.name.trim().slice(0, 200) || "Document";
-		yield* sql.withTransaction(
-			Effect.gen(function* () {
-				yield* store.create({ id, workspaceId, name, mediaType, data, addedBy: actor.id });
-				yield* log.write({ documentId: id, workspaceId, generation: 1, step: "uploaded", detail: { size: data.length, mediaType, by: actor.id } });
-			}),
-		);
+		const document = { id, workspaceId, name, mediaType, data, addedBy: actor.id };
+		const key = yield* store.putBytes(document);
+		// Checked again with the workspace locked, so a delete that came meanwhile wins and nothing is added to it.
+		yield* sql
+			.withTransaction(
+				Effect.gen(function* () {
+					yield* workspaces.admit(actor.id, workspaceId, "edit");
+					yield* store.insert(document, key);
+					yield* log.write({ documentId: id, workspaceId, generation: 1, step: "uploaded", detail: { size: data.length, mediaType, by: actor.id } });
+				}),
+			)
+			.pipe(Effect.onError(() => (key ? store.removeObjects([key]) : Effect.void)));
 		yield* startIndexing({ id, workspace_id: workspaceId }, 1);
 		return summaryOf(Option.getOrThrow(yield* store.find(workspaceId, id)));
 	});
