@@ -30,10 +30,31 @@ export type Overview = {
 	yesterday: { active: number; replies: number };
 	days: (Day & { active: number })[];
 	byModel: ModelShare[];
+	/** The app's own calls, in US dollars: no one's credits (server/admin/usage.ts). */
+	system: SystemSpend;
 	people: { id: string; name: string; today: { used: number; limit: number }; credits: number; replies: number; activeDays: number }[];
 	pendingRequests: number;
 	creditsPerUsd: number;
 };
+
+export type SystemSpend = { usd: number; calls: number; byFunction: { functionId: string; usd: number; calls: number }[] };
+
+/** GET /api/admin/workspaces (server/workspaces/admin.ts): organisation workspaces in full, private ones as totals. */
+export type DocumentStatus = "reading" | "ready" | "failed";
+export type OrgDocument = { id: string; name: string; mediaType: string; size: number; status: DocumentStatus; error: string | null; createdAt: string; costUsd: number | null };
+export type OrgWorkspace = {
+	id: string;
+	name: string;
+	description: string;
+	icon: string | null;
+	owner: { id: string; name: string; email: string };
+	createdAt: string;
+	updatedAt: string;
+	documents: OrgDocument[];
+	costUsd: number | null;
+};
+export type PrivateWorkspaces = { workspaces: number; documents: Record<DocumentStatus, number>; costUsd: number; errors: { error: string; documents: number }[] };
+export type WorkspacesReport = { org: OrgWorkspace[]; private: PrivateWorkspaces };
 
 type Requests = Answer<typeof admin.requests.$get>;
 export type PendingRequest = Requests["pending"][number];

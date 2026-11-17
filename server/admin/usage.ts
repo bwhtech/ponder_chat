@@ -108,7 +108,7 @@ export function byModel(rows: ReadonlyArray<{ model: string; usd: number }>, cre
  * What the app's own calls cost (docs/workspaces-plan.md, "System spend"): chat names,
  * memory and workspace embeddings, picture pages. Read from `runs`, not `charged_runs`, in
  * US dollars: they cost no one credits. Every system function id is listed, with 0 when
- * it made no call, largest cost first.
+ * it made no call, in the order of the list, so the page's lines never move.
  */
 export type SystemSpend = { usd: number; calls: number; byFunction: { functionId: SystemFunctionId; usd: number; calls: number }[] };
 
@@ -116,7 +116,7 @@ export function systemSpend(rows: ReadonlyArray<{ function_id: string; usd: numb
 	const byFunction = SYSTEM_FUNCTION_IDS.map((functionId) => {
 		const row = rows.find((found) => found.function_id === functionId);
 		return { functionId, usd: roundUsd(row?.usd ?? 0), calls: row?.calls ?? 0 };
-	}).sort((a, b) => b.usd - a.usd || b.calls - a.calls);
+	});
 	return {
 		usd: roundUsd(byFunction.reduce((sum, row) => sum + row.usd, 0)),
 		calls: byFunction.reduce((sum, row) => sum + row.calls, 0),

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Alert, Avatar, Button, PageHeader, PageHeaderMobile, TabButtons } from "frappe-ui";
+import { Alert, Avatar, Button, PageHeader, PageHeaderMobile, Skeleton, TabButtons } from "frappe-ui";
 import { BarChart, DonutChart, NumberCard } from "frappe-ui/charts";
 import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "frappe-ui/list";
 import { computed, ref, watch } from "vue";
@@ -12,7 +12,8 @@ import EmptyState from "../../EmptyState.vue";
 import { shortDay } from "../../dates";
 import PrivacyNote from "../components/PrivacyNote.vue";
 import { count } from "../../numbers";
-import { credits, dollars } from "../lib/format";
+import { credits, dollars, money } from "../lib/format";
+import { systemLines } from "../lib/system-spend";
 import { isMobile } from "../lib/viewport";
 import { counts, settings } from "../store";
 
@@ -74,6 +75,7 @@ const now = computed(() => data.value?.today ?? { active: 0, replies: 0, credits
 const yesterday = computed(() => data.value?.yesterday ?? { active: 0, replies: 0 });
 const top = computed(() => data.value?.people ?? []);
 const pending = computed(() => counts.pendingRequests);
+const system = computed(() => systemLines(data.value?.system));
 
 function openRequests() {
 	void router.push("/requests");
@@ -235,6 +237,43 @@ function openRequests() {
 				<EmptyState v-else-if="!loading" icon="lucide-users" title="No one has used Ponder yet" body="People show here after their first reply." />
 
 				<ListSkeleton v-if="loading" :avatar="isMobile ? 'lg' : 'sm'" :two-lines="isMobile" label="Loading people" />
+			</section>
+
+			<!-- The app's own calls (server/admin/usage.ts): the names are known, so only the numbers wait. -->
+			<section aria-label="System" class="space-y-3" data-slot="system-spend">
+				<div class="flex items-baseline justify-between gap-3">
+					<h2 class="text-base-semibold text-ink-gray-9">System</h2>
+					<span class="flex h-[1lh] items-center text-sm tabular-nums text-ink-gray-6">
+						<Skeleton v-if="loading" class="h-3 w-28 rounded-4" />
+						<template v-else>Last {{ range }} days · {{ money(data?.system.usd ?? 0) }}</template>
+					</span>
+				</div>
+				<p class="text-p-sm text-ink-gray-6">What the app's own model calls cost. They are not counted against anyone's credits.</p>
+				<List :columns="isMobile ? ['minmax(0,1fr)', '4rem', '5rem'] : ['minmax(0,1fr)', '6rem', '6rem']" :row-height="52" class="-mx-3 list-row-px-3">
+					<ListHeader>
+						<ListHeaderCell>Call</ListHeaderCell>
+						<ListHeaderCell class="justify-end">Calls</ListHeaderCell>
+						<ListHeaderCell class="justify-end">Cost</ListHeaderCell>
+					</ListHeader>
+					<ListRows :items="system" row-key="functionId" v-slot="{ item }">
+						<ListRow :data-function="item.functionId">
+							<ListCell>
+								<div class="min-w-0">
+									<div class="truncate text-base text-ink-gray-8">{{ item.label }}</div>
+									<div v-if="item.what" class="truncate text-sm text-ink-gray-6">{{ item.what }}</div>
+								</div>
+							</ListCell>
+							<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">
+								<Skeleton v-if="item.calls === null" class="h-3 w-8 rounded-4" />
+								<template v-else>{{ count(item.calls) }}</template>
+							</ListCell>
+							<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">
+								<Skeleton v-if="item.usd === null" class="h-3 w-12 rounded-4" />
+								<template v-else>{{ money(item.usd) }}</template>
+							</ListCell>
+						</ListRow>
+					</ListRows>
+				</List>
 			</section>
 		</template>
 
