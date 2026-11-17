@@ -125,7 +125,7 @@ describe.skipIf(!base)("workspace documents", () => {
 		const passages = await database((sql) => sql<{ location: string; model: string; ordinal: number }>`select location, model, ordinal from workspace_passages where document_id = ${uploaded.id} order by ordinal`);
 		assert.strictEqual(passages.length, 120);
 		assert.strictEqual(passages[4].location, "ward-manual.md › Part 5");
-		assert.ok(passages.every((passage) => passage.model === "google/gemini-embedding-2"));
+		assert.ok(passages.every((passage) => passage.model === "qwen/qwen3-embedding-8b"));
 		// Two calls: 96, then 24.
 		assert.deepStrictEqual(
 			openRouter.embedded.slice(-2).map((batch) => batch.length),
@@ -229,7 +229,7 @@ describe.skipIf(!base)("workspace documents", () => {
 			log.map((step) => step.step),
 			["reindexed", "chunked", "embedded", "embedded", "ready"],
 		);
-		assert.deepStrictEqual(log[0].detail, { reason: "model-changed", from: "old/embedding", to: "google/gemini-embedding-2" });
+		assert.deepStrictEqual(log[0].detail, { reason: "model-changed", from: "old/embedding", to: "qwen/qwen3-embedding-8b" });
 		assert.strictEqual(await documents((service) => service.reindexOutdated), 0);
 		assert.include((await search()).map((excerpt) => excerpt.documentId), ids.manual);
 	});

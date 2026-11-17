@@ -63,7 +63,7 @@ const Workspaces = await import("../Workspaces.ts");
 const { passageStore } = await import("./passages.ts");
 const { searchWorkspace, workspaceTurn } = await import("./turn.ts");
 
-const MODEL = "google/gemini-embedding-2";
+const MODEL = "qwen/qwen3-embedding-8b";
 const ana = `ana-${tag}`;
 const bob = `bob-${tag}`;
 const database = <A>(work: (sql: PgClient.PgClient) => Effect.Effect<A, unknown>) => runPromise(PgClient.PgClient.use(work).pipe(Effect.orDie));

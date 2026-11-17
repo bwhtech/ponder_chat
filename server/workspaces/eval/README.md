@@ -36,3 +36,6 @@ OPENROUTER_API_KEY=... WORKSPACE_EVAL_DATABASE_URL=postgres://... WORKSPACE_EVAL
 | Date | Embedding model | Top-8 hit rate | Embeddings |
 | --- | --- | --- | --- |
 | 17 November 2026 | `google/gemini-embedding-2` | 30/31 (97%): text 9/10, table 7/7, picture 14/14 | $0.049, 1,229 passages |
+| 18 November 2026 | `qwen/qwen3-embedding-8b` | 30/31 (97%): text 9/10, table 7/7, picture 14/14 | $0.0026, 1,232 passages |
+| 18 November 2026 | `google/gemini-embedding-001` | 30/31 (97%) | $0.037, 1,232 passages |
+| 18 November 2026 | `openai/text-embedding-3-large` | 30/31 (97%) | $0.032, 1,232 passages |

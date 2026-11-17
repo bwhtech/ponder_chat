@@ -76,7 +76,7 @@ export class PonderConfig extends Context.Service<
 		readonly memoryModel: string;
 		/** PONDER_MEMORY_GATE_MODEL, default perplexity/pplx-decider-v1.2 (memory/decision-gate.ts). */
 		readonly memoryGateModel: string;
-		/** PONDER_EMBEDDING_MODEL, default google/gemini-embedding-2 (memory/pgvector-index.ts). */
+		/** PONDER_EMBEDDING_MODEL, default qwen/qwen3-embedding-8b (memory/pgvector-index.ts). */
 		readonly embeddingModel: string;
 
 		// --- Credits
@@ -231,7 +231,7 @@ const make = Effect.gen(function* () {
 		memoryIndexEnabled: env.PONDER_MEMORY_INDEX !== "off",
 		memoryModel: env.PONDER_MEMORY_MODEL ?? "z-ai/glm-5.3-flash",
 		memoryGateModel: env.PONDER_MEMORY_GATE_MODEL ?? "perplexity/pplx-decider-v1.2",
-		embeddingModel: env.PONDER_EMBEDDING_MODEL ?? "google/gemini-embedding-2",
+		embeddingModel: env.PONDER_EMBEDDING_MODEL ?? "qwen/qwen3-embedding-8b",
 
 		dailyCredits: wholeNumber(env.CHAT_DAILY_CREDITS, 1000),
 		creditsPerUsd: wholeNumber(env.CHAT_CREDITS_PER_USD, 1000),

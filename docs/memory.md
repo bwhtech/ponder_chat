@@ -86,7 +86,7 @@ Only the person whose save it was can undo it, and only once. The undo is logged
 
 With 30 or fewer memories, recall gives all of them. Above that it finds the 8 most relevant:
 
-1. **The index** (pgvector): a hybrid query that combines full-text search with vector search over embeddings, merged with reciprocal-rank fusion. Embeddings come from OpenRouter (`PONDER_EMBEDDING_MODEL`, default `google/gemini-embedding-2`), so a query in Hindi finds a memory written in English.
+1. **The index** (pgvector): a hybrid query that combines full-text search with vector search over embeddings, merged with reciprocal-rank fusion. Embeddings come from OpenRouter (`PONDER_EMBEDDING_MODEL`, default `qwen/qwen3-embedding-8b`), so a query in Hindi finds a memory written in English.
 2. **Postgres** full-text search, when the index is off, fails or finds nothing.
 3. The most recent memories, when neither finds anything.
 
@@ -117,7 +117,7 @@ The index is the `memory_vectors` table. Saves, edits and forgets update it afte
 | `PONDER_MEMORY_INDEX` | pgvector | `off` leaves the index out; search then uses Postgres only. |
 | `PONDER_MEMORY_GATE_MODEL` | `perplexity/pplx-decider-v1.2` | The gate's decision model. |
 | `PONDER_MEMORY_MODEL` | `z-ai/glm-5.3-flash` | The writer's model. |
-| `PONDER_EMBEDDING_MODEL` | `google/gemini-embedding-2` | The embedding model. After a change, the next start rebuilds the memory index and indexes the workspace documents again. |
+| `PONDER_EMBEDDING_MODEL` | `qwen/qwen3-embedding-8b` | The embedding model. After a change, the next start rebuilds the memory index and indexes the workspace documents again. |
 
 ## Checks
 

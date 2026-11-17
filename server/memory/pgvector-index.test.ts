@@ -103,7 +103,7 @@ describe.skipIf(!url)("the pgvector index", () => {
 				embeddingsDown = true;
 				const error = yield* Effect.flip(index.search(owner("cook"), "dinner", 1)).pipe(Effect.ensuring(Effect.sync(() => (embeddingsDown = false))));
 				assert.instanceOf(error, EmbeddingFailed);
-				assert.strictEqual(error.message, "Embeddings (google/gemini-embedding-2) failed");
+				assert.strictEqual(error.message, "Embeddings (qwen/qwen3-embedding-8b) failed");
 			}),
 		);
 
@@ -123,14 +123,14 @@ describe.skipIf(!url)("the pgvector index", () => {
 				embeddingsDown = true;
 				const fallback = yield* store.recall(scope, "marathon").pipe(Effect.ensuring(Effect.sync(() => (embeddingsDown = false))));
 				assert.deepStrictEqual(fallback.fragments?.map((fragment) => fragment.text), ["I run a marathon in March"]);
-				assert.deepStrictEqual(lines, ["memory: index search failed, using Postgres: Embeddings (google/gemini-embedding-2) failed"]);
+				assert.deepStrictEqual(lines, ["memory: index search failed, using Postgres: Embeddings (qwen/qwen3-embedding-8b) failed"]);
 
 				// A save whose index update fails is saved, and says so.
 				embeddingsDown = true;
 				const receipts = yield* store.save(scope, { user: "I write code", assistant: "Ok." }).pipe(Effect.ensuring(Effect.sync(() => (embeddingsDown = false))));
 				assert.deepStrictEqual(
 					receipts.map((receipt) => [receipt.ok, receipt.error]),
-					[[false, "Saved, but the search index failed: Embeddings (google/gemini-embedding-2) failed"]],
+					[[false, "Saved, but the search index failed: Embeddings (qwen/qwen3-embedding-8b) failed"]],
 				);
 				assert.strictEqual((yield* store.list(scope)).length, 3);
 			}).pipe(Effect.provide(logger));
