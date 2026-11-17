@@ -45,7 +45,7 @@ const expanded = ref(false);
 		</div>
 		<template v-else>
 			<p data-slot="workspace-instructions" class="whitespace-pre-wrap break-words text-p-sm text-ink-gray-8" :class="{ 'line-clamp-[12]': !expanded && instructions.length > LONG }">{{ instructions }}</p>
-			<Button v-if="instructions.length > LONG" variant="ghost" size="sm" class="-ml-2" :label="expanded ? 'Show less' : 'Show all'" @click="expanded = !expanded" />
+			<Button v-if="instructions.length > LONG" variant="ghost" size="sm" class="touch-target -ml-2" :label="expanded ? 'Show less' : 'Show all'" @click="expanded = !expanded" />
 		</template>
 	</section>
 </template>

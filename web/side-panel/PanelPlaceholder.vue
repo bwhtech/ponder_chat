@@ -2,6 +2,7 @@
 import { Button, Skeleton } from "frappe-ui";
 import { computed, onMounted } from "vue";
 import { ARTIFACT_LOOK, FILE_LOOK, panelStandIn } from "./look";
+import PdfPagesPlaceholder from "./PdfPagesPlaceholder.vue";
 import { closePanel, fileKind, panelItem } from "./panel";
 import "./slide.css";
 
@@ -9,16 +10,18 @@ import "./slide.css";
  * The side panel (SidePanel.vue) while its code arrives: the same panel, sliding in the same
  * way, with the file's or the artifact's icon and title, Close, and lines where the content
  * goes. The buttons that act on the content come with the panel, at the header's far end.
+ * The lines sit where the viewer that follows draws its own (a PDF's page, TextView's column),
+ * so nothing moves when it arrives.
  */
 defineOptions({ inheritAttrs: false });
 const header = computed(() => {
 	const item = panelItem.value;
 	if (item?.type === "artifact") {
 		const artifact = item.artifact.value;
-		return { title: artifact.title || "Untitled", ...ARTIFACT_LOOK[artifact.kind], inset: artifact.kind === "slides" };
+		return { title: artifact.title || "Untitled", ...ARTIFACT_LOOK[artifact.kind], inset: artifact.kind === "slides", kind: null };
 	}
 	const kind = item ? fileKind(item.file.mediaType, item.file.name) : null;
-	return { title: item?.file.name ?? "", ...FILE_LOOK[kind ?? "image"], inset: kind === "pdf" };
+	return { title: item?.file.name ?? "", ...FILE_LOOK[kind ?? "image"], inset: kind === "pdf", kind };
 });
 onMounted(() => (panelStandIn.shown = true));
 </script>
@@ -40,7 +43,8 @@ onMounted(() => (panelStandIn.shown = true));
 				</div>
 			</header>
 			<div class="min-h-0 flex-1 overflow-hidden" :class="header.inset ? 'bg-surface-gray-1' : ''">
-				<div class="flex flex-col gap-2.5 p-4 sm:p-6">
+				<PdfPagesPlaceholder v-if="header.kind === 'pdf'" />
+				<div v-else :class="['flex flex-col gap-2.5', header.kind === 'text' ? 'mx-auto w-full max-w-[680px] px-5 pt-8 sm:px-10 sm:pt-10' : 'p-4 sm:p-6']">
 					<Skeleton v-for="width in ['w-2/5', 'w-full', 'w-11/12', 'w-full', 'w-3/5']" :key="width" :class="['h-3.5 rounded-4', width]" />
 				</div>
 			</div>
