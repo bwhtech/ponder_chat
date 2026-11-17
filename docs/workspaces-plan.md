@@ -64,13 +64,40 @@ Attachments in a chat:
 Ponder uses the same steps, with Postgres in place of MariaDB and SQLite. Memory already does hybrid search this way (`server/memory/pgvector-index.ts`): pgvector, `to_tsvector('simple', …)` and reciprocal rank fusion. Embeddings use `PONDER_EMBEDDING_MODEL` through OpenRouter.
 
 1. **Upload.** `POST /api/workspaces/:id/documents` takes the same file types and the same 10 MB limit as a chat attachment: PDF, text, Markdown, CSV, TSV and JSON. The bytes go to the object store under `workspaces/<id>/<document>`. DOCX and spreadsheets are in "Later".
-2. **Extract.** The PDF text reader in `server/pdf-text.ts` reads the text once. The text is kept in `workspace_documents.text`.
+2. **Extract.** The text is read once and kept in `workspace_documents.text`. A PDF is read as "PDF reading" below tells.
 3. **Index.** A workflow run splits the text into passages (1,000 characters, 200 overlap, Flow's chunker), embeds them in batches of 96, and saves them in one transaction. The document shows "Reading" until the run ends, then "Ready" or "Failed".
 4. **Choose inline or search, on each turn.** Use Flow's attachment rule. When the text of all ready documents fits in half of the model's context window, all of it goes into the system prompt as `<document name="…">` blocks. Otherwise, the largest documents move to search until the rest fit. The existing limit of 300,000 characters for files in one call also applies.
 5. **Search.** For documents in search, the 8 best passages for the person's message go into the latest message as a `<workspace_excerpts>` block, the way memory adds `<memory>`. The model also gets a `workspace_search(query)` tool for more searches. The server binds the tool to the chat's workspace, so the model cannot search another one.
 6. **Model change.** Each passage stores the embedding model that made it. Search reads only passages from the current model. When the model changes, a check at startup indexes the old documents again.
 
 Instructions and inline documents stay the same during a chat, so the provider's prompt cache keeps them. Excerpts change on each message, so they go in the latest message, outside the cache.
+
+### PDF reading
+
+The pdf.js reader in `server/pdf-text.ts` reads only the text layer. It gets nothing from a scanned page, and nothing from a table or a chart that is a picture. In the two real procedure manuals we tested, the antibiotic dose tables and the FIGO misoprostol regimens are pictures.
+
+1. **LiteParse reads every page** (`@llamaindex/liteparse`, MIT). It runs in the Node server, with no API key and no cost. It writes Markdown, with Markdown tables, and gives signals for each page. OCR stays off.
+2. **A model reads some pages.** A page goes to a model when one picture covers 10% of the page or more (`largestImageCoverage >= 0.1`), or when the page is one scanned picture (`fullPageImage`). Do not use LiteParse's own `needsOcr` flag: it is true for every page that has a logo.
+3. **The model is `google/gemini-3.8-flash`** through OpenRouter, with `provider: { zdr: true }`, `reasoning: { effort: "low" }`, and one page per call as a one-page PDF. Its text takes the place of LiteParse's text for that page. The prompt asks for Markdown tables, plain text with no LaTeX, no page header or footer, and chart values under "Values read from the chart (approximate):".
+4. **No text and no model.** When a page has no text layer and the model call fails, the document is "Failed" with the page number. It is not "Ready" with pages missing.
+
+**What we measured** (17 November 2026):
+
+| | Nephrology manual | Obstetrics manual |
+| --- | --- | --- |
+| Pages | 398 | 180 |
+| LiteParse time, 2 CPUs | 3.2 s | 3.5 s |
+| Pages sent to the model | 21 | 3 |
+| Model cost | $0.044 | $0.011 |
+
+- Gemini read the 31-row dose table, all its doses and its footnotes, the same as the page. Two runs gave the same 119 numbers. The regimen chart doses were also correct.
+- Chart values were within about 1,000 of the bars. They are estimates, so the label says "approximate".
+- LiteParse kept the body text. In a sample of 600 lines, all were there. The only differences were format, such as `4<sup>th</sup>`.
+- On 13 synthetic hard pages (scans, phone photos, a fax, handwriting, Kannada and Hindi), Gemini 3.8 Flash had 0.6% character error. It was the only model that read all the Kannada place names. Smaller models put in names of other real towns.
+- Rejected: LiteParse's own Tesseract OCR (40% error on scans), OpenRouter's `mistral-ocr` parser (wrote Kannada in Sinhala script, and has no ZDR), the `cloudflare-ai` parser (no OCR), and DeepSeek V4.1 Flash (gave no text on 9 of 24 real pages, because its reasoning used all the output tokens).
+- A page costs about $0.0015 to $0.0023, so a scanned book of 400 pages costs about $0.60 to $0.95. OpenRouter's batch price is about half, for documents that nobody waits for.
+
+The test scripts are not in the repo. Add a small test with one picture page to the documents pull request.
 
 ## Database
 
@@ -186,10 +213,10 @@ Each pull request ships alone, and each one updates the README. The first one al
 - **Prompt injection from shared documents.** A member can upload a document that tells the model to call another member's connectors. Workspace text must be marked as data, not instructions. The "Ask first" rule on connector tools that change data must stay. Add a case to `e2e/tests/exfiltration.spec.ts`.
 - **Cost.** Inline documents can fill half of the context window on every message. The cache lowers the cost only for providers that cache. Measure this on a real workspace before the documents pull request is merged.
 - **Embedding cost.** It is not decided who pays for indexing: the person who uploads, or nobody.
+- **LiteParse is a native package.** It has a Rust core. Make sure that `deploy/deploy.sh` installs the Linux x64 build on the VM, and that the server still starts when the package does not load: then PDFs are read with `pdf-text.ts` as now.
 - **A large upload.** Indexing a 10 MB text document is about 12,000 passages, in about 125 embedding calls. The workflow must run it in batches that can start again after a crash.
 
 ## Open questions
 
-1. Who pays for embeddings: the uploader's credits, or nobody?
+1. Who pays for embeddings and for reading PDF pages with a model: the uploader's credits, or nobody?
 2. Is half of the context window the right inline limit for Ponder, or should it be lower to keep the cost down?
-3. Which OCR service reads a scanned PDF, which has no text layer for `pdf-text.ts` to read.
