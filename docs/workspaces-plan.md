@@ -6,11 +6,13 @@ The design comes from the prototype at https://sketch.netchamp.dev/u/nagariahuss
 
 ## Status
 
-Pull request 1, the server part, is built: the tables, `accessOf`, the API, people search, `threads.workspace_id` and the instructions in the prompt (`server/workspaces/`).
+Built. The three parts below ("Pull requests") are all in one pull request, #66.
 
-The server part of pull request 2 is built too (`server/workspaces/documents/`): upload, the indexing workflow, the indexing log and "Try again", inline documents or excerpts and `workspace_search` on each turn, the system function ids in `charged_runs`, and memory embeddings in `runs`. On the test questions, the top-8 hit rate is 30 of 31 (97%) with `google/gemini-embedding-2`. The Details view comes next.
+Part 1, workspaces and sharing: the tables, `accessOf`, the API, people search, `threads.workspace_id`, the instructions in the prompt (`server/workspaces/`), `Shell.vue`, the sidebar, the workspace page, the dialogs and the composer chip (`web/workspaces/`).
 
-Pull request 3, the admin part, is built: `/admin/workspaces` (`server/workspaces/admin.ts`, `web/admin/pages/Workspaces.vue`) lists organisation workspaces with their documents, statuses, errors, indexing cost and each document's log, and private workspaces as totals with no names: how many, documents by status, indexing cost, and the errors of failed documents with names cut out. The Activity page names the four workspace events and shows the length of the instructions, not their text. The overview has a "System" line: the cost of each system function id over the same days, from `runs`.
+Part 2, documents (`server/workspaces/documents/`): upload, the indexing workflow, the indexing log, Details and "Try again", inline documents or excerpts and `workspace_search` on each turn, the system function ids in `charged_runs`, and memory embeddings in `runs`. A sweep starts indexing again for a document that stays in Reading with no run. On the test questions, the top-8 hit rate is 30 of 31 (97%) with `google/gemini-embedding-2`.
+
+Part 3, the admin part, is built: `/admin/workspaces` (`server/workspaces/admin.ts`, `web/admin/pages/Workspaces.vue`) lists organisation workspaces with their documents, statuses, errors, indexing cost and each document's log, and private workspaces as totals with no names: how many, documents by status, indexing cost, and the errors of failed documents with names cut out. The Activity page names the four workspace events and shows the length of the instructions, not their text. The overview has a "System" line: the cost of each system function id over the same days, from `runs`.
 
 Found while building it: through OpenRouter with Zero Data Retention, `google/gemini-embedding-2` takes one text for each call (a call with two or more answers 404). The embedder then sends each passage alone, 8 at a time, and keeps one `runs` row for the batch. A 10 MB text is then about 12,000 calls. A model that takes batches under Zero Data Retention (for example `google/gemini-embedding-001` or `qwen/qwen3-embedding-8b`) would be faster, but a change of `PONDER_EMBEDDING_MODEL` also indexes memory again.
 
