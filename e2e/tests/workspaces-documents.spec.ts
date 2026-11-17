@@ -34,7 +34,7 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 
 	await test.step("a file the server can't read, picked from the empty area, shows why", async () => {
 		await choose(page, documents(page).getByRole("button", { name: "Upload documents" }), { name: "photo.png", mimeType: "image/png", buffer: Buffer.from("not a document") });
-		await expect(documents(page).getByRole("alert")).toHaveText(`"photo.png" can't be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.`);
+		await expect(documents(page).getByRole("alert")).toHaveText(`“photo.png” can't be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.`);
 		await expect(rows(page)).toHaveCount(0);
 	});
 

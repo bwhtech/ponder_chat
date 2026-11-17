@@ -395,7 +395,7 @@ describe.skipIf(!base)("workspace documents", () => {
 		const image = new FormData();
 		image.set("file", file("photo.png", new Uint8Array([137, 80, 78, 71]), "image/png"));
 		const refused = await call("cy", "POST", paths.upload, image);
-		assert.deepStrictEqual([refused.status, refused.body.error], [400, '"photo.png" can\'t be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.']);
+		assert.deepStrictEqual([refused.status, refused.body.error], [400, '“photo.png” can\'t be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.']);
 	});
 
 	it("deletes a document with its passages and log, and a workspace with all of its documents", async () => {

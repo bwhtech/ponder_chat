@@ -64,9 +64,9 @@ export const STALLED_AFTER_SECONDS = 5 * 60;
 
 /** Why the file can't be used, in plain words, for the person who uploaded it. */
 export function refusalText(name: string, { reason }: DocumentRefused) {
-	if (reason === "too-large") return `"${name}" is larger than 10 MB.`;
-	if (reason === "not-pdf") return `"${name}" can't be read. It does not look like a PDF.`;
-	return `"${name}" can't be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.`;
+	if (reason === "too-large") return `“${name}” is larger than 10 MB.`;
+	if (reason === "not-pdf") return `“${name}” can't be read. It does not look like a PDF.`;
+	return `“${name}” can't be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.`;
 }
 
 export type DocumentLog = { document: DocumentSummary; steps: LogEntry[] };

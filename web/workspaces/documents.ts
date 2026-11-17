@@ -28,12 +28,12 @@ const param = (workspaceId: string, documentId?: string) => ({ id: encodeURIComp
  * the limit is refused here, in the server's words, so ten megabytes are not sent for nothing.
  */
 export async function uploadDocument(workspaceId: string, file: File): Promise<WorkspaceDocument> {
-	if (file.size > MAX_DOCUMENT_BYTES) throw new ApiError(`"${file.name}" is larger than 10 MB.`, 413);
+	if (file.size > MAX_DOCUMENT_BYTES) throw new ApiError(`“${file.name}” is larger than 10 MB.`, 413);
 	const body = new FormData();
 	body.append("file", file);
 	const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/documents`, { method: "POST", body });
 	const answer = (await response.json().catch(() => ({}))) as { document?: WorkspaceDocument; error?: string };
-	if (!response.ok || !answer.document) throw new ApiError(answer.error ?? `"${file.name}" could not be uploaded.`, response.status);
+	if (!response.ok || !answer.document) throw new ApiError(answer.error ?? `“${file.name}” could not be uploaded.`, response.status);
 	return answer.document;
 }
 
