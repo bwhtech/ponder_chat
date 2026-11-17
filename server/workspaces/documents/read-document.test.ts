@@ -61,10 +61,37 @@ describe("dropRepeatedLines", () => {
 				"#### Sundarraj & Dr. Joseph Johny",
 			].join("\n"),
 		}));
+		// The first page keeps its copy of a line that repeats word for word, in case it is not a footer.
 		assert.deepStrictEqual(
 			dropRepeatedLines(pages).map((page) => page.markdown),
-			TOPICS.map((topic) => `Body text about ${topic}.\n| Drug | Dose |`),
+			TOPICS.map((topic, index) => `Body text about ${topic}.\n| Drug | Dose |${index === 0 ? "\n#### Sundarraj & Dr. Joseph Johny" : ""}`),
 		);
+	});
+
+	it("keeps lines that differ only in numbers that are not the page's", () => {
+		const doses = [5, 10, 15, 20].map((dose, index) => ({ page: index + 1, markdown: `Take ${dose} mg daily.` }));
+		assert.deepStrictEqual(dropRepeatedLines(doses), doses);
+		const withHeaders = doses.map((page) => ({ ...page, markdown: `Pg. ${page.page} of 4\n${page.markdown}\nPrepared by: QMC` }));
+		assert.deepStrictEqual(
+			dropRepeatedLines(withHeaders).map((page) => page.markdown),
+			doses.map((page, index) => `${page.markdown}${index === 0 ? "\nPrepared by: QMC" : ""}`),
+		);
+	});
+
+	it("keeps the first copy of a line that repeats word for word at the top of each page", () => {
+		const pages = [1, 2, 3, 4].map((page) => ({ page, markdown: "Take 5 mg daily." }));
+		assert.deepStrictEqual(
+			dropRepeatedLines(pages).map((page) => page.markdown),
+			["Take 5 mg daily.", "", "", ""],
+		);
+	});
+
+	it("looks for headers and footers only in the first and last lines of a page", () => {
+		const pages = TOPICS.map((topic, index) => ({
+			page: index + 1,
+			markdown: [`About ${topic}.`, ...Array.from({ length: 4 }, (_, line) => `${topic} line ${line}.`), "Check the exit site daily.", String(index + 1), "- Gauze 10 cm", ...Array.from({ length: 4 }, (_, line) => `${topic} end ${line}.`)].join("\n"),
+		}));
+		assert.deepStrictEqual(dropRepeatedLines(pages), pages);
 	});
 
 	it("splits pdf.js's text into its pages", () => {
