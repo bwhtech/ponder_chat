@@ -36,6 +36,8 @@ Planned. Nothing is built.
 | URL | `/?w=<id>`, the same way `?t=<id>` opens a chat | The chat page has no router, and the server serves it only at `/`. |
 | Code name | `web/Workspace.vue` (the signed-in layout) becomes `web/Shell.vue`. | The word "workspace" must have one meaning in the code. |
 | Connectors | Later. In a workspace chat, the model uses the person's own connectors, as it does now. | A connector's credentials are in the owner's row. A shared connector with one sign-in for each member needs a new table (see "Later"). |
+| Who pays to index | The system, not the uploader. Embeddings, picture pages read by a model, and the embedding of each search cost no credits. Each call is kept in `runs`, as titles are, and admins see the total as system spend. | The documents are a shared resource for many people. The uploader must not pay for the others. The spend must still be visible. |
+| Inline limit | Half of the model's context window, as in Flow. | Cost is not the main concern. Answers are better when the whole document is in the prompt. |
 | Web search | It stays on in workspace chats. The workspace guidance tells the model to answer from the documents first and to say when they do not have the answer. | Ponder has no web search switch now. A strict "workspace only" mode with a "Search the web" button is in "Later". |
 
 ## Documents: what Frappe Flow does
@@ -98,6 +100,25 @@ The pdf.js reader in `server/pdf-text.ts` reads only the text layer. It gets not
 - A page costs about $0.0015 to $0.0023, so a scanned book of 400 pages costs about $0.60 to $0.95. OpenRouter's batch price is about half, for documents that nobody waits for.
 
 The test scripts are not in the repo. Add a small test with one picture page to the documents pull request.
+
+### System spend
+
+Some model calls are made by the app, not for one person's reply. They cost no credits, but each one is kept in `runs`, so that admins can see and audit the spend.
+
+1. **Titles do this now.** `thread-title` calls are in `runs`, and `charged_runs` leaves them out (`server/telemetry/Runs.ts`). But no admin page shows their cost. Only the daily total in `deploy/sentinel.sh` counts them.
+2. **Memory embeddings are not in `runs` at all.** `server/memory/pgvector-index.ts` calls `embedMany` and `embed`, and does not keep the usage. Fix this in the documents pull request, because the same embedding code is used.
+3. **A list of system function ids** takes the place of the single `TITLE_FUNCTION_ID` rule in the `charged_runs` view:
+
+   | `function_id` | Call |
+   | --- | --- |
+   | `thread-title` | Name a chat (now) |
+   | `memory-embed` | Embed memories and memory searches |
+   | `workspace-index` | Embed a document's passages |
+   | `workspace-pdf` | Read a picture page with a model |
+   | `workspace-search` | Embed the question for a workspace search |
+
+4. **Each row names who caused it.** `user` is the uploader for indexing and the asker for a search, so an admin can see who causes the spend. `thread_id` is set for a search. Indexing rows get the document id in their run id (`workspace-index:<document>:<batch>`), so a document's cost can be added up, also after the document is deleted.
+5. **Admin usage page.** Add a "System" line: the cost for each system function id, for the same days as the rest of the page. It does not count against anyone's credits.
 
 ## Database
 
@@ -174,8 +195,8 @@ A workspace that the person cannot use answers 404, never 403, so a request does
 ## Pull requests
 
 1. **Workspaces and sharing.** The tables without documents, `accessOf`, the API, people search, `threads.workspace_id`, instructions in the prompt, the rename to `Shell.vue`, the sidebar, the workspace page, the dialogs and the composer chip. A person can make a workspace with instructions, share it, and chat in it.
-2. **Documents.** Upload, text extraction, the indexing workflow, inline or search on each turn, `workspace_search`, and the Reading, Ready and Failed states.
-3. **Admin page.** `/admin/workspaces`, and audit events for organisation workspaces.
+2. **Documents.** Upload, text extraction, the indexing workflow, inline or search on each turn, `workspace_search`, and the Reading, Ready and Failed states. The system function ids in `charged_runs`, and memory embeddings kept in `runs`.
+3. **Admin page.** `/admin/workspaces`, audit events for organisation workspaces, and the "System" line on the usage page.
 
 Each pull request ships alone, and each one updates the README. The first one also changes the "no organisation" lines in `docs/pilot-plan.md` and `docs/memory.md`.
 
@@ -211,12 +232,6 @@ Each pull request ships alone, and each one updates the README. The first one al
 ## Risks
 
 - **Prompt injection from shared documents.** A member can upload a document that tells the model to call another member's connectors. Workspace text must be marked as data, not instructions. The "Ask first" rule on connector tools that change data must stay. Add a case to `e2e/tests/exfiltration.spec.ts`.
-- **Cost.** Inline documents can fill half of the context window on every message. The cache lowers the cost only for providers that cache. Measure this on a real workspace before the documents pull request is merged.
-- **Embedding cost.** It is not decided who pays for indexing: the person who uploads, or nobody.
+- **Cost.** Inline documents can fill half of the context window on every message. That is part of the reply, so it costs the asker's credits. This is accepted. The cache lowers the cost only for providers that cache. Measure the cost of one message on a real workspace before the documents pull request is merged, to make sure the daily credits are still enough.
 - **LiteParse is a native package.** It has a Rust core. Make sure that `deploy/deploy.sh` installs the Linux x64 build on the VM, and that the server still starts when the package does not load: then PDFs are read with `pdf-text.ts` as now.
 - **A large upload.** Indexing a 10 MB text document is about 12,000 passages, in about 125 embedding calls. The workflow must run it in batches that can start again after a crash.
-
-## Open questions
-
-1. Who pays for embeddings and for reading PDF pages with a model: the uploader's credits, or nobody?
-2. Is half of the context window the right inline limit for Ponder, or should it be lower to keep the cost down?
