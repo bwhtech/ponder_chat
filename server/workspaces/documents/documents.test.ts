@@ -234,6 +234,26 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.include((await search()).map((excerpt) => excerpt.documentId), ids.manual);
 	});
 
+	it("indexes again a document that was mid-run when the model changed; the old run can't finish it", async () => {
+		const uploaded = await documents((service) => service.upload(actor("ana"), ids.workspace, file("half-done.md", manual(120, "heparin dose"), "text/markdown")));
+		const old = asked.at(-1)!;
+		await runPromise(Indexer.Indexer.use((indexer) => Effect.andThen(indexer.prepare(old), indexer.embedBatch(old, 0))));
+		// The first batch is the old model's, and the deploy stopped the run there.
+		await database((sql) => sql`update workspace_passages set model = 'old/embedding', embedding = '[1,0,0,0,0]'::vector where document_id = ${uploaded.id} and model is not null`);
+
+		assert.strictEqual(await documents((service) => service.reindexOutdated), 1);
+		const request = asked.at(-1)!;
+		assert.deepStrictEqual(request, { documentId: uploaded.id, generation: old.generation + 1 });
+		// The old run resumes: its steps do nothing.
+		assert.strictEqual(await runPromise(Indexer.Indexer.use((indexer) => Effect.andThen(indexer.embedBatch(old, 1), indexer.finish(old)))), "gone");
+		assert.strictEqual(await indexLatest(), "ready");
+		const log = (await documents((service) => service.log(actor("ana"), ids.workspace, uploaded.id))).steps;
+		assert.deepStrictEqual(log.find((step) => step.generation === request.generation)?.detail, { reason: "model-changed", from: "old/embedding", to: "qwen/qwen3-embedding-8b" });
+		assert.notInclude(log.map((step) => step.step), "failed");
+		const models = await database((sql) => sql<{ model: string }>`select distinct model from workspace_passages where document_id = ${uploaded.id}`);
+		assert.deepStrictEqual(models.map((row) => row.model), ["qwen/qwen3-embedding-8b"]);
+	});
+
 	it("embeds one passage a call when the model takes no more, with one runs row for the batch", async () => {
 		openRouter.oneAtATime = true;
 		const uploaded = await documents((service) => service.upload(actor("ana"), ids.workspace, file("short.md", manual(3), "text/markdown")));

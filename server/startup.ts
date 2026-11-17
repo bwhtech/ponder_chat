@@ -51,15 +51,16 @@ export async function startup() {
 	const lock = await runPromise(Scope.make());
 	await runPromise(becomeTheOnlyWorker.pipe(Scope.provide(lock)));
 	await runPromise(releaseDeadWorkers);
-	const { getWorld } = await import("workflow/runtime");
-	const world = await getWorld();
-	await world.start?.();
-	// Once the worker runs: documents whose passages another embedding model made are indexed again.
+	// Before the worker resumes the runs a stop left: documents whose passages another embedding model made are
+	// indexed again with a new generation, so the run of a document that was Reading can't fail it (Documents.ts).
 	await runPromise(
 		Documents.Documents.use((documents) => documents.reindexOutdated).pipe(
 			Effect.catchTags({ SqlError: (error) => Effect.logError("workspace documents: could not check for documents to index again:", sqlMessage(error)) }),
 		),
 	);
+	const { getWorld } = await import("workflow/runtime");
+	const world = await getWorld();
+	await world.start?.();
 	// Loaded here: replies.ts, which the sweep runs, loads the workflow.
 	const { sweeps } = await import("./workflow/sweep.ts");
 	const sweeping = runtime().runFork(sweeps);

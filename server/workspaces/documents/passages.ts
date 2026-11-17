@@ -42,7 +42,7 @@ const ExcerptRow = Schema.Struct({
 	location: Schema.String,
 	content: Schema.String,
 });
-const OutdatedRow = Schema.Struct({ id: Schema.String, models: Schema.Array(Schema.String) });
+const OutdatedRow = Schema.Struct({ id: Schema.String, status: Schema.Literals(["ready", "reading"]), models: Schema.Array(Schema.String) });
 
 export type PassageStore = {
 	/** The document's passages in place of the ones before, with no embeddings yet. In one transaction. */
@@ -54,7 +54,7 @@ export type PassageStore = {
 	readonly missing: (documentId: string, model: string) => Effect.Effect<number, SqlError>;
 	readonly count: (documentId: string) => Effect.Effect<number, SqlError>;
 	readonly search: (request: SearchRequest) => Effect.Effect<Excerpt[], SqlError>;
-	/** Ready documents with a passage that another model embedded, and those models. */
+	/** Ready or Reading documents with a passage that another model embedded, and those models. */
 	readonly outdated: (model: string) => Effect.Effect<ReadonlyArray<typeof OutdatedRow.Type>, SqlError>;
 };
 
@@ -85,10 +85,10 @@ export function passageStore(sql: PgClient.PgClient): PassageStore {
 		Request: Schema.String,
 		Result: OutdatedRow,
 		execute: (model) => sql`
-			select d.id, array_agg(distinct p.model) as models
+			select d.id, d.status, array_agg(distinct p.model) as models
 			from workspace_documents d join workspace_passages p on p.document_id = d.id
-			where d.status = 'ready' and p.model is distinct from ${model}
-			group by d.id`,
+			where p.model is distinct from ${model} and (d.status = 'ready' or (d.status = 'reading' and p.model is not null))
+			group by d.id, d.status`,
 	});
 	const findBest = SqlSchema.findAll({
 		Request: Schema.Struct({

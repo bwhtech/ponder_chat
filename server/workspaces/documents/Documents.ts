@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as PgClient from "@effect/sql-pg/PgClient";
+import * as Arr from "effect/Array";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -78,7 +79,7 @@ export class Documents extends Context.Service<
 		readonly remove: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<void, AccessErrors | DocumentNotFound>;
 		readonly log: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<DocumentLog, AccessErrors | DocumentNotFound>;
 		readonly retry: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<DocumentSummary, AccessErrors | DocumentNotFound | DocumentNotFailed>;
-		/** At start-up: index again the ready documents whose passages another embedding model made. Gives how many. */
+		/** At start-up: index again the ready or reading documents whose passages another embedding model made. Gives how many. */
 		readonly reindexOutdated: Effect.Effect<number, SqlError>;
 		/** For the sweep: start again the indexing of stalled documents. Gives how many. */
 		readonly restartStalled: Effect.Effect<number, SqlError>;
@@ -158,18 +159,24 @@ const make = Effect.gen(function* () {
 		return summaryOf(Option.getOrThrow(yield* store.find(workspaceId, row.id)));
 	});
 
+	/** A new generation for the document, so a run of the one before does nothing more. */
+	const claimOutdated = Effect.fnUntraced(function* (document: { id: string; status: "ready" | "reading"; models: ReadonlyArray<string> }) {
+		const generation = yield* store.restart(document.id, [document.status]);
+		const row = yield* store.byId(document.id);
+		if (Option.isNone(generation) || Option.isNone(row)) return Option.none();
+		const detail = { reason: "model-changed", from: document.models.join(", "), to: indexer.model };
+		yield* log.write({ documentId: document.id, workspaceId: row.value.workspace_id, generation: generation.value, step: "reindexed", detail });
+		return Option.some({ row: row.value, generation: generation.value });
+	});
+
 	const reindexOutdated = Effect.gen(function* () {
 		const outdated = yield* passages.outdated(indexer.model);
-		for (const document of outdated) {
-			const generation = yield* store.restart(document.id, ["ready"]);
-			const row = yield* store.byId(document.id);
-			if (Option.isNone(generation) || Option.isNone(row)) continue;
-			const detail = { reason: "model-changed", from: document.models.join(", "), to: indexer.model };
-			yield* log.write({ documentId: document.id, workspaceId: row.value.workspace_id, generation: generation.value, step: "reindexed", detail });
-			yield* startIndexing(row.value, generation.value);
-		}
-		if (outdated.length) yield* Effect.log(`workspace documents: indexing ${outdated.length} documents again for the embedding model ${indexer.model}`);
-		return outdated.length;
+		// A document Reading when the model changed holds batches of both models, and its old run would fail it. All
+		// are claimed before any run starts: a start also starts Workflow's worker, which resumes the old runs.
+		const claimed = Arr.getSomes(yield* Effect.forEach(outdated, claimOutdated));
+		for (const { row, generation } of claimed) yield* startIndexing(row, generation);
+		if (claimed.length) yield* Effect.log(`workspace documents: indexing ${claimed.length} documents again for the embedding model ${indexer.model}`);
+		return claimed.length;
 	}).pipe(Effect.withSpan("Documents.reindexOutdated"));
 
 	const restartStalled = Effect.gen(function* () {
