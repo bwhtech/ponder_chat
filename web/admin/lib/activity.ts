@@ -1,5 +1,6 @@
 import { skillTitle } from "../../../shared/skill-file";
 import type { Activity } from "../api";
+import { count } from "../../numbers";
 import { credits, date } from "./format";
 import { AUTO_COST_OPTIONS } from "./settings-form";
 
@@ -68,7 +69,43 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"enable-skill": (_, after) => ({ text: `Turned on the skill ${skillName(after)}`, details: [] }),
 	"disable-skill": (_, after) => ({ text: `Turned off the skill ${skillName(after)}`, details: [] }),
 	"delete-skill": (before) => ({ text: `Deleted the skill ${skillName(before)}`, details: [] }),
+	// Organisation workspaces only (server/workspaces/Workspaces.ts). The server sends the instructions' length, not their text.
+	"create-workspace": (_, after) => ({ text: `Made ${theWorkspace(after)} for everyone`, details: [instructionsLength(after)].filter(Boolean) }),
+	"update-workspace": (before, after) => ({ text: `Edited ${theWorkspace(after)}`, details: workspaceChanges(before, after) }),
+	"share-workspace": (before, after) => ({ text: sharingText(before, after), details: sharingChanges(before, after) }),
+	"delete-workspace": (before) => ({ text: `Deleted ${theWorkspace(before)}`, details: [] }),
 };
+
+/** “the workspace “Handbook””, or “a workspace”: a sharing event names its workspace only while it is for everyone (server/admin/activity.ts). */
+function theWorkspace(fields: Fields) {
+	return typeof fields.name === "string" ? `the workspace “${fields.name}”` : "a workspace";
+}
+
+function workspaceChanges(before: Fields, after: Fields) {
+	return [
+		changed("Name", before.name, after.name),
+		before.description !== after.description ? "New description" : "",
+		before.icon !== after.icon ? "New icon" : "",
+		after.instructionsChanged ? `New instructions, ${count(Number(before.instructionsLength ?? 0))} → ${count(Number(after.instructionsLength ?? 0))} characters` : "",
+	].filter(Boolean);
+}
+
+function instructionsLength(fields: Fields) {
+	const length = Number(fields.instructionsLength ?? 0);
+	return length ? `Instructions: ${count(length)} characters` : "";
+}
+
+function sharingText(before: Fields, after: Fields) {
+	if (before.kind !== "org" && after.kind === "org") return `Made ${theWorkspace(after)} for everyone`;
+	if (before.kind === "org" && after.kind !== "org") return "Made a workspace private";
+	return `Changed who can use ${theWorkspace(after)}`;
+}
+
+function sharingChanges(before: Fields, after: Fields) {
+	const members = (fields: Fields) => (Array.isArray(fields.members) ? fields.members.length : 0);
+	const kind = (fields: Fields) => (fields.kind === "org" ? "For everyone" : "Private");
+	return [changed("Kind", kind(before), kind(after)), members(before) === members(after) ? "" : `Members: ${count(members(before))} → ${count(members(after))}`].filter(Boolean);
+}
 
 /** The logo's theme (server/branding/Branding.ts). */
 function themeName(theme: unknown) {
