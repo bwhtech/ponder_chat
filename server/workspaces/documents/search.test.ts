@@ -126,7 +126,8 @@ describe.skipIf(!base)("workspace search", () => {
 			{ content: "Clean the catheter exit site." },
 		]);
 		// The same text, made by another model, in a document not ready, or in another workspace: never found.
-		docs.stale = await seed(ids.ward, "stale", [{ content: "Vancomycin dose from the old model.", vector: [1, 0.01, 0.01], model: "old/embedding" }]);
+		// The old model's vector has another width: a search that compared it would fail.
+		docs.stale = await seed(ids.ward, "stale", [{ content: "Vancomycin dose from the old model.", vector: [1, 0.01, 0.01, 0.01, 0.01], model: "old/embedding" }]);
 		docs.reading = await seed(ids.ward, "reading", [{ content: "Vancomycin dose still reading." }], "reading");
 		docs.other = await seed(ids.other, "elsewhere", [{ content: "Vancomycin dose in another workspace." }]);
 	});

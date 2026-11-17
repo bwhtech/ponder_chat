@@ -34,6 +34,7 @@ const Documents = await import("./Documents.ts");
 const Indexer = await import("./Indexer.ts");
 const IndexRuns = await import("./IndexRuns.ts");
 const { workspacesApi } = await import("../routes.ts");
+const { searchWorkspace } = await import("./turn.ts");
 
 const FIXTURE = readFileSync(new URL("./fixtures/picture-pages.pdf", import.meta.url));
 const TABLE = "| Drug | Intermittent (daily) |\n| --- | --- |\n| Cefazolin | 15 mg/kg daily |";
@@ -211,8 +212,14 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.strictEqual(refused._tag, "DocumentNotFailed");
 	});
 
-	it("indexes again the documents that another embedding model made, at start-up", async () => {
-		await database((sql) => sql`update workspace_passages set model = 'old/embedding' where document_id = ${ids.manual}`);
+	it("indexes again the documents that another embedding model made, at start-up; search works meanwhile", async () => {
+		// The old model's vectors are 5 wide, the fake's 3: a search that read them would fail.
+		await database((sql) => sql`update workspace_passages set model = 'old/embedding', embedding = '[1,0,0,0,0]'::vector where document_id = ${ids.manual}`);
+		const search = () =>
+			runPromise(searchWorkspace({ owner: who.ana, workspaceId: ids.workspace, threadId: `thread-${tag}`, query: "vancomycin dose", documentIds: [ids.manual, ids.pdf] }));
+		// Until the run ends, the manual is only not found.
+		assert.notInclude((await search()).map((excerpt) => excerpt.documentId), ids.manual);
+
 		assert.strictEqual(await documents((service) => service.reindexOutdated), 1);
 		const request = asked.at(-1)!;
 		assert.strictEqual(request.documentId, ids.manual);
@@ -224,6 +231,7 @@ describe.skipIf(!base)("workspace documents", () => {
 		);
 		assert.deepStrictEqual(log[0].detail, { reason: "model-changed", from: "old/embedding", to: "google/gemini-embedding-2" });
 		assert.strictEqual(await documents((service) => service.reindexOutdated), 0);
+		assert.include((await search()).map((excerpt) => excerpt.documentId), ids.manual);
 	});
 
 	it("embeds one passage a call when the model takes no more, with one runs row for the batch", async () => {
