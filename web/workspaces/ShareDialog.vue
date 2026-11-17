@@ -17,11 +17,15 @@ const workspace = props.request.workspace;
 
 const kind = ref(workspace.kind);
 const members = ref<Member[]>((workspace.members ?? []).map((member: Member) => ({ ...member })));
+const savedAccess = access(workspace.members ?? []);
+/** A new kind, or, for a private workspace, someone added, removed or given other access. */
+const changed = computed(() => kind.value !== workspace.kind || (kind.value === "private" && access(members.value) !== savedAccess));
 const error = ref("");
 const saving = ref(false);
 useFrameFocus();
 
 async function save() {
+	if (!changed.value) return;
 	saving.value = true;
 	error.value = "";
 	try {
@@ -36,6 +40,11 @@ async function save() {
 		saving.value = false;
 	}
 }
+
+/** Who can do what, in a form that compares. */
+function access(list: Member[]) {
+	return list.map((member) => `${member.id}:${member.access}`).sort().join();
+}
 </script>
 
 <template>
@@ -46,7 +55,7 @@ async function save() {
 			<ErrorMessage v-if="error" :message="error" />
 			<div class="flex justify-end gap-2 pt-2">
 				<Button label="Cancel" @click="open = false" />
-				<Button variant="solid" theme="gray" label="Save" :loading="saving" @click="save" />
+				<Button variant="solid" theme="gray" label="Save" :loading="saving" :disabled="!changed" @click="save" />
 			</div>
 		</div>
 	</Dialog>

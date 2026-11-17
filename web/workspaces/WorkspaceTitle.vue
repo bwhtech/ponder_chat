@@ -5,7 +5,7 @@ import { nextTick, ref } from "vue";
  * The workspace page's name. For people who can edit, it is a "Rename" button that turns into
  * a field in the same place: Enter or leaving the field renames, Escape keeps the name, and an
  * empty name is not taken. Everyone else sees plain text. The heading keeps the name as its
- * accessible name either way.
+ * accessible name either way. Rename in the page's ⋯ menu starts the same edit (`start`).
  */
 const props = defineProps<{ name: string; editable: boolean }>();
 const emit = defineEmits<{ rename: [name: string] }>();
@@ -33,6 +33,8 @@ async function finish(save: boolean, refocus = false) {
 	trigger.value?.focus();
 }
 
+defineExpose({ start });
+
 function onEnter(event: KeyboardEvent) {
 	if (!event.isComposing) void finish(true, true);
 }
@@ -40,7 +42,8 @@ function onEnter(event: KeyboardEvent) {
 
 <template>
 	<h1 v-if="!editable" class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9">{{ name }}</h1>
-	<!-- The button and the field share one box, pulled out by its border and padding, so the name does not move. -->
+	<!-- The button and the field share one box, pulled out by its border and padding, so the name does not move.
+	     Chrome draws a field's text 1px lower than the same line in the button; the field's 1px bottom padding lifts it back (pixel-compared). -->
 	<h1 v-else class="flex min-w-0 flex-1 text-lg-semibold text-ink-gray-9" :aria-label="name" data-slot="workspace-title">
 		<!-- The field is as wide as its text, as the button is: a hidden copy of the text sizes it, with 1px more for the caret (size="1" drops the field's own width). -->
 		<span v-if="editing" class="-ml-[5px] grid min-w-12 max-w-[calc(100%+5px)]">
@@ -52,7 +55,7 @@ function onEnter(event: KeyboardEvent) {
 				size="1"
 				maxlength="80"
 				aria-label="Workspace name"
-				class="col-start-1 row-start-1 h-7 w-full min-w-0 rounded-4 border border-outline-gray-4 bg-surface-base px-1 py-0 text-lg-semibold text-ink-gray-9 shadow-sm outline-none focus:border-outline-gray-4 focus:ring-0"
+				class="col-start-1 row-start-1 h-7 w-full min-w-0 rounded-4 border border-outline-gray-4 bg-surface-base px-1 pb-px pt-0 text-lg-semibold text-ink-gray-9 shadow-sm outline-none focus:border-outline-gray-4 focus:ring-0"
 				@keydown.enter.prevent="onEnter"
 				@keydown.esc.prevent.stop="finish(false, true)"
 				@blur="finish(true)"

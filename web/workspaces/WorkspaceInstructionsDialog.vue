@@ -14,6 +14,7 @@ const props = defineProps<{ request: Extract<WorkspaceDialogRequest, { kind: "in
 const open = computed({ get: () => workspaceDialog.open, set: (value) => (workspaceDialog.open = value) });
 
 const instructions = ref(props.request.workspace.instructions);
+const changed = computed(() => instructions.value.trim() !== props.request.workspace.instructions.trim());
 const error = ref("");
 const saving = ref(false);
 
@@ -32,6 +33,7 @@ onMounted(() =>
 );
 
 async function save() {
+	if (!changed.value) return;
 	saving.value = true;
 	error.value = "";
 	try {
@@ -53,7 +55,7 @@ async function save() {
 			<ErrorMessage v-if="error" :message="error" />
 			<div class="flex justify-end gap-2 pt-2">
 				<Button label="Cancel" @click="open = false" />
-				<Button type="submit" variant="solid" theme="gray" :loading="saving" label="Save" />
+				<Button type="submit" variant="solid" theme="gray" :loading="saving" :disabled="!changed" label="Save" />
 			</div>
 		</form>
 	</Dialog>

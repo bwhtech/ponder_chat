@@ -49,6 +49,8 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 
 		await a.page.getByRole("button", { name: "Share", exact: true }).click();
 		const share = a.page.getByRole("dialog", { name: `Share “${name}”` });
+		// Nothing to save until someone is added.
+		await expect(share.getByRole("button", { name: "Save" })).toBeDisabled();
 		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(b.person.email);
 		await a.page.getByRole("option", { name: new RegExp(escape(b.person.email)) }).click();
 		await expect(share.locator('[data-slot="workspace-member"]')).toContainText(b.person.email);
@@ -117,6 +119,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await a.page.goto(workspaceUrl);
 		await a.page.getByRole("button", { name: "Share", exact: true }).click();
 		const share = a.page.getByRole("dialog", { name: `Share “${name}”` });
+		await expect(share.getByRole("button", { name: "Save" })).toBeDisabled();
 		await share.locator('[data-slot="workspace-member"]').getByRole("button", { name: /^Remove / }).click();
 		await expect(share.locator('[data-slot="workspace-member"]')).toHaveCount(0);
 		await share.getByRole("button", { name: "Save" }).click();
@@ -170,7 +173,7 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	}
 });
 
-test("the owner renames a workspace by its title, and adds and edits its instructions on their own", async ({ page, person, fake }) => {
+test("the owner renames a workspace by its title or its menu, and adds and edits its instructions on their own", async ({ page, person, fake }) => {
 	const tag = person.id.slice(0, 6);
 	const name = `Ward rota ${tag}`;
 	const renamed = `Night rota ${tag}`;
@@ -199,8 +202,11 @@ test("the owner renames a workspace by its title, and adds and edits its instruc
 		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 	});
 
-	await test.step("Enter renames it: the sidebar follows, and the address keeps its slug", async () => {
-		await page.getByRole("button", { name: "Rename", exact: true }).click();
+	await test.step("Rename in the ⋯ menu opens the same field; Enter renames it, the sidebar follows, and the address keeps its slug", async () => {
+		await page.getByRole("button", { name: "Workspace actions" }).click();
+		await page.getByRole("menuitem", { name: "Rename" }).click();
+		await expect(field).toBeFocused();
+		await expect(field).toHaveValue(name);
 		await field.fill(renamed);
 		await field.press("Enter");
 		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
@@ -213,10 +219,16 @@ test("the owner renames a workspace by its title, and adds and edits its instruc
 
 	await test.step("Add instructions opens them on their own; Edit and their lines open them again", async () => {
 		const dialog = page.getByRole("dialog", { name: "Instructions" });
+		const save = dialog.getByRole("button", { name: "Save" });
 		await instructionsSection(page).getByRole("button", { name: "Add instructions" }).click();
 		await expect(dialog.getByLabel("Instructions")).toBeFocused();
 		await expect(dialog.getByLabel("Name")).toHaveCount(0);
+		// Save waits for a change; spaces alone are none.
+		await expect(save).toBeDisabled();
+		await dialog.getByLabel("Instructions").fill("   ");
+		await expect(save).toBeDisabled();
 		await dialog.getByLabel("Instructions").fill(first);
+		await expect(save).toBeEnabled();
 		await dialog.getByRole("button", { name: "Save" }).click();
 		await expect(dialog).toHaveCount(0);
 		await expect(aside(page).getByText(first)).toBeVisible();
@@ -229,6 +241,7 @@ test("the owner renames a workspace by its title, and adds and edits its instruc
 
 		await instructionsSection(page).getByRole("button", { name: "Edit", exact: true }).click();
 		await expect(dialog.getByLabel("Instructions")).toHaveValue(first);
+		await expect(save).toBeDisabled();
 		await dialog.getByLabel("Instructions").fill(second);
 		await dialog.getByRole("button", { name: "Save" }).click();
 		await expect(dialog).toHaveCount(0);
