@@ -74,6 +74,7 @@ export function failureReason(error: string | null) {
 	const page = /^Page (\d+)\b/.exec(error ?? "");
 	if (page) return `Could not read page ${page[1]}`;
 	if (/\bno text\b/.test(error ?? "")) return "Found no text to read";
+	if (/^This table is too/.test(error ?? "")) return "The table is too large";
 	return "Could not read it";
 }
 
@@ -81,6 +82,8 @@ export function failureReason(error: string | null) {
 export function failureCause(error: string | null) {
 	if (/time(d)? ?out/i.test(error ?? "")) return "It took too long.";
 	if (/missing from storage/.test(error ?? "")) return "The file is missing. Upload it again.";
+	// The server's own words (csv.ts): how wide it may be, or what to change.
+	if (/^This table is too/.test(error ?? "")) return error;
 	return null;
 }
 
