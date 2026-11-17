@@ -1,5 +1,6 @@
 import { toCredits } from "../credits/Credits.ts";
 import { MODELS } from "../models/Models.ts";
+import { SYSTEM_FUNCTION_IDS, type SystemFunctionId } from "../telemetry/Runs.ts";
 
 /**
  * Usage for /admin, read from `charged_runs` (telemetry/Runs.ts) by AdminReports.ts: cost,
@@ -103,6 +104,26 @@ export function byModel(rows: ReadonlyArray<{ model: string; usd: number }>, cre
 		.sort((a, b) => b.credits - a.credits);
 }
 
+/**
+ * What the app's own calls cost (docs/workspaces-plan.md, "System spend"): chat names,
+ * memory and workspace embeddings, picture pages. Read from `runs`, not `charged_runs`, in
+ * US dollars: they cost no one credits. Every system function id is listed, with 0 when
+ * it made no call, largest cost first.
+ */
+export type SystemSpend = { usd: number; calls: number; byFunction: { functionId: SystemFunctionId; usd: number; calls: number }[] };
+
+export function systemSpend(rows: ReadonlyArray<{ function_id: string; usd: number; calls: number }>): SystemSpend {
+	const byFunction = SYSTEM_FUNCTION_IDS.map((functionId) => {
+		const row = rows.find((found) => found.function_id === functionId);
+		return { functionId, usd: roundUsd(row?.usd ?? 0), calls: row?.calls ?? 0 };
+	}).sort((a, b) => b.usd - a.usd || b.calls - a.calls);
+	return {
+		usd: roundUsd(byFunction.reduce((sum, row) => sum + row.usd, 0)),
+		calls: byFunction.reduce((sum, row) => sum + row.calls, 0),
+		byFunction,
+	};
+}
+
 /** The last `days` UTC dates up to the day that starts at `today`, oldest first. */
 export function lastDays(days: number, today: Date) {
 	const start = today.getTime();
@@ -117,4 +138,9 @@ function modelName(id: string) {
 
 function round(value: number) {
 	return Math.round(value * 10) / 10;
+}
+
+/** `runs.cost_usd` keeps 6 places; sums of floats get more. */
+function roundUsd(value: number) {
+	return Math.round(value * 1e6) / 1e6;
 }

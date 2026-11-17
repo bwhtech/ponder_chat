@@ -27,16 +27,48 @@ export type Activity = {
 	after: Record<string, unknown> | null;
 };
 
-export function toActivity(row: EventRow, names: Map<string, Named>): Activity {
+/**
+ * `workspaces` names the organisation workspaces that sharing events point to: those
+ * events keep the workspace's id only.
+ */
+export function toActivity(row: EventRow, names: Map<string, Named>, workspaces = new Map<string, string>()): Activity {
+	const { before, after } = WORKSPACE_ACTIONS.has(row.action) ? workspaceChanges(row, workspaces) : row;
 	return {
 		id: row.id,
 		at: row.at.toISOString(),
 		actor: names.get(row.actor_id) ?? { id: row.actor_id, name: displayName(null, row.actor_email), email: row.actor_email },
 		action: row.action,
 		target: row.target ? (names.get(row.target) ?? unknownTarget(row.target)) : null,
-		before: row.before,
-		after: row.after,
+		before,
+		after,
 	};
+}
+
+/** The events of organisation workspaces (workspaces/Workspaces.ts). */
+export const WORKSPACE_ACTIONS = new Set(["create-workspace", "update-workspace", "share-workspace", "delete-workspace"]);
+
+/** The workspace ids that sharing events point to, to name them. */
+export function sharedWorkspaceIds(rows: ReadonlyArray<EventRow>) {
+	return [...new Set(rows.flatMap((row) => (row.action === "share-workspace" && typeof row.after?.workspace === "string" ? [row.after.workspace] : [])))];
+}
+
+/**
+ * A workspace's instructions can be 20,000 characters, twice in an update: the page gets
+ * their length, and whether they changed, not the text. A sharing event gets the
+ * workspace's name while it is for everyone.
+ */
+function workspaceChanges(row: EventRow, workspaces: Map<string, string>) {
+	const before = row.before && withoutInstructions(row.before);
+	const after = row.after && withoutInstructions(row.after, row.before);
+	const name = after && row.action === "share-workspace" ? workspaces.get(String(after.workspace)) : undefined;
+	return { before, after: after && name ? { ...after, name } : after };
+}
+
+function withoutInstructions(fields: Record<string, unknown>, before?: Record<string, unknown> | null) {
+	if (typeof fields.instructions !== "string") return fields;
+	const { instructions, ...rest } = fields;
+	const changed = typeof before?.instructions === "string" ? { instructionsChanged: before.instructions !== instructions } : {};
+	return { ...rest, instructionsLength: instructions.length, ...changed };
 }
 
 export function unknownTarget(target: string): Named {
