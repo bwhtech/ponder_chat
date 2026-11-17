@@ -66,11 +66,16 @@ export const workspaceSearchInput = z.object({
 export type WorkspaceSearchInput = z.infer<typeof workspaceSearchInput>;
 
 function excerptList(excerpts: ReadonlyArray<WorkspaceExcerpt>) {
-	return excerpts.map((excerpt, index) => `[${index + 1}] ${excerpt.location}\n${escapeBlock(excerpt.content)}`).join("\n\n");
+	return excerpts.map((excerpt, index) => `[${index + 1}] ${oneLine(excerpt.location)}\n${escapeBlock(excerpt.content)}`).join("\n\n");
 }
 
 function attribute(value: string) {
 	return value.replace(/[&"<>\n\r]/g, (char) => ({ "&": "&amp;", '"': "&quot;", "<": "&lt;", ">": "&gt;", "\n": " ", "\r": " " })[char]!);
+}
+
+/** A location line holds the file's name and its headings: it stays one line, inside its block. */
+function oneLine(text: string) {
+	return escapeBlock(text.replace(/[\r\n]+/g, " "));
 }
 
 /** Text from people cannot close its own block and write outside it. */
