@@ -64,55 +64,86 @@ const make = Effect.gen(function* () {
 	const embedder = yield* makeEmbedder;
 	const readers = yield* Effect.context<PageReader.PageReader | PdfText.PdfText>();
 
-	/** The document, while this run is its latest. */
+	/** The document, while this run is its latest. A first look: each write checks again (fenced). */
 	const current = (request: IndexRequest) =>
 		Effect.map(store.byId(request.documentId), Option.filter((row) => row.generation === request.generation));
 	const logRow = (row: DocumentRow, step: LogRow["step"], detail: LogDetail, extra: Partial<LogRow> = {}) =>
 		log.write({ documentId: row.id, workspaceId: row.workspace_id, generation: row.generation, step, detail, ...extra });
 
-	const failRow = Effect.fnUntraced(function* (row: DocumentRow, stage: IndexStage, error: string, extra: LogDetail = {}) {
-		const message = cutError(error);
-		const ms = yield* log.elapsedMs(row.id, row.generation);
-		yield* sql.withTransaction(Effect.all([store.settle(row.id, row.generation, "failed", message), logRow(row, "failed", { step: stage, error: message, ms, ...extra })]));
-		yield* Effect.logWarning(`workspace documents: indexing failed for document ${row.id} of workspace ${row.workspace_id}`);
-	});
-
 	/**
-	 * The text, and the page reads' `runs` rows and log rows, together. The log lists rows in
-	 * the order they were written (log.ts), and a person reads "parsed" before its pages.
+	 * Runs `write` in a transaction that holds the document's row, while this run is still its
+	 * latest and the document is Reading. A step can wait minutes on a model: a newer run, "Try
+	 * again" or a delete may come meanwhile. They wait for a write in progress, and a write
+	 * after them does nothing. None when the run was overtaken, or the document is settled or gone.
 	 */
-	const saveRead = (row: DocumentRow, read: DocumentText) =>
+	const fenced = <A, E, R>(row: Pick<DocumentRow, "id" | "generation">, write: (locked: DocumentRow) => Effect.Effect<A, E, R>) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				yield* store.saveText(row.id, storedText(read.pages));
-				yield* logRow(row, "parsed", { engine: read.engine, pages: read.pageCount, chars: read.chars, ms: read.ms });
-				yield* recordPageReads(row, read.pageReads);
+				const locked = yield* store.lockReading(row.id, row.generation);
+				if (Option.isNone(locked)) return Option.none<A>();
+				return Option.some(yield* write(locked.value));
 			}),
 		);
 
-	const recordPageReads = Effect.fnUntraced(function* (row: DocumentRow, reads: ReadonlyArray<PageRead>) {
+	/** Failed, with the page reads that led to it. "gone" when a newer run took over. */
+	const failRow = Effect.fnUntraced(function* (row: DocumentRow, stage: IndexStage, error: string, extra: LogDetail = {}, pageReads: ReadonlyArray<PageRead> = []) {
+		const message = cutError(error);
+		const failed = yield* fenced(row, (locked) =>
+			Effect.gen(function* () {
+				yield* logPageReads(locked, pageReads);
+				const ms = yield* log.elapsedMs(locked.id, locked.generation);
+				yield* store.settle(locked.id, locked.generation, "failed", message);
+				yield* logRow(locked, "failed", { step: stage, error: message, ms, ...extra });
+			}),
+		);
+		if (Option.isNone(failed)) return "gone" as const;
+		yield* Effect.logWarning(`workspace documents: indexing failed for document ${row.id} of workspace ${row.workspace_id}`);
+		return "failed" as const;
+	});
+
+	/**
+	 * The text, and the page reads' log rows, together. The log lists rows in the order they
+	 * were written (log.ts), and a person reads "parsed" before its pages.
+	 */
+	const saveRead = (row: DocumentRow, read: DocumentText) =>
+		fenced(row, (locked) =>
+			Effect.gen(function* () {
+				yield* store.saveText(locked.id, storedText(read.pages));
+				yield* logRow(locked, "parsed", { engine: read.engine, pages: read.pageCount, chars: read.chars, ms: read.ms });
+				yield* logPageReads(locked, read.pageReads);
+			}),
+		);
+
+	/** The `runs` rows of the page reads: their spend is kept, also for a run that a newer one overtook. */
+	const recordPageRuns = Effect.fnUntraced(function* (row: DocumentRow, reads: ReadonlyArray<PageRead>) {
 		for (const read of reads) {
-			const runId = read.attempts > 0 ? `workspace-pdf:${row.id}:${row.generation}:${read.page}` : null;
+			const runId = pageRunId(row, read);
 			if (runId) yield* runs.insert(pageReadRun(runId, row.added_by, read));
-			const { page, reason, model, ms, ok, error, attempts, inputTokens, outputTokens } = read;
-			yield* logRow(row, "page-read", { page, reason, model, ms, ok, error, attempts, inputTokens, outputTokens }, { part: page, runId });
 		}
 	});
 
+	const logPageReads = Effect.fnUntraced(function* (row: DocumentRow, reads: ReadonlyArray<PageRead>) {
+		for (const read of reads) {
+			const { page, reason, model, ms, ok, error, attempts, inputTokens, outputTokens } = read;
+			yield* logRow(row, "page-read", { page, reason, model, ms, ok, error, attempts, inputTokens, outputTokens }, { part: page, runId: pageRunId(row, read) });
+		}
+	});
+
+	/** "parsed", or how the run ended: failed, or gone when a newer run took over meanwhile. */
 	const parse = Effect.fn("workspace.parse")(function* (row: DocumentRow) {
 		yield* Tracing.annotate({ "ponder.bytes": row.size });
 		const bytes = yield* store.bytes(row);
-		if (Option.isNone(bytes)) return yield* Effect.as(failRow(row, "parse", "The file is missing from storage. Upload it again."), false);
+		if (Option.isNone(bytes)) return yield* failRow(row, "parse", "The file is missing from storage. Upload it again.");
 		const read = yield* readDocument(row.media_type, new Uint8Array(bytes.value)).pipe(Effect.provideContext(readers), Effect.result);
 		if (read._tag === "Failure") {
 			const error = read.failure;
-			if (error._tag === "PdfUnreadable" || error._tag === "TableTooLarge") return yield* Effect.as(failRow(row, "parse", error.message), false);
-			yield* recordPageReads(row, error.pageReads);
-			return yield* Effect.as(failRow(row, "page-read", error.message, { page: error.page }), false);
+			if (error._tag === "PdfUnreadable" || error._tag === "TableTooLarge") return yield* failRow(row, "parse", error.message);
+			yield* recordPageRuns(row, error.pageReads);
+			return yield* failRow(row, "page-read", error.message, { page: error.page }, error.pageReads);
 		}
-		if (read.success.chars === 0) return yield* Effect.as(failRow(row, "parse", "The document has no text."), false);
-		yield* saveRead(row, read.success);
-		return true;
+		if (read.success.chars === 0) return yield* failRow(row, "parse", "The document has no text.");
+		yield* recordPageRuns(row, read.success.pageReads);
+		return Option.isSome(yield* saveRead(row, read.success)) ? ("parsed" as const) : ("gone" as const);
 	});
 
 	const prepare = Effect.fn("Indexer.prepare")(function* (request: IndexRequest) {
@@ -120,12 +151,15 @@ const make = Effect.gen(function* () {
 		if (Option.isNone(found)) return { state: "gone" } satisfies Prepared;
 		const row = found.value;
 		yield* Effect.log(`workspace documents: indexing document ${row.id} of workspace ${row.workspace_id}`);
-		if (!row.has_text && !(yield* parse(row))) return { state: "failed" } satisfies Prepared;
+		const parsed = row.has_text ? "parsed" : yield* parse(row);
+		if (parsed !== "parsed") return { state: parsed } satisfies Prepared;
 		const text = Option.getOrElse(yield* store.text(row.id), () => "");
 		const made = chunkDocument({ name: row.name, pages: storedPages(row.media_type, text), headings: headingRule(row.media_type) });
-		yield* passages.replace(row.id, row.workspace_id, made);
 		const batches = Math.ceil(made.length / BATCH_SIZE);
-		yield* logRow(row, "chunked", { passages: made.length, batches });
+		const chunked = yield* fenced(row, (locked) =>
+			Effect.andThen(passages.replace(locked.id, locked.workspace_id, made), logRow(locked, "chunked", { passages: made.length, batches })),
+		);
+		if (Option.isNone(chunked)) return { state: "gone" } satisfies Prepared;
 		return { state: "chunked", batches } satisfies Prepared;
 	});
 
@@ -140,13 +174,14 @@ const make = Effect.gen(function* () {
 		const runId = `workspace-index:${row.id}:${row.generation}:${batch}`;
 		const vectors = yield* embedder.embedMany(todo.map(embeddingText), { id: runId, functionId: "workspace-index", user: row.added_by, threadId: null });
 		const ms = (yield* Clock.currentTimeMillis) - started;
-		yield* sql.withTransaction(
+		// Passage ids are the same in each run: a run that a newer one overtook must not write into its passages.
+		yield* fenced(row, (locked) =>
 			Effect.all([
 				passages.saveEmbeddings(
 					embedder.model,
 					todo.map((passage, index) => ({ id: passage.id, vector: vectors[index] })),
 				),
-				logRow(row, "embedded", { batch, passages: todo.length, model: embedder.model, ms }, { part: batch, runId }),
+				logRow(locked, "embedded", { batch, passages: todo.length, model: embedder.model, ms }, { part: batch, runId }),
 			]),
 		);
 	});
@@ -155,17 +190,25 @@ const make = Effect.gen(function* () {
 		const found = yield* current(request);
 		if (Option.isNone(found)) return "gone" as const;
 		const row = found.value;
-		if ((yield* passages.missing(row.id, embedder.model)) > 0) return yield* Effect.as(failRow(row, "finish", "Some passages have no embedding. Try again."), "failed" as const);
-		const ms = yield* log.elapsedMs(row.id, row.generation);
-		const count = yield* passages.count(row.id);
-		yield* sql.withTransaction(Effect.all([store.settle(row.id, row.generation, "ready", null), logRow(row, "ready", { passages: count, ms })]));
+		const ready = yield* fenced(row, (locked) =>
+			Effect.gen(function* () {
+				if ((yield* passages.missing(locked.id, embedder.model)) > 0) return false;
+				const ms = yield* log.elapsedMs(locked.id, locked.generation);
+				const count = yield* passages.count(locked.id);
+				yield* store.settle(locked.id, locked.generation, "ready", null);
+				yield* logRow(locked, "ready", { passages: count, ms });
+				return true;
+			}),
+		);
+		if (Option.isNone(ready)) return "gone" as const;
+		if (!ready.value) return yield* failRow(row, "finish", "Some passages have no embedding. Try again.");
 		yield* Effect.log(`workspace documents: document ${row.id} of workspace ${row.workspace_id} is ready`);
 		return "ready" as const;
 	});
 
 	const fail = Effect.fn("Indexer.fail")(function* (request: IndexRequest, stage: IndexStage, error: string) {
 		const found = yield* current(request);
-		if (Option.isSome(found) && found.value.status === "reading") yield* failRow(found.value, stage, error);
+		if (Option.isSome(found)) yield* failRow(found.value, stage, error);
 	});
 
 	const run = Effect.fn("workspace.index")(function* (request: IndexRequest) {
@@ -195,6 +238,11 @@ export const layer = Layer.effect(Indexer, make);
 export function failureText(error: unknown) {
 	const tagged = error instanceof Error && "_tag" in error;
 	return tagged ? `${error.message} Try again.` : "Something went wrong while indexing. Try again.";
+}
+
+/** A page read's `runs` row: none when the page could not be sent at all. */
+function pageRunId(row: DocumentRow, read: PageRead) {
+	return read.attempts > 0 ? `workspace-pdf:${row.id}:${row.generation}:${read.page}` : null;
 }
 
 function pageReadRun(id: string, user: string, read: PageRead): Runs.RunRow {

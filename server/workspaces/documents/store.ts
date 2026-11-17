@@ -115,6 +115,16 @@ export function documentStore(sql: PgClient.PgClient, objects: ObjectStore.Objec
 			where id = ${documentId} and status = any(${from}) and generation = coalesce(${generation}::int, generation)
 			returning generation`,
 	});
+	// FOR NO KEY UPDATE: a restart and a delete wait for it, and the passages and log rows
+	// that the holder inserts (whose keys point here) do not.
+	const lockReading = SqlSchema.findOneOption({
+		Request: Schema.Struct({ documentId: Schema.String, generation: Schema.Number }),
+		Result: DocumentRow,
+		execute: ({ documentId, generation }) => sql`
+			select ${sql.literal(COLUMNS)} from workspace_documents
+			where id = ${documentId} and generation = ${generation} and status = 'reading'
+			for no key update`,
+	});
 	const findReadingSince = SqlSchema.findAll({
 		Request: Schema.Number,
 		Result: DocumentRow,
@@ -176,6 +186,12 @@ export function documentStore(sql: PgClient.PgClient, objects: ObjectStore.Objec
 		restart: (documentId: string, from: ReadonlyArray<DocumentStatus>, generation: number | null = null) =>
 			decoded(restartWhere({ documentId, from, generation })).pipe(Effect.map(Option.map((row) => row.generation))),
 
+		/**
+		 * Locks the document's row until the transaction ends, while `generation` is its latest
+		 * and it is Reading. None when a newer run took over, it is settled, or it is gone.
+		 */
+		lockReading: (documentId: string, generation: number) => decoded(lockReading({ documentId, generation })),
+
 		/** The generation's Workflow run, once it started. */
 		setRun: (documentId: string, generation: number, runId: string) =>
 			sql`update workspace_documents set index_run_id = ${runId} where id = ${documentId} and generation = ${generation}`.pipe(Effect.asVoid),
@@ -223,6 +239,7 @@ export type DocumentStore = {
 	readonly readySizes: (workspaceId: string) => Effect.Effect<ReadonlyArray<typeof SizeRow.Type>, SqlError>;
 	readonly texts: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<typeof TextOfRow.Type>, SqlError>;
 	readonly restart: (documentId: string, from: ReadonlyArray<DocumentStatus>, generation?: number | null) => Effect.Effect<Option.Option<number>, SqlError>;
+	readonly lockReading: (documentId: string, generation: number) => Effect.Effect<Option.Option<DocumentRow>, SqlError>;
 	readonly setRun: (documentId: string, generation: number, runId: string) => Effect.Effect<void, SqlError>;
 	readonly readingFor: (seconds: number) => Effect.Effect<ReadonlyArray<DocumentRow>, SqlError>;
 	readonly settle: (documentId: string, generation: number, status: Exclude<DocumentStatus, "reading">, error: string | null) => Effect.Effect<void, SqlError>;

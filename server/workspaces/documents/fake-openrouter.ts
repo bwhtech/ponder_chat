@@ -27,6 +27,8 @@ export type FakeOpenRouter = {
 	oneAtATime: boolean;
 	/** Answers 502 to an embedding call when this says so: it sees the call's texts. */
 	failEmbedding?: (input: string[]) => boolean;
+	/** Holds a call until the promise it gives settles: a call that is slow, or that never ends. */
+	gate?: (kind: "embedding" | "page") => Promise<void> | undefined;
 	close: () => Promise<void>;
 };
 
@@ -40,6 +42,7 @@ export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
 			response.end(JSON.stringify(json));
 		};
 		if (request.url?.endsWith("/v1/embeddings")) {
+			await fake.gate?.("embedding");
 			const input = body.input as string[];
 			// As OpenRouter answers for google/gemini-embedding-2 under Zero Data Retention.
 			if (fake.oneAtATime && input.length > 1) return send(404, { error: { message: "No endpoints found matching your data policy (Zero data retention).", code: 404 } });
@@ -49,6 +52,7 @@ export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
 			return send(200, { object: "list", model: body.model, data, usage: { prompt_tokens: input.length * 7, total_tokens: input.length * 7, cost: EMBED_COST } });
 		}
 		if (request.url?.endsWith("/v1/chat/completions")) {
+			await fake.gate?.("page");
 			const file = JSON.stringify(body.messages).match(/page-(\d+)\.pdf/);
 			const answer = pages.get(Number(file?.[1]));
 			if (answer === "fail") return send(400, { error: { message: "Provider returned error" } });

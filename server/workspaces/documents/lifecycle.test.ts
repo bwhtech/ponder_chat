@@ -4,6 +4,7 @@
  * and a first chat or an upload that races a delete. On a real Postgres
  * (TEST_DATABASE_URL), in a schema of its own, with a stand-in bucket and OpenRouter.
  */
+import { readFileSync } from "node:fs";
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
@@ -65,10 +66,35 @@ const services = Layer.fresh(Documents.layer).pipe(
 const run = <A, E>(effect: Effect.Effect<A, E, WorkspacesTag | DocumentsTag | IndexerTag>) => runPromise(Effect.provide(effect, services));
 const database = <A>(work: (sql: PgClient.PgClient) => Effect.Effect<A, unknown>) => runPromise(PgClient.PgClient.use(work).pipe(Effect.orDie));
 
-const file = (name: string, text: string) => new File([text], name, { type: "text/markdown" });
+const FIXTURE = readFileSync(new URL("./fixtures/picture-pages.pdf", import.meta.url));
+const file = (name: string, text: string | Uint8Array, type = "text/markdown") => new File([text as BlobPart], name, { type });
 const manual = (topic: string) => `## Part 1\n\nThe ${topic}. ${"Read the whole procedure before you start. ".repeat(20)}`;
 const newWorkspace = (name: string) => run(Workspaces.Workspaces.use((workspaces) => workspaces.create(ana, { kind: "private", name, description: "", instructions: "", icon: null }))).then((created) => created.id);
 const upload = (workspaceId: string, name: string, topic = "vancomycin dose") => run(Documents.Documents.use((documents) => documents.upload(ana, workspaceId, file(name, manual(topic)))));
+const indexer = <A, E>(use: (service: IndexerTag["Service"]) => Effect.Effect<A, E>) => run(Indexer.Indexer.use(use));
+
+/** Holds the next call of this kind until `release`; `arrived` settles when it comes. */
+function holdNext(kind: "embedding" | "page") {
+	let release = () => {};
+	let arrived = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	const came = new Promise<void>((resolve) => (arrived = resolve));
+	openRouter.gate = (called) => {
+		if (called !== kind) return undefined;
+		openRouter.gate = undefined;
+		arrived();
+		return held;
+	};
+	return { arrived: came, release: () => release() };
+}
+
+/** What Documents.retry and the sweep do: a new generation takes over the document. */
+const takeOver = (documentId: string) =>
+	database((sql) => sql<{ generation: number }>`
+		update workspace_documents set status = 'reading', error = null, generation = generation + 1, index_run_id = null, reading_since = now()
+		where id = ${documentId} returning generation`).then(([row]) => ({ documentId, generation: row.generation }));
+const embeddedPassages = (documentId: string) =>
+	database((sql) => sql<{ count: number }>`select count(*)::int as count from workspace_passages where document_id = ${documentId} and embedding is not null`).then(([row]) => row.count);
 
 describe.skipIf(!base)("workspace document lifecycle", () => {
 	beforeAll(async () => {
@@ -119,5 +145,55 @@ describe.skipIf(!base)("workspace document lifecycle", () => {
 		assert.isAbove(await run(Documents.Documents.use((documents) => documents.removeLeftObjects)), 0);
 		assert.deepStrictEqual(await waiting(), []);
 		assert.ok(keys.every((key) => !bucket.objects.has(key)));
+	});
+
+	it("an embedding call that a newer run overtakes writes nothing into the new run's passages", async () => {
+		const workspaceId = await newWorkspace("Overtaken");
+		const document = await upload(workspaceId, "slow.md");
+		const old = asked.at(-1)!;
+		assert.deepStrictEqual(await indexer((service) => service.prepare(old)), { state: "chunked", batches: 1 });
+
+		const hold = holdNext("embedding");
+		const slow = indexer((service) => service.embedBatch(old, 0));
+		await hold.arrived;
+		// While the old call waits on OpenRouter, a new run starts and splits the text again.
+		const latest = await takeOver(document.id);
+		assert.deepStrictEqual(await indexer((service) => service.prepare(latest)), { state: "chunked", batches: 1 });
+		hold.release();
+		await slow;
+
+		// The passage ids are the same in both runs: the old vectors must not land in the new passages.
+		assert.strictEqual(await embeddedPassages(document.id), 0);
+		const logged = await database((sql) => sql<{ count: number }>`
+			select count(*)::int as count from workspace_document_log where document_id = ${document.id} and generation = ${old.generation} and step = 'embedded'`);
+		assert.strictEqual(logged[0].count, 0);
+		assert.strictEqual(await indexer((service) => Effect.andThen(service.embedBatch(latest, 0), service.finish(latest))), "ready");
+		assert.strictEqual(await indexer((service) => service.finish(old)), "gone");
+		assert.strictEqual(await embeddedPassages(document.id), 1);
+	});
+
+	it("a PDF read that a newer run overtakes neither saves its text nor replaces the ready passages", async () => {
+		openRouter.pages.set(2, "| Drug | Dose |\n| --- | --- |\n| Cefazolin | 15 mg/kg |").set(3, "Exit site care: clean the exit site every second day.");
+		const workspaceId = await newWorkspace("Slow read");
+		const document = await run(Documents.Documents.use((documents) => documents.upload(ana, workspaceId, file("slow.pdf", FIXTURE, "application/pdf"))));
+		const old = asked.at(-1)!;
+
+		const hold = holdNext("page");
+		const slow = indexer((service) => service.prepare(old));
+		await hold.arrived;
+		// The new run reads, splits and embeds the document, and makes it ready, while the old read waits.
+		const latest = await takeOver(document.id);
+		assert.strictEqual(await indexer((service) => service.run(latest)), "ready");
+		const passages = await embeddedPassages(document.id);
+		assert.isAbove(passages, 0);
+		hold.release();
+
+		assert.deepStrictEqual(await slow, { state: "gone" });
+		assert.strictEqual(await embeddedPassages(document.id), passages);
+		const settled = await database((sql) => sql<{ status: string; generation: number }>`select status, generation from workspace_documents where id = ${document.id}`);
+		assert.deepStrictEqual(settled[0], { status: "ready", generation: latest.generation });
+		// The old read's model calls are still kept in runs: they were paid for.
+		const paid = await database((sql) => sql<{ count: number }>`select count(*)::int as count from runs where id like ${`workspace-pdf:${document.id}:${old.generation}:%`}`);
+		assert.strictEqual(paid[0].count, 2);
 	});
 });
