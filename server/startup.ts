@@ -27,6 +27,7 @@ import * as ApprovalUses from "./workflow/approval-uses.ts";
 import * as ThreadRuns from "./workflow/runs.ts";
 import * as WebBuild from "./web-build.ts";
 import * as OpenRouter from "./openrouter/OpenRouter.ts";
+import * as Workspaces from "./workspaces/Workspaces.ts";
 
 /**
  * What the server does once when it starts, before it answers requests: create and
@@ -81,6 +82,8 @@ const migrateAll = Effect.gen(function* () {
 	// After threads: its tables reference them.
 	yield* CompactionStore.CompactionStore.use((store) => store.migrate);
 	yield* Auth.Auth.use((auth) => auth.migrate);
+	// After Auth and Threads: its tables reference users, and threads.workspace_id references it.
+	yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
 	yield* Files.Files.use((files) => files.migrate);
 	yield* Credits.Credits.use((credits) => credits.migrate);
 	yield* Invites.Invites.use((invites) => invites.migrate);

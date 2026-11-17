@@ -21,14 +21,21 @@ import * as Tracing from "../tracing/Tracing.ts";
  * does not decode is a bug, not a failure: a defect.
  */
 
-/** A thread in the person's list (GET /api/threads, the boot page). The web app reads this type. */
-export type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number };
+/**
+ * A thread in the person's list (GET /api/threads, the boot page). The web app reads this
+ * type. `workspaceId` only for a chat in a workspace (workspaces/Workspaces.ts).
+ */
+export type ThreadSummary = { id: string; title: string; updatedAt: string; messages: number; workspaceId?: string };
+
+/** A saved thread's version, for the cache of GET /api/threads/:id: when it was saved, and its workspace. */
+export type ThreadVersion = { updatedAt: Date; workspaceId: string | null };
 
 /** The AI SDK's messages, as the app saved them. Only that each is an object is checked, as before: the AI SDK owns their shape. */
 const Messages = Schema.mutable(Schema.Array(Schema.declare((value): value is UIMessage => Predicate.isObject(value))));
 
 const MessagesRow = Schema.Struct({ messages: Messages });
-const UpdatedAtRow = Schema.Struct({ updated_at: Schema.Date });
+const VersionRow = Schema.Struct({ updated_at: Schema.Date, workspace_id: Schema.NullOr(Schema.String) });
+const WorkspaceRow = Schema.Struct({ workspace_id: Schema.NullOr(Schema.String) });
 const OwnerRow = Schema.Struct({ owner: Schema.String });
 const SummaryRow = Schema.Struct({
 	id: Schema.String,
@@ -36,6 +43,7 @@ const SummaryRow = Schema.Struct({
 	updated_at: Schema.Date,
 	messages: Schema.Number,
 	first: Schema.NullOr(Schema.String),
+	workspace_id: Schema.NullOr(Schema.String),
 });
 const ThreadOfOwner = Schema.Struct({ id: Schema.String, owner: Schema.String });
 
@@ -46,12 +54,17 @@ export class Threads extends Context.Service<
 		readonly migrate: Effect.Effect<void, SqlError>;
 		/** The thread's messages, or none for a thread not saved yet. Any owner's: callers check the owner first. */
 		readonly load: (id: string) => Effect.Effect<UIMessage[], SqlError>;
-		/** When the person's thread was last saved; none for one not saved yet (or not theirs). Its version for caching. */
-		readonly updatedAt: (id: string, owner: string) => Effect.Effect<Option.Option<Date>, SqlError>;
+		/** When the person's thread was last saved, and its workspace; none for one not saved yet (or not theirs). Its version for caching. */
+		readonly version: (id: string, owner: string) => Effect.Effect<Option.Option<ThreadVersion>, SqlError>;
 		/** Whose thread this is; none for a new one. */
 		readonly owner: (id: string) => Effect.Effect<Option.Option<string>, SqlError>;
-		/** Saves the person's thread. Someone else's thread with the same id is left alone. */
-		readonly save: (id: string, owner: string, messages: UIMessage[]) => Effect.Effect<void, SqlError>;
+		/** The workspace the thread is in; none for a thread in no workspace, or not saved yet. */
+		readonly workspaceOf: (id: string) => Effect.Effect<Option.Option<string>, SqlError>;
+		/**
+		 * Saves the person's thread. Someone else's thread with the same id is left alone. The
+		 * workspace is set only when the thread is first saved, and never changes after.
+		 */
+		readonly save: (id: string, owner: string, messages: UIMessage[], workspaceId?: string) => Effect.Effect<void, SqlError>;
 		/** Saves a reply into the person's thread. False, and nothing saved, when the thread was deleted. */
 		readonly update: (id: string, owner: string, messages: UIMessage[]) => Effect.Effect<boolean, SqlError>;
 		/** A person's threads, newest first, at most 200. Untitled threads are named by their first message. */
@@ -94,6 +107,9 @@ const make = Effect.gen(function* () {
 		yield* sql`alter table threads add column if not exists owner text not null default 'default'`;
 		yield* sql`alter table threads add column if not exists title text`;
 		yield* sql`create index if not exists threads_owner_updated on threads (owner, updated_at desc)`;
+		// The chat's workspace, set by its first message. Its foreign key is Workspaces.migrate's, which runs after.
+		yield* sql`alter table threads add column if not exists workspace_id text`;
+		yield* sql`create index if not exists threads_workspace on threads (workspace_id) where workspace_id is not null`;
 		yield* migrateSearch;
 	});
 
@@ -102,10 +118,15 @@ const make = Effect.gen(function* () {
 		Result: MessagesRow,
 		execute: (id) => sql`select messages from threads where id = ${id}`,
 	});
-	const findUpdatedAt = SqlSchema.findOneOption({
+	const findVersion = SqlSchema.findOneOption({
 		Request: ThreadOfOwner,
-		Result: UpdatedAtRow,
-		execute: ({ id, owner }) => sql`select updated_at from threads where id = ${id} and owner = ${owner}`,
+		Result: VersionRow,
+		execute: ({ id, owner }) => sql`select updated_at, workspace_id from threads where id = ${id} and owner = ${owner}`,
+	});
+	const findWorkspace = SqlSchema.findOneOption({
+		Request: Schema.String,
+		Result: WorkspaceRow,
+		execute: (id) => sql`select workspace_id from threads where id = ${id}`,
 	});
 	const findOwner = SqlSchema.findOneOption({
 		Request: Schema.String,
@@ -117,7 +138,8 @@ const make = Effect.gen(function* () {
 		Result: SummaryRow,
 		execute: (owner) => sql`
 			select id, title, updated_at, jsonb_array_length(messages) as messages,
-				jsonb_path_query_first(messages, '$[*] ? (@.role == "user").parts[*] ? (@.type == "text").text') #>> '{}' as first
+				jsonb_path_query_first(messages, '$[*] ? (@.role == "user").parts[*] ? (@.type == "text").text') #>> '{}' as first,
+				workspace_id
 			from threads where owner = ${owner}
 			order by updated_at desc limit 200`,
 	});
@@ -130,9 +152,9 @@ const make = Effect.gen(function* () {
 		return messages;
 	});
 
-	const updatedAt = Effect.fn("Threads.updatedAt")(function* (id: string, owner: string) {
-		const row = yield* findUpdatedAt({ id, owner }).pipe(Effect.catchTags({ SchemaError: Effect.die }));
-		return Option.map(row, (found) => found.updated_at);
+	const version = Effect.fn("Threads.version")(function* (id: string, owner: string) {
+		const row = yield* findVersion({ id, owner }).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+		return Option.map(row, (found): ThreadVersion => ({ updatedAt: found.updated_at, workspaceId: found.workspace_id }));
 	});
 
 	const owner = Effect.fn("Threads.owner")(function* (id: string) {
@@ -140,9 +162,15 @@ const make = Effect.gen(function* () {
 		return Option.map(row, (found) => found.owner);
 	});
 
-	const save = Effect.fn("Threads.save")(function* (id: string, owner: string, messages: UIMessage[]) {
+	const workspaceOf = Effect.fn("Threads.workspaceOf")(function* (id: string) {
+		const row = yield* findWorkspace(id).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+		return Option.flatMap(row, (found) => Option.fromNullishOr(found.workspace_id));
+	});
+
+	const save = Effect.fn("Threads.save")(function* (id: string, owner: string, messages: UIMessage[], workspaceId?: string) {
+		// The update leaves workspace_id alone: a chat's workspace never changes.
 		yield* sql`
-			insert into threads (id, owner, messages) values (${id}, ${owner}, ${sql.json(messages)})
+			insert into threads (id, owner, messages, workspace_id) values (${id}, ${owner}, ${sql.json(messages)}, ${workspaceId ?? null})
 			on conflict (id) do update set messages = excluded.messages, updated_at = now()
 			where threads.owner = excluded.owner`;
 	});
@@ -160,6 +188,7 @@ const make = Effect.gen(function* () {
 				title: row.title || nameFromFirstMessage(row.first),
 				updatedAt: row.updated_at.toISOString(),
 				messages: row.messages,
+				...(row.workspace_id && { workspaceId: row.workspace_id }),
 			}),
 		);
 	});
@@ -174,7 +203,7 @@ const make = Effect.gen(function* () {
 		return rows.length > 0;
 	});
 
-	return Threads.of({ migrate, load, updatedAt, owner, save, update, list, rename, remove });
+	return Threads.of({ migrate, load, version, owner, workspaceOf, save, update, list, rename, remove });
 });
 
 export const layer = Layer.effect(Threads, make);

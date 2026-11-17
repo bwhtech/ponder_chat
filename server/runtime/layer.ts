@@ -35,6 +35,7 @@ import * as ChatModels from "../workflow/model.ts";
 import * as Replies from "../workflow/replies.ts";
 import * as ThreadRuns from "../workflow/runs.ts";
 import * as WorkflowRuns from "../workflow/WorkflowRuns.ts";
+import * as Workspaces from "../workspaces/Workspaces.ts";
 import * as Database from "./Database.ts";
 import * as Http from "./Http.ts";
 
@@ -46,7 +47,7 @@ import * as Http from "./Http.ts";
  * runs, logs and traces through them.
  */
 export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer).pipe(
-	Layer.provideMerge(Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer)),
+	Layer.provideMerge(Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer, Workspaces.layer)),
 	Layer.provideMerge(
 		Layer.mergeAll(
 			Threads.layer,

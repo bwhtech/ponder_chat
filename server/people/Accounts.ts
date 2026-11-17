@@ -24,6 +24,11 @@ const AdminRow = Schema.Struct({ email: Schema.String, role: Schema.String, crea
 
 export type AdminRow = typeof AdminRow.Type;
 
+const PersonRow = Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String });
+
+/** A person in the people picker (GET /api/people). */
+export type PersonRow = typeof PersonRow.Type;
+
 export class Accounts extends Context.Service<
 	Accounts,
 	{
@@ -40,6 +45,12 @@ export class Accounts extends Context.Service<
 		readonly emailOf: (userId: string) => Effect.Effect<Option.Option<string>, SqlError>;
 		/** The account of an email; none before the person's first sign-in. */
 		readonly idOfEmail: (email: string) => Effect.Effect<Option.Option<string>, SqlError>;
+		/**
+		 * People whose name or email has the text, without case, by name: at most 20. Any
+		 * signed-in person may search: everyone in the organisation sees everyone. Blocked
+		 * people are left out. An empty text gives the first 20.
+		 */
+		readonly search: (text: string) => Effect.Effect<ReadonlyArray<PersonRow>, SqlError>;
 	}
 >()("ponder/people/Accounts") {}
 
@@ -73,6 +84,15 @@ const make = Effect.gen(function* () {
 		execute: (email) => sql`select id from users where lower(email) = ${email}`,
 	});
 
+	const findPeople = SqlSchema.findAll({
+		Request: Schema.String,
+		Result: PersonRow,
+		execute: (pattern) => sql`
+			select id, coalesce(name, '') as name, email from users
+			where (name ilike ${pattern} escape '\\' or email ilike ${pattern} escape '\\') and banned is not true
+			order by lower(coalesce(name, '')), lower(email) limit 20`,
+	});
+
 	const roleOf = Effect.fn("Accounts.roleOf")(function* (userId: string) {
 		const row = yield* findRole(userId).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 		return roleFrom(Option.match(row, { onNone: () => null, onSome: (found) => found.role }));
@@ -104,7 +124,13 @@ const make = Effect.gen(function* () {
 		return Option.map(row, (found) => found.id);
 	});
 
-	return Accounts.of({ roleOf, isAdmin, setRole, listAdmins, hasAccount, emailOf, idOfEmail });
+	const search = Effect.fn("Accounts.search")(function* (text: string) {
+		// The text is matched as it is: % and _ in it are not wildcards.
+		const pattern = `%${text.trim().replace(/[\\%_]/g, (special) => `\\${special}`)}%`;
+		return yield* findPeople(pattern).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+	});
+
+	return Accounts.of({ roleOf, isAdmin, setRole, listAdmins, hasAccount, emailOf, idOfEmail, search });
 });
 
 export const layer = Layer.effect(Accounts, make);

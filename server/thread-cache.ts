@@ -47,19 +47,25 @@ export const layer = Layer.effect(ThreadCache, make);
 export const threadResponse = Effect.fn("ThreadCache.respond")(function* (c: HonoContext, id: string, owner: string) {
 	const threads = yield* Threads.Threads;
 	const cache = yield* ThreadCache;
-	const updatedAt = Option.getOrNull(yield* threads.updatedAt(id, owner));
+	const version = Option.getOrNull(yield* threads.version(id, owner));
 	const run = Option.getOrUndefined(yield* ThreadRuns.ThreadRuns.use((runs) => runs.latest(id)));
 	const running = Boolean(run && !run.finished);
 	// The model kept erroring: the page offers Retry (workflow/chat.ts).
 	const failed = Boolean(run?.finished && run.failed);
 	// A thread not saved yet (or someone else's) has no version: always fresh, never cached.
-	if (!updatedAt) return c.json({ messages: [], running: false }, 200, { "Cache-Control": "no-store" });
+	if (!version) return c.json({ messages: [], running: false }, 200, { "Cache-Control": "no-store" });
+	// A deleted workspace lets its chats go without saving them, so the workspace is part of the version.
+	const { updatedAt, workspaceId } = version;
 
-	const etag = `"${updatedAt.getTime()}${running ? "-running" : ""}${failed ? "-failed" : ""}"`;
+	const etag = `"${updatedAt.getTime()}${running ? "-running" : ""}${failed ? "-failed" : ""}${workspaceId ? `-w${workspaceId}` : ""}"`;
 	const headers = { ETag: etag, "Cache-Control": "private, no-cache", Vary: "Accept-Encoding" };
 	if (c.req.header("If-None-Match")?.split(",").some((tag) => tag.trim().replace(/^W\//, "") === etag)) return c.body(null, 304, headers);
 
-	const entry = yield* cache.entry(id, etag, Effect.map(threads.load(id), (messages) => JSON.stringify({ messages, running, failed })));
+	const entry = yield* cache.entry(
+		id,
+		etag,
+		Effect.map(threads.load(id), (messages) => JSON.stringify({ messages, running, failed, ...(workspaceId && { workspaceId }) })),
+	);
 	if (/\bgzip\b/.test(c.req.header("Accept-Encoding") ?? "")) {
 		return c.body(new Uint8Array(entry.gzip), 200, { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" });
 	}
