@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Skeleton } from "frappe-ui";
+import TablePlaceholder from "./TablePlaceholder.vue";
 import { computed, onMounted, ref, shallowRef } from "vue";
 import { delimiterFor, isNumericColumn, parseDelimited, type ParsedTable } from "./csv";
 
@@ -38,9 +38,7 @@ onMounted(async () => {
 		<p class="text-base text-ink-gray-7">This file could not be shown.</p>
 		<a :href="url" :download="name" class="text-sm-medium text-ink-gray-8 underline underline-offset-2">Download it</a>
 	</div>
-	<div v-else-if="!table" class="flex flex-col gap-2 p-4">
-		<Skeleton v-for="line in 8" :key="line" class="h-6 w-full rounded-2" />
-	</div>
+	<TablePlaceholder v-else-if="!table" />
 	<p v-else-if="!table.rows.length" class="px-6 pt-[20vh] text-center text-base text-ink-gray-6">This file is empty.</p>
 	<div v-else class="min-w-full">
 		<table class="w-max min-w-full border-separate border-spacing-0 text-base text-ink-gray-7">

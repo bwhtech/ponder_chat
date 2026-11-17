@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Skeleton } from "frappe-ui";
+import TextLines from "./TextLines.vue";
 import { Response } from "frappe-ui-ai-elements";
 import { computed, onMounted, ref } from "vue";
 
@@ -41,9 +41,7 @@ function readable(raw: string) {
 	</div>
 	<p v-else-if="text !== null && !text.trim()" class="px-6 pt-[20vh] text-center text-base text-ink-gray-6">This file is empty.</p>
 	<article v-else data-slot="text-file" class="mx-auto w-full max-w-[680px] px-5 pb-16 pt-8 sm:px-10 sm:pt-10" :aria-busy="text === null || undefined">
-		<div v-if="text === null" class="flex flex-col gap-2.5">
-			<Skeleton v-for="width in ['w-2/5', 'w-full', 'w-11/12', 'w-full', 'w-3/5']" :key="width" :class="['h-3.5 rounded-4', width]" />
-		</div>
+		<TextLines v-if="text === null" />
 		<Response v-else-if="markdown" :content="text" />
 		<pre v-else class="whitespace-pre-wrap break-words font-mono text-sm text-ink-gray-8">{{ text }}</pre>
 	</article>

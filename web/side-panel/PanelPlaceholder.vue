@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { Button, Skeleton } from "frappe-ui";
+import { Button } from "frappe-ui";
+import TablePlaceholder from "./TablePlaceholder.vue";
+import TextLines from "./TextLines.vue";
 import { computed, onMounted } from "vue";
 import { ARTIFACT_LOOK, FILE_LOOK, panelStandIn } from "./look";
 import PdfPagesPlaceholder from "./PdfPagesPlaceholder.vue";
@@ -44,9 +46,10 @@ onMounted(() => (panelStandIn.shown = true));
 			</header>
 			<div class="min-h-0 flex-1 overflow-hidden" :class="header.inset ? 'bg-surface-gray-1' : ''">
 				<PdfPagesPlaceholder v-if="header.kind === 'pdf'" />
-				<div v-else :class="['flex flex-col gap-2.5', header.kind === 'text' ? 'mx-auto w-full max-w-[680px] px-5 pt-8 sm:px-10 sm:pt-10' : 'p-4 sm:p-6']">
-					<Skeleton v-for="width in ['w-2/5', 'w-full', 'w-11/12', 'w-full', 'w-3/5']" :key="width" :class="['h-3.5 rounded-4', width]" />
-				</div>
+				<TablePlaceholder v-else-if="header.kind === 'table'" />
+				<div v-else-if="header.kind === 'text'" class="mx-auto w-full max-w-[680px] px-5 pt-8 sm:px-10 sm:pt-10"><TextLines /></div>
+				<!-- An image has no skeleton of its own: it appears centred, so lines would only flash. -->
+				<div v-else-if="header.kind !== 'image'" class="p-4 sm:p-6"><TextLines /></div>
 			</div>
 		</aside>
 	</Transition>
