@@ -227,16 +227,33 @@ const make = Effect.gen(function* () {
 
 	const update = Effect.fn("Workspaces.update")(function* (actor: Actor, workspaceId: string, changes: WorkspaceChanges) {
 		const found = yield* withAccess(actor.id, workspaceId, "edit");
-		const before = yield* detail(workspaceId, found.access, found.admin);
-		const next = { ...before, ...changes };
-		yield* sql`
-			update workspaces set name = ${next.name}, description = ${next.description}, instructions = ${next.instructions},
-				icon = ${next.icon}, updated_at = now()
-			where id = ${workspaceId}`;
-		const after = yield* detail(workspaceId, found.access, found.admin);
-		yield* audit(actor, "update-workspace", [after.kind], auditView(before), auditView(after));
-		return after;
+		const changed = yield* setFields(workspaceId, changes);
+		// Deleted since the access check.
+		if (Option.isNone(changed)) return yield* new WorkspaceNotFound({ workspaceId });
+		const { before, after } = changed.value;
+		yield* audit(actor, "update-workspace", [before.kind, after.kind], before, after);
+		return yield* detail(workspaceId, found.access, found.admin);
 	});
+
+	/**
+	 * Sets only the fields given, in one statement, so that a change to another field made
+	 * at the same time stays. The row as this statement found and left it, for the log:
+	 * the subquery locks the row and reads its latest version.
+	 */
+	const setFields = Effect.fnUntraced(function* (workspaceId: string, changes: WorkspaceChanges) {
+		const fields = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
+		const assignments = Object.keys(fields).length > 0 ? sql`${sql.update(fields)}, updated_at = now()` : sql`updated_at = now()`;
+		const found = yield* sql<{ before: AuditView; after: AuditView }>`
+			update workspaces w set ${assignments}
+			from (select * from workspaces where id = ${workspaceId} and deleted_at is null for update) old
+			where w.id = old.id
+			returning ${auditJson("old")} as before, ${auditJson("w")} as after`;
+		return Arr.head(found);
+	});
+
+	/** auditView's fields, from a row of `workspaces` under this alias. */
+	const auditJson = (alias: "old" | "w") =>
+		sql.literal(`jsonb_build_object('workspace', ${alias}.id, 'kind', ${alias}.kind, 'name', ${alias}.name, 'description', ${alias}.description, 'instructions', ${alias}.instructions, 'icon', ${alias}.icon)`);
 
 	const share = Effect.fn("Workspaces.share")(function* (actor: Actor, workspaceId: string, sharing: Sharing) {
 		const found = yield* withAccess(actor.id, workspaceId, "manage");
@@ -333,6 +350,8 @@ function membersToKeep(members: Sharing["members"], ownerId: string) {
 }
 
 /** What the activity log keeps of a workspace. */
+type AuditView = ReturnType<typeof auditView>;
+
 function auditView(workspace: WorkspaceDetail) {
 	const { id, kind, name, description, instructions, icon } = workspace;
 	return { workspace: id, kind, name, description, instructions, icon };

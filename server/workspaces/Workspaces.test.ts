@@ -223,6 +223,23 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.deepStrictEqual(await auditedActions(org), ["create-workspace", "update-workspace"]);
 	});
 
+	it("keeps both of two changes to different fields made at once, and logs each as it was made", async () => {
+		for (const round of [1, 2, 3]) {
+			const [named, described] = await Promise.all([
+				call("admin", "PATCH", `/api/workspaces/${org}`, { name: `Handbook ${round}` }),
+				call("admin2", "PATCH", `/api/workspaces/${org}`, { description: `Read me ${round}` }),
+			]);
+			assert.deepStrictEqual([named.status, described.status], [200, 200]);
+			assert.deepInclude((await call("dan", "GET", `/api/workspaces/${org}`)).body.workspace, { name: `Handbook ${round}`, description: `Read me ${round}` }, `round ${round}`);
+		}
+		const logged = await database((sql) => sql<{ before: Record<string, unknown>; after: Record<string, unknown> }>`select before, after from admin_events where action = 'update-workspace' and after->>'workspace' = ${org} order by id desc limit 6`);
+		for (const { before, after } of logged) {
+			const changed = Object.keys(after).filter((key) => after[key] !== before[key]);
+			assert.oneOf(changed.join(), ["name", "description"]);
+		}
+		assert.strictEqual((await call("admin", "PATCH", `/api/workspaces/${org}`, { name: "Handbook" })).status, 200);
+	});
+
 	it("takes access away from a member who is removed", async () => {
 		const removed = await call("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members: [{ userId: who.cy, access: "edit" }] });
 		assert.strictEqual(removed.status, 200);
@@ -245,7 +262,8 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.deepInclude(back.body.workspace, { kind: "org", members: [] }, "an organisation workspace keeps no members");
 		assert.strictEqual(await access("dan", org), "ask");
 		assert.strictEqual((await call("admin2", "DELETE", `/api/workspaces/${org}`)).status, 200);
-		assert.deepStrictEqual(await auditedActions(org), ["create-workspace", "update-workspace", "share-workspace", "share-workspace", "delete-workspace"]);
+		const updates = Array.from({ length: 8 }, () => "update-workspace");
+		assert.deepStrictEqual(await auditedActions(org), ["create-workspace", ...updates, "share-workspace", "share-workspace", "delete-workspace"]);
 		assert.strictEqual(await access("admin", org), "none", "a deleted workspace is no one's");
 	});
 
