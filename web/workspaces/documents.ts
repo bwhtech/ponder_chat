@@ -58,7 +58,7 @@ export function fileSize(bytes: number) {
 export const STATUS_LABELS: Record<DocumentStatus, string> = { reading: "Reading…", ready: "Ready", failed: "Failed" };
 
 /** The Details view's footnote, in the dialog and in its stand-in. */
-export const DETAILS_NOTE = "Reading documents is paid by the app, not from anyone's credits. This log keeps numbers only, never the document's text.";
+export const DETAILS_NOTE = "Reading documents is paid by the app, not from your credits.";
 
 /** A PDF's icon, or a text file's. */
 export function documentIcon(document: Pick<WorkspaceDocument, "mediaType">) {

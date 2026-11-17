@@ -20,12 +20,6 @@ const members = ref<Member[]>((workspace.members ?? []).map((member: Member) => 
 const error = ref("");
 const saving = ref(false);
 
-const summary = computed(() => {
-	if (kind.value === "org") return "Everyone in the organisation can ask in it. Admins can change it.";
-	if (!members.value.length) return "Only you can use this workspace. Add people to share it.";
-	return "Only the people above can use it. Each person's chats stay their own.";
-});
-
 async function save() {
 	saving.value = true;
 	error.value = "";
@@ -48,7 +42,6 @@ async function save() {
 		<div class="space-y-4">
 			<FormControl v-if="isAdmin" v-model="kind" type="select" label="Who can use it" :options="KIND_OPTIONS" />
 			<PeoplePicker v-if="kind === 'private'" v-model="members" :owner="workspace.owner" />
-			<p class="text-p-sm text-ink-gray-6">{{ summary }}</p>
 			<ErrorMessage v-if="error" :message="error" />
 			<div class="flex justify-end gap-2 pt-2">
 				<Button label="Cancel" @click="open = false" />

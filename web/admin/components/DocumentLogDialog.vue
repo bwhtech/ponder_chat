@@ -74,8 +74,6 @@ async function load() {
 				</li>
 			</ol>
 
-			<p class="text-p-sm text-ink-gray-5">Indexing is paid by the app, not from anyone's credits. The log keeps numbers only, never the document's text.</p>
-
 			<div class="flex justify-end pt-2">
 				<Button label="Close" @click="open = false" />
 			</div>

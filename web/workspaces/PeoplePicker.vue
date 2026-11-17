@@ -108,6 +108,5 @@ const ACCESS_OPTIONS = [
 				<Button variant="ghost" icon="lucide-x" class="touch-target" :aria-label="`Remove ${displayName(member)}`" @click="remove(member.id)" />
 			</li>
 		</ul>
-		<p v-if="!members.length" class="text-p-sm text-ink-gray-6">Nobody else yet. Only you can use it.</p>
 	</div>
 </template>

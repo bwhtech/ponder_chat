@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { Button, Skeleton } from "frappe-ui";
+import { Avatar, Button, Skeleton } from "frappe-ui";
+import { displayName } from "../../shared/display-name";
 import { computed } from "vue";
 import { when } from "../dates";
 import DialogFrame from "../DialogFrame.vue";
 import { DETAILS_NOTE, fileSize, STATUS_LABELS } from "./documents";
-import { closeWorkspaceDialog, dialogTitle, workspaceDialog } from "./dialogs";
-import { isAdmin } from "./store";
+import { closeWorkspaceDialog, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
+import { isAdmin, type Member, type Person } from "./store";
 
 /**
  * A workspace dialog (WorkspaceDialogs.vue) while its code arrives: the same box, title,
@@ -20,6 +21,14 @@ const form = computed(() => {
 	const workspace = value.kind === "edit" ? value.workspace : null;
 	return { name: workspace?.name ?? "", description: workspace?.description ?? "", instructions: workspace?.instructions ?? "", kind: value.kind === "new" && isAdmin.value };
 });
+const sharing = computed(() => {
+	const value = request.value;
+	if (value?.kind !== "share") return null;
+	const kind = KIND_OPTIONS.find((option) => option.value === value.workspace.kind)?.label ?? "";
+	return { kind, private: value.workspace.kind === "private", owner: value.workspace.owner as Person, members: (value.workspace.members ?? []) as Member[] };
+});
+const ACCESS_LABELS = { ask: "Can ask", edit: "Can edit" } as const;
+const nameOf = (person: Person) => displayName(person.name, person.email);
 </script>
 
 <template>
@@ -37,12 +46,11 @@ const form = computed(() => {
 				<template v-if="form">
 					<div class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Name<span class="ml-1 text-ink-red-5" aria-hidden="true">*</span></div>
-						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-8">{{ form.name }}</div>
+						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base" :class="form.name ? 'text-ink-gray-8' : 'text-ink-gray-4'">{{ form.name || NAME_PLACEHOLDER }}</div>
 					</div>
 					<div class="space-y-1.5">
-						<div class="text-sm leading-tighter text-ink-gray-6">What is it for?</div>
+						<div class="text-sm leading-tighter text-ink-gray-6">Description (optional)</div>
 						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-8">{{ form.description }}</div>
-						<p class="text-p-sm text-ink-gray-6">Shown on the workspace page.</p>
 					</div>
 					<div v-if="form.kind" class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Who can use it</div>
@@ -50,8 +58,10 @@ const form = computed(() => {
 					</div>
 					<div class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Instructions</div>
-						<div class="h-[calc(6lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm text-ink-gray-8">{{ form.instructions }}</div>
-						<p class="text-p-sm text-ink-gray-6">Every chat in this workspace follows these.</p>
+						<div
+							class="h-[calc(6lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm"
+							:class="form.instructions ? 'text-ink-gray-8' : 'text-ink-gray-4'"
+						>{{ form.instructions || INSTRUCTIONS_PLACEHOLDER }}</div>
 					</div>
 				</template>
 				<template v-else-if="request.kind === 'document'">
@@ -67,8 +77,25 @@ const form = computed(() => {
 					</ol>
 					<p class="text-p-sm text-ink-gray-5">{{ DETAILS_NOTE }}</p>
 				</template>
-				<template v-else>
-					<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">Add people by name or email</div>
+				<template v-else-if="sharing">
+					<div v-if="isAdmin" class="space-y-1.5">
+						<div class="text-sm leading-tighter text-ink-gray-6">Who can use it</div>
+						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-8">{{ sharing.kind }}</div>
+					</div>
+					<div v-if="sharing.private" class="space-y-2">
+						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">Add people by name or email</div>
+						<ul class="divide-y divide-outline-gray-1">
+							<li v-for="person in [sharing.owner, ...sharing.members]" :key="person.id" class="flex min-h-11 items-center gap-2.5 py-1.5">
+								<Avatar :label="nameOf(person)" size="md" />
+								<div class="min-w-0 flex-1">
+									<p class="truncate text-sm text-ink-gray-8">{{ nameOf(person) }}</p>
+									<p class="truncate text-xs text-ink-gray-6">{{ person.email }}</p>
+								</div>
+								<span class="w-28 shrink-0 pr-2 text-right text-sm text-ink-gray-6">{{ "access" in person ? ACCESS_LABELS[(person as Member).access] : "Owner" }}</span>
+								<span class="size-7 shrink-0" aria-hidden="true" />
+							</li>
+						</ul>
+					</div>
 				</template>
 				<div v-if="request.kind === 'document'" class="flex justify-end gap-2 pt-2">
 					<Button label="Close" @click="closeWorkspaceDialog" />
