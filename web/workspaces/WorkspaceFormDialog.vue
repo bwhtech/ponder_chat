@@ -2,7 +2,7 @@
 import { Button, Dialog, ErrorMessage, FormControl } from "frappe-ui";
 import { computed, reactive, ref } from "vue";
 import { toast } from "../toasts";
-import { dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
+import { DESCRIPTION_PLACEHOLDER, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
 import { createWorkspace, isAdmin, updateWorkspace } from "./store";
 
 /**
@@ -37,7 +37,7 @@ async function save() {
 		} else {
 			const made = await createWorkspace({ ...fields, kind: isAdmin.value ? form.kind : "private" });
 			props.request.onMade(made.slug);
-			toast.success(`Made “${made.name}”`);
+			toast.success(`Created “${made.name}”`);
 		}
 		open.value = false;
 	} catch (failure) {
@@ -51,10 +51,10 @@ async function save() {
 <template>
 	<Dialog v-model:open="open" :title="dialogTitle(request)" size="lg">
 		<form class="space-y-4" @submit.prevent="save">
-			<FormControl v-model="form.name" label="Name" :placeholder="NAME_PLACEHOLDER" required :error="nameError" />
-			<FormControl v-model="form.description" label="Description (optional)" />
+			<FormControl v-model="form.name" label="Name" :placeholder="NAME_PLACEHOLDER" :error="nameError" />
+			<FormControl v-model="form.description" type="textarea" label="Description (optional)" :placeholder="DESCRIPTION_PLACEHOLDER" :rows="2" />
 			<FormControl v-if="request.kind === 'new' && isAdmin" v-model="form.kind" type="select" label="Who can use it" :options="KIND_OPTIONS" />
-			<FormControl v-model="form.instructions" type="textarea" label="Instructions" :placeholder="INSTRUCTIONS_PLACEHOLDER" :rows="6" />
+			<FormControl v-model="form.instructions" type="textarea" label="Instructions (optional)" :placeholder="INSTRUCTIONS_PLACEHOLDER" :rows="6" />
 			<ErrorMessage v-if="error" :message="error" />
 			<div class="flex justify-end gap-2 pt-2">
 				<Button label="Cancel" @click="open = false" />

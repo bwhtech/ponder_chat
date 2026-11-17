@@ -2,10 +2,9 @@
 import { Avatar, Button, Skeleton } from "frappe-ui";
 import { displayName } from "../../shared/display-name";
 import { computed } from "vue";
-import { when } from "../dates";
+import { me } from "../account";
 import DialogFrame from "../DialogFrame.vue";
-import { DETAILS_NOTE, fileSize, STATUS_LABELS } from "./documents";
-import { closeWorkspaceDialog, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
+import { closeWorkspaceDialog, DESCRIPTION_PLACEHOLDER, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
 import { isAdmin, type Member, type Person } from "./store";
 
 /**
@@ -29,6 +28,7 @@ const sharing = computed(() => {
 });
 const ACCESS_LABELS = { ask: "Can ask", edit: "Can edit" } as const;
 const nameOf = (person: Person) => displayName(person.name, person.email);
+const shownName = (person: Person) => (person.id === sharing.value?.owner.id && person.id === me.value?.user.id ? "You" : nameOf(person));
 </script>
 
 <template>
@@ -45,19 +45,22 @@ const nameOf = (person: Person) => displayName(person.name, person.email);
 			<div class="space-y-4">
 				<template v-if="form">
 					<div class="space-y-1.5">
-						<div class="text-sm leading-tighter text-ink-gray-6">Name<span class="ml-1 text-ink-red-5" aria-hidden="true">*</span></div>
+						<div class="text-sm leading-tighter text-ink-gray-6">Name</div>
 						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base" :class="form.name ? 'text-ink-gray-8' : 'text-ink-gray-4'">{{ form.name || NAME_PLACEHOLDER }}</div>
 					</div>
 					<div class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Description (optional)</div>
-						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-8">{{ form.description }}</div>
+						<div
+							class="h-[calc(2lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm"
+							:class="form.description ? 'text-ink-gray-8' : 'text-ink-gray-4'"
+						>{{ form.description || DESCRIPTION_PLACEHOLDER }}</div>
 					</div>
 					<div v-if="form.kind" class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Who can use it</div>
 						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-8">Only the people you add</div>
 					</div>
 					<div class="space-y-1.5">
-						<div class="text-sm leading-tighter text-ink-gray-6">Instructions</div>
+						<div class="text-sm leading-tighter text-ink-gray-6">Instructions (optional)</div>
 						<div
 							class="h-[calc(6lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm"
 							:class="form.instructions ? 'text-ink-gray-8' : 'text-ink-gray-4'"
@@ -65,17 +68,9 @@ const nameOf = (person: Person) => displayName(person.name, person.email);
 					</div>
 				</template>
 				<template v-else-if="request.kind === 'document'">
-					<p class="text-p-sm text-ink-gray-6">
-						<span :class="{ 'text-ink-red-6': request.document.status === 'failed' }">{{ STATUS_LABELS[request.document.status] }}</span>
-						<span> · {{ fileSize(request.document.size) }} · Uploaded {{ when(request.document.createdAt) }}</span>
-					</p>
-					<ol class="divide-y divide-outline-gray-1" aria-busy="true">
-						<li v-for="width in ['w-24', 'w-32', 'w-28', 'w-20']" :key="width" class="py-2.5">
-							<div class="flex h-[1lh] items-center justify-between text-sm"><Skeleton :class="['h-3 rounded-4', width]" /><Skeleton class="h-3 w-12 rounded-4" /></div>
-							<div class="flex h-[1lh] items-center text-p-sm"><Skeleton class="h-2.5 w-48 max-w-full rounded-4" /></div>
-						</li>
+					<ol class="space-y-3" aria-busy="true">
+						<li v-for="width in ['w-36', 'w-44', 'w-20']" :key="width" class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></li>
 					</ol>
-					<p class="text-p-sm text-ink-gray-5">{{ DETAILS_NOTE }}</p>
 				</template>
 				<template v-else-if="sharing">
 					<div v-if="isAdmin" class="space-y-1.5">
@@ -84,15 +79,18 @@ const nameOf = (person: Person) => displayName(person.name, person.email);
 					</div>
 					<div v-if="sharing.private" class="space-y-2">
 						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">Add people by name or email</div>
-						<ul class="divide-y divide-outline-gray-1">
-							<li v-for="person in [sharing.owner, ...sharing.members]" :key="person.id" class="flex min-h-11 items-center gap-2.5 py-1.5">
-								<Avatar :label="nameOf(person)" size="md" />
-								<div class="min-w-0 flex-1">
-									<p class="truncate text-sm text-ink-gray-8">{{ nameOf(person) }}</p>
-									<p class="truncate text-xs text-ink-gray-6">{{ person.email }}</p>
+						<!-- PeoplePicker.vue's rows, with what each can do as text. -->
+						<ul>
+							<li v-for="person in [sharing.owner, ...sharing.members]" :key="person.id" class="flex flex-wrap items-center gap-x-2.5 gap-y-1 py-1.5 sm:h-8 sm:flex-nowrap sm:py-0">
+								<Avatar :label="nameOf(person)" size="sm" class="shrink-0" />
+								<p class="min-w-0 flex-1 text-sm sm:truncate">
+									<span class="text-ink-gray-8">{{ shownName(person) }}</span>
+									<span class="ml-1.5 break-all text-ink-gray-6">{{ person.email }}</span>
+								</p>
+								<div class="flex basis-full items-center gap-2.5 pl-[1.875rem] sm:basis-auto sm:pl-0 [@media(pointer:coarse)]:gap-x-4">
+									<span class="flex h-7 w-28 shrink-0 items-center border border-transparent px-2 text-sm text-ink-gray-6">{{ "access" in person ? ACCESS_LABELS[(person as Member).access] : "Owner" }}</span>
+									<span class="size-7 shrink-0" aria-hidden="true" />
 								</div>
-								<span class="w-28 shrink-0 pr-2 text-right text-sm text-ink-gray-6">{{ "access" in person ? ACCESS_LABELS[(person as Member).access] : "Owner" }}</span>
-								<span class="size-7 shrink-0" aria-hidden="true" />
 							</li>
 						</ul>
 					</div>

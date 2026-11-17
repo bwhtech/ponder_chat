@@ -2,15 +2,17 @@
 import { displayName as nameToShow } from "../../shared/display-name";
 import { Avatar, Button, Combobox, Select } from "frappe-ui";
 import { computed, ref, watch } from "vue";
+import { me } from "../account";
 import { searchPeople, type Member, type Person } from "./store";
 
 /**
  * The people of a private workspace (ShareDialog.vue): its owner, then each member with
  * "Can ask" or "Can edit". The search asks the server (GET /api/people), so the
- * Combobox does not filter again; each row shows the name with the email under it.
+ * Combobox does not filter again; each row shows the name with the email after it.
  */
 const props = defineProps<{ owner: Person }>();
 const members = defineModel<Member[]>({ required: true });
+const ownerIsMe = computed(() => me.value?.user.id === props.owner.id);
 
 const query = ref("");
 const results = ref<readonly Person[]>([]);
@@ -68,6 +70,14 @@ function displayName(person: Person) {
 	return nameToShow(person.name, person.email);
 }
 
+/**
+ * A person's row, drawn as the side panel's People: one line on a wider screen. On a phone
+ * the name and email take the first line, and what they can do goes under the name.
+ */
+const ROW = "flex flex-wrap items-center gap-x-2.5 gap-y-1 py-1.5 sm:h-8 sm:flex-nowrap sm:py-0";
+const WHO = "min-w-0 flex-1 text-sm sm:truncate";
+const ACCESS = "flex basis-full items-center gap-2.5 pl-[1.875rem] sm:basis-auto sm:pl-0 [@media(pointer:coarse)]:gap-x-4";
+
 const ACCESS_OPTIONS = [
 	{ label: "Can ask", value: "ask" },
 	{ label: "Can edit", value: "edit" },
@@ -88,24 +98,28 @@ const ACCESS_OPTIONS = [
 			aria-label="Add people by name or email"
 			@update:open="onOpen"
 		/>
-		<ul class="divide-y divide-outline-gray-1" aria-label="People">
-			<li class="flex min-h-11 items-center gap-2.5 py-1.5">
-				<Avatar :label="displayName(owner)" size="md" />
-				<div class="min-w-0 flex-1">
-					<p class="truncate text-sm text-ink-gray-8">{{ displayName(owner) }}</p>
-					<p class="truncate text-xs text-ink-gray-6">{{ owner.email }}</p>
+		<ul aria-label="People">
+			<li :class="ROW">
+				<Avatar :label="displayName(owner)" size="sm" class="shrink-0" />
+				<p :class="WHO">
+					<span class="text-ink-gray-8">{{ ownerIsMe ? "You" : displayName(owner) }}</span>
+					<span class="ml-1.5 break-all text-ink-gray-6">{{ owner.email }}</span>
+				</p>
+				<div :class="ACCESS">
+					<span class="flex h-7 w-28 shrink-0 items-center border border-transparent px-2 text-sm text-ink-gray-6">Owner</span>
+					<span class="size-7 shrink-0" aria-hidden="true" />
 				</div>
-				<span class="w-28 shrink-0 pr-2 text-right text-sm text-ink-gray-6">Owner</span>
-				<span class="size-7 shrink-0" aria-hidden="true" />
 			</li>
-			<li v-for="member in members" :key="member.id" class="flex min-h-11 items-center gap-2.5 py-1.5" data-slot="workspace-member">
-				<Avatar :label="displayName(member)" size="md" />
-				<div class="min-w-0 flex-1">
-					<p class="truncate text-sm text-ink-gray-8">{{ displayName(member) }}</p>
-					<p class="truncate text-xs text-ink-gray-6">{{ member.email }}</p>
+			<li v-for="member in members" :key="member.id" :class="ROW" data-slot="workspace-member">
+				<Avatar :label="displayName(member)" size="sm" class="shrink-0" />
+				<p :class="WHO">
+					<span class="text-ink-gray-8">{{ displayName(member) }}</span>
+					<span class="ml-1.5 break-all text-ink-gray-6">{{ member.email }}</span>
+				</p>
+				<div :class="ACCESS">
+					<Select v-model="member.access" :options="ACCESS_OPTIONS" size="sm" class="touch-target w-28 shrink-0" :aria-label="`What ${displayName(member)} can do`" />
+					<Button variant="ghost" icon="lucide-x" class="touch-target" :aria-label="`Remove ${displayName(member)}`" @click="remove(member.id)" />
 				</div>
-				<Select v-model="member.access" :options="ACCESS_OPTIONS" size="sm" class="w-28 shrink-0" :aria-label="`What ${displayName(member)} can do`" />
-				<Button variant="ghost" icon="lucide-x" class="touch-target" :aria-label="`Remove ${displayName(member)}`" @click="remove(member.id)" />
 			</li>
 		</ul>
 	</div>

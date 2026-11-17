@@ -3,7 +3,7 @@ import type { WorkspaceDocument } from "./documents";
 import type { WorkspaceDetail } from "./store";
 
 /**
- * The workspace dialogs: New workspace, Edit details, Share and a document's Details (WorkspaceDialogs.vue). Their
+ * The workspace dialogs: New workspace, Edit workspace, Share and a document's Details (WorkspaceDialogs.vue). Their
  * code loads the first time one opens; meanwhile the shell draws the dialog's frame and fields
  * (WorkspaceDialogPlaceholder.vue), as it does for Settings. `request` stays after closing, so
  * the dialog can play its closing transition.
@@ -39,6 +39,7 @@ export const KIND_OPTIONS = [
 
 /** The New and Edit form's placeholders, in the dialog and in its stand-in. */
 export const NAME_PLACEHOLDER = "e.g. HR policies";
+export const DESCRIPTION_PLACEHOLDER = "e.g. Policies and forms for ward staff";
 export const INSTRUCTIONS_PLACEHOLDER = "Additional instructions passed to the AI agent";
 
 /** The dialog's title, in the dialog and in its stand-in. */
