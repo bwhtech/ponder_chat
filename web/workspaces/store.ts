@@ -10,7 +10,9 @@ import { count } from "../numbers";
  * later ones ask the API. Organisation workspaces come first, then the ones shared with the
  * person, then their own, as the server orders them.
  *
- * The open workspace lives in the URL (`?w=<id>`), as the open chat does (`?t=<id>`).
+ * The open workspace lives in the URL by its slug (`?w=hr-policies`), as the open chat does
+ * by its id (`?t=<id>`). Links from before slugs have its id there: the page opens them and
+ * puts the slug in their place.
  */
 export type WorkspaceSummary = Answer<typeof client.api.workspaces.$get>["workspaces"][number];
 export type WorkspaceDetail = Answer<(typeof client.api.workspaces)[":id"]["$get"]>["workspace"];
@@ -23,13 +25,19 @@ export type WorkspaceInput = { kind?: "org" | "private"; name: string; descripti
 export const workspaces = ref<WorkspaceSummary[]>([]);
 /** The list came from the server: until then the sidebar shows skeleton rows. */
 export const workspacesLoaded = ref(false);
-/** The workspace open in the main area, from `?w=<id>`; empty when a chat or Memory is open. */
-export const openWorkspaceId = ref(workspaceInUrl());
+/** The workspace open in the main area, from `?w=`: its slug, or its id in an older link. Empty when a chat or Memory is open. */
+export const openWorkspaceKey = ref(workspaceInUrl());
+export const openWorkspace = computed(() => workspaceByKey(openWorkspaceKey.value));
 
 export const isAdmin = computed(() => me.value?.user.role === "admin");
 
 export function workspaceById(id: string | null | undefined) {
 	return id ? workspaces.value.find((workspace) => workspace.id === id) : undefined;
+}
+
+/** By the `?w=` of the URL: a slug, or an id. */
+export function workspaceByKey(key: string | null | undefined) {
+	return key ? workspaces.value.find((workspace) => workspace.slug === key || workspace.id === key) : undefined;
 }
 
 export async function loadWorkspaces() {
@@ -46,17 +54,30 @@ export function workspaceInUrl() {
 	return new URL(location.href).searchParams.get("w") ?? "";
 }
 
-/** Opens the workspace page: `?w=<id>`, in place of the open chat or Memory. */
-export function showWorkspace(id: string) {
-	openWorkspaceId.value = id;
+/** Opens the workspace page: `?w=<slug>`, in place of the open chat or Memory. */
+export function showWorkspace(slug: string) {
+	openWorkspaceKey.value = slug;
 	const url = new URL(location.href);
 	for (const key of ["t", "view"]) url.searchParams.delete(key);
-	url.searchParams.set("w", id);
+	url.searchParams.set("w", slug);
 	if (url.href !== location.href) history.pushState(null, "", url);
 }
 
-export async function fetchWorkspace(id: string): Promise<WorkspaceDetail> {
-	return (await unwrap(client.api.workspaces[":id"].$get({ param: { id: encodeURIComponent(id) } }), "The workspace could not load.")).workspace;
+/**
+ * An older link opened by the workspace's id: its slug takes the id's place, in the same
+ * history entry. Only while that page is still the open one.
+ */
+export function replaceWorkspaceKey(opened: string, slug: string) {
+	if (openWorkspaceKey.value !== opened || opened === slug) return;
+	openWorkspaceKey.value = slug;
+	const url = new URL(location.href);
+	url.searchParams.set("w", slug);
+	history.replaceState(history.state, "", url);
+}
+
+/** By its id or its slug (server/workspaces/slug.ts). */
+export async function fetchWorkspace(idOrSlug: string): Promise<WorkspaceDetail> {
+	return (await unwrap(client.api.workspaces[":id"].$get({ param: { id: encodeURIComponent(idOrSlug) } }), "The workspace could not load.")).workspace;
 }
 
 export async function createWorkspace(input: WorkspaceInput) {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Skeleton } from "frappe-ui";
 import { computed } from "vue";
-import { kindIcon, workspaceById } from "./store";
+import { kindIcon, workspaceByKey } from "./store";
 
 /**
  * The workspace page (WorkspacePage.vue) while its code arrives: its header with the name
@@ -9,8 +9,8 @@ import { kindIcon, workspaceById } from "./store";
  * slots (Shell.vue), so the phone's buttons are already in the header.
  */
 defineOptions({ inheritAttrs: false });
-const props = defineProps<{ id: string }>();
-const workspace = computed(() => workspaceById(props.id));
+const props = defineProps<{ slugOrId: string }>();
+const workspace = computed(() => workspaceByKey(props.slugOrId));
 </script>
 
 <template>

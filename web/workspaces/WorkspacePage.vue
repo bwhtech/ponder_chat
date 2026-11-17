@@ -14,18 +14,19 @@ import WorkspaceAside from "./WorkspaceAside.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
 import WorkspaceComposer from "./WorkspaceComposer.vue";
 import WorkspaceHeading from "./WorkspaceHeading.vue";
-import { deleteWorkspace, fetchWorkspace, loadWorkspaces, workspaceById, type WorkspaceDetail } from "./store";
+import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, workspaceByKey, type WorkspaceDetail } from "./store";
 
 /**
- * A workspace (`?w=<id>`): its name and who can use it, the composer, whose new chat is in
+ * A workspace (`?w=<slug>`): its name and who can use it, the composer, whose new chat is in
  * this workspace, the person's own chats in it, and a side panel with the instructions, the
- * documents and "Shared with" (under the chats on a phone). The sidebar's row draws the
- * header at once; the rest fills in when the workspace loads. A workspace the person cannot use is not found.
+ * documents and its people (under the chats on a phone). The sidebar's row draws the header
+ * at once; the rest fills in when the workspace loads. A workspace the person cannot use is
+ * not found. An older link by the workspace's id opens it too, and the slug takes its place.
  *
  * It renders its own header, as the main area's first child, so the hairline under it follows
  * this page's scroller (style.css).
  */
-const props = defineProps<{ id: string }>();
+const props = defineProps<{ slugOrId: string }>();
 const emit = defineEmits<{ openChat: [id: string]; ask: [message: FirstMessage]; deleted: [] }>();
 
 const { refresh: refreshThreads } = useThreads();
@@ -33,11 +34,12 @@ const detail = shallowRef<WorkspaceDetail>();
 const missing = ref(false);
 const loadError = ref("");
 /** What the page shows before the workspace loads: the sidebar's row. */
-const summary = computed(() => detail.value ?? workspaceById(props.id));
+const summary = computed(() => detail.value ?? workspaceByKey(props.slugOrId));
+const workspaceId = computed(() => summary.value?.id ?? "");
 
 // Each load takes a number: the answer for a workspace no longer open is dropped.
 let asked = 0;
-watch(() => props.id, load, { immediate: true });
+watch(() => props.slugOrId, (key) => (detail.value?.slug === key ? undefined : load()), { immediate: true });
 
 async function load() {
 	const mine = ++asked;
@@ -46,8 +48,10 @@ async function load() {
 	missing.value = false;
 	loadError.value = "";
 	try {
-		const found = await fetchWorkspace(props.id);
-		if (mine === asked) detail.value = found;
+		const found = await fetchWorkspace(props.slugOrId);
+		if (mine !== asked) return;
+		detail.value = found;
+		replaceWorkspaceKey(props.slugOrId, found.slug);
 	} catch (error) {
 		if (mine !== asked) return;
 		if (error instanceof ApiError && error.status === 404) {
@@ -84,7 +88,7 @@ async function poll(current: () => boolean) {
 	const mine = asked;
 	const seen = changes;
 	try {
-		const fresh = await fetchWorkspace(props.id);
+		const fresh = await fetchWorkspace(workspaceId.value);
 		if (current() && mine === asked && seen === changes) detail.value = fresh;
 	} catch (error) {
 		// Deleted, or shared no more: asking again will not help. Offline for a moment: the next poll tries again.
@@ -117,7 +121,7 @@ function askDelete() {
 	if (!workspace) return;
 	dialog.danger({
 		title: "Delete this workspace?",
-		message: `“${workspace.name}” and its instructions will be deleted. The chats in it stay with the people who wrote them, outside any workspace.`,
+		message: `“${workspace.name}”, its instructions and its documents will be deleted. Chats in it are kept.`,
 		onConfirm: async () => {
 			await deleteWorkspace(workspace.id);
 			void refreshThreads();
@@ -156,10 +160,10 @@ function askDelete() {
 		<div class="mx-auto grid w-full max-w-[1120px] gap-8 px-4 pb-10 pt-6 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
 			<div class="min-w-0 space-y-8">
 				<p v-if="summary?.description" class="text-p-base text-ink-gray-6">{{ summary.description }}</p>
-				<WorkspaceComposer :workspace-id="id" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
-				<WorkspaceChats :workspace-id="id" @open="emit('openChat', $event)" />
+				<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
+				<WorkspaceChats :workspace-id="workspaceId" @open="emit('openChat', $event)" />
 			</div>
-			<WorkspaceAside :workspace="summary" :detail="detail" @edit="edit" @share="share" @documents="documentsChanged" />
+			<WorkspaceAside :workspace="summary" :detail="detail" @edit="edit" @documents="documentsChanged" />
 		</div>
 	</div>
 </template>

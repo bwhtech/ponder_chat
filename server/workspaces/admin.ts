@@ -27,6 +27,8 @@ export type OrgDocument = DocumentSummary & {
 
 export type OrgWorkspace = {
 	id: string;
+	/** Its address in the chat: `/?w=<slug>`. */
+	slug: string;
 	name: string;
 	description: string;
 	icon: string | null;
@@ -59,6 +61,7 @@ const StatusSchema = Schema.Literals(["reading", "ready", "failed"]);
 
 const OrgRow = Schema.Struct({
 	id: Schema.String,
+	slug: Schema.String,
 	name: Schema.String,
 	description: Schema.String,
 	icon: Schema.NullOr(Schema.String),
@@ -108,7 +111,7 @@ const make = Effect.gen(function* () {
 		Request: Schema.Void,
 		Result: OrgRow,
 		execute: () => sql`
-			select w.id, w.name, w.description, w.icon, w.created_at, w.updated_at, w.owner_id,
+			select w.id, w.slug, w.name, w.description, w.icon, w.created_at, w.updated_at, w.owner_id,
 				coalesce(u.name, '') as owner_name, coalesce(u.email, '') as owner_email
 			from workspaces w left join users u on u.id = w.owner_id
 			where w.kind = 'org' and w.deleted_at is null
@@ -187,6 +190,7 @@ function orgWorkspace(row: typeof OrgRow.Type, documents: ReadonlyArray<typeof O
 	const costs = documents.flatMap((document) => (document.cost_usd === null ? [] : [document.cost_usd]));
 	return {
 		id: row.id,
+		slug: row.slug,
 		name: row.name,
 		description: row.description,
 		icon: row.icon,

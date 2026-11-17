@@ -16,6 +16,9 @@ import * as Workspaces from "./Workspaces.ts";
  * the person cannot use answers 404, never 403, so an answer does not show that it
  * exists. A person who can use it, but not for this, gets 403 with a message the page
  * can show. A document that is not in the workspace is a 404 too.
+ *
+ * GET /:id also takes the workspace's slug (slug.ts), as the page's address has it; the
+ * other routes take its id, which the page has from that answer.
  */
 type Env = SignedInEnv;
 

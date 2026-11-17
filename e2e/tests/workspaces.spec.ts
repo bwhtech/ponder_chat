@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { e2e } from "../env.ts";
 import { chat, expect, test } from "../fixtures.ts";
-import { newPerson } from "../workspaces.ts";
+import { createWorkspace, newPerson } from "../workspaces.ts";
 
 /**
  * Workspaces and sharing (docs/workspaces-plan.md, "Tests"): a person makes a workspace with
@@ -29,13 +29,14 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await a.page.getByRole("button", { name: "New workspace" }).click();
 		const dialog = a.page.getByRole("dialog", { name: "New workspace" });
 		await dialog.getByLabel("Name").fill(name);
-		await dialog.getByLabel("What is it for?").fill("Questions about leave");
+		await dialog.getByLabel("Description (optional)").fill("Questions about leave");
 		await dialog.getByLabel("Instructions").fill(`${marker}\nKeep answers short.`);
 		// Not an admin: no choice of who can use it.
 		await expect(dialog.getByLabel("Who can use it")).toHaveCount(0);
 		await dialog.getByRole("button", { name: "Create workspace" }).click();
 
-		await expect(a.page).toHaveURL(/[?&]w=/);
+		// The address has the workspace's slug, made from its name.
+		await expect(a.page).toHaveURL(/[?&]w=leave-policies-/);
 		workspaceUrl = a.page.url();
 		await expect(a.page.getByRole("heading", { name, level: 1 })).toBeVisible();
 		await expect(a.page.getByText("Only you", { exact: true })).toBeVisible();
@@ -61,7 +62,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(b.page.getByText("Shared with you", { exact: true })).toBeVisible();
 		// Only the owner shares or deletes.
 		await expect(b.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
-		await expect(b.page.getByText("No chats here yet")).toBeVisible();
+		await expect(b.page.getByText("No chats yet.")).toBeVisible();
 
 		await chat.send(b.page, question);
 		await expect(b.page).toHaveURL(/[?&]t=/);
@@ -84,13 +85,14 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(c.page.getByText("This workspace was not found")).toBeVisible();
 		await expect(c.page.getByText(marker)).toHaveCount(0);
 		await expect(workspaceRows(c.page).getByRole("button", { name })).toHaveCount(0);
-		const id = new URL(workspaceUrl).searchParams.get("w")!;
-		expect((await c.page.request.get(`/api/workspaces/${id}`)).status()).toBe(404);
+		const slug = new URL(workspaceUrl).searchParams.get("w")!;
+		expect((await c.page.request.get(`/api/workspaces/${slug}`)).status()).toBe(404);
+		expect((await c.page.request.get("/api/workspaces/no-such-workspace")).status()).toBe(404);
 	});
 
 	await test.step("4. A cannot open B's chat in the workspace", async () => {
 		await a.page.goto(workspaceUrl);
-		await expect(a.page.getByText("No chats here yet")).toBeVisible();
+		await expect(a.page.getByText("No chats yet.")).toBeVisible();
 		await a.page.goto(`/?t=${chatId}`);
 		await expect(a.page.locator('[data-slot="prompt-input"]')).toBeVisible();
 		await expect(chat.messages(a.page)).toHaveCount(0);
@@ -170,6 +172,15 @@ test("a workspace made from the Memory page opens in its place", async ({ page, 
 	// Back goes to Memory again.
 	await page.goBack();
 	await expect(page.getByRole("heading", { name: "Memory", exact: true, level: 1 })).toBeVisible();
+});
+
+test("an older link by a workspace's id opens it, with the slug in its place", async ({ page, person }) => {
+	const name = `Old link ${person.id.slice(0, 6)}`;
+	const { id, slug } = await createWorkspace(page, name);
+	await page.goto(`/?w=${id}`);
+	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+	await expect(page).toHaveURL(new RegExp(`[?&]w=${escape(slug)}$`));
+	await expect(workspaceRows(page).locator('[data-state="active"]')).toHaveText(name);
 });
 
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');

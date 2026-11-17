@@ -20,13 +20,14 @@ const documents = (page: Page) => page.locator('[data-slot="workspace-documents"
 const rows = (page: Page) => documents(page).locator('[data-slot="workspace-document"]');
 const row = (page: Page, name: string) => rows(page).filter({ has: page.locator('[data-slot="document-name"]', { hasText: name }) });
 const picker = (page: Page) => page.locator('[data-slot="document-picker"]');
+const dropState = (page: Page) => page.locator('[data-slot="workspace-aside"] [data-slot="document-drop"]');
 
 test("7. an editor uploads documents; they go from Reading to Ready, and answers use them whole or searched", async ({ page, person, fake }) => {
 	test.setTimeout(120_000);
 	const tag = person.id.slice(0, 6);
-	const id = await createWorkspace(page, `Office handbook ${tag}`);
-	await page.goto(`/?w=${id}`);
-	await expect(documents(page).getByText("Drop files here, or choose them")).toBeVisible();
+	const { id, slug } = await createWorkspace(page, `Office handbook ${tag}`);
+	await page.goto(`/?w=${slug}`);
+	await expect(documents(page).getByText("No documents yet.")).toBeVisible();
 
 	await test.step("a file the server can't read shows why", async () => {
 		await picker(page).setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: Buffer.from("not a document") });
@@ -35,11 +36,11 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 	});
 
 	const leave = `Staff get 27 days of paid leave a year, code LV-${tag}.`;
-	await test.step("a file dropped on the list goes from Reading to Ready", async () => {
+	await test.step("a file dropped on the side panel goes from Reading to Ready", async () => {
 		await drag(page, "dragenter");
-		await expect(documents(page).getByText("Drop to add to this workspace")).toBeVisible();
+		await expect(dropState(page)).toBeVisible();
 		await drag(page, "drop", { name: "leave-policy.md", text: `# Leave policy\n\n${leave}\n\nAsk your manager before you book a trip.` });
-		await expect(documents(page).getByText("Drop to add to this workspace")).toHaveCount(0);
+		await expect(dropState(page)).toHaveCount(0);
 		const leaveRow = row(page, "leave-policy.md");
 		await expect(leaveRow).toContainText("Reading…");
 		await expect(leaveRow).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
@@ -59,11 +60,11 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 
 	const permit = `The visitor parking permit code is PK-${tag}.`;
 	await test.step("a document too large for the model's window is searched, and the answer quotes its passage", async () => {
-		await page.goto(`/?w=${id}`);
+		await page.goto(`/?w=${slug}`);
 		await picker(page).setInputFiles(textFile("handbook.txt", handbook(permit), "text/plain"));
 		await expect(row(page, "handbook.txt")).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
 
-		await page.getByRole("button", { name: /Model/ }).click();
+		await page.getByRole("button", { name: /^Model:/ }).click();
 		await page.getByRole("option", { name: /GLM 5\.3/ }).click();
 		const question = `What is the visitor parking permit code, ${tag}?`;
 		await chat.send(page, question);
@@ -84,12 +85,12 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 	test.setTimeout(90_000);
 	const tag = person.id.slice(0, 6);
 	await fake.page({ match: `PAGEKEY-ok-${tag}`, text: "Exit site care: clean the exit site every second day." });
-	const id = await createWorkspace(page, `Dialysis manual ${tag}`);
+	const { id, slug } = await createWorkspace(page, `Dialysis manual ${tag}`);
 	const asker = await newPerson(browser, db, fake, "asks only");
 	await share(page, id, [{ userId: asker.person.id, access: "ask" }]);
 
 	await test.step("the editor uploads a PDF with a scan, and its Details show each step", async () => {
-		await page.goto(`/?w=${id}`);
+		await page.goto(`/?w=${slug}`);
 		await picker(page).setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: scanPdf("Peritoneal dialysis manual", `PAGEKEY-ok-${tag}`) });
 		const manual = row(page, "manual.pdf");
 		await expect(manual).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
@@ -115,7 +116,7 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 	});
 
 	await test.step("a person who can only ask sees the name and status, and no Details, upload or delete", async () => {
-		await asker.page.goto(`/?w=${id}`);
+		await asker.page.goto(`/?w=${slug}`);
 		const manual = row(asker.page, "manual.pdf");
 		await expect(manual).toContainText("Ready");
 		await expect(manual.getByRole("button")).toHaveCount(0);
@@ -138,8 +139,8 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 	const tag = person.id.slice(0, 6);
 	// The page model fails the scan once, then reads it.
 	await fake.page({ match: `PAGEKEY-fail-${tag}`, failFirst: 1, error: "The fake page model is down.", text: "Exit site care: clean the exit site every second day." });
-	const id = await createWorkspace(page, `Scans ${tag}`);
-	await page.goto(`/?w=${id}`);
+	const { id, slug } = await createWorkspace(page, `Scans ${tag}`);
+	await page.goto(`/?w=${slug}`);
 	await picker(page).setInputFiles({ name: "scan.pdf", mimeType: "application/pdf", buffer: scanPdf("Scanned forms", `PAGEKEY-fail-${tag}`) });
 
 	const scan = row(page, "scan.pdf");
@@ -187,14 +188,15 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 test("10. the page stops reading a Reading document again once Details close, the document is gone or the person leaves", async ({ page, person }) => {
 	test.setTimeout(90_000);
 	const tag = person.id.slice(0, 6);
-	const id = await createWorkspace(page, `Polls ${tag}`);
+	const { id, slug } = await createWorkspace(page, `Polls ${tag}`);
 	const documentId = await uploadReady(page, id, textFile("notes.md", "Notes."));
-	const workspacePath = `/api/workspaces/${id}`;
+	// The page loads the workspace by its slug, then polls it by its id.
+	const workspacePaths = [`/api/workspaces/${slug}`, `/api/workspaces/${id}`];
 	const logPath = `/api/workspaces/${id}/documents/${documentId}/log`;
 
 	// The document stays Reading for the page, so it keeps polling, and each workspace answer takes a moment.
 	await page.route(
-		(url) => url.pathname === workspacePath,
+		(url) => workspacePaths.includes(url.pathname),
 		async (route) => {
 			if (route.request().method() !== "GET") return route.fallback();
 			const response = await route.fetch();
@@ -217,7 +219,7 @@ test("10. the page stops reading a Reading document again once Details close, th
 	const sent = { workspace: 0, log: 0 };
 	page.on("request", (request) => {
 		const path = new URL(request.url()).pathname;
-		if (request.method() === "GET" && path === workspacePath) sent.workspace++;
+		if (request.method() === "GET" && workspacePaths.includes(path)) sent.workspace++;
 		if (path === logPath) sent.log++;
 	});
 	/** Nothing more is asked for in the next few seconds, longer than any wait between polls here. */

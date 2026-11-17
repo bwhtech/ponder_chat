@@ -72,7 +72,7 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 					v-else-if="!report?.org.length"
 					icon="lucide-building-2"
 					title="No workspaces for everyone yet"
-					body="An admin makes one in the chat: New workspace, then For everyone."
+					body="Make one in the chat with New workspace."
 				/>
 				<div v-else class="space-y-8">
 					<article v-for="workspace in report.org" :key="workspace.id" class="space-y-2" data-slot="org-workspace" :aria-label="workspace.name">
@@ -84,7 +84,7 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 								</p>
 								<p v-if="workspace.description" class="line-clamp-2 text-p-sm text-ink-gray-6">{{ workspace.description }}</p>
 							</div>
-							<Button class="shrink-0" label="Open" icon-right="lucide-arrow-up-right" :link="`/?w=${encodeURIComponent(workspace.id)}`" />
+							<Button class="shrink-0" label="Open" icon-right="lucide-arrow-up-right" :link="`/?w=${encodeURIComponent(workspace.slug)}`" />
 						</div>
 
 						<p v-if="!workspace.documents.length" class="text-p-sm text-ink-gray-6">No documents yet.</p>
@@ -134,7 +134,6 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 
 			<section aria-label="Private workspaces" class="space-y-3" data-slot="private-workspaces">
 				<h2 class="text-base-semibold text-ink-gray-9">Private workspaces</h2>
-				<p class="text-p-sm text-ink-gray-6">Totals only. Their owners choose who uses them, and admins see no names, documents or owners.</p>
 				<div data-slot="dashboard" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
 					<NumberCard title="Private workspaces" :loading="loading" :value="privateTotals?.workspaces ?? null" :format="count" />
 					<NumberCard title="Ready documents" :loading="loading" :value="privateTotals?.documents.ready ?? null" :format="count" />

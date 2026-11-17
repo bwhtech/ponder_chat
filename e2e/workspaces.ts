@@ -20,11 +20,11 @@ export async function newPerson(browser: Browser, db: postgres.Sql, fake: Fake, 
 	return { page, person, context };
 }
 
-/** A private workspace of the page's person; its id. */
+/** A private workspace of the page's person: its id, for the API, and its slug, for the page's address (`/?w=<slug>`). */
 export async function createWorkspace(page: Page, name: string, instructions = "") {
 	const response = await page.request.post("/api/workspaces", { data: { name, instructions } });
 	expect(response.status(), await response.text()).toBe(201);
-	return ((await response.json()) as { workspace: { id: string } }).workspace.id;
+	return ((await response.json()) as { workspace: { id: string; slug: string } }).workspace;
 }
 
 export async function share(page: Page, workspaceId: string, members: { userId: string; access: "ask" | "edit" }[]) {

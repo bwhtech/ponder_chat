@@ -1,6 +1,6 @@
 import type * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
-import type * as Option from "effect/Option";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as SqlSchema from "effect/sql/SqlSchema";
@@ -18,6 +18,7 @@ const FactsRow = Schema.Struct({ kind: KindSchema, owner_id: Schema.String, memb
 
 const SummaryRow = Schema.Struct({
 	id: Schema.String,
+	slug: Schema.String,
 	kind: KindSchema,
 	owner_id: Schema.String,
 	name: Schema.String,
@@ -46,6 +47,8 @@ export type Rows = {
 	facts: (request: { userId: string; workspaceId: string }) => Effect.Effect<Option.Option<typeof FactsRow.Type>, SqlError>;
 	summaries: (userId: string) => Effect.Effect<ReadonlyArray<SummaryRow>, SqlError>;
 	detail: (workspaceId: string) => Effect.Effect<Option.Option<DetailRow>, SqlError>;
+	/** The id of the workspace with this id or slug, not deleted. */
+	idOf: (idOrSlug: string) => Effect.Effect<Option.Option<string>, SqlError>;
 	members: (workspaceId: string) => Effect.Effect<Member[], SqlError>;
 	/** The ids among these that have an account. */
 	existing: (userIds: string[]) => Effect.Effect<ReadonlyArray<string>, SqlError>;
@@ -66,7 +69,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		Request: Schema.String,
 		Result: SummaryRow,
 		execute: (userId) => sql`
-			select w.id, w.kind, w.owner_id, w.name, w.description, w.icon, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)}
+			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.icon, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)}
 			from workspaces w left join workspace_members m on m.workspace_id = w.id and m.user_id = ${userId}
 			where w.deleted_at is null and (w.kind = 'org' or w.owner_id = ${userId} or m.user_id is not null)`,
 	});
@@ -74,11 +77,20 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		Request: Schema.String,
 		Result: DetailRow,
 		execute: (workspaceId) => sql`
-			select w.id, w.kind, w.owner_id, w.name, w.description, w.instructions, w.icon, w.created_at, w.updated_at,
+			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.instructions, w.icon, w.created_at, w.updated_at,
 				null as member, ${sql.literal(MEMBER_COUNT)},
 				coalesce(u.name, '') as owner_name, coalesce(u.email, '') as owner_email
 			from workspaces w left join users u on u.id = w.owner_id
 			where w.id = ${workspaceId} and w.deleted_at is null`,
+	});
+	const idOf = SqlSchema.findOneOption({
+		Request: Schema.String,
+		Result: IdRow,
+		// An id wins over a slug that happens to spell it.
+		execute: (key) => sql`
+			select id from workspaces
+			where (id = ${key} or slug = ${key}) and deleted_at is null
+			order by (id = ${key}) desc limit 1`,
 	});
 	const members = SqlSchema.findAll({
 		Request: Schema.String,
@@ -100,6 +112,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		facts: (request) => decoded(facts(request)),
 		summaries: (userId) => decoded(summaries(userId)),
 		detail: (workspaceId) => decoded(detail(workspaceId)),
+		idOf: (key) => decoded(idOf(key)).pipe(Effect.map(Option.map((row) => row.id))),
 		members: (workspaceId) => decoded(members(workspaceId)).pipe(Effect.map((rows) => rows.map((row): Member => ({ ...row })))),
 		existing: (userIds) => (userIds.length ? decoded(existing(userIds)).pipe(Effect.map((rows) => rows.map((row) => row.id))) : Effect.succeed([])),
 	};

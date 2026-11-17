@@ -15,6 +15,7 @@ import { type Access, accessFrom, atLeast, canManage, type Kind, type MemberAcce
 import { documentStore, type DocumentSummary } from "./documents/store.ts";
 import { migrateDocuments } from "./documents/tables.ts";
 import { type DetailRow, type Rows, rowsOf, type SummaryRow } from "./rows.ts";
+import { claimSlug, migrateSlugs } from "./slug.ts";
 
 /**
  * Workspaces (docs/workspaces-plan.md): a name, a description, instructions and documents
@@ -39,6 +40,8 @@ export type Member = Person & { access: MemberAccess };
 /** A row of the sidebar (GET /api/workspaces, the boot page). `memberCount` is 0 for an organisation workspace: everyone uses it. */
 export type WorkspaceSummary = {
 	id: string;
+	/** Its address on the page (slug.ts): made from the first name, and kept on a rename. */
+	slug: string;
 	kind: Kind;
 	name: string;
 	description: string;
@@ -108,7 +111,8 @@ export class Workspaces extends Context.Service<
 		readonly check: (userId: string, workspaceId: string, needed: "ask" | "edit") => Effect.Effect<void, WorkspaceNotFound | WorkspaceRefused | SqlError>;
 		/** The workspaces the person can use: organisation ones first, then those shared with them, then their own; by name. */
 		readonly list: (userId: string) => Effect.Effect<WorkspaceSummary[], SqlError>;
-		readonly get: (userId: string, workspaceId: string) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | SqlError>;
+		/** By its id or its slug: the page's address has the slug, and older links the id. */
+		readonly get: (userId: string, idOrSlug: string) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | SqlError>;
 		/** Anyone makes a private workspace; only an admin an organisation one. The maker is its owner. */
 		readonly create: (actor: Actor, input: NewWorkspace) => Effect.Effect<WorkspaceDetail, WorkspaceRefused | SqlError>;
 		/** Name, description, instructions and icon: `edit` and above. */
@@ -143,6 +147,7 @@ const make = Effect.gen(function* () {
 				updated_at timestamptz not null default now(),
 				deleted_at timestamptz
 			)`;
+		yield* migrateSlugs(sql);
 		yield* sql`
 			create table if not exists workspace_members (
 				workspace_id text not null references workspaces (id) on delete cascade,
@@ -207,9 +212,11 @@ const make = Effect.gen(function* () {
 		return found.map((row) => summaryFrom(row, accessFrom({ kind: row.kind, ownerId: row.owner_id, member: row.member }, userId, admin))).sort(sidebarOrder);
 	});
 
-	const get = Effect.fn("Workspaces.get")(function* (userId: string, workspaceId: string) {
+	const get = Effect.fn("Workspaces.get")(function* (userId: string, idOrSlug: string) {
+		// An unknown slug and one the person can't use answer the same.
+		const workspaceId = Option.getOrElse(yield* rows.idOf(idOrSlug), () => idOrSlug);
 		const found = yield* resolve(userId, workspaceId);
-		if (found.access === "none") return yield* new WorkspaceNotFound({ workspaceId });
+		if (found.access === "none") return yield* new WorkspaceNotFound({ workspaceId: idOrSlug });
 		return yield* detail(workspaceId, found.access, found.admin);
 	});
 
@@ -217,9 +224,13 @@ const make = Effect.gen(function* () {
 		const admin = yield* accounts.isAdmin(actor.id);
 		if (input.kind === "org" && !admin) return yield* new WorkspaceRefused({ reason: "org-needs-admin" });
 		const id = randomUUID();
-		yield* sql`
-			insert into workspaces (id, kind, owner_id, name, description, instructions, icon)
-			values (${id}, ${input.kind}, ${actor.id}, ${input.name}, ${input.description}, ${input.instructions}, ${input.icon})`;
+		yield* claimSlug(input.name, (slug) =>
+			sql`
+				insert into workspaces (id, slug, kind, owner_id, name, description, instructions, icon)
+				values (${id}, ${slug}, ${input.kind}, ${actor.id}, ${input.name}, ${input.description}, ${input.instructions}, ${input.icon})
+				on conflict (slug) do nothing
+				returning id`.pipe(Effect.map((rows) => rows.length > 0)),
+		);
 		const created = yield* detail(id, "owner", admin);
 		yield* audit(actor, "create-workspace", [created.kind], null, auditView(created));
 		return created;
@@ -311,6 +322,7 @@ export const layer = Layer.effect(Workspaces, make);
 function summaryFrom(row: SummaryRow, access: Access): WorkspaceSummary {
 	return {
 		id: row.id,
+		slug: row.slug,
 		kind: row.kind,
 		name: row.name,
 		description: row.description,

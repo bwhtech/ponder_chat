@@ -4,7 +4,7 @@ import { nameFromFirstMessage } from "../shared/thread-name";
 import { client, unwrap, type Answer } from "./api";
 import { fromBoot } from "./boot";
 import { forgetThread, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
-import { openWorkspaceId } from "./workspaces/store";
+import { openWorkspaceKey } from "./workspaces/store";
 
 /**
  * The person's threads and the one open now. The open thread lives in the URL
@@ -15,7 +15,7 @@ import { openWorkspaceId } from "./workspaces/store";
  * asked afterwards: a 304 when nothing changed, or the newer thread, which replaces
  * the chat unless a reply is on its way. The list is kept in localStorage the same way.
  *
- * A workspace page (`?w=<id>`) takes the open thread's place in the URL; opening a thread
+ * A workspace page (`?w=<slug>`) takes the open thread's place in the URL; opening a thread
  * takes it back.
  */
 export type ThreadSummary = Answer<typeof client.api.threads.$get>["threads"][number];
@@ -293,7 +293,7 @@ function storedList(): ThreadSummary[] {
 function setUrl(id: string, push: boolean) {
 	const url = new URL(location.href);
 	url.searchParams.delete("w");
-	openWorkspaceId.value = "";
+	openWorkspaceKey.value = "";
 	url.searchParams.set("t", id);
 	if (push) history.pushState(null, "", url);
 	else history.replaceState(null, "", url);

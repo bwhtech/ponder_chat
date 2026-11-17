@@ -278,6 +278,55 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.deepStrictEqual(thread.map((found) => found._tag), ["Some", "None"]);
 	});
 
+	it("gives each workspace a slug from its name, unique, and keeps it on a rename", async () => {
+		const first = (await call("ana", "POST", "/api/workspaces", { name: "HR policies" })).body.workspace;
+		const second = (await call("bob", "POST", "/api/workspaces", { name: "HR Policies!" })).body.workspace;
+		assert.strictEqual(first.slug, "hr-policies");
+		assert.match(second.slug, /^hr-policies-[a-z2-9]{4}$/, "a name taken by someone else's workspace gets a suffix");
+
+		const renamed = await call("ana", "PATCH", `/api/workspaces/${first.id}`, { name: "People policies" });
+		assert.deepInclude(renamed.body.workspace, { name: "People policies", slug: "hr-policies" });
+		const bySlug = await call("ana", "GET", "/api/workspaces/hr-policies");
+		assert.deepInclude(bySlug.body.workspace, { id: first.id, slug: "hr-policies" });
+		assert.strictEqual((await call("ana", "GET", `/api/workspaces/${first.id}`)).body.workspace.slug, "hr-policies", "the id still works");
+		const listed = (await call("ana", "GET", "/api/workspaces")).body.workspaces.find((workspace: { id: string }) => workspace.id === first.id);
+		assert.strictEqual(listed.slug, "hr-policies");
+	});
+
+	it("answers someone else's slug as it answers a slug that does not exist", async () => {
+		const notFound = { status: 404, body: { error: "Not found" } };
+		assert.deepStrictEqual(await call("dan", "GET", "/api/workspaces/hr-policies"), notFound);
+		assert.deepStrictEqual(await call("dan", "GET", "/api/workspaces/no-such-workspace"), notFound);
+		assert.deepStrictEqual(await call("admin", "GET", "/api/workspaces/hr-policies"), notFound, "an admin who was not added");
+	});
+
+	it("never gives a deleted workspace's slug again", async () => {
+		const gone = (await call("cy", "POST", "/api/workspaces", { name: "Dialysis unit" })).body.workspace;
+		assert.strictEqual(gone.slug, "dialysis-unit");
+		await call("cy", "DELETE", `/api/workspaces/${gone.id}`);
+		assert.strictEqual((await call("cy", "GET", "/api/workspaces/dialysis-unit")).status, 404);
+		const again = (await call("cy", "POST", "/api/workspaces", { name: "Dialysis unit" })).body.workspace;
+		assert.match(again.slug, /^dialysis-unit-[a-z2-9]{4}$/);
+	});
+
+	it("fills the slugs of workspaces made before slugs, the oldest first, when it migrates", async () => {
+		const older = await create("ana", "private", "Ward rota");
+		const newer = await create("bob", "private", "Ward rota");
+		await database((sql) =>
+			Effect.gen(function* () {
+				yield* sql`alter table workspaces alter column slug drop not null`;
+				yield* sql`update workspaces set slug = null where id in (${older}, ${newer})`;
+			}),
+		);
+		await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.migrate));
+		const slugs = await database((sql) => sql<{ id: string; slug: string }>`select id, slug from workspaces where id in (${older}, ${newer})`);
+		const slugOf = (id: string) => slugs.find((row) => row.id === id)?.slug;
+		assert.strictEqual(slugOf(older), "ward-rota");
+		assert.match(slugOf(newer) ?? "", /^ward-rota-[a-z2-9]{4}$/);
+		const [column] = await database((sql) => sql<{ is_nullable: string }>`select is_nullable from information_schema.columns where table_schema = ${schema} and table_name = 'workspaces' and column_name = 'slug'`);
+		assert.strictEqual(column?.is_nullable, "NO");
+	});
+
 	it("finds people by name or email, without case, at most 20", async () => {
 		await database((sql) =>
 			Effect.gen(function* () {

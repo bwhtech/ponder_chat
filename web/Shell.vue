@@ -18,7 +18,7 @@ import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
 import { openWorkspaceDialog, workspaceDialogUsed } from "./workspaces/dialogs";
 import { handOver, type FirstMessage } from "./workspaces/first-message";
-import { openWorkspaceId, showWorkspace, workspaceInUrl } from "./workspaces/store";
+import { openWorkspace, openWorkspaceKey, showWorkspace, workspaceInUrl } from "./workspaces/store";
 import WorkspacePlaceholder from "./workspaces/WorkspacePlaceholder.vue";
 
 /**
@@ -90,13 +90,13 @@ const requestWaited = ref(false);
 watch(() => me.value?.credits.request?.status === "pending", (pending) => pending && (requestWaited.value = true), { immediate: true });
 // Files in the chat (attachments, images from Python) open in the side panel.
 provideFileViewer(viewInPanel);
-// The main area shows the open chat, the Memory page (?view=memory), or a workspace (?w=<id>, workspaces/store.ts).
+// The main area shows the open chat, the Memory page (?view=memory), or a workspace (?w=<slug>, workspaces/store.ts).
 const view = ref<"chat" | "memory">(viewInUrl());
 addEventListener("popstate", () => {
 	view.value = viewInUrl();
-	openWorkspaceId.value = workspaceInUrl();
+	openWorkspaceKey.value = workspaceInUrl();
 });
-const page = computed(() => (view.value === "memory" ? "memory" : openWorkspaceId.value ? "workspace" : "chat"));
+const page = computed(() => (view.value === "memory" ? "memory" : openWorkspaceKey.value ? "workspace" : "chat"));
 // The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
 watch([current, page], closePanel);
 // Back to the chat from Memory or a workspace, by a click or by Back: its chat mounts again,
@@ -122,17 +122,17 @@ function showMemory() {
 	sheetOpen.value = false;
 	if (view.value === "memory") return;
 	view.value = "memory";
-	openWorkspaceId.value = "";
+	openWorkspaceKey.value = "";
 	const url = new URL(location.href);
 	url.searchParams.delete("w");
 	url.searchParams.set("view", "memory");
 	history.pushState(null, "", url);
 }
 
-function pickWorkspace(id: string) {
+function pickWorkspace(slug: string) {
 	sheetOpen.value = false;
 	view.value = "chat";
-	showWorkspace(id);
+	showWorkspace(slug);
 }
 
 function newWorkspace() {
@@ -235,7 +235,7 @@ function onSaved() {
 			<!-- The page's main landmark, as on the sign-in page: the open chat, Memory or a workspace. -->
 			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
 				<!-- A workspace draws its own header, wider, for its side panel. -->
-				<WorkspacePage v-if="page === 'workspace'" :id="openWorkspaceId" :key="openWorkspaceId" @open-chat="pick" @ask="askInWorkspace" @deleted="newThread">
+				<WorkspacePage v-if="page === 'workspace'" :slug-or-id="openWorkspaceKey" :key="openWorkspace?.id ?? openWorkspaceKey" @open-chat="pick" @ask="askInWorkspace" @deleted="newThread">
 					<template #start><Button class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-panel-left" aria-label="Chats" @click="sheetOpen = true" /></template>
 					<template #end><Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" /></template>
 				</WorkspacePage>

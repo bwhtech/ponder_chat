@@ -44,6 +44,7 @@ export type DocumentStatus = "reading" | "ready" | "failed";
 export type OrgDocument = { id: string; name: string; mediaType: string; size: number; status: DocumentStatus; error: string | null; createdAt: string; costUsd: number | null };
 export type OrgWorkspace = {
 	id: string;
+	slug: string;
 	name: string;
 	description: string;
 	icon: string | null;
