@@ -10,8 +10,11 @@ import * as SqlSchema from "effect/sql/SqlSchema";
  * a passage's text. Rows are only added. A row's id names its document, its indexing run
  * (generation) and its step, so a step that Workflow runs again writes no second row.
  *
- * The cost of a row is read from its `runs` row when the log is read, so the two never
- * disagree, also after the sweep fills in a cost that came late.
+ * The cost of a row is read from `runs` when the log is read, so the two never disagree,
+ * also after the sweep fills in a cost that came late. A row's cost is its run's and the
+ * tries of that run that were billed too (`<run>:failed:<uuid>`, `<run>:try:<n>`). The last
+ * row of an indexing run (`ready`, `failed`) shows every call of its generation, also the
+ * tries of a batch that never got its `embedded` row.
  */
 export type LogStep = "uploaded" | "reindexed" | "parsed" | "page-read" | "chunked" | "embedded" | "ready" | "failed";
 
@@ -35,7 +38,7 @@ export type LogEntry = {
 	step: LogStep;
 	at: string;
 	detail: LogDetail;
-	/** From `runs`. For `ready` and `failed`, the run's total; null when no model call cost anything (yet). */
+	/** From `runs`. For `ready` and `failed`, the generation's total; null when no model call cost anything (yet). */
 	costUsd: number | null;
 };
 
@@ -44,8 +47,15 @@ const EntryRow = Schema.Struct({
 	step: Schema.Literals(["uploaded", "reindexed", "parsed", "page-read", "chunked", "embedded", "ready", "failed"]),
 	detail: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Number, Schema.Boolean, Schema.Null])),
 	created_at: Schema.Date,
-	cost_usd: Schema.NullOr(Schema.Number),
+	run_id: Schema.NullOr(Schema.String),
 });
+const CostRow = Schema.Struct({ id: Schema.String, cost_usd: Schema.NullOr(Schema.Number) });
+
+/**
+ * The `runs` rows of a document's indexing: their ids are `<function>:<document>:<generation>:<part>[:...]`
+ * (Indexer.ts). The expression index of tables.ts finds them, also after the document is deleted.
+ */
+export const DOCUMENT_RUNS = "r.function_id in ('workspace-index', 'workspace-pdf') and split_part(r.id, ':', 2)";
 
 export type IndexLog = {
 	readonly write: (row: LogRow) => Effect.Effect<void, SqlError>;
@@ -68,16 +78,26 @@ export function indexLog(sql: PgClient.PgClient): IndexLog {
 		Request: Schema.String,
 		Result: EntryRow,
 		execute: (documentId) => sql`
-			select l.generation, l.step, l.detail, l.created_at, r.cost_usd::float8 as cost_usd
-			from workspace_document_log l left join runs r on r.id = l.run_id
-			where l.document_id = ${documentId}
-			order by l.created_at, l.id`,
+			select generation, step, detail, created_at, run_id from workspace_document_log
+			where document_id = ${documentId}
+			order by created_at, id`,
+	});
+	const findCosts = SqlSchema.findAll({
+		Request: Schema.String,
+		Result: CostRow,
+		execute: (documentId) => sql`select r.id, r.cost_usd::float8 as cost_usd from runs r where ${sql.literal(DOCUMENT_RUNS)} = ${documentId}`,
 	});
 
 	const read = (documentId: string) =>
-		findEntries(documentId).pipe(
+		Effect.all([findEntries(documentId), findCosts(documentId)]).pipe(
 			Effect.catchTags({ SchemaError: Effect.die }),
-			Effect.map((rows) => withTotals(rows.map((row): LogEntry => ({ generation: row.generation, step: row.step, at: row.created_at.toISOString(), detail: { ...row.detail }, costUsd: row.cost_usd })))),
+			Effect.map(([rows, costs]) =>
+				rows.map((row): LogEntry => {
+					const entry = { generation: row.generation, step: row.step, at: row.created_at.toISOString(), detail: { ...row.detail } };
+					if (row.step === "ready" || row.step === "failed") return { ...entry, costUsd: total(costs.filter((cost) => generationOf(cost.id) === row.generation)) };
+					return { ...entry, costUsd: row.run_id ? total(costs.filter((cost) => cost.id === row.run_id || cost.id.startsWith(`${row.run_id}:`))) : null };
+				}),
+			),
 		);
 
 	const findElapsed = SqlSchema.findAll({
@@ -100,13 +120,14 @@ function logId({ documentId, generation, step, part }: LogRow) {
 	return [documentId, generation, step, ...(part === undefined ? [] : [part])].join(":");
 }
 
-/** A run's last row (`ready` or `failed`) shows what all its model calls cost. */
-function withTotals(entries: LogEntry[]): LogEntry[] {
-	return entries.map((entry) => {
-		if (entry.step !== "ready" && entry.step !== "failed") return entry;
-		const costs = entries.filter((other) => other.generation === entry.generation && other.costUsd !== null).map((other) => other.costUsd!);
-		return { ...entry, costUsd: costs.length ? round(costs.reduce((sum, cost) => sum + cost, 0)) : null };
-	});
+/** The calls' cost added up; null when none has a cost (yet). */
+function total(rows: ReadonlyArray<typeof CostRow.Type>) {
+	const costs = rows.flatMap((row) => (row.cost_usd === null ? [] : [row.cost_usd]));
+	return costs.length ? round(costs.reduce((sum, cost) => sum + cost, 0)) : null;
+}
+
+function generationOf(runId: string) {
+	return Number(runId.split(":")[2]);
 }
 
 function round(usd: number) {

@@ -74,6 +74,10 @@ export const migrateDocuments = (sql: PgClient.PgClient) =>
 		yield* sql`create index if not exists workspace_passages_document on workspace_passages (document_id, ordinal)`;
 		yield* sql`create index if not exists workspace_passages_workspace on workspace_passages (workspace_id, model)`;
 		yield* sql`create index if not exists workspace_passages_search on workspace_passages using gin (search)`;
+		// A document's model calls in `runs`, by the document id in their run id (log.ts, DOCUMENT_RUNS).
+		yield* sql`
+			create index if not exists runs_workspace_document on runs (split_part(id, ':', 2))
+			where function_id in ('workspace-index', 'workspace-pdf')`;
 		yield* sql`
 			create table if not exists workspace_object_deletions (
 				object_key text primary key,

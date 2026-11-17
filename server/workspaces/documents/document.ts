@@ -12,8 +12,17 @@ export type DocumentPage = { page: number | null; markdown: string };
 /** Why a page went to a model: one picture covers 10% of it or more, or the whole page is one scanned picture. */
 export type PageReadReason = "picture" | "scan";
 
+/** One try that OpenRouter answered, and so may have billed: its own `runs` row, so a cost that comes later is filled in for each. */
+export const PageCall = Schema.Struct({
+	generationId: Schema.NullOr(Schema.String),
+	costUsd: Schema.NullOr(Schema.Number),
+	inputTokens: Schema.Number,
+	outputTokens: Schema.Number,
+});
+export type PageCall = typeof PageCall.Type;
+
 /**
- * One model call that read a page, for the `page-read` log row and its `runs` row.
+ * One page that a model read, for the `page-read` log row and its `runs` rows.
  * Never the page's text: only numbers, ids, the model and the error.
  */
 export const PageRead = Schema.Struct({
@@ -32,8 +41,10 @@ export const PageRead = Schema.Struct({
 	inputTokens: Schema.Number,
 	outputTokens: Schema.Number,
 	reasoningTokens: Schema.Number,
-	/** OpenRouter's generation id ("gen-..."), so a cost that comes later can be filled in. */
+	/** OpenRouter's generation id ("gen-...") of the last try that has one. */
 	generationId: Schema.NullOr(Schema.String),
+	/** Each try that OpenRouter answered, in order. */
+	calls: Schema.Array(PageCall),
 	/** The length of the model's text. 0 when the call failed. */
 	chars: Schema.Number,
 });

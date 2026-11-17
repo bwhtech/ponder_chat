@@ -14,7 +14,7 @@ import * as Layer from "effect/Layer";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../../auth.ts";
 import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
-import { EMBED_COST, PAGE_COST, startFakeOpenRouter } from "./fake-openrouter.ts";
+import { EMBED_COST, LATE_COST, PAGE_COST, startFakeOpenRouter } from "./fake-openrouter.ts";
 import type { Documents as DocumentsService } from "./Documents.ts";
 import type { IndexRequest } from "./Indexer.ts";
 
@@ -29,6 +29,8 @@ const { runPromise, dispose } = await import("../../runtime/runtime.ts");
 const Threads = await import("../../threads/Threads.ts");
 const AdminEvents = await import("../../admin/AdminEvents.ts");
 const Runs = await import("../../telemetry/Runs.ts");
+const ModelCalls = await import("../../telemetry/ModelCalls.ts");
+const AdminWorkspaces = await import("../admin.ts");
 const Workspaces = await import("../Workspaces.ts");
 const Documents = await import("./Documents.ts");
 const Indexer = await import("./Indexer.ts");
@@ -185,6 +187,26 @@ describe.skipIf(!base)("workspace documents", () => {
 		for (const text of ["Cefazolin", "Exit site", "Peritonitis is the main infection", "cloudy bag"]) assert.notInclude(rows, text);
 	});
 
+	it("keeps each paid try of a page with its own generation id, so a cost that comes late is added to the page", async () => {
+		openRouter.pages.set(2, TABLE).set(3, SCAN);
+		openRouter.emptyOnce.add(2);
+		const uploaded = await documents((service) => service.upload(actor("cy"), ids.workspace, file("retried.pdf", FIXTURE, "application/pdf")));
+		assert.strictEqual(await indexLatest(), "ready");
+		const page = `workspace-pdf:${uploaded.id}:1:2`;
+		const rows = () => database((sql) => sql<{ id: string; generation_id: string; cost: number | null }>`
+			select id, generation_id, cost_usd::float8 as cost from runs where id = ${page} or id like ${`${page}:%`} order by id`);
+		assert.deepStrictEqual(await rows(), [
+			{ id: page, generation_id: "gen-2", cost: PAGE_COST },
+			{ id: `${page}:try:1`, generation_id: "gen-2-empty", cost: null },
+		]);
+		// The sweep asks OpenRouter for the try's cost; the page's row in the log adds it.
+		await runPromise(ModelCalls.ModelCalls.use((calls) => calls.fillCosts));
+		assert.strictEqual((await rows())[1].cost, LATE_COST);
+		const log = (await documents((service) => service.log(actor("cy"), ids.workspace, uploaded.id))).steps;
+		assert.closeTo(log.find((step) => step.step === "page-read" && step.detail.page === 2)!.costUsd!, PAGE_COST + LATE_COST, 1e-9);
+		await documents((service) => service.remove(actor("cy"), ids.workspace, uploaded.id));
+	});
+
 	it("fails a document whose page has no text and can't be read, with the page; Try again makes it ready", async () => {
 		openRouter.pages.set(3, "fail");
 		ids.failing = (await documents((service) => service.upload(actor("ana"), ids.workspace, file("scan.pdf", FIXTURE, "application/pdf")))).id;
@@ -312,6 +334,16 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.strictEqual(total.steps, 3);
 		assert.closeTo(total.cost, 3 * EMBED_COST, 1e-9);
 		openRouter.oneAtATime = false;
+
+		// The document's log and the admin's totals count the tries of the batch that failed too.
+		const log = (await documents((service) => service.log(actor("ana"), ids.workspace, uploaded.id))).steps;
+		assert.closeTo(log.find((step) => step.step === "embedded")!.costUsd!, 3 * EMBED_COST, 1e-9);
+		assert.closeTo(log.at(-1)!.costUsd!, 3 * EMBED_COST, 1e-9);
+		const report = await runPromise(AdminWorkspaces.AdminWorkspaces.use((admin) => admin.report));
+		const [all] = await database((sql) => sql<{ cost: number }>`
+			select coalesce(sum(r.cost_usd), 0)::float8 as cost from runs r join workspace_documents d on split_part(r.id, ':', 2) = d.id
+			where r.function_id in ('workspace-index', 'workspace-pdf')`);
+		assert.closeTo(report.private.costUsd, all.cost, 1e-6);
 		// The AI SDK waits 2 s, then 4 s, between its tries.
 	}, 20_000);
 

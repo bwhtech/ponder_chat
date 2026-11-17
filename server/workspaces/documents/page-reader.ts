@@ -170,7 +170,7 @@ function failed(error: string, retryable: boolean): Attempt {
 	return { ...NO_USAGE, ok: false, error, retryable };
 }
 
-/** One record for all attempts: their costs and tokens added up, the last one's id and outcome. */
+/** One record for all attempts: their costs and tokens added up, the last one's id and outcome, and each answered try. */
 function resultOf(request: PageRequest, attempts: Attempt[], ms: number): PageReadResult {
 	const last = attempts[attempts.length - 1];
 	const costs = attempts.flatMap((one) => (one.costUsd === null ? [] : [one.costUsd]));
@@ -188,7 +188,13 @@ function resultOf(request: PageRequest, attempts: Attempt[], ms: number): PageRe
 		outputTokens: sum((one) => one.outputTokens),
 		reasoningTokens: sum((one) => one.reasoningTokens),
 		generationId: attempts.flatMap((one) => (one.generationId ? [one.generationId] : [])).at(-1) ?? null,
+		calls: attempts.filter(answered).map(({ generationId, costUsd, inputTokens, outputTokens }) => ({ generationId, costUsd, inputTokens, outputTokens })),
 		chars: last.ok ? last.text.length : 0,
 	};
 	return { record, text: last.ok ? Option.some(last.text) : Option.none() };
+}
+
+/** OpenRouter took the call: it named it, gave its cost, or counted its tokens. */
+function answered(attempt: Attempt) {
+	return attempt.generationId !== null || attempt.costUsd !== null || attempt.inputTokens > 0 || attempt.outputTokens > 0;
 }

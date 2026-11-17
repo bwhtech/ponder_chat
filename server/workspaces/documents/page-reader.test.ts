@@ -99,6 +99,7 @@ describe("PageReader", () => {
 				outputTokens: 140,
 				reasoningTokens: 30,
 				generationId: "gen-123",
+				calls: [{ generationId: "gen-123", costUsd: 0.0021, inputTokens: 1800, outputTokens: 140 }],
 				chars: PAGE_TEXT.length,
 			});
 		}).pipe(Effect.provide(fake.layer));
@@ -129,6 +130,27 @@ describe("PageReader", () => {
 			assert.strictEqual(result.record.ok, true);
 			assert.strictEqual(result.record.attempts, 2);
 			assert.strictEqual(result.record.costUsd, 0.0021);
+		}).pipe(Effect.provide(fake.layer));
+	});
+
+	it.effect("keeps each answered try with its own generation id and cost, for costs that come late", () => {
+		const noCost = { ...completion, id: "gen-1", usage: { prompt_tokens: 1800, completion_tokens: 0 } };
+		const fake = fakeOpenRouter([
+			{ status: 200, body: { ...noCost, choices: [{ finish_reason: "stop", message: { content: "" } }] } },
+			{ status: 503, body: { error: { message: "Provider returned error" } } },
+			{ status: 200, body: completion },
+		]);
+		return Effect.gen(function* () {
+			const fiber = yield* Effect.forkChild(read());
+			yield* TestClock.adjust("2 seconds");
+			yield* TestClock.adjust("4 seconds");
+			const result = yield* Fiber.join(fiber);
+			assert.strictEqual(result.record.attempts, 3);
+			// The 503 has no id, no cost and no tokens: OpenRouter did not take it.
+			assert.deepStrictEqual(result.record.calls, [
+				{ generationId: "gen-1", costUsd: null, inputTokens: 1800, outputTokens: 0 },
+				{ generationId: "gen-123", costUsd: 0.0021, inputTokens: 1800, outputTokens: 140 },
+			]);
 		}).pipe(Effect.provide(fake.layer));
 	});
 

@@ -40,6 +40,7 @@ function recordedRead(request: PageReader.PageRequest, text: string | undefined)
 		error: text === undefined ? "No model in this run." : null,
 		ms: 0,
 		attempts: 1,
+		calls: [],
 		costUsd: 0,
 		inputTokens: 0,
 		outputTokens: 0,

@@ -119,6 +119,7 @@ function notCopied(page: number, reason: PageReadReason): PageReader.PageReadRes
 		outputTokens: 0,
 		reasoningTokens: 0,
 		generationId: null,
+		calls: [],
 		chars: 0,
 	};
 	return { record, text: Option.none() };

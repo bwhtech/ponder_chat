@@ -37,6 +37,7 @@ function fakeModel(answers: Record<number, string | "fail">) {
 				outputTokens: ok ? 80 : 0,
 				reasoningTokens: 0,
 				generationId: ok ? `gen-${request.page}` : null,
+				calls: ok ? [{ generationId: `gen-${request.page}`, costUsd: 0.002, inputTokens: 1_200, outputTokens: 80 }] : [],
 				chars: ok ? answer.length : 0,
 			};
 			return { record, text: ok ? Option.some(answer) : Option.none() };
@@ -117,6 +118,7 @@ describe("readPdf", () => {
 			for (const text of [TABLE, SCAN, "Cefazolin", "Exit site", "Doses for peritonitis", "Peritonitis is the main"]) assert.notInclude(records, text);
 			assert.deepStrictEqual(Object.keys(read.pageReads[0]).sort(), [
 				"attempts",
+				"calls",
 				"chars",
 				"costUsd",
 				"error",

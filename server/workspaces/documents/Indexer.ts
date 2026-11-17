@@ -118,10 +118,7 @@ const make = Effect.gen(function* () {
 
 	/** The `runs` rows of the page reads: their spend is kept, also for a run that a newer one overtook. */
 	const recordPageRuns = Effect.fnUntraced(function* (row: DocumentRow, reads: ReadonlyArray<PageRead>) {
-		for (const read of reads) {
-			const runId = pageRunId(row, read);
-			if (runId) yield* runs.insert(pageReadRun(runId, row.added_by, read));
-		}
+		for (const read of reads) for (const run of pageReadRuns(row, read)) yield* runs.insert(run);
 	});
 
 	const logPageReads = Effect.fnUntraced(function* (row: DocumentRow, reads: ReadonlyArray<PageRead>) {
@@ -247,22 +244,34 @@ function pageRunId(row: DocumentRow, read: PageRead) {
 	return read.attempts > 0 ? `workspace-pdf:${row.id}:${row.generation}:${read.page}` : null;
 }
 
-function pageReadRun(id: string, user: string, read: PageRead): Runs.RunRow {
-	return {
-		id,
-		parentId: null,
-		threadId: null,
-		user,
-		functionId: "workspace-pdf",
-		model: read.model,
-		steps: read.attempts,
-		inputTokens: read.inputTokens,
-		outputTokens: read.outputTokens,
-		cachedTokens: 0,
-		costUsd: read.costUsd,
-		durationMs: read.ms,
-		toolCalls: [],
-		finishReason: read.ok ? "stop" : "failed",
-		generationId: read.generationId,
-	};
+/**
+ * A page read's `runs` rows: one for each try that OpenRouter answered, each with its own
+ * generation id and cost, so the sweep fills in each cost that comes late. The last is the
+ * page's own id, which its log row points to; the tries before it are `<id>:try:<n>`. A
+ * page read with no answered try still has its row, for the log row's key.
+ */
+function pageReadRuns(row: DocumentRow, read: PageRead): Runs.RunRow[] {
+	const id = pageRunId(row, read);
+	if (!id) return [];
+	const calls = read.calls.length ? read.calls : [{ generationId: null, costUsd: null, inputTokens: 0, outputTokens: 0 }];
+	return calls.map((call, index) => {
+		const last = index === calls.length - 1;
+		return {
+			id: last ? id : `${id}:try:${index + 1}`,
+			parentId: null,
+			threadId: null,
+			user: row.added_by,
+			functionId: "workspace-pdf",
+			model: read.model,
+			steps: 1,
+			inputTokens: call.inputTokens,
+			outputTokens: call.outputTokens,
+			cachedTokens: 0,
+			costUsd: call.costUsd,
+			durationMs: last ? read.ms : 0,
+			toolCalls: [],
+			finishReason: last ? (read.ok ? "stop" : "failed") : "retried",
+			generationId: call.generationId,
+		};
+	});
 }

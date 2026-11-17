@@ -9,10 +9,14 @@ import type { AddressInfo } from "node:net";
  * - Embeddings: a vector of three topics (doses, exit-site care, bleeding), so a question
  *   is near the passages about it. Each call costs EMBED_COST.
  * - Chat completions (the page reader): the text in `pages` for the page in the file's
- *   name, "fail" for a refusal that is not retried, and no text for any other page.
+ *   name, "fail" for a refusal that is not retried, and no text for any other page. A page
+ *   in `emptyOnce` first gets no text and no cost (a try that is worth another).
+ * - The generation API: LATE_COST for any generation.
  */
 export const EMBED_COST = 0.00002;
 export const PAGE_COST = 0.002;
+/** What the generation API says a call cost, when its answer gave none. */
+export const LATE_COST = 0.0005;
 
 const TOPICS = [/dose|vancomycin|cefazolin|mg\/kg/i, /exit site|catheter/i, /bleed|misoprostol/i];
 export const meaning = (text: string) => TOPICS.map((topic) => (topic.test(text) ? 1 : 0.01));
@@ -27,13 +31,15 @@ export type FakeOpenRouter = {
 	oneAtATime: boolean;
 	/** Answers 502 to an embedding call when this says so: it sees the call's texts. */
 	failEmbedding?: (input: string[]) => boolean;
+	/** Pages whose first call gets no text and no cost, with the id `gen-<page>-empty`. */
+	emptyOnce: Set<number>;
 	/** Holds a call until the promise it gives settles: a call that is slow, or that never ends. */
 	gate?: (kind: "embedding" | "page") => Promise<void> | undefined;
 	close: () => Promise<void>;
 };
 
 export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
-	const fake: FakeOpenRouter = { url: "", pages: new Map(), embedded: [], oneAtATime: false, close: async () => undefined };
+	const fake: FakeOpenRouter = { url: "", pages: new Map(), embedded: [], oneAtATime: false, emptyOnce: new Set(), close: async () => undefined };
 	const { pages, embedded } = fake;
 	const server = createServer(async (request, response) => {
 		const body = request.method === "POST" ? JSON.parse(await read(request)) : {};
@@ -54,11 +60,14 @@ export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
 		if (request.url?.endsWith("/v1/chat/completions")) {
 			await fake.gate?.("page");
 			const file = JSON.stringify(body.messages).match(/page-(\d+)\.pdf/);
-			const answer = pages.get(Number(file?.[1]));
+			const page = Number(file?.[1]);
+			if (fake.emptyOnce.delete(page)) return send(200, { id: `gen-${page}-empty`, model: body.model, choices: [{ finish_reason: "stop", message: { content: "" } }], usage: { prompt_tokens: 1_200 } });
+			const answer = pages.get(page);
 			if (answer === "fail") return send(400, { error: { message: "Provider returned error" } });
 			const usage = { cost: PAGE_COST, prompt_tokens: 1_200, completion_tokens: 80 };
 			return send(200, { id: `gen-${file?.[1]}`, model: body.model, choices: [{ finish_reason: "stop", message: { content: answer ?? "" } }], usage });
 		}
+		if (request.url?.includes("/v1/generation?id=")) return send(200, { data: { total_cost: LATE_COST, tokens_prompt: 1_200, tokens_completion: 0 } });
 		send(404, { error: { message: "Not here" } });
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

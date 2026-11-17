@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import * as ObjectStore from "../files/ObjectStore.ts";
-import { indexLog, type LogEntry } from "./documents/log.ts";
+import { DOCUMENT_RUNS, indexLog, type LogEntry } from "./documents/log.ts";
 import { documentStore, type DocumentStatus, type DocumentSummary, summaryOf } from "./documents/store.ts";
 
 /**
@@ -89,8 +89,8 @@ const StatusRow = Schema.Struct({ status: StatusSchema, documents: Schema.Number
 /** The names here are read only to cut them out of the error. */
 const FailedRow = Schema.Struct({ error: Schema.NullOr(Schema.String), names: Schema.Array(Schema.NullOr(Schema.String)) });
 
-// A document's cost: its log rows' model calls (log.ts reads the same rows for each step).
-const DOCUMENT_COST = "(select sum(r.cost_usd) from workspace_document_log l join runs r on r.id = l.run_id where l.document_id = d.id)";
+// A document's cost: every model call of its indexing, also the billed tries of a batch that failed (log.ts).
+const DOCUMENT_COST = `(select sum(r.cost_usd) from runs r where ${DOCUMENT_RUNS} = d.id)`;
 
 export class AdminWorkspaces extends Context.Service<
 	AdminWorkspaces,
