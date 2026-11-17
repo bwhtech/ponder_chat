@@ -77,13 +77,16 @@ const make = Effect.gen(function* () {
 		yield* Effect.logWarning(`workspace documents: indexing failed for document ${row.id} of workspace ${row.workspace_id}`);
 	});
 
-	/** The page reads' `runs` rows and log rows, and the text, together. */
+	/**
+	 * The text, and the page reads' `runs` rows and log rows, together. The log lists rows in
+	 * the order they were written (log.ts), and a person reads "parsed" before its pages.
+	 */
 	const saveRead = (row: DocumentRow, read: DocumentText) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				yield* recordPageReads(row, read.pageReads);
 				yield* store.saveText(row.id, storedText(read.pages));
 				yield* logRow(row, "parsed", { engine: read.engine, pages: read.pageCount, chars: read.chars, ms: read.ms });
+				yield* recordPageReads(row, read.pageReads);
 			}),
 		);
 

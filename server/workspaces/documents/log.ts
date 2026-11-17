@@ -62,6 +62,8 @@ export function indexLog(sql: PgClient.PgClient): IndexLog {
 		values (${logId(row)}, ${row.documentId}, ${row.workspaceId}, ${row.generation}, ${row.step}, ${sql.json(row.detail)}, ${row.runId ?? null})
 		on conflict (id) do nothing`.pipe(Effect.asVoid);
 
+	// In the order the rows were written: created_at is clock_timestamp(), not the
+	// transaction's start, so rows written in one transaction keep their order too.
 	const findEntries = SqlSchema.findAll({
 		Request: Schema.String,
 		Result: EntryRow,

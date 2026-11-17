@@ -30,20 +30,6 @@ const STAGES: Record<string, string> = {
 	finish: "finishing",
 };
 
-/**
- * The steps in the order a person reads them. The page reads of a PDF are written with its
- * "parsed" row, in one transaction, so they share its time and come first: they go after it.
- */
-export function readingOrder(steps: ReadonlyArray<LogEntry>) {
-	const ordered: LogEntry[] = [];
-	for (const entry of steps) {
-		let at = ordered.length;
-		if (entry.step === "parsed") while (at > 0 && ordered[at - 1].step === "page-read" && ordered[at - 1].generation === entry.generation) at--;
-		ordered.splice(at, 0, entry);
-	}
-	return ordered;
-}
-
 export function stepView(entry: LogEntry): StepView {
 	const { detail } = entry;
 	const starts = entry.step === "uploaded" || entry.step === "reindexed";

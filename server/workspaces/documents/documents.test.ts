@@ -147,9 +147,9 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.strictEqual(log.document.status, "ready");
 		assert.deepStrictEqual(
 			log.steps.map((step) => step.step),
-			["uploaded", "page-read", "page-read", "parsed", "chunked", "embedded", "ready"],
+			["uploaded", "parsed", "page-read", "page-read", "chunked", "embedded", "ready"],
 		);
-		const [uploaded, table, scan, parsed] = log.steps;
+		const [uploaded, parsed, table, scan] = log.steps;
 		assert.deepStrictEqual(uploaded.detail, { size: FIXTURE.length, mediaType: "application/pdf", by: who.cy });
 		assert.deepStrictEqual([table.detail.page, table.detail.reason, table.detail.ok, table.costUsd], [2, "picture", true, PAGE_COST]);
 		assert.deepStrictEqual([scan.detail.page, scan.detail.reason], [3, "scan"]);

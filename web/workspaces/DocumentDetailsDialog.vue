@@ -5,7 +5,7 @@ import { when } from "../dates";
 import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
 import { dialogTitle, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
-import { readingOrder, stepView } from "./document-log";
+import { stepView } from "./document-log";
 import { DETAILS_NOTE, fetchDocumentLog, fileSize, retryDocument, STATUS_LABELS, type LogEntry, type WorkspaceDocument } from "./documents";
 
 /**
@@ -22,7 +22,7 @@ const doc = shallowRef<WorkspaceDocument>(props.request.document);
 const steps = shallowRef<LogEntry[]>();
 const loadError = ref("");
 const retrying = ref(false);
-const views = computed(() => steps.value && readingOrder(steps.value).map((entry) => ({ entry, view: stepView(entry) })));
+const views = computed(() => steps.value?.map((entry) => ({ entry, view: stepView(entry) })));
 let timer: ReturnType<typeof setTimeout> | undefined;
 let closed = false;
 
