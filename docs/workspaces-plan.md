@@ -220,6 +220,7 @@ Only the owner changes the members of a private workspace. Only an admin changes
 | `PUT /api/workspaces/:id/sharing` | The owner of a private workspace, or an admin for an organisation workspace: kind and members |
 | `DELETE /api/workspaces/:id` | The owner of a private workspace, or an admin for an organisation workspace |
 | `POST /api/workspaces/:id/documents`, `DELETE /api/workspaces/:id/documents/:doc` | `edit` and above |
+| `GET /api/workspaces/:id/documents/:doc/file` | `ask` and above: the uploaded file, which opens in the chat's side panel from the document's name |
 | `GET /api/people?q=` | Any signed-in person. At most 20 results, with id, name and email. |
 | `POST /api/chat` | The body gets `workspaceId`, read only on the first message. |
 | `GET /api/admin/workspaces` | Admins: organisation workspaces, and counts of private ones |

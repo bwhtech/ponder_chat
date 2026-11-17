@@ -19,7 +19,7 @@ import * as Branding from "./branding/Branding.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
 import * as Credits from "./credits/Credits.ts";
 import * as Files from "./files.ts";
-import { MAX_FILE_BYTES, refusalText } from "./files.ts";
+import { fileHeaders, MAX_FILE_BYTES, refusalText } from "./files.ts";
 import * as Memory from "./memory.ts";
 import { memoryApi } from "./memory/routes.ts";
 import * as Models from "./models/Models.ts";
@@ -323,17 +323,7 @@ const api = app
 				Files.Files.use((files) => files.load(c.req.param("id"), userOf(c))),
 				Option.match({
 					onNone: () => c.json({ error: "Not found" }, 404),
-					onSome: (file) => {
-						// Only types that cannot run script open in the browser. Anything else (HTML or SVG that Python wrote) downloads, sandboxed.
-						const inline = INLINE_TYPES.has(file.media_type);
-						return c.body(new Uint8Array(file.data), 200, {
-							"Content-Type": file.media_type,
-							"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
-							"Cache-Control": "private, max-age=31536000, immutable",
-							"X-Content-Type-Options": "nosniff",
-							...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
-						});
-					},
+					onSome: (file) => c.body(new Uint8Array(file.data), 200, { ...fileHeaders(file.name, file.media_type), "Cache-Control": "private, max-age=31536000, immutable" }),
 				}),
 			),
 		),
@@ -394,5 +384,3 @@ export default app;
 function isChat(path: string) {
 	return path === "/api/chat" || path.startsWith("/api/chat/");
 }
-
-const INLINE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json"]);

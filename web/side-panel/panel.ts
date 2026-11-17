@@ -35,15 +35,16 @@ export function closePanel() {
 	current.value = null;
 }
 
-/** PDFs, CSV and TSV files, and the image types that browsers show. Other files open as a link. */
+/** PDFs, CSV and TSV files, text, Markdown and JSON, and the image types that browsers show. Other files open as a link. */
 export function canView(mediaType: string, name = "") {
 	return fileKind(mediaType, name) !== null;
 }
 
-export function fileKind(mediaType: string, name = ""): "pdf" | "image" | "table" | null {
+export function fileKind(mediaType: string, name = ""): "pdf" | "image" | "table" | "text" | null {
 	if (mediaType === "application/pdf" || /\.pdf$/i.test(name)) return "pdf";
 	if (/^image\/(png|jpe?g|gif|webp|avif)$/.test(mediaType)) return "image";
 	if (/^text\/(csv|tab-separated-values)$/.test(mediaType) || /\.(csv|tsv)$/i.test(name)) return "table";
+	if (/^(text\/(plain|markdown)|application\/json)$/.test(mediaType) || /\.(txt|md|json)$/i.test(name)) return "text";
 	return null;
 }
 

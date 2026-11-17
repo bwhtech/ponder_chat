@@ -34,6 +34,22 @@ export const SPREADSHEET_TYPES: Record<string, string> = {
 	xls: "application/vnd.ms-excel",
 	ods: "application/vnd.oasis.opendocument.spreadsheet",
 };
+/** What the model reads cannot run script, so it opens in the browser. */
+const INLINE_TYPES = new Set([...BINARY_TYPES, ...TEXT_TYPES]);
+
+/**
+ * The headers of a stored file's bytes (a chat file, a workspace document), all but its cache
+ * policy. Other types (HTML or SVG that Python wrote) download, sandboxed.
+ */
+export function fileHeaders(name: string, mediaType: string): Record<string, string> {
+	const inline = INLINE_TYPES.has(mediaType);
+	return {
+		"Content-Type": mediaType,
+		"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
+		"X-Content-Type-Options": "nosniff",
+		...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
+	};
+}
 
 export type StoredFile = { id: string; url: string; name: string; mediaType: string; size: number };
 export type LoadedFile = { name: string; media_type: string; data: Buffer; text: string | null };

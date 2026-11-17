@@ -21,7 +21,8 @@ import { documentStore, summaryOf, type DocumentRow, type DocumentSummary } from
 /**
  * A workspace's documents, as its routes use them (docs/workspaces-plan.md, "API"): upload,
  * delete, the indexing log and "Try again", for people who can edit the workspace. The
- * list is in the workspace's detail (Workspaces.get), for everyone who can ask.
+ * list is in the workspace's detail (Workspaces.get), and each uploaded file opens (file),
+ * for everyone who can ask.
  *
  * A document is always read with its workspace's id, after the workspace's access check:
  * one that is not in this workspace is not found.
@@ -69,6 +70,7 @@ export function refusalText(name: string, { reason }: DocumentRefused) {
 }
 
 export type DocumentLog = { document: DocumentSummary; steps: LogEntry[] };
+export type DocumentFile = { name: string; mediaType: string; data: Buffer };
 
 type AccessErrors = Workspaces.WorkspaceNotFound | Workspaces.WorkspaceRefused | SqlError;
 
@@ -79,6 +81,8 @@ export class Documents extends Context.Service<
 		readonly remove: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<void, AccessErrors | DocumentNotFound>;
 		readonly log: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<DocumentLog, AccessErrors | DocumentNotFound>;
 		readonly retry: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<DocumentSummary, AccessErrors | DocumentNotFound | DocumentNotFailed>;
+		/** The uploaded file, for the side viewer: anyone who can ask, whatever its status. */
+		readonly file: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<DocumentFile, AccessErrors | DocumentNotFound | ObjectStore.ObjectStoreError>;
 		/** At start-up: index again the ready or reading documents whose passages another embedding model made. Gives how many. */
 		readonly reindexOutdated: Effect.Effect<number, SqlError>;
 		/** For the sweep: start again the indexing of stalled documents. Gives how many. */
@@ -142,6 +146,15 @@ const make = Effect.gen(function* () {
 		return { document: summaryOf(row), steps: yield* log.read(row.id) } satisfies DocumentLog;
 	});
 
+	const file = Effect.fn("Documents.file")(function* (actor: Workspaces.Actor, workspaceId: string, documentId: string) {
+		yield* workspaces.check(actor.id, workspaceId, "ask");
+		const row = yield* store.find(workspaceId, documentId);
+		if (Option.isNone(row)) return yield* new DocumentNotFound({ documentId });
+		const data = yield* store.bytes(row.value);
+		if (Option.isNone(data)) return yield* new DocumentNotFound({ documentId });
+		return { name: row.value.name, mediaType: row.value.media_type, data: data.value } satisfies DocumentFile;
+	});
+
 	/** Reading for a while, with no run going. */
 	const stalled = Effect.fnUntraced(function* (row: DocumentRow) {
 		const now = yield* Clock.currentTimeMillis;
@@ -193,7 +206,7 @@ const make = Effect.gen(function* () {
 		return restarted;
 	}).pipe(Effect.withSpan("Documents.restartStalled"));
 
-	return Documents.of({ upload, remove, log: readLog, retry, reindexOutdated, restartStalled });
+	return Documents.of({ upload, remove, log: readLog, retry, file, reindexOutdated, restartStalled });
 });
 
 export const layer = Layer.effect(Documents, make);

@@ -97,8 +97,8 @@ addEventListener("popstate", () => {
 	openWorkspaceKey.value = workspaceInUrl();
 });
 const page = computed(() => (view.value === "memory" ? "memory" : openWorkspaceKey.value ? "workspace" : "chat"));
-// The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
-watch([current, page], closePanel);
+// The side panel shows a file or an artifact of the open chat or workspace, so it closes when that changes.
+watch([current, page, openWorkspaceKey], closePanel);
 // Back to the chat from Memory or a workspace, by a click or by Back: its chat mounts again,
 // with the messages it has now, not the ones it opened with. Before the render, so it never
 // draws the older ones.

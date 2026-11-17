@@ -4,6 +4,7 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ApiError } from "../api";
 import { dialog } from "../dialogs";
 import EmptyState from "../EmptyState.vue";
+import { panelItem } from "../side-panel/panel";
 import { toast } from "../toasts";
 import { useThreads } from "../threads";
 import { openWorkspaceDialog } from "./dialogs";
@@ -177,7 +178,8 @@ function askDelete() {
 		data-slot="workspace-view"
 		class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-range:40px] [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]"
 	>
-		<div class="mx-auto grid w-full max-w-[1120px] gap-8 px-4 pb-10 pt-6 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
+		<!-- The file viewer beside the page leaves too little width for two columns. -->
+		<div class="mx-auto grid w-full max-w-[1120px] gap-8 px-4 pb-10 pt-6 sm:px-5" :class="{ 'lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12': !panelItem }">
 			<div class="min-w-0 space-y-8">
 				<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
 				<WorkspaceChats :workspace-id="workspaceId" :shared="Boolean(summary && (summary.kind === 'org' || summary.memberCount))" @open="emit('openChat', $event)" />

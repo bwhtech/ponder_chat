@@ -10,6 +10,7 @@ export const FILE_LOOK = {
 	pdf: { icon: "lucide-file-text", ink: "text-ink-red-6" },
 	image: { icon: "lucide-image", ink: "text-ink-violet-6" },
 	table: { icon: "lucide-file-spreadsheet", ink: "text-ink-green-6" },
+	text: { icon: "lucide-file-text", ink: "text-ink-blue-6" },
 };
 
 /**

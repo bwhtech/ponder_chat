@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
+import { useFileViewer } from "frappe-ui-ai-elements";
 import { ref } from "vue";
 import { dialog } from "../dialogs";
 import { toast } from "../toasts";
 import DocumentRow from "./DocumentRow.vue";
-import { deleteDocument, DOCUMENT_TYPES, retryDocument, uploadDocument, type WorkspaceDocument } from "./documents";
+import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, uploadDocument, type WorkspaceDocument } from "./documents";
 import { openWorkspaceDialog } from "./dialogs";
 
 /**
  * The workspace's documents, in its side panel. Everyone who can ask sees each document's
- * name, and its status while it is not Ready. People who can edit also see its size and why
+ * name, and its status while it is not Ready, and opens its file by the name. People who can edit also see its size and why
  * it failed, upload (the button, or files dropped on the panel: WorkspaceAside.vue calls
  * `upload`), delete, open its Details (the indexing log) and "Try again" a document that
  * failed. The file picker
@@ -24,6 +25,7 @@ const picker = ref<HTMLInputElement>();
 const uploading = ref(0);
 const errors = ref<string[]>([]);
 const retrying = ref(new Set<string>());
+const viewFile = useFileViewer();
 
 defineExpose({ upload });
 
@@ -52,6 +54,12 @@ function picked(event: Event) {
 	const input = event.target as HTMLInputElement;
 	void upload(Array.from(input.files ?? []));
 	input.value = "";
+}
+
+/** In the chat's side viewer (Shell.vue); a type it can't show opens in a new tab. */
+function open(document: WorkspaceDocument) {
+	const file = documentFile(props.workspaceId, document);
+	if (!viewFile(file)) window.open(file.url, "_blank", "noopener");
 }
 
 function details(document: WorkspaceDocument) {
@@ -103,7 +111,7 @@ function askDelete(document: WorkspaceDocument) {
 		</div>
 
 		<ul v-if="!documents" class="space-y-1" aria-busy="true" aria-label="Loading documents">
-			<li v-for="width in ['w-40', 'w-32']" :key="width" class="flex gap-2.5 py-1">
+			<li v-for="width in ['w-40', 'w-32']" :key="width" class="flex gap-2.5 py-1 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center">
 				<span class="flex size-5 shrink-0 items-center justify-center"><Skeleton class="size-4 rounded-4" /></span>
 				<div class="min-w-0 flex-1">
 					<div class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></div>
@@ -112,13 +120,15 @@ function askDelete(document: WorkspaceDocument) {
 			</li>
 		</ul>
 
-		<ul v-else-if="documents.length" class="space-y-1" data-slot="document-list">
+		<!-- Pulled out by the rows' padding, so the hover background reaches past the text, as in the chats. -->
+		<ul v-else-if="documents.length" class="-mx-2 space-y-1" data-slot="document-list">
 			<DocumentRow
 				v-for="document in documents"
 				:key="document.id"
 				:document="document"
 				:editable="editable"
 				:retrying="retrying.has(document.id)"
+				@open="open(document)"
 				@details="details(document)"
 				@retry="retry(document)"
 				@delete="askDelete(document)"

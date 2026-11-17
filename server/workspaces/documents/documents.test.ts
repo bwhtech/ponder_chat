@@ -337,6 +337,29 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.deepStrictEqual(asked.at(-1), { documentId: runLive, generation: 2 });
 	});
 
+	it("opens a document's file for everyone who can ask, safely; non-members and another workspace's documents get 404", async () => {
+		const open = (person: Who, workspaceId: string, documentId: string) =>
+			app.request(`/api/workspaces/${workspaceId}/documents/${documentId}/file`, { headers: { "x-test-user": who[person] } });
+		for (const person of ["ana", "cy", "bob"] as const) {
+			const pdf = await open(person, ids.workspace, ids.pdf);
+			assert.strictEqual(pdf.status, 200, person);
+			assert.ok(Buffer.from(await pdf.arrayBuffer()).equals(FIXTURE), `${person} gets the PDF's bytes`);
+			assert.deepStrictEqual(
+				["content-type", "content-disposition", "x-content-type-options", "cache-control"].map((name) => pdf.headers.get(name)),
+				["application/pdf", "inline; filename*=UTF-8''peritonitis.pdf", "nosniff", "private, no-cache"],
+			);
+		}
+		const markdown = await open("bob", ids.workspace, ids.manual);
+		assert.strictEqual(markdown.headers.get("content-type"), "text/markdown");
+		assert.match(await markdown.text(), /^## Part 1\n\nSection 1 of the manual/);
+
+		assert.strictEqual((await open("dan", ids.workspace, ids.pdf)).status, 404);
+		assert.strictEqual((await open("ana", ids.workspace, "no-such-document")).status, 404);
+		// Dan's own workspace does not hold Ana's document, and Ana can't use Dan's.
+		assert.strictEqual((await open("dan", ids.other, ids.pdf)).status, 404);
+		assert.strictEqual((await open("ana", ids.other, ids.pdf)).status, 404);
+	});
+
 	it("lets only people who can edit upload, delete, read the log and try again; others get 403, and non-members 404", async () => {
 		const form = () => {
 			const data = new FormData();

@@ -127,7 +127,7 @@ A person's page shows their numbers for 30 days and the devices they are signed 
 
 ### Also in Ponder
 
-- **Files in a side panel.** Attached PDFs, images and CSV files open beside the chat. A PDF draws each page as it comes near the screen. A CSV shows as a table.
+- **Files in a side panel.** Attached PDFs, images, CSV, text, Markdown and JSON files open beside the chat, and a workspace's documents beside its page. A PDF draws each page as it comes near the screen. A CSV shows as a table, and Markdown as a reply does.
 - **Search and export.** The search box above the chat list finds chats by the words in their titles and messages. Each chat's menu exports it as a Markdown file.
 
 ## Run it
@@ -248,6 +248,7 @@ Documents (`server/workspaces/documents/`):
 | `DELETE /api/workspaces/:id/documents/:doc` | `edit` and above | `{ ok: true }`. Its passages and log go with it. |
 | `GET /api/workspaces/:id/documents/:doc/log` | `edit` and above | `{ document, steps }`. Each step: `{ generation, step, at, detail, costUsd }`. |
 | `POST /api/workspaces/:id/documents/:doc/retry` | `edit` and above | "Try again": `{ document }`, `reading` again. 409 unless the document failed. |
+| `GET /api/workspaces/:id/documents/:doc/file` | `ask` and above | The uploaded file, inline, as `/api/files/:id` sends it, with `Cache-Control: private, no-cache`. A click on a document's name opens it in the side panel. |
 | `GET /api/people?q=` | Anyone | `{ people }`: at most 20, by name or email, with id, name and email |
 | `POST /api/chat` | `ask` and above | The body takes `workspaceId`, read on a new chat's first message only. |
 

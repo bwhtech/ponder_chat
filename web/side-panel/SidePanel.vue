@@ -10,6 +10,7 @@ import { panelHeader } from "./header";
 import { panelStandIn } from "./look";
 import { closePanel, fileKind, panelItem } from "./panel";
 import TableView from "./TableView.vue";
+import TextView from "./TextView.vue";
 import "./slide.css";
 
 /**
@@ -58,7 +59,8 @@ function onKeydown(event: KeyboardEvent) {
 	if (target?.closest("input, textarea, select, [contenteditable], dialog, [role=dialog], [role=menu]")) return;
 	closePanel();
 }
-watch(item, (open) => (open ? addEventListener("keydown", onKeydown) : removeEventListener("keydown", onKeydown)));
+// Immediate: the panel's code first loads after its first item is set.
+watch(item, (open) => (open ? addEventListener("keydown", onKeydown) : removeEventListener("keydown", onKeydown)), { immediate: true });
 onBeforeUnmount(() => {
 	removeEventListener("keydown", onKeydown);
 	clearTimeout(copiedTimer);
@@ -97,6 +99,7 @@ onBeforeUnmount(() => {
 				<HtmlView v-else-if="artifact" :artifact="artifact" :view="pageView" />
 				<PdfPages v-else-if="file && kind === 'pdf'" :url="file.url" :name="file.name" />
 				<TableView v-else-if="file && kind === 'table'" :url="file.url" :name="file.name" :media-type="file.mediaType" @rows="rows = $event" />
+				<TextView v-else-if="file && kind === 'text'" :url="file.url" :name="file.name" :media-type="file.mediaType" />
 				<div v-else-if="file" class="flex min-h-full items-center justify-center p-4 sm:p-6">
 					<img :src="file.url" :alt="file.name" class="max-h-[calc(100dvh-7rem)] max-w-full rounded-4 object-contain" />
 				</div>

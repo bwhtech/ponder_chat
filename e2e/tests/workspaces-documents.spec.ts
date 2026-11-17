@@ -1,14 +1,14 @@
 import type { Page } from "@playwright/test";
 import type { ReceivedCall } from "../fake/script.ts";
 import { chat, expect, test } from "../fixtures.ts";
-import { scanPdf } from "../pdfs.ts";
+import { scanPdf, textPdf } from "../pdfs.ts";
 import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady } from "../workspaces.ts";
 
 /**
  * Workspace documents (docs/workspaces-plan.md, "Tests", 7 to 9): an editor uploads a document,
  * it goes from Reading to Ready, and answers use it, whole when it fits the model's window and
  * as searched passages when it does not; the indexing log in Details, for editors only; and a
- * document that fails, then reads on "Try again".
+ * document that fails, then reads on "Try again"; and a document opened in the side viewer.
  *
  * The fake model quotes the line of the workspace's text that best matches the question, and
  * says whether it came from a whole document or an excerpt (fake/server.ts). Its embeddings
@@ -117,8 +117,8 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 		await expect(manual).toHaveAttribute("data-status", "ready");
 		// Ready needs no word, and the size is for editors.
 		await expect(manual).toHaveText("manual.pdf");
-		await expect(manual.getByRole("button")).toHaveCount(0);
-		await expect(documents(asker.page).getByRole("button")).toHaveCount(0);
+		// Its one button is the name, which opens the file (test 11).
+		await expect(documents(asker.page).getByRole("button")).toHaveText(["manual.pdf"]);
 		await expect(asker.page.locator('[data-slot="document-picker"]')).toHaveCount(0);
 
 		const document = (await documentOf(page, id, "manual.pdf"))!;
@@ -264,6 +264,47 @@ test("10. the page stops reading a Reading document again once Details close, th
 		await gone;
 		await quiet("log", 5000);
 	});
+});
+
+test("11. a person who can only ask opens a document in the side viewer; a person outside the workspace can't get the file", async ({ page, person, fake, db, browser }) => {
+	test.setTimeout(90_000);
+	const tag = person.id.slice(0, 6);
+	const { id, slug } = await createWorkspace(page, `Ward reports ${tag}`);
+	await uploadReady(page, id, textFile("handover.md", `# Night shift handover\n\nCheck each bed before you leave, ${tag}.`));
+	const pdfId = await uploadReady(page, id, { name: "report.pdf", mimeType: "application/pdf", buffer: textPdf(["Ward report", "Beds and staff"]) });
+	const asker = await newPerson(browser, db, fake, "opens documents");
+	await share(page, id, [{ userId: asker.person.id, access: "ask" }]);
+	await asker.page.goto(`/?w=${slug}`);
+	const panel = asker.page.locator('[data-slot="side-panel"]');
+
+	await test.step("a Markdown document opens with its name and text", async () => {
+		await row(asker.page, "handover.md").getByRole("button", { name: "handover.md" }).click();
+		await expect(panel.getByRole("heading", { name: "handover.md" })).toBeVisible();
+		await expect(panel.locator('[data-slot="text-file"]')).toContainText(`Check each bed before you leave, ${tag}.`);
+		await expect(panel.locator('[data-slot="text-file"] h1')).toHaveText("Night shift handover");
+		// Escape closes the first file the panel opened, too.
+		await asker.page.keyboard.press("Escape");
+		await expect(panel).toHaveCount(0);
+	});
+
+	await test.step("a PDF opens as its drawn pages", async () => {
+		await row(asker.page, "report.pdf").getByRole("button", { name: "report.pdf" }).click();
+		await expect(panel.getByRole("heading", { name: "report.pdf" })).toBeVisible();
+		const first = panel.getByRole("img", { name: "Page 1 of 2" });
+		await expect(first.locator("canvas")).toBeVisible();
+		// Drawn: its loading skeleton is gone.
+		await expect(first.locator(".fui-skeleton")).toHaveCount(0);
+		await asker.page.keyboard.press("Escape");
+		await expect(panel).toHaveCount(0);
+	});
+
+	await test.step("a person outside the workspace gets 404 for the file", async () => {
+		const outsider = await newPerson(browser, db, fake, "not a member");
+		expect((await outsider.page.request.get(`/api/workspaces/${id}/documents/${pdfId}/file`)).status()).toBe(404);
+		await outsider.context.close();
+	});
+
+	await asker.context.close();
 });
 
 /** What the person's messages sent to the model hold, without the system prompt, which names the excerpts block too. */

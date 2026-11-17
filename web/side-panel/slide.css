@@ -1,4 +1,4 @@
-/* The side panel's slide in and out: the panel's (SidePanel.vue) and its stand-in's (PanelPlaceholder.vue). */
+/* The side panel's slide in and out, and its loading shimmer: the panel's (SidePanel.vue) and its stand-in's (PanelPlaceholder.vue). */
 .side-panel-enter-active,
 .side-panel-leave-active {
 	transition:
@@ -21,5 +21,35 @@
 	.side-panel-enter-from,
 	.side-panel-leave-to {
 		transform: none;
+	}
+}
+
+/*
+ * What loads in the panel (a PDF's pages, a table, a text file, the stand-in's lines): a light
+ * that sweeps across each skeleton, in place of frappe-ui's pulse. The selector outranks
+ * `animate-pulse` by specificity, not by order. With reduced motion, the skeleton stays still.
+ */
+[data-slot="side-panel"] .fui-skeleton {
+	--panel-shimmer: rgb(255 255 255 / 0.6);
+	background-image: linear-gradient(100deg, transparent 30%, var(--panel-shimmer) 50%, transparent 70%);
+	background-size: 200% 100%;
+	background-repeat: no-repeat;
+	animation: panel-shimmer 1.6s linear infinite;
+}
+[data-theme="dark"] [data-slot="side-panel"] .fui-skeleton {
+	--panel-shimmer: rgb(255 255 255 / 0.07);
+}
+@keyframes panel-shimmer {
+	from {
+		background-position: 150% 0;
+	}
+	to {
+		background-position: -50% 0;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	[data-slot="side-panel"] .fui-skeleton {
+		background-image: none;
+		animation: none;
 	}
 }

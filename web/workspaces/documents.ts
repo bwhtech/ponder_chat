@@ -1,10 +1,11 @@
+import type { ViewedFile } from "frappe-ui-ai-elements";
 import { ApiError, client, unwrap } from "../api";
 import { count } from "../numbers";
 
 /**
  * A workspace's documents (server/workspaces/documents/): the list comes with the workspace
- * (store.ts, fetchWorkspace); people who can edit it upload, delete, read the indexing log and
- * ask for "Try again". Written out, so the check without the server (tsconfig.no-node.json)
+ * (store.ts, fetchWorkspace), and everyone who can ask opens each file in the side viewer;
+ * people who can edit it upload, delete, read the indexing log and ask for "Try again". Written out, so the check without the server (tsconfig.no-node.json)
  * still knows them.
  */
 export type DocumentStatus = "reading" | "ready" | "failed";
@@ -46,6 +47,12 @@ export async function retryDocument(workspaceId: string, documentId: string): Pr
 
 export async function fetchDocumentLog(workspaceId: string, documentId: string): Promise<DocumentLog> {
 	return unwrap(client.api.workspaces[":id"].documents[":doc"].log.$get({ param: param(workspaceId, documentId) }), "The details could not load.");
+}
+
+/** The uploaded file, as the side viewer opens it, for everyone who can ask. */
+export function documentFile(workspaceId: string, document: WorkspaceDocument): ViewedFile {
+	const { id, doc } = param(workspaceId, document.id);
+	return { name: document.name, mediaType: document.mediaType, url: `/api/workspaces/${id}/documents/${doc}/file` };
 }
 
 /** A file's size, such as "820 bytes", "14 KB" or "1.2 MB". */

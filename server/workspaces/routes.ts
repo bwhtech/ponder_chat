@@ -3,7 +3,7 @@ import { bodyLimit } from "hono/body-limit";
 import * as Effect from "effect/Effect";
 import { z } from "zod";
 import type { SignedInEnv } from "../auth.ts";
-import { MAX_FILE_BYTES } from "../files.ts";
+import { fileHeaders, MAX_FILE_BYTES } from "../files.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { limitPerPerson } from "../rate-limit.ts";
 import { route } from "../runtime/route.ts";
@@ -118,6 +118,18 @@ export const workspacesApi = new Hono<Env>()
 	// The indexing log, for the Details view: people who can edit only.
 	.get("/:id/documents/:doc/log", (c) =>
 		route(c, Effect.map(documents((service) => service.log(actorOf(c), c.req.param("id"), c.req.param("doc"))), (log) => c.json(log)), documentErrors),
+	)
+
+	// The uploaded file, for the side viewer: anyone who can ask. Cached only to be checked again
+	// (no-cache), so a person who loses the workspace can't open it from the browser's cache.
+	.get("/:id/documents/:doc/file", (c) =>
+		route(
+			c,
+			Effect.map(documents((service) => service.file(actorOf(c), c.req.param("id"), c.req.param("doc"))), (file) =>
+				c.body(new Uint8Array(file.data), 200, { ...fileHeaders(file.name, file.mediaType), "Cache-Control": "private, no-cache" }),
+			),
+			documentErrors,
+		),
 	)
 
 	// "Try again", for a document that failed.
