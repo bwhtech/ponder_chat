@@ -43,9 +43,17 @@ const who = { ana: `ana-${tag}`, bob: `bob-${tag}`, cy: `cy-${tag}`, dan: `dan-$
 type Who = keyof typeof who;
 const actor = (person: Who) => ({ id: who[person], email: `${person}@example.invalid` });
 
-/** The indexing runs asked for, in order: Workflow's place. */
+/** The indexing runs asked for, in order: Workflow's place. A run is live until the test ends it. */
 const asked: IndexRequest[] = [];
-const fakeRuns = Layer.succeed(IndexRuns.IndexRuns, IndexRuns.IndexRuns.of({ start: (request) => Effect.sync(() => void asked.push(request)) }));
+const ended = new Set<string>();
+const runIdOf = (request: IndexRequest) => `run-${request.documentId}-${request.generation}`;
+const fakeRuns = Layer.succeed(
+	IndexRuns.IndexRuns,
+	IndexRuns.IndexRuns.of({
+		start: (request) => Effect.sync(() => (asked.push(request), runIdOf(request))),
+		status: (runId) => Effect.succeed(ended.has(runId) ? "ended" : "live"),
+	}),
+);
 const onFakeWorkflow = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provide(effect, Layer.fresh(Documents.layer).pipe(Layer.provide(fakeRuns)));
 const documents = <A, E>(use: (service: DocumentsService["Service"]) => Effect.Effect<A, E>) => runPromise(onFakeWorkflow(Documents.Documents.use(use)));
 const indexLatest = () => runPromise(Indexer.Indexer.use((indexer) => indexer.run(asked.at(-1)!)));
@@ -268,6 +276,38 @@ describe.skipIf(!base)("workspace documents", () => {
 		openRouter.oneAtATime = false;
 		// The AI SDK waits 2 s, then 4 s, between its tries.
 	}, 20_000);
+
+	it("indexes again a document left Reading with no live run, once; one whose run is live or just started is left alone", async () => {
+		const upload = (name: string) => documents((service) => service.upload(actor("ana"), ids.workspace, file(name, manual(1), "text/markdown"))).then((document) => document.id);
+		const [neverStarted, runEnded, runLive, justUploaded] = [await upload("never.md"), await upload("ended.md"), await upload("live.md"), await upload("new.md")];
+		// A crash between the upload's transaction and the start of its run; a run that ended without settling the document.
+		await database((sql) => sql`update workspace_documents set index_run_id = null where id = ${neverStarted} or id = ${justUploaded}`);
+		await database((sql) => sql`update workspace_documents set reading_since = now() - interval '1 hour' where id in (${neverStarted}, ${runEnded}, ${runLive})`);
+		ended.add(runIdOf({ documentId: runEnded, generation: 1 }));
+
+		const before = asked.length;
+		assert.strictEqual(await documents((service) => service.restartStalled), 2);
+		assert.sameDeepMembers(asked.slice(before), [
+			{ documentId: neverStarted, generation: 2 },
+			{ documentId: runEnded, generation: 2 },
+		]);
+		const log = (await documents((service) => service.log(actor("ana"), ids.workspace, neverStarted))).steps;
+		assert.deepStrictEqual(log.at(-1)!.detail, { reason: "stalled" });
+		// Their new runs are live: the next sweep starts nothing.
+		assert.strictEqual(await documents((service) => service.restartStalled), 0);
+		assert.strictEqual(await runPromise(Indexer.Indexer.use((indexer) => indexer.run({ documentId: neverStarted, generation: 2 }))), "ready");
+
+		// Try again: refused while the run is live or the document has only just started.
+		for (const id of [runLive, justUploaded]) {
+			const refused = await documents((service) => service.retry(actor("ana"), ids.workspace, id)).catch((error) => error);
+			assert.strictEqual(refused._tag, "DocumentNotFailed");
+		}
+		// Once the run ended, an editor may start it again.
+		ended.add(runIdOf({ documentId: runLive, generation: 1 }));
+		const again = await documents((service) => service.retry(actor("ana"), ids.workspace, runLive));
+		assert.strictEqual(again.status, "reading");
+		assert.deepStrictEqual(asked.at(-1), { documentId: runLive, generation: 2 });
+	});
 
 	it("lets only people who can edit upload, delete, read the log and try again; others get 403, and non-members 404", async () => {
 		const form = () => {

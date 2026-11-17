@@ -41,6 +41,10 @@ const DocumentRow = Schema.Struct({
 	added_by: Schema.String,
 	created_at: Schema.Date,
 	has_text: Schema.Boolean,
+	/** The Workflow run of this generation; null until it started. */
+	index_run_id: Schema.NullOr(Schema.String),
+	/** When this generation began. */
+	reading_since: Schema.Date,
 });
 export type DocumentRow = typeof DocumentRow.Type;
 
@@ -51,7 +55,7 @@ const GenerationRow = Schema.Struct({ generation: Schema.Number });
 const SizeRow = Schema.Struct({ id: Schema.String, name: Schema.String, chars: Schema.Number });
 const TextOfRow = Schema.Struct({ id: Schema.String, name: Schema.String, text: Schema.String });
 
-const COLUMNS = "id, workspace_id, name, media_type, size, object_key, status, error, generation, added_by, created_at, text is not null as has_text";
+const COLUMNS = "id, workspace_id, name, media_type, size, object_key, status, error, generation, added_by, created_at, text is not null as has_text, index_run_id, reading_since";
 
 export type NewDocument = { id: string; workspaceId: string; name: string; mediaType: string; data: Uint8Array; addedBy: string };
 
@@ -89,11 +93,20 @@ export function documentStore(sql: PgClient.PgClient, objects: ObjectStore.Objec
 		execute: (ids) => sql`select id, name, text from workspace_documents where id = any(${ids}) and text is not null order by created_at, id`,
 	});
 	const restartWhere = SqlSchema.findOneOption({
-		Request: Schema.Struct({ documentId: Schema.String, from: Schema.Array(StatusSchema) }),
+		Request: Schema.Struct({ documentId: Schema.String, from: Schema.Array(StatusSchema), generation: Schema.NullOr(Schema.Number) }),
 		Result: GenerationRow,
-		execute: ({ documentId, from }) => sql`
-			update workspace_documents set status = 'reading', error = null, generation = generation + 1
-			where id = ${documentId} and status = any(${from}) returning generation`,
+		execute: ({ documentId, from, generation }) => sql`
+			update workspace_documents
+			set status = 'reading', error = null, generation = generation + 1, index_run_id = null, reading_since = now()
+			where id = ${documentId} and status = any(${from}) and generation = coalesce(${generation}::int, generation)
+			returning generation`,
+	});
+	const findReadingSince = SqlSchema.findAll({
+		Request: Schema.Number,
+		Result: DocumentRow,
+		execute: (seconds) => sql`
+			select ${sql.literal(COLUMNS)} from workspace_documents
+			where status = 'reading' and reading_since < now() - make_interval(secs => ${seconds}) order by reading_since`,
 	});
 
 	/** Deletes the objects; a failure is logged, never the key: the rows are gone already, and an object left over harms no one. */
@@ -131,8 +144,19 @@ export function documentStore(sql: PgClient.PgClient, objects: ObjectStore.Objec
 		readySizes: (workspaceId: string) => decoded(findSizes(workspaceId)),
 		texts: (ids: ReadonlyArray<string>) => (ids.length ? decoded(findTexts(ids)) : Effect.succeed([])),
 
-		/** Starts a new indexing run: "Reading", and its generation. None when the status is not one of `from`. */
-		restart: (documentId: string, from: ReadonlyArray<DocumentStatus>) => decoded(restartWhere({ documentId, from })).pipe(Effect.map(Option.map((row) => row.generation))),
+		/**
+		 * Starts a new indexing run: "Reading", and its generation. None when the status is not
+		 * one of `from`, or, when `generation` is given, another run took over meanwhile.
+		 */
+		restart: (documentId: string, from: ReadonlyArray<DocumentStatus>, generation: number | null = null) =>
+			decoded(restartWhere({ documentId, from, generation })).pipe(Effect.map(Option.map((row) => row.generation))),
+
+		/** The generation's Workflow run, once it started. */
+		setRun: (documentId: string, generation: number, runId: string) =>
+			sql`update workspace_documents set index_run_id = ${runId} where id = ${documentId} and generation = ${generation}`.pipe(Effect.asVoid),
+
+		/** The documents Reading for longer than `seconds`, oldest first. */
+		readingFor: (seconds: number) => decoded(findReadingSince(seconds)),
 
 		/** The end of an indexing run, unless a newer run took over. */
 		settle: (documentId: string, generation: number, status: Exclude<DocumentStatus, "reading">, error: string | null) =>
@@ -162,7 +186,9 @@ export type DocumentStore = {
 	readonly saveText: (documentId: string, text: string) => Effect.Effect<void, SqlError>;
 	readonly readySizes: (workspaceId: string) => Effect.Effect<ReadonlyArray<typeof SizeRow.Type>, SqlError>;
 	readonly texts: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<typeof TextOfRow.Type>, SqlError>;
-	readonly restart: (documentId: string, from: ReadonlyArray<DocumentStatus>) => Effect.Effect<Option.Option<number>, SqlError>;
+	readonly restart: (documentId: string, from: ReadonlyArray<DocumentStatus>, generation?: number | null) => Effect.Effect<Option.Option<number>, SqlError>;
+	readonly setRun: (documentId: string, generation: number, runId: string) => Effect.Effect<void, SqlError>;
+	readonly readingFor: (seconds: number) => Effect.Effect<ReadonlyArray<DocumentRow>, SqlError>;
 	readonly settle: (documentId: string, generation: number, status: Exclude<DocumentStatus, "reading">, error: string | null) => Effect.Effect<void, SqlError>;
 	readonly remove: (row: DocumentRow) => Effect.Effect<void, SqlError>;
 	readonly removeAll: (workspaceId: string) => Effect.Effect<void, SqlError>;

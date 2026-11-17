@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as PgClient from "@effect/sql-pg/PgClient";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -43,7 +44,7 @@ export class DocumentNotFound extends Schema.TaggedError<DocumentNotFound>()("Do
 	}
 }
 
-/** "Try again" is for a document that failed. */
+/** "Try again" is for a document that failed, or whose indexing stopped (stalled). */
 export class DocumentNotFailed extends Schema.TaggedError<DocumentNotFailed>()("DocumentNotFailed", {
 	documentId: Schema.String,
 }) {
@@ -51,6 +52,13 @@ export class DocumentNotFailed extends Schema.TaggedError<DocumentNotFailed>()("
 		return "Only a document that failed can be read again.";
 	}
 }
+
+/**
+ * A document Reading for this long with no live run is stalled: its run never started (a
+ * crash right after the upload) or ended without settling it. Long enough for a run that
+ * is starting to have saved its id.
+ */
+export const STALLED_AFTER_SECONDS = 5 * 60;
 
 /** Why the file can't be used, in plain words, for the person who uploaded it. */
 export function refusalText(name: string, { reason }: DocumentRefused) {
@@ -72,6 +80,8 @@ export class Documents extends Context.Service<
 		readonly retry: (actor: Workspaces.Actor, workspaceId: string, documentId: string) => Effect.Effect<DocumentSummary, AccessErrors | DocumentNotFound | DocumentNotFailed>;
 		/** At start-up: index again the ready documents whose passages another embedding model made. Gives how many. */
 		readonly reindexOutdated: Effect.Effect<number, SqlError>;
+		/** For the sweep: start again the indexing of stalled documents. Gives how many. */
+		readonly restartStalled: Effect.Effect<number, SqlError>;
 	}
 >()("ponder/workspaces/Documents") {}
 
@@ -95,6 +105,7 @@ const make = Effect.gen(function* () {
 	/** Starts the run; one that can't start leaves the document Failed, so "Try again" can start it. */
 	const startIndexing = Effect.fnUntraced(function* (row: Pick<DocumentRow, "id" | "workspace_id">, generation: number) {
 		yield* runs.start({ documentId: row.id, generation }).pipe(
+			Effect.flatMap((runId) => store.setRun(row.id, generation, runId)),
 			Effect.catchTags({
 				IndexNotStarted: (error) =>
 					Effect.andThen(Effect.logError(`workspace documents: could not start indexing document ${row.id}:`, error.cause), indexer.fail({ documentId: row.id, generation }, "parse", "Indexing could not start. Try again.")),
@@ -130,9 +141,17 @@ const make = Effect.gen(function* () {
 		return { document: summaryOf(row), steps: yield* log.read(row.id) } satisfies DocumentLog;
 	});
 
+	/** Reading for a while, with no run going. */
+	const stalled = Effect.fnUntraced(function* (row: DocumentRow) {
+		const now = yield* Clock.currentTimeMillis;
+		if (row.status !== "reading" || now - row.reading_since.getTime() < STALLED_AFTER_SECONDS * 1000) return false;
+		return row.index_run_id === null || (yield* runs.status(row.index_run_id)) === "ended";
+	});
+
 	const retry = Effect.fn("Documents.retry")(function* (actor: Workspaces.Actor, workspaceId: string, documentId: string) {
 		const row = yield* editable(actor, workspaceId, documentId);
-		const generation = yield* store.restart(row.id, ["failed"]);
+		// A stalled one only from the generation read here: a run that took over meanwhile is left alone.
+		const generation = (yield* stalled(row)) ? yield* store.restart(row.id, ["reading"], row.generation) : yield* store.restart(row.id, ["failed"]);
 		if (Option.isNone(generation)) return yield* new DocumentNotFailed({ documentId });
 		yield* log.write({ documentId: row.id, workspaceId, generation: generation.value, step: "reindexed", detail: { reason: "asked", by: actor.id } });
 		yield* startIndexing(row, generation.value);
@@ -153,7 +172,21 @@ const make = Effect.gen(function* () {
 		return outdated.length;
 	}).pipe(Effect.withSpan("Documents.reindexOutdated"));
 
-	return Documents.of({ upload, remove, log: readLog, retry, reindexOutdated });
+	const restartStalled = Effect.gen(function* () {
+		let restarted = 0;
+		for (const row of yield* store.readingFor(STALLED_AFTER_SECONDS)) {
+			if (!(yield* stalled(row))) continue;
+			const generation = yield* store.restart(row.id, ["reading"], row.generation);
+			if (Option.isNone(generation)) continue;
+			yield* log.write({ documentId: row.id, workspaceId: row.workspace_id, generation: generation.value, step: "reindexed", detail: { reason: "stalled" } });
+			yield* startIndexing(row, generation.value);
+			restarted++;
+		}
+		if (restarted) yield* Effect.log(`workspace documents: indexing ${restarted} stalled documents again`);
+		return restarted;
+	}).pipe(Effect.withSpan("Documents.restartStalled"));
+
+	return Documents.of({ upload, remove, log: readLog, retry, reindexOutdated, restartStalled });
 });
 
 export const layer = Layer.effect(Documents, make);

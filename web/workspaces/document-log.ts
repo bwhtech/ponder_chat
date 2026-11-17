@@ -38,7 +38,7 @@ export function stepView(entry: LogEntry): StepView {
 		case "uploaded":
 			return { ...base, title: "Uploaded", facts: join(size(detail.size), typeName(detail.mediaType)) };
 		case "reindexed":
-			return { ...base, title: "Read again", facts: detail.reason === "model-changed" ? join("The embedding model changed", text(detail.to)) : "An editor asked to try again" };
+			return { ...base, title: "Read again", facts: reindexReason(detail) };
 		case "parsed":
 			return { ...base, title: "Read the text", facts: join(engineName(detail.engine), plural(detail.pages, "page"), plural(detail.chars, "character")) };
 		case "page-read":
@@ -112,6 +112,12 @@ function typeName(mediaType: Detail[string] | undefined) {
 
 function text(value: Detail[string] | undefined) {
 	return value === null || value === undefined ? "" : String(value);
+}
+
+function reindexReason(detail: Detail) {
+	if (detail.reason === "model-changed") return join("The embedding model changed", text(detail.to));
+	if (detail.reason === "stalled") return "Reading had stopped, so it started again";
+	return "An editor asked to try again";
 }
 
 function join(...parts: (string | null)[]) {

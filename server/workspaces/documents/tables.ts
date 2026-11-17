@@ -10,7 +10,9 @@ import * as Effect from "effect/Effect";
  *   `workspaces/<workspace>/<document>`, or in `data` when no bucket is set up. `text` is
  *   the Markdown that was read, null until then; a PDF's pages start with "--- Page N ---".
  *   `generation` counts the indexing runs, so the ids of a run's log and `runs` rows never
- *   meet those of an earlier run.
+ *   meet those of an earlier run. `index_run_id` is the Workflow run of the latest
+ *   generation, null until it started; `reading_since` is when that generation began. The
+ *   sweep reads both to start again a run that never started or ended without settling.
  * - `workspace_document_log`: what each indexing run did, as numbers only. Rows are only
  *   added, and go with their document.
  * - `workspace_passages`: the passages that search returns. `embedding` has no width, so
@@ -36,7 +38,11 @@ export const migrateDocuments = (sql: PgClient.PgClient) =>
 				added_by text not null,
 				created_at timestamptz not null default now()
 			)`;
+		// For a database made before they came.
+		yield* sql`alter table workspace_documents add column if not exists index_run_id text`;
+		yield* sql`alter table workspace_documents add column if not exists reading_since timestamptz not null default now()`;
 		yield* sql`create index if not exists workspace_documents_workspace on workspace_documents (workspace_id, created_at)`;
+		yield* sql`create index if not exists workspace_documents_reading on workspace_documents (reading_since) where status = 'reading'`;
 		yield* sql`
 			create table if not exists workspace_document_log (
 				id text primary key,
