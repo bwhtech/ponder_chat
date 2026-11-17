@@ -6,6 +6,7 @@ import { dialogsWanted, loadDialogs } from "./dialogs";
 import { loadToasts, toastsWanted } from "./toasts";
 import { loadModels } from "./models";
 import { useThreads } from "./threads";
+import { loadWorkspaces } from "./workspaces/store";
 import Shell from "./Shell.vue";
 import EmptyState from "./EmptyState.vue";
 
@@ -23,13 +24,14 @@ void loadMe();
 const retry = () => me.value === undefined && void loadMe();
 addEventListener("online", retry);
 onBeforeUnmount(() => removeEventListener("online", retry));
-// The threads and the model list load once someone is signed in.
+// The threads, the workspaces and the model list load once someone is signed in.
 watch(
 	() => Boolean(me.value),
 	(ready) => {
 		if (!ready || started) return;
 		started = true;
 		void init();
+		void loadWorkspaces();
 		void loadModels();
 	},
 	// The page may say who is signed in already (boot.ts), before this watch starts.

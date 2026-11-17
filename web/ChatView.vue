@@ -10,7 +10,7 @@ import { useDraft } from "./drafts";
 import { canUndo, MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from "./message-queue";
 import { isAuto } from "../shared/auto-model";
-import { defaultModel, features, ModelSelector, modelName, models } from "./models";
+import { acceptedFiles, defaultModel, features, ModelSelector, modelName, models } from "./models";
 import { chosenCitations, citationLabel, citationPart, withComment, type Citation } from "./cite/citations";
 import type { CiteAnchor } from "./cite/CitationChip.vue";
 import type { PendingCite } from "./cite/selection";
@@ -22,6 +22,7 @@ import { useThreads } from "./threads";
 import { useLazyChat } from "./lazy-chat";
 import { once } from "./once";
 import { preloadChat } from "./preload";
+import { useChatWorkspace, WorkspaceChip, WorkspacePicker } from "./workspaces/chat-workspace";
 // The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
 import {
 	CitationChip,
@@ -57,8 +58,11 @@ import {
 	Suggestions,
 } from "frappe-ui-ai-elements";
 
-/** One chat: the conversation and the message field. The shell mounts a new one per thread. */
-const props = defineProps<{ threadId: string; initialMessages: UIMessage[]; running?: boolean; failed?: boolean }>();
+/**
+ * One chat: the conversation and the message field. The shell mounts a new one per thread.
+ * `workspaceId` is the saved chat's workspace; a new chat picks one in the composer.
+ */
+const props = defineProps<{ threadId: string; initialMessages: UIMessage[]; running?: boolean; failed?: boolean; workspaceId?: string }>();
 const emit = defineEmits<{
 	/** A reply finished and the thread was saved: its place in the list and the credits left changed. */
 	saved: [];
@@ -85,6 +89,14 @@ function lastReplyModel(messages: UIMessage[]) {
 	return reply && replyModelId(reply);
 }
 
+// The chat's workspace (workspaces/chat-workspace.ts), and a question asked on a workspace page, sent as the first message.
+const workspace = useChatWorkspace(
+	props.threadId,
+	() => props.workspaceId,
+	() => messages.value.some((message) => message.role === "user"),
+);
+if (workspace.firstMessage?.model) threadModel.value = workspace.firstMessage.model;
+
 /** The server said the saved thread is ahead of this page (THREAD_CHANGED). */
 let threadChanged = false;
 // The AI SDK loads beside the page (lazy-chat.ts); the messages show without it.
@@ -97,7 +109,8 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 		api: "/api/chat",
 		prepareSendMessagesRequest: ({ id, messages }) => ({
 			headers: { "Content-Type": "application/json" },
-			body: { id, messages, model: threadModel.value },
+			// The server reads the workspace on the chat's first message only.
+			body: { id, messages, model: threadModel.value, workspaceId: workspace.chosen.value ?? undefined },
 		}),
 		fetch: patientFetch,
 	}),
@@ -112,7 +125,11 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 		emit("saved");
 		void notes.load({ wait: true });
 	},
-	onError: () => emit("refused"),
+	onError: () => {
+		emit("refused");
+		// Perhaps removed from the chat's workspace meanwhile: the list says so, and the composer closes.
+		workspace.recheck();
+	},
 }), props.initialMessages);
 
 /**
@@ -146,6 +163,8 @@ onMounted(() => {
 	if (props.initialMessages.length) void notes.load();
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	if (props.running) void resumeStream();
+	const first = workspace.firstMessage;
+	if (first) void send(first.text, first.files);
 });
 
 const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
@@ -158,8 +177,6 @@ useDraft(props.threadId, input);
 watch(input, () => void preloadChat(), { once: true });
 const uploading = ref(false);
 const uploadError = ref("");
-// What the server can pass to the model; spreadsheets only when Python can read them.
-const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
 
 // Skills: $name in the message box opens the menu (skills/picker.ts); a chosen skill is a chip until the message goes out.
 const composer = ref<HTMLElement | null>(null);
@@ -357,7 +374,7 @@ watch(
 	(now, before) => {
 		chatBusy.value = now;
 		if (now) failedBefore.value = false;
-		if (before && !now) remember(props.threadId, { messages: messages.value, running: false, failed: Boolean(error.value) });
+		if (before && !now) remember(props.threadId, { messages: messages.value, running: false, failed: Boolean(error.value), workspaceId: workspace.chosen.value ?? undefined });
 		if (before && !now && threadChanged) {
 			threadChanged = false;
 			void reload(props.threadId);
@@ -366,7 +383,7 @@ watch(
 	{ immediate: true },
 );
 onBeforeUnmount(() => {
-	if (busy.value) remember(props.threadId, { messages: messages.value, running: true });
+	if (busy.value) remember(props.threadId, { messages: messages.value, running: true, workspaceId: workspace.chosen.value ?? undefined });
 	chatBusy.value = false;
 });
 
@@ -421,7 +438,7 @@ async function send(text: string, files: File[] = []) {
 		if (!skillChips.value.length) skillChips.value = chosen;
 		if (!citeChips.value.length) citeChips.value = quoted;
 	};
-	if ((!text.trim() && !files.length && !chosen.length && !quoted.length) || uploading.value || outOfCredits.value) {
+	if ((!text.trim() && !files.length && !chosen.length && !quoted.length) || uploading.value || outOfCredits.value || workspace.lostAccess.value) {
 		if (outOfCredits.value) giveBack();
 		return;
 	}
@@ -435,7 +452,7 @@ function sendNow({ text, files, skills: chosen, citations: quoted }: Queued) {
 	const closed = closeOpenCalls(messages.value);
 	if (closed) messages.value = closed;
 	// The first message: the thread shows in the list now, not once the reply ends.
-	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", ") || citationLabel(quoted[0]!));
+	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", ") || citationLabel(quoted[0]!), workspace.chosen.value ?? undefined);
 	if (!chosen.length && !quoted.length) return sendMessage(files.length ? { text, files } : { text });
 	// The skills go first in the message, so their instructions come before the person's text (server/workflow/skills.ts).
 	// The quotes come next, so the text that follows can refer to them (server/workflow/citations.ts).
@@ -601,7 +618,7 @@ function replyModelId(message: UIMessage) {
 							<MessageContent><Loader :text="thinkingText" /></MessageContent>
 						</Message>
 					</ConversationItem>
-					<ConversationItem v-if="(error || failedBefore) && !outOfCredits">
+					<ConversationItem v-if="(error || failedBefore) && !outOfCredits && !workspace.lostAccess.value">
 						<Alert
 							theme="red"
 							title="Something went wrong"
@@ -624,6 +641,14 @@ function replyModelId(message: UIMessage) {
 			</Suggestions>
 		</Transition>
 		<OutOfCredits v-if="outOfCredits" />
+		<!-- The server's own words for a send it refuses (server/workflow/replies.ts). -->
+		<Alert
+			v-if="workspace.lostAccess.value"
+			data-slot="workspace-access-lost"
+			theme="amber"
+			title="You no longer have access to this chat's workspace."
+			description="You can read this chat, but not send in it."
+		/>
 		<Alert v-if="uploadError" theme="red" :title="uploadError" description="Attach the files again to send them." />
 		<div ref="composer" class="relative" v-bind="skillListeners">
 			<SkillMenu
@@ -640,8 +665,8 @@ function replyModelId(message: UIMessage) {
 				v-model="input"
 				queue
 				:status="status"
-				:disabled="uploading || outOfCredits"
-				:accept="ACCEPT"
+				:disabled="uploading || outOfCredits || workspace.lostAccess.value"
+				:accept="acceptedFiles"
 				:ready="skillChips.length > 0 || citeChips.length > 0"
 				@submit="send($event.text, $event.files)"
 				@stop="queue.stop"
@@ -672,6 +697,8 @@ function replyModelId(message: UIMessage) {
 					<PromptInputTools>
 						<PromptInputAttachButton />
 						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
+						<WorkspaceChip v-if="workspace.locked.value && workspace.summary.value" :workspace="workspace.summary.value" locked />
+						<WorkspacePicker v-else-if="workspace.pickable.value" v-model="workspace.chosen.value" />
 						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-6">Uploading…</span>
 					</PromptInputTools>
 					<PromptInputSubmit />

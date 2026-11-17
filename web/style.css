@@ -13,7 +13,7 @@
   [data-slot='chat-column'] {
     timeline-scope: --transcript;
   }
-  [data-slot='chat-column'] :is([data-slot='message-scroller-viewport'], [data-slot='memory-view']) {
+  [data-slot='chat-column'] :is([data-slot='message-scroller-viewport'], [data-slot='memory-view'], [data-slot='workspace-view']) {
     scroll-timeline: --transcript block;
   }
   [data-slot='chat-column'] > [data-slot='chat-header'] {
@@ -55,6 +55,21 @@
 @media (min-width: 640px) {
   .scroll-gutter-match {
     max-width: calc(720px + 2 * var(--scroll-gutter, 0px));
+    padding-inline: calc(1.25rem + var(--scroll-gutter, 0px));
+  }
+}
+
+/* The workspace page's header: the same, for the page's wider frame (its chats and its side panel), whose
+   scroller reserves the gutter on both sides as the transcript does (workspaces/WorkspacePage.vue). */
+.workspace-gutter-match {
+  margin-inline: auto;
+  width: 100%;
+  max-width: 1120px;
+  padding-inline: 1rem;
+}
+@media (min-width: 640px) {
+  .workspace-gutter-match {
+    max-width: calc(1120px + 2 * var(--scroll-gutter, 0px));
     padding-inline: calc(1.25rem + var(--scroll-gutter, 0px));
   }
 }

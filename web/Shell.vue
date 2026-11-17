@@ -15,12 +15,17 @@ import { afterLoad, prefetchChat } from "./preload";
 import { closePanel, panelItem, viewInPanel } from "./side-panel/panel";
 import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
+import { openWorkspaceDialog, workspaceDialogUsed } from "./workspaces/dialogs";
+import { handOver, type FirstMessage } from "./workspaces/first-message";
+import { openWorkspaceId, showWorkspace, workspaceInUrl } from "./workspaces/store";
+import WorkspacePlaceholder from "./workspaces/WorkspacePlaceholder.vue";
 
 /**
- * The signed-in shell: chats in a sidebar (a bottom sheet on phones) and the open chat, or
- * the Memory page. The header at the top of the sidebar opens the account menu, as on /admin.
+ * The signed-in shell: workspaces and chats in a sidebar (a bottom sheet on phones), and the
+ * open chat, the Memory page or a workspace. The header at the top of the sidebar opens the
+ * account menu, as on /admin.
  */
-const { current, currentThread, messages, running, failed, loading, revision, refresh, open, start } = useThreads();
+const { current, currentThread, currentWorkspace, messages, running, failed, loading, revision, refresh, open, start } = useThreads();
 // What answers a tap at once while the code it opens loads (stand-ins.ts): one small chunk,
 // fetched once the page has drawn.
 const loadStandIns = once(() => import("./stand-ins"));
@@ -30,6 +35,7 @@ const MemoryPlaceholder = standIn("MemoryPlaceholder");
 const PanelPlaceholder = standIn("PanelPlaceholder");
 const DialogPlaceholder = standIn("DialogPlaceholder");
 const PageOpening = standIn("PageOpening");
+const WorkspaceDialogPlaceholder = standIn("WorkspaceDialogPlaceholder");
 onMounted(() => void loadStandIns().catch(() => undefined));
 // What the first page does not show loads when it opens: Settings, Memory and the side panel.
 // Until each is here, its stand-in in its shape answers the tap. The overlays wait 100ms
@@ -37,6 +43,10 @@ onMounted(() => void loadStandIns().catch(() => undefined));
 const SettingsModal = defineAsyncComponent({ loader: () => import("./settings/SettingsModal.vue"), loadingComponent: SettingsPlaceholder, delay: 100 });
 const MemoryView = defineAsyncComponent({ loader: () => import("./MemoryView.vue"), loadingComponent: MemoryPlaceholder, delay: 0 });
 const SidePanel = defineAsyncComponent({ loader: () => import("./side-panel/SidePanel.vue"), loadingComponent: PanelPlaceholder, delay: 100 });
+// A workspace page, and the workspace dialogs (New workspace, Edit, Share), the same way.
+// The page's stand-in comes with the first code: a workspace link draws its header at once.
+const WorkspacePage = defineAsyncComponent({ loader: () => import("./workspaces/WorkspacePage.vue"), loadingComponent: WorkspacePlaceholder, delay: 0 });
+const WorkspaceDialogs = defineAsyncComponent({ loader: () => import("./workspaces/WorkspaceDialogs.vue"), loadingComponent: WorkspaceDialogPlaceholder, delay: 100 });
 // Each stays once it has opened, so it can play its closing transition.
 const settingsUsed = ref(false);
 const panelUsed = ref(false);
@@ -79,11 +89,15 @@ const requestWaited = ref(false);
 watch(() => me.value?.credits.request?.status === "pending", (pending) => pending && (requestWaited.value = true), { immediate: true });
 // Files in the chat (attachments, images from Python) open in the side panel.
 provideFileViewer(viewInPanel);
-// The main area shows the open chat, or the Memory page (?view=memory).
+// The main area shows the open chat, the Memory page (?view=memory), or a workspace (?w=<id>, workspaces/store.ts).
 const view = ref<"chat" | "memory">(viewInUrl());
-addEventListener("popstate", () => (view.value = viewInUrl()));
+addEventListener("popstate", () => {
+	view.value = viewInUrl();
+	openWorkspaceId.value = workspaceInUrl();
+});
+const page = computed(() => (view.value === "memory" ? "memory" : openWorkspaceId.value ? "workspace" : "chat"));
 // The side panel shows a file or an artifact of the open chat, so it closes when the chat changes.
-watch([current, view], closePanel);
+watch([current, page], closePanel);
 // A tap on the model button before its menu's code came (models.ts) is for that chat only.
 watch(current, () => (modelMenuAsked.value = false));
 
@@ -103,9 +117,28 @@ function showMemory() {
 	sheetOpen.value = false;
 	if (view.value === "memory") return;
 	view.value = "memory";
+	openWorkspaceId.value = "";
 	const url = new URL(location.href);
+	url.searchParams.delete("w");
 	url.searchParams.set("view", "memory");
 	history.pushState(null, "", url);
+}
+
+function pickWorkspace(id: string) {
+	sheetOpen.value = false;
+	view.value = "chat";
+	showWorkspace(id);
+}
+
+function newWorkspace() {
+	sheetOpen.value = false;
+	openWorkspaceDialog({ kind: "new" });
+}
+
+/** A question on a workspace page: a new chat in that workspace, which sends it at once (first-message.ts). */
+function askInWorkspace(message: FirstMessage) {
+	newThread();
+	handOver(current.value, message);
 }
 
 function pick(id: string) {
@@ -182,43 +215,72 @@ function onSaved() {
 	<div class="contents">
 		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
 			<!-- Phones get the chats in the bottom sheet, so there the sidebar is not drawn at all, not only hidden. -->
-			<ChatsPanel v-if="wide" :name="name" :menu="menu" :highlight="view === 'chat'" @select="pick" @new-chat="newThread" />
+			<ChatsPanel
+				v-if="wide"
+				:name="name"
+				:menu="menu"
+				:highlight="page === 'chat'"
+				:highlight-workspace="page === 'workspace'"
+				@select="pick"
+				@new-chat="newThread"
+				@select-workspace="pickWorkspace"
+				@new-workspace="newWorkspace"
+			/>
 
-			<!-- The page's main landmark, as on the sign-in page: the open chat or Memory. -->
+			<!-- The page's main landmark, as on the sign-in page: the open chat, Memory or a workspace. -->
 			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
-				<!-- The title sits in the same 720px column as the chat and Memory, so it shares their leading edge.
-				     On phones the icon buttons pull out by their inner padding, so their glyphs sit on that edge too. -->
-				<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
-					<div class="scroll-gutter-match flex items-center gap-2">
-						<Button class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-panel-left" aria-label="Chats" @click="sheetOpen = true" />
-						<div v-if="loading && !currentThread" class="flex h-[1lh] min-w-0 flex-1 items-center text-lg-semibold"><Skeleton class="h-4 w-48 max-w-full rounded-4" /></div>
-						<h1 v-else class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9" :class="{ 'md:sr-only': view === 'chat' && !currentThread }">{{ view === "memory" ? "Memory" : (currentThread?.title ?? "New chat") }}</h1>
-						<Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" />
-					</div>
-				</header>
-				<MemoryView v-if="view === 'memory'" @open-thread="pick" />
-				<ThreadSkeleton v-else-if="loading" />
-				<ChatView
-					v-else-if="current"
-					:key="`${current}:${revision}`"
-					:thread-id="current"
-					:initial-messages="messages"
-					:running="running"
-					:failed="failed"
-					@saved="onSaved"
-					@refused="refreshCredits"
-					@open-memory="showMemory"
-				/>
+				<!-- A workspace draws its own header, wider, for its side panel. -->
+				<WorkspacePage v-if="page === 'workspace'" :id="openWorkspaceId" :key="openWorkspaceId" @open-chat="pick" @ask="askInWorkspace" @deleted="newThread">
+					<template #start><Button class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-panel-left" aria-label="Chats" @click="sheetOpen = true" /></template>
+					<template #end><Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" /></template>
+				</WorkspacePage>
+				<template v-else>
+					<!-- The title sits in the same 720px column as the chat and Memory, so it shares their leading edge.
+					     On phones the icon buttons pull out by their inner padding, so their glyphs sit on that edge too. -->
+					<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
+						<div class="scroll-gutter-match flex items-center gap-2">
+							<Button class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-panel-left" aria-label="Chats" @click="sheetOpen = true" />
+							<div v-if="loading && !currentThread" class="flex h-[1lh] min-w-0 flex-1 items-center text-lg-semibold"><Skeleton class="h-4 w-48 max-w-full rounded-4" /></div>
+							<h1 v-else class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9" :class="{ 'md:sr-only': view === 'chat' && !currentThread }">{{ view === "memory" ? "Memory" : (currentThread?.title ?? "New chat") }}</h1>
+							<Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" />
+						</div>
+					</header>
+					<MemoryView v-if="view === 'memory'" @open-thread="pick" />
+					<ThreadSkeleton v-else-if="loading" />
+					<ChatView
+						v-else-if="current"
+						:key="`${current}:${revision}`"
+						:thread-id="current"
+						:initial-messages="messages"
+						:running="running"
+						:failed="failed"
+						:workspace-id="currentWorkspace"
+						@saved="onSaved"
+						@refused="refreshCredits"
+						@open-memory="showMemory"
+					/>
+				</template>
 			</main>
 
 			<SidePanel v-if="panelUsed" />
 		</div>
 
 		<BottomSheet v-if="sheetUsed" v-model:open="sheetOpen" title="Chats">
-			<ChatsPanel sheet :name="name" :menu="menu" :highlight="view === 'chat'" @select="pick" @new-chat="newThread" />
+			<ChatsPanel
+				sheet
+				:name="name"
+				:menu="menu"
+				:highlight="page === 'chat'"
+				:highlight-workspace="page === 'workspace'"
+				@select="pick"
+				@new-chat="newThread"
+				@select-workspace="pickWorkspace"
+				@new-workspace="newWorkspace"
+			/>
 		</BottomSheet>
 
 		<SettingsModal v-if="settingsUsed" />
+		<WorkspaceDialogs v-if="workspaceDialogUsed" />
 		<CreditRequestWatch v-if="requestWaited" />
 		<DialogPlaceholder v-if="pendingDialog" :request="pendingDialog" />
 		<PageOpening v-if="openingAdmin" label="Opening admin…" />

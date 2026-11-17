@@ -6,7 +6,7 @@ import type { UIMessage } from "ai";
  * next visit. `etag` is the server's version of the thread; null when the page wrote the
  * entry itself (after a reply), so the next check fetches it whole.
  */
-export type CachedThread = { messages: UIMessage[]; running: boolean; failed?: boolean; etag: string | null };
+export type CachedThread = { messages: UIMessage[]; running: boolean; failed?: boolean; workspaceId?: string; etag: string | null };
 
 const memory = new Map<string, CachedThread>();
 /**
