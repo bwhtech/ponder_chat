@@ -119,6 +119,22 @@ describe.skipIf(!base)("chats in a workspace", () => {
 			}).pipe(onFakeWorkflow),
 		);
 
+		it.effect("two first messages at once both use the workspace the chat was saved with", () =>
+			Effect.gen(function* () {
+				const threadId = `chat-race-${tag}`;
+				const replies = yield* Replies.Replies;
+				const before = turns.length;
+				yield* Effect.all(
+					[ids.notes, ids.handbook].map((workspaceId) => replies.start({ threadId, owner: bob, messages: [message("m1", "Bonjour")], workspaceId })),
+					{ concurrency: "unbounded" },
+				);
+				const saved = Option.getOrUndefined(yield* Threads.Threads.use((threads) => threads.workspaceOf(threadId)));
+				const started = turns.slice(before).filter((turn) => turn.threadId === threadId);
+				assert.lengthOf(started, 2);
+				for (const turn of started) assert.strictEqual(turn.workspaceId, saved);
+			}).pipe(onFakeWorkflow),
+		);
+
 		it.effect("a later message cannot change the chat's workspace, or add one", () =>
 			Effect.gen(function* () {
 				const replies = yield* Replies.Replies;

@@ -184,9 +184,12 @@ const make = Effect.gen(function* () {
 
 	/**
 	 * The chat's workspace: the one a new chat's first message names, else the one the chat
-	 * has. Checked on every message, so a person who was removed can no longer send.
+	 * has. Checked on every message, so a person who was removed can no longer send. Under
+	 * the thread's lock: two first messages sent at once both use the workspace that the
+	 * first of them saved, never the one the second names.
 	 */
-	const workspaceFor = Effect.fnUntraced(function* (input: StartInput, isNew: boolean) {
+	const workspaceFor = Effect.fnUntraced(function* (input: StartInput) {
+		const isNew = Option.isNone(yield* ownerOf(input.threadId));
 		const workspaceId = isNew ? input.workspaceId : Option.getOrUndefined(yield* threads.workspaceOf(input.threadId));
 		if (!workspaceId) return undefined;
 		if (atLeast(yield* workspaces.accessOf(input.owner, workspaceId), "ask")) return workspaceId;
@@ -242,7 +245,8 @@ const make = Effect.gen(function* () {
 
 	/** Under the thread's lock: the run that answers the thread, a new one or the one already going. */
 	const startRun = Effect.fnUntraced(function* (input: StartInput, model: Models.ChatModel, python: boolean, requested: number) {
-		const { threadId, owner, messages, workspaceId } = input;
+		const { threadId, owner, messages } = input;
+		const workspaceId = yield* workspaceFor(input);
 		const continued = continuedFrom(messages);
 		const previous = Option.getOrUndefined(yield* runs.active(threadId));
 		if (previous && sameContinuation(previous.continued, continued)) return { runId: previous.runId, model: previous.model, followed: true };
@@ -313,12 +317,11 @@ const make = Effect.gen(function* () {
 		if (status.remaining <= 0) return yield* new OutOfCredits({ hours: Math.max(1, Math.ceil((new Date(status.resetsAt).getTime() - checked) / 3_600_000)) });
 		const savedOwner = yield* ownerOf(threadId);
 		if (Option.getOrElse(savedOwner, () => owner) !== owner) return yield* new ThreadNotYours({ threadId });
-		const workspaceId = yield* workspaceFor(input, Option.isNone(savedOwner));
 		const model = yield* models.pick(input.model);
 		const python = yield* sandbox.ready;
 		const continued = continuedFrom(messages);
 		yield* untilQuestionSaved(threadId, messages, continued);
-		const started = yield* runs.withLock(threadId, startRun({ ...input, workspaceId }, model, python, checked));
+		const started = yield* runs.withLock(threadId, startRun(input, model, python, checked));
 		// The run goes on if the request closes; the page reconnects with follow.
 		const stream = "stream" in started ? started.stream : yield* provided(replyStream(started.runId, started.model, { continued })).pipe(inReplyTrace(started.runId));
 		if (!started.followed) {
