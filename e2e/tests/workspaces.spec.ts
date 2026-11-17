@@ -39,9 +39,10 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(a.page).toHaveURL(/[?&]w=leave-policies-/);
 		workspaceUrl = a.page.url();
 		await expect(a.page.getByRole("heading", { name, level: 1 })).toBeVisible();
-		await expect(a.page.getByText("Only you", { exact: true })).toBeVisible();
 		await expect(workspaceRows(a.page).getByRole("button", { name })).toBeVisible();
 		await expect(aside(a.page).getByText(marker)).toBeVisible();
+		// Only its owner uses it so far.
+		await expect(aside(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
 
 		await a.page.getByRole("button", { name: "Share", exact: true }).click();
 		const share = a.page.getByRole("dialog", { name: `Share “${name}”` });
@@ -50,7 +51,6 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(share.locator('[data-slot="workspace-member"]')).toContainText(b.person.email);
 		await share.getByRole("button", { name: "Save" }).click();
 		await expect(share).toHaveCount(0);
-		await expect(a.page.getByText("You and 1 person", { exact: true })).toBeVisible();
 		await expect(aside(a.page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
 	});
 
@@ -59,30 +59,34 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await workspaceRows(b.page).getByRole("button", { name }).click();
 		await expect(b.page).toHaveURL(workspaceUrl);
 		await expect(b.page.getByRole("heading", { name, level: 1 })).toBeVisible();
-		await expect(b.page.getByText("Shared with you", { exact: true })).toBeVisible();
-		// Only the owner shares or deletes.
+		await expect(aside(b.page).getByText("Can ask", { exact: true })).toBeVisible();
+		// Only the owner shares or deletes; B can only ask, so B changes nothing.
 		await expect(b.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
-		await expect(b.page.getByText("No chats yet.")).toBeVisible();
+		await expect(b.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
+		await expect(b.page.getByRole("button", { name: "Edit", exact: true })).toHaveCount(0);
+		// No chat of B's in it yet: no "Your chats".
+		await expect(b.page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
 
 		await chat.send(b.page, question);
 		await expect(b.page).toHaveURL(/[?&]t=/);
 		chatId = new URL(b.page.url()).searchParams.get("t")!;
 		await expect(chat.reply(b.page)).toContainText(`Workspace “${name}” says: ${marker}`);
 		await chat.idle(b.page);
-		// The chat is in the workspace: its composer names it, and so does its row in the list.
+		// The chat is in the workspace: its header and its composer name it, and both link to it.
+		await expect(b.page.locator('[data-slot="chat-breadcrumb"]')).toContainText(name);
 		await expect(b.page.locator('[data-slot="workspace-chip"]')).toHaveText(name);
-		await expect(b.page.locator('[data-slot="thread-workspace"]').first()).toHaveText(name);
 		const [call] = await fake.calls(question);
 		expect(call.system).toContain(marker);
 
-		// The workspace page lists B's own chat.
-		await b.page.goto(workspaceUrl);
+		// Back to the workspace by the header: its page lists B's own chat.
+		await b.page.locator('[data-slot="chat-breadcrumb"]').getByRole("link", { name }).click();
+		await expect(b.page).toHaveURL(workspaceUrl);
 		await expect(b.page.locator('[data-slot="workspace-chats"]')).toContainText("How many days of leave");
 	});
 
 	await test.step("3. C gets not found for the same address", async () => {
 		await c.page.goto(workspaceUrl);
-		await expect(c.page.getByText("This workspace was not found")).toBeVisible();
+		await expect(c.page.getByText("No workspace here")).toBeVisible();
 		await expect(c.page.getByText(marker)).toHaveCount(0);
 		await expect(workspaceRows(c.page).getByRole("button", { name })).toHaveCount(0);
 		const slug = new URL(workspaceUrl).searchParams.get("w")!;
@@ -92,7 +96,8 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 
 	await test.step("4. A cannot open B's chat in the workspace", async () => {
 		await a.page.goto(workspaceUrl);
-		await expect(a.page.getByText("No chats yet.")).toBeVisible();
+		await expect(aside(a.page).getByText(marker)).toBeVisible();
+		await expect(a.page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
 		await a.page.goto(`/?t=${chatId}`);
 		await expect(a.page.locator('[data-slot="prompt-input"]')).toBeVisible();
 		await expect(chat.messages(a.page)).toHaveCount(0);
@@ -107,7 +112,8 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await share.locator('[data-slot="workspace-member"]').getByRole("button", { name: /^Remove / }).click();
 		await expect(share.locator('[data-slot="workspace-member"]')).toHaveCount(0);
 		await share.getByRole("button", { name: "Save" }).click();
-		await expect(a.page.getByText("Only you", { exact: true })).toBeVisible();
+		await expect(share).toHaveCount(0);
+		await expect(aside(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
 
 		await b.page.goto(`/?t=${chatId}`);
 		await expect(b.page.locator('[data-slot="message"][data-role="user"]')).toHaveText(question);
@@ -139,7 +145,7 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	await page.getByRole("option", { name: "Everyone in the organisation" }).click();
 	await dialog.getByRole("button", { name: "Create workspace" }).click();
 	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-	await expect(page.getByText("Everyone", { exact: true })).toBeVisible();
+	await expect(aside(page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
 	const workspaceUrl = page.url();
 
 	for (const title of ["first person", "second person"]) {

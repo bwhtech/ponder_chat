@@ -3,10 +3,11 @@ import { nextTick, ref, watch } from "vue";
 import { skillTitle, type SkillOption } from "./skills";
 
 /**
- * The list of skills over the message box (picker.ts). mousedown.prevent on each row keeps
- * the focus in the textarea, so typing keeps filtering.
+ * The list of skills over the message box (picker.ts), or under it (`below`) where the box
+ * sits near the top of the page. mousedown.prevent on each row keeps the focus in the
+ * textarea, so typing keeps filtering.
  */
-const props = defineProps<{ items: SkillOption[]; query: string; active: number }>();
+const props = defineProps<{ items: SkillOption[]; query: string; active: number; below?: boolean }>();
 const emit = defineEmits<{ choose: [skill: SkillOption]; hover: [index: number] }>();
 
 const list = ref<HTMLElement | null>(null);
@@ -22,7 +23,8 @@ watch(
 <template>
 	<div
 		data-slot="skill-menu"
-		class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-6 bg-surface-elevation-2 shadow-xl ring-1 ring-outline-gray-2"
+		class="absolute inset-x-0 z-20 overflow-hidden rounded-6 bg-surface-elevation-2 shadow-xl ring-1 ring-outline-gray-2"
+		:class="below ? 'top-full mt-2' : 'bottom-full mb-2'"
 	>
 		<div class="flex h-9 items-center gap-2 border-b border-outline-gray-1 px-3">
 			<span class="text-sm font-medium text-ink-gray-7">Skills</span>

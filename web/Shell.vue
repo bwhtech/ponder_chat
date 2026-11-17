@@ -18,7 +18,7 @@ import { useThemeMenu } from "./theme-menu";
 import { useThreads } from "./threads";
 import { openWorkspaceDialog, workspaceDialogUsed } from "./workspaces/dialogs";
 import { handOver, type FirstMessage } from "./workspaces/first-message";
-import { openWorkspace, openWorkspaceKey, showWorkspace, workspaceInUrl } from "./workspaces/store";
+import { followWorkspaceLink, openWorkspace, openWorkspaceKey, showWorkspace, workspaceById, workspaceHref, workspaceInUrl } from "./workspaces/store";
 import WorkspacePlaceholder from "./workspaces/WorkspacePlaceholder.vue";
 
 /**
@@ -103,6 +103,8 @@ watch([current, page], closePanel);
 // with the messages it has now, not the ones it opened with. Before the render, so it never
 // draws the older ones.
 watch(page, (now, before) => now === "chat" && before !== "chat" && resume());
+// A chat in a workspace says so in its header: "Dialysis unit / Exit-site care", back to the workspace.
+const chatWorkspace = computed(() => (view.value === "chat" && currentThread.value ? workspaceById(currentWorkspace.value) : undefined));
 // A tap on the model button before its menu's code came (models.ts) is for that chat only.
 watch(current, () => (modelMenuAsked.value = false));
 
@@ -235,7 +237,7 @@ function onSaved() {
 			<!-- The page's main landmark, as on the sign-in page: the open chat, Memory or a workspace. -->
 			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
 				<!-- A workspace draws its own header, wider, for its side panel. -->
-				<WorkspacePage v-if="page === 'workspace'" :slug-or-id="openWorkspaceKey" :key="openWorkspace?.id ?? openWorkspaceKey" @open-chat="pick" @ask="askInWorkspace" @deleted="newThread">
+				<WorkspacePage v-if="page === 'workspace'" :slug-or-id="openWorkspaceKey" :key="openWorkspace?.id ?? openWorkspaceKey" @open-chat="pick" @ask="askInWorkspace" @deleted="newThread" @new-chat="newThread">
 					<template #start><Button class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-panel-left" aria-label="Chats" @click="sheetOpen = true" /></template>
 					<template #end><Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" /></template>
 				</WorkspacePage>
@@ -246,6 +248,15 @@ function onSaved() {
 						<div class="scroll-gutter-match flex items-center gap-2">
 							<Button class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-panel-left" aria-label="Chats" @click="sheetOpen = true" />
 							<div v-if="loading && !currentThread" class="flex h-[1lh] min-w-0 flex-1 items-center text-lg-semibold"><Skeleton class="h-4 w-48 max-w-full rounded-4" /></div>
+							<div v-else-if="chatWorkspace && currentThread" class="flex min-w-0 flex-1 items-center gap-1.5 text-lg-semibold" data-slot="chat-breadcrumb">
+								<a
+									:href="workspaceHref(chatWorkspace.slug)"
+									class="min-w-0 max-w-[50%] truncate rounded-4 text-ink-gray-6 transition-colors duration-150 ease-out-strong hover:text-ink-gray-8 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-gray-3 motion-reduce:transition-none"
+									@click="followWorkspaceLink($event, chatWorkspace.slug)"
+								>{{ chatWorkspace.name }}</a>
+								<span class="shrink-0 text-ink-gray-4" aria-hidden="true">/</span>
+								<h1 class="min-w-0 flex-1 truncate text-ink-gray-9">{{ currentThread.title }}</h1>
+							</div>
 							<h1 v-else class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9" :class="{ 'md:sr-only': view === 'chat' && !currentThread }">{{ view === "memory" ? "Memory" : (currentThread?.title ?? "New chat") }}</h1>
 							<Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" />
 						</div>

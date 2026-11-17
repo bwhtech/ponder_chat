@@ -5,12 +5,11 @@ import { computed, nextTick, ref, watch } from "vue";
 import { excerptPieces, useThreadSearch } from "./thread-search";
 import ThreadRowsSkeleton from "./ThreadRowsSkeleton.vue";
 import { useThreads, type ThreadSummary } from "./threads";
-import { workspaceById } from "./workspaces/store";
 
 /**
  * The person's threads, grouped by when they were last active, with a search box above.
- * Each row has rename, export and delete, and a chat in a workspace names it. While the
- * box has text, the list shows the chats that match, each with an excerpt.
+ * Each row has rename, export and delete. While the box has text, the list shows the
+ * chats that match, each with an excerpt.
  */
 const props = withDefaults(
 	defineProps<{
@@ -58,10 +57,6 @@ const groups = computed(() => {
 	}
 	return grouped.filter((group) => group.threads.length);
 });
-
-function workspaceName(thread: ThreadSummary) {
-	return workspaceById(thread.workspaceId)?.name;
-}
 
 function menu(thread: ThreadSummary) {
 	return [
@@ -160,11 +155,7 @@ function askDelete(thread: ThreadSummary) {
 						>
 							<!-- SidebarItem keeps an 8px gap for an icon; these rows have none, so the title takes it back
 							     and starts on the sidebar's 16px edge with the search icon, the group label and the credits. -->
-							<span class="-ml-2 flex w-full min-w-0 items-center gap-2">
-								<span class="truncate text-sm leading-tighter">{{ thread.title }}</span>
-								<!-- A chat in a workspace names it, after the title. -->
-								<span v-if="workspaceName(thread)" data-slot="thread-workspace" class="ml-auto max-w-[45%] shrink-0 truncate text-xs leading-tighter text-ink-gray-6">{{ workspaceName(thread) }}</span>
-							</span>
+							<span class="-ml-2 truncate text-sm leading-tighter">{{ thread.title }}</span>
 							<template #suffix>
 								<Dropdown :options="menu(thread)" align="end">
 									<template #trigger>
@@ -184,7 +175,6 @@ function askDelete(thread: ThreadSummary) {
 				</div>
 			</TransitionGroup>
 			<ThreadRowsSkeleton v-if="!listLoaded && !searching" />
-			<p v-else-if="!threads.length && !searching" class="px-2 text-p-sm text-ink-gray-6">Your chats show up here once you start one.</p>
 		</div>
 	</nav>
 </template>

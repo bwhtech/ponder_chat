@@ -1,9 +1,9 @@
 /**
  * A question asked on a workspace page (WorkspacePage.vue). The page starts a new chat, and
  * the chat (ChatView.vue) takes the question as its first message, in that workspace, with
- * the model and files chosen on the page.
+ * the model, files and skills chosen on the page.
  */
-export type FirstMessage = { text: string; files: File[]; model: string; workspaceId: string };
+export type FirstMessage = { text: string; files: File[]; skills: string[]; model: string; workspaceId: string };
 
 const waiting = new Map<string, FirstMessage>();
 

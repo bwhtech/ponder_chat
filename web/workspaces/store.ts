@@ -63,6 +63,18 @@ export function showWorkspace(slug: string) {
 	if (url.href !== location.href) history.pushState(null, "", url);
 }
 
+/** A workspace page's address, for a link to it. */
+export function workspaceHref(slug: string) {
+	return `/?w=${encodeURIComponent(slug)}`;
+}
+
+/** A click on a link to a workspace opens it in this page; with a modifier key, the browser opens a tab as usual. */
+export function followWorkspaceLink(event: MouseEvent, slug: string) {
+	if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+	event.preventDefault();
+	showWorkspace(slug);
+}
+
 /**
  * An older link opened by the workspace's id: its slug takes the id's place, in the same
  * history entry. Only while that page is still the open one.
@@ -114,7 +126,7 @@ export function kindIcon(workspace: Pick<WorkspaceSummary, "kind" | "memberCount
 	return workspace.memberCount ? "lucide-users" : "lucide-lock";
 }
 
-/** Who can use it, in a few words: for the badge on the workspace page and the sidebar row's hint. */
+/** Who can use it, in a few words: the sidebar row's hint. */
 export function sharedWith(workspace: Pick<WorkspaceSummary, "kind" | "access" | "memberCount">) {
 	if (workspace.kind === "org") return "Everyone";
 	if (workspace.access !== "owner") return "Shared with you";

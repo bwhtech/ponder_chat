@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Dropdown } from "frappe-ui";
+import { Dropdown, type DropdownOptions } from "frappe-ui";
 import { computed, h } from "vue";
 import WorkspaceChip from "./WorkspaceChip.vue";
 import { kindIcon, workspaceById, workspaces } from "./store";
@@ -14,14 +14,15 @@ const workspace = computed(() => workspaceById(chosen.value));
 
 const check = (on: boolean) => ({ suffix: () => (on ? h("span", { class: "lucide-check size-4 shrink-0 text-ink-gray-7" }) : null) });
 
-const options = computed(() => [
+const options = computed<DropdownOptions>(() => [
 	{
 		group: "No workspace",
 		hideLabel: true,
-		options: [{ label: "No workspace", icon: "lucide-layers", onClick: () => (chosen.value = null), slots: check(!chosen.value) }],
+		options: [{ label: "No workspace", onClick: () => (chosen.value = null), slots: check(!chosen.value) }],
 	},
 	{
 		group: "Workspaces",
+		hideLabel: true,
 		options: workspaces.value.map((each) => ({ label: each.name, icon: kindIcon(each), onClick: () => (chosen.value = each.id), slots: check(chosen.value === each.id) })),
 	},
 ]);

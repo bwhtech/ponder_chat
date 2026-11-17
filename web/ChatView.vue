@@ -15,7 +15,7 @@ import { chosenCitations, citationLabel, citationPart, withComment, type Citatio
 import type { CiteAnchor } from "./cite/CitationChip.vue";
 import type { PendingCite } from "./cite/selection";
 import { SkillMenu, useSkillPicker } from "./skills/picker";
-import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skills/skills";
+import { chosenSkills, loadSkills, skillPart, skillTitle, withSkillsHint } from "./skills/skills";
 import { summarizedThrough } from "./compaction";
 import { THREAD_CHANGED } from "../shared/replies";
 import { useThreads } from "./threads";
@@ -164,7 +164,9 @@ onMounted(() => {
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	if (props.running) void resumeStream();
 	const first = workspace.firstMessage;
-	if (first) void send(first.text, first.files);
+	if (!first) return;
+	skillChips.value = first.skills;
+	void send(first.text, first.files);
 });
 
 const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
@@ -192,7 +194,9 @@ const {
 	listeners: skillListeners,
 } = useSkillPicker(input, composer);
 void loadSkills();
-const placeholder = computed(() => (skills.value.length ? "Message Ponder Chat. Type $ for skills" : "Message Ponder Chat"));
+// A new chat with a workspace chosen names it, as the workspace page does.
+const askIn = computed(() => (workspace.locked.value ? undefined : workspace.summary.value?.name));
+const placeholder = computed(() => withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat"));
 
 /** The skills the person asked for in the message this reply answers, for the line above the reply. */
 function askedSkills(message: UIMessage) {
@@ -636,7 +640,7 @@ function replyModelId(message: UIMessage) {
 		<!-- Above the field on phones; under it in the middle of the page. -->
 		<!-- The chips fade out with the greeting when the first message goes. -->
 		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
-			<Suggestions v-if="landing && !outOfCredits" class="-mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
+			<Suggestions v-if="landing && !outOfCredits && !askIn" class="-mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
 				<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
 			</Suggestions>
 		</Transition>
