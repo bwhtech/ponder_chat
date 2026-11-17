@@ -20,6 +20,7 @@ useTestSchema(schema);
 const { runPromise, dispose } = await import("../runtime/runtime.ts");
 const Threads = await import("../threads/Threads.ts");
 const AdminEvents = await import("../admin/AdminEvents.ts");
+const Runs = await import("../telemetry/Runs.ts");
 const Workspaces = await import("./Workspaces.ts");
 const { peopleApi, workspacesApi } = await import("./routes.ts");
 
@@ -103,6 +104,8 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 			Effect.gen(function* () {
 				yield* Threads.Threads.use((threads) => threads.migrate);
 				yield* AdminEvents.AdminEvents.use((events) => events.migrate);
+				// Before Workspaces, as at start-up: a document's log references `runs`.
+				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
 				// Twice, without a change.
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);

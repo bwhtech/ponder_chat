@@ -88,9 +88,10 @@ describe.skipIf(!base)("chats in a workspace", () => {
 				yield* sql`insert into users (id, name, email, role) values (${ana}, 'Ana', ${`${ana}@example.invalid`}, 'admin'), (${bob}, 'Bob', ${`${bob}@example.invalid`}, 'user'), (${dan}, 'Dan', ${`${dan}@example.invalid`}, 'user')`;
 				yield* Threads.Threads.use((threads) => threads.migrate);
 				yield* AdminEvents.AdminEvents.use((events) => events.migrate);
+				// Before Workspaces, as at start-up: a document's log references `runs`.
+				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
 				yield* ThreadRuns.ThreadRuns.use((runs) => runs.migrate);
-				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Settings.Settings.use((settings) => settings.migrate);
 				yield* Credits.Credits.use((credits) => credits.migrate);
 				yield* ApprovalUses.ApprovalUses.use((uses) => uses.migrate);

@@ -3,14 +3,15 @@
  * TEST_DATABASE_URL, in a schema of the test's own (search_path), with memory, Python and
  * OpenRouter off. Import it before the app's modules: the layer reads the environment when
  * it is built (config.ts). The users table there is a small one of the test's own, as in
- * people/Invites.test.ts.
+ * people/Invites.test.ts. `public` comes after it on the path only for pgvector's type and
+ * operators, which the extension put there: every table is made in the test's schema.
  */
 export const base = process.env.TEST_DATABASE_URL;
 
 export function useTestSchema(schema: string) {
 	if (!base) return;
 	Object.assign(process.env, {
-		DATABASE_URL: `${base}${base.includes("?") ? "&" : "?"}options=${encodeURIComponent(`-csearch_path=${schema}`)}`,
+		DATABASE_URL: `${base}${base.includes("?") ? "&" : "?"}options=${encodeURIComponent(`-csearch_path=${schema},public`)}`,
 		BETTER_AUTH_SECRET: "test-secret-for-the-workspaces-0123456789abcdef",
 		PONDER_MEMORY: "off",
 		PONDER_PYTHON: "off",
