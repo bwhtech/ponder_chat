@@ -3,6 +3,7 @@
  * rows with their header repeated.
  */
 import { assert, describe, it } from "@effect/vitest";
+import * as Result from "effect/Result";
 import { chunkDocument, embeddingText, MAX, MAX_ROW, TARGET, type Passage } from "./chunk.ts";
 import type { DocumentPage } from "./document.ts";
 import { readText } from "./read-document.ts";
@@ -101,7 +102,7 @@ describe("chunkDocument", () => {
 
 	it("turns a CSV into table rows, with the header in each passage", () => {
 		const csv = ["name,dose,notes", ...Array.from({ length: 80 }, (_, index) => `Drug ${index},${index} mg,"given daily, with food"`)].join("\n");
-		const read = readText("text/csv", new TextEncoder().encode(csv));
+		const read = Result.getOrThrow(readText("text/csv", new TextEncoder().encode(csv)));
 		const passages = chunkDocument({ name: "Doses", pages: read.pages, headings: "levels" });
 		assert.isAbove(passages.length, 1);
 		for (const passage of passages) {

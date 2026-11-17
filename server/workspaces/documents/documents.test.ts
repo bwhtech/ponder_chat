@@ -212,6 +212,16 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.strictEqual(refused._tag, "DocumentNotFailed");
 	});
 
+	it("fails a table that is too wide, with a reason the person can act on", async () => {
+		const header = Array.from({ length: 501 }, (_, index) => `c${index}`).join(",");
+		const uploaded = await documents((service) => service.upload(actor("ana"), ids.workspace, file("wide.csv", `${header}\n1\n`, "text/csv")));
+		assert.strictEqual(await indexLatest(), "failed");
+		const log = await documents((service) => service.log(actor("ana"), ids.workspace, uploaded.id));
+		assert.strictEqual(log.document.error, "This table is too wide. It can have at most 500 columns.");
+		assert.deepStrictEqual([log.steps.at(-1)!.step, log.steps.at(-1)!.detail.step], ["failed", "parse"]);
+		await documents((service) => service.remove(actor("ana"), ids.workspace, uploaded.id));
+	});
+
 	it("indexes again the documents that another embedding model made, at start-up; search works meanwhile", async () => {
 		// The old model's vectors are 5 wide, the fake's 3: a search that read them would fail.
 		await database((sql) => sql`update workspace_passages set model = 'old/embedding', embedding = '[1,0,0,0,0]'::vector where document_id = ${ids.manual}`);

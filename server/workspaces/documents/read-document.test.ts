@@ -2,11 +2,15 @@
  * Text documents become one Markdown page; a PDF's repeated page headers are dropped.
  */
 import { assert, describe, it } from "@effect/vitest";
+import * as Result from "effect/Result";
 import { dropRepeatedLines } from "./boilerplate.ts";
-import { headingRule, readText } from "./read-document.ts";
+import { MAX_COLUMNS } from "./csv.ts";
+import { headingRule, readText as readTextResult } from "./read-document.ts";
 import { pdfTextPages } from "./read-pdf.ts";
 
 const bytes = (text: string) => new TextEncoder().encode(text);
+const readText = (mediaType: string, data: Uint8Array) => Result.getOrThrow(readTextResult(mediaType, data));
+const refusal = (mediaType: string, text: string) => Result.match(readTextResult(mediaType, bytes(text)), { onSuccess: () => null, onFailure: (error) => error });
 const TOPICS = ["dialysis", "biopsy", "transplant", "fistula", "peritonitis", "donors"];
 
 describe("readText", () => {
@@ -33,6 +37,24 @@ describe("readText", () => {
 	it("reads a TSV, and keeps a pipe in a cell from ending it", () => {
 		const read = readText("text/tab-separated-values", bytes("a\tb\n1|2\t3\n"));
 		assert.strictEqual(read.pages[0].markdown, "| a | b |\n| --- | --- |\n| 1\\|2 | 3 |");
+	});
+
+	it("refuses a table that is too wide, or that padding would make too large, before it builds it", () => {
+		const wide = refusal("text/csv", `${Array.from({ length: MAX_COLUMNS + 1 }, (_, index) => `c${index}`).join(",")}\n1\n`);
+		assert.deepStrictEqual([wide?._tag, wide?.reason], ["TableTooLarge", "columns"]);
+		assert.include(wide!.message, "This table is too wide");
+		// 4 KB of header over 2 MB of one-cell rows would be about 3 GB of Markdown.
+		const header = Array.from({ length: MAX_COLUMNS }, (_, index) => `c${index}`).join(",");
+		const ragged = refusal("text/tab-separated-values", `${header.replaceAll(",", "\t")}\n${"1\n".repeat(1_000_000)}`);
+		assert.deepStrictEqual([ragged?._tag, ragged?.reason], ["TableTooLarge", "size"]);
+		// The same rows under a narrow header are fine.
+		assert.strictEqual(refusal("text/csv", `a,b\n${"1\n".repeat(1_000_000)}`), null);
+	});
+
+	it("keeps JSON as written when its indents would make it too large", () => {
+		const deep = `${"[".repeat(2_000)}${"1,".repeat(1_000_000)}1${"]".repeat(2_000)}`;
+		const markdown = readText("application/json", bytes(deep)).pages[0].markdown;
+		assert.strictEqual(markdown, `\`\`\`json\n${deep}\n\`\`\``);
 	});
 
 	it("puts JSON in a fence, pretty-printed so it can be split by lines", () => {

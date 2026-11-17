@@ -106,7 +106,7 @@ const make = Effect.gen(function* () {
 		const read = yield* readDocument(row.media_type, new Uint8Array(bytes.value)).pipe(Effect.provideContext(readers), Effect.result);
 		if (read._tag === "Failure") {
 			const error = read.failure;
-			if (error._tag === "PdfUnreadable") return yield* Effect.as(failRow(row, "parse", error.message), false);
+			if (error._tag === "PdfUnreadable" || error._tag === "TableTooLarge") return yield* Effect.as(failRow(row, "parse", error.message), false);
 			yield* recordPageReads(row, error.pageReads);
 			return yield* Effect.as(failRow(row, "page-read", error.message, { page: error.page }), false);
 		}
