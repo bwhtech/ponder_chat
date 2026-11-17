@@ -25,6 +25,8 @@ export type FakeOpenRouter = {
 	embedded: string[][];
 	/** Refuse an embedding call with more than one value, as for a model with no such endpoint. */
 	oneAtATime: boolean;
+	/** Answers 502 to an embedding call when this says so: it sees the call's texts. */
+	failEmbedding?: (input: string[]) => boolean;
 	close: () => Promise<void>;
 };
 
@@ -41,6 +43,7 @@ export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
 			const input = body.input as string[];
 			// As OpenRouter answers for google/gemini-embedding-2 under Zero Data Retention.
 			if (fake.oneAtATime && input.length > 1) return send(404, { error: { message: "No endpoints found matching your data policy (Zero data retention).", code: 404 } });
+			if (fake.failEmbedding?.(input)) return send(502, { error: { message: "The embedding provider is down.", code: 502 } });
 			embedded.push(input);
 			const data = input.map((text, index) => ({ object: "embedding", index, embedding: meaning(text) }));
 			return send(200, { object: "list", model: body.model, data, usage: { prompt_tokens: input.length * 7, total_tokens: input.length * 7, cost: EMBED_COST } });

@@ -233,6 +233,42 @@ describe.skipIf(!base)("workspace documents", () => {
 		);
 	});
 
+	it("keeps the cost of the calls that worked when one passage fails, and pays only for that one on the next try", async () => {
+		openRouter.oneAtATime = true;
+		const uploaded = await documents((service) => service.upload(actor("ana"), ids.workspace, file("flaky.md", manual(3, "exit site care"), "text/markdown")));
+		const request = asked.at(-1)!;
+		const prepared = await runPromise(Indexer.Indexer.use((indexer) => indexer.prepare(request)));
+		assert.deepStrictEqual(prepared, { state: "chunked", batches: 1 });
+
+		// The passage of Part 2 fails on every try: the AI SDK tries each call 3 times.
+		let refused = 0;
+		openRouter.failEmbedding = (input) => input.some((text) => text.includes("Part 2")) && ++refused > 0;
+		const calls = openRouter.embedded.length;
+		const failed = await runPromise(Indexer.Indexer.use((indexer) => Effect.flip(indexer.embedBatch(request, 0))));
+		assert.strictEqual(failed._tag, "EmbeddingFailed");
+		assert.strictEqual(refused, 3);
+		assert.strictEqual(openRouter.embedded.length - calls, 2);
+		const spent = () =>
+			database((sql) => sql<{ steps: number; cost: number }>`
+				select coalesce(sum(steps), 0)::int as steps, coalesce(sum(cost_usd), 0)::float8 as cost from runs where id like ${`workspace-index:${uploaded.id}:1:0%`}`).then(([row]) => row);
+		const afterFailure = await spent();
+		assert.strictEqual(afterFailure.steps, 2);
+		assert.closeTo(afterFailure.cost, 2 * EMBED_COST, 1e-9);
+
+		// The next try embeds only the passage that failed.
+		openRouter.failEmbedding = undefined;
+		await runPromise(Indexer.Indexer.use((indexer) => indexer.embedBatch(request, 0)));
+		const again = openRouter.embedded.slice(calls + 2);
+		assert.strictEqual(again.length, 1);
+		assert.include(again[0][0], "Part 2");
+		assert.strictEqual(await runPromise(Indexer.Indexer.use((indexer) => indexer.finish(request))), "ready");
+		const total = await spent();
+		assert.strictEqual(total.steps, 3);
+		assert.closeTo(total.cost, 3 * EMBED_COST, 1e-9);
+		openRouter.oneAtATime = false;
+		// The AI SDK waits 2 s, then 4 s, between its tries.
+	}, 20_000);
+
 	it("lets only people who can edit upload, delete, read the log and try again; others get 403, and non-members 404", async () => {
 		const form = () => {
 			const data = new FormData();
