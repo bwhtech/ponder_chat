@@ -3,7 +3,8 @@
  * rows with their header repeated.
  */
 import { assert, describe, it } from "@effect/vitest";
-import { chunkDocument, embeddingText, MAX, TARGET, type Passage } from "./chunk.ts";
+import { chunkDocument, embeddingText, MAX, MAX_ROW, TARGET, type Passage } from "./chunk.ts";
+import type { DocumentPage } from "./document.ts";
 import { readText } from "./read-document.ts";
 
 const HEADER = "| Drug | Intermittent | Continuous |\n| --- | --- | --- |";
@@ -112,8 +113,95 @@ describe("chunkDocument", () => {
 		assert.strictEqual(rows[0], "| Drug 0 | 0 mg | given daily, with food |");
 	});
 
+	it("never cuts a long row: it keeps its header, past MAX if it must", () => {
+		const long = `| Cefazolin | ${"15 mg/kg daily, ".repeat(200)}|`;
+		assert.isAbove(HEADER.length + long.length, MAX);
+		const markdown = [HEADER, row(1), long, row(2)].join("\n");
+		const passages = chunkDocument({ name: "Manual", pages: [{ page: 251, markdown }], headings: "numbered" });
+		const holding = passages.filter((passage) => passage.content.includes("| Cefazolin |"));
+		assert.strictEqual(holding.length, 1);
+		assert.strictEqual(holding[0].content, `${HEADER}\n${long}`);
+		assert.deepStrictEqual(passages.flatMap(tableRows), [row(1), row(2)]);
+	});
+
+	it("cuts a row only past MAX_ROW, and repeats the header in each piece", () => {
+		const cells = Array.from({ length: 1_500 }, (_, index) => `dose${index}`).join(" ");
+		const long = `| Vancomycin | ${cells} |`;
+		assert.isAbove(long.length, MAX_ROW);
+		const passages = chunkDocument({ name: "Manual", pages: [{ page: 252, markdown: `${HEADER}\n${long}` }], headings: "numbered" });
+		assert.isAbove(passages.length, 1);
+		for (const passage of passages) assert.isTrue(passage.content.startsWith(`${HEADER}\n`), `part ${passage.ordinal} has no header`);
+		const pieces = passages.map((passage) => passage.content.slice(HEADER.length + 1));
+		assert.strictEqual(pieces.join(" "), long);
+	});
+
+	it("reads a pipe line with no separator line as text, and keeps a table that has only its header", () => {
+		const alone = chunkDocument({ name: "Manual", pages: [{ page: 7, markdown: "Cefazolin dose:\n\n| Cefazolin | 15 mg/kg daily |" }], headings: "numbered" });
+		assert.include(alone.map((passage) => passage.content).join("\n"), "| Cefazolin | 15 mg/kg daily |");
+		const headerOnly = chunkDocument({ name: "Manual", pages: [{ page: 8, markdown: HEADER }], headings: "numbered" });
+		assert.include(headerOnly.map((passage) => passage.content).join("\n"), HEADER);
+	});
+
+	it("keeps every line of the input in some passage", () => {
+		for (let seed = 1; seed <= 60; seed++) {
+			const pages = randomPages(seed);
+			for (const headings of ["numbered", "levels"] as const) {
+				const passages = chunkDocument({ name: "Doc", pages, headings });
+				const all = squash(passages.map((passage) => passage.content).join("\n"));
+				for (const page of pages) {
+					for (const line of page.markdown.split("\n").filter((one) => one.trim() !== "")) {
+						assert.include(all, squash(line), `seed ${seed}, ${headings}: lost ${JSON.stringify(line.slice(0, 80))}`);
+					}
+				}
+			}
+		}
+	});
+
 	it("is deterministic", () => {
 		const pages = [{ page: 1, markdown: `#### 1. A\n\n${paragraph(400)}\n\n${table(50)}` }];
 		assert.deepStrictEqual(chunkDocument({ name: "D", pages, headings: "numbered" }), chunkDocument({ name: "D", pages, headings: "numbered" }));
 	});
 });
+
+/** Without spaces and line breaks: the chunker may cut a long line at a space, and joins pieces with a line break. */
+function squash(text: string) {
+	return text.replace(/\s+/g, "");
+}
+
+/** A few pages of mixed Markdown, the same for the same seed. */
+function randomPages(seed: number): DocumentPage[] {
+	const random = seeded(seed);
+	const pick = <T>(items: ReadonlyArray<T>) => items[Math.floor(random() * items.length)];
+	const count = (most: number) => 1 + Math.floor(random() * most);
+	const words = (many: number) => Array.from({ length: many }, () => pick(["dose", "mg/kg", "daily", "10", "Cefazolin", "exit", "site", "|", "-", "#", "**bold**", "2.3"])).join(" ");
+	const blocks: Array<() => string> = [
+		() => `${"#".repeat(count(4))} ${pick(["", "2.", "2.3", "13.4.1"])} ${words(count(6))}`,
+		() => `**${words(3)}**`,
+		() => `#### ${words(40)}`,
+		() => `${words(count(400))}.`,
+		() => Array.from({ length: count(6) }, () => `- ${words(4)}`).join("\n"),
+		() => Array.from({ length: 1 + count(30) }, (_, index) => (index === 1 ? "| --- | --- |" : `| ${words(2)} | ${words(count(40))} |`)).join("\n"),
+		() => `| ${words(2)} | ${words(3)} |`,
+		() => Array.from({ length: 1 + count(4) }, () => `| ${words(2)} | ${words(2)} |`).join("\n"),
+		() => "| Drug | Dose |\n| --- | --- |",
+		() => `| Long | ${words(700)} |`,
+		() => "```\nconst dose = 10;\n\n| not a table |\n```",
+		() => "Text then a pipe line\n| A | B |\nand more text",
+		() => "",
+	];
+	return Array.from({ length: count(4) }, (_, index) => ({
+		page: index + 1,
+		markdown: Array.from({ length: count(12) }, () => pick(blocks)()).join(pick(["\n\n", "\n", "\n\n\n"])),
+	}));
+}
+
+/** mulberry32. */
+function seeded(seed: number) {
+	let state = seed;
+	return () => {
+		state = (state + 0x6d2b79f5) | 0;
+		let mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+		mixed = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+		return ((mixed ^ (mixed >>> 14)) >>> 0) / 4_294_967_296;
+	};
+}

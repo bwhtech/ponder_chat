@@ -73,10 +73,10 @@ function headingLine(raw: RawBlock, rule: HeadingRule) {
 	return rule === "numbered" && boldLine ? raw.lines[0].trim() : null;
 }
 
+/** Pipe lines are a table only with a separator line under the first; else they are text, such as one "| a | b |" line. */
 function withPlace(raw: RawBlock, page: number | null, path: string[]): Block {
-	if (raw.kind !== "table") return { kind: "text", text: raw.lines.join("\n"), page, path };
-	const headerLines = SEPARATOR.test(raw.lines[1] ?? "") ? 2 : 1;
-	return { kind: "table", header: raw.lines.slice(0, headerLines).join("\n"), rows: raw.lines.slice(headerLines), page, path };
+	if (raw.kind !== "table" || !SEPARATOR.test(raw.lines[1] ?? "")) return { kind: "text", text: raw.lines.join("\n"), page, path };
+	return { kind: "table", header: raw.lines.slice(0, 2).join("\n"), rows: raw.lines.slice(2), page, path };
 }
 
 const HEADING = /^#{1,6}\s+\S/;

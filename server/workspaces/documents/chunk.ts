@@ -10,7 +10,9 @@ import { splitText } from "./split-text.ts";
  * - Paragraphs are packed up to TARGET. A longer paragraph is cut at lines, then at
  *   sentences, then at words.
  * - A table row is never cut. A table up to MAX stays whole; a longer one is split by
- *   rows, and each part starts with the header row and its separator line.
+ *   rows, and each part starts with the header row and its separator line. A row that
+ *   does not fit in MAX with its header is a passage of its own, past MAX: the embedding
+ *   models take far more. Only a row past MAX_ROW is cut, and each piece has the header.
  * - Each passage has a location line, "<document> › <headings> (page N)", which is
  *   embedded with it, so a dose in a table part still says which table it is in.
  *
@@ -18,6 +20,8 @@ import { splitText } from "./split-text.ts";
  */
 export const TARGET = 1_000;
 export const MAX = 2_000;
+/** A table row up to this length is never cut. */
+export const MAX_ROW = 8_000;
 const MIN = 300;
 /** The location names at most this many headings, the nearest ones. */
 const MAX_PATH = 3;
@@ -29,7 +33,7 @@ export type Passage = {
 	page: number | null;
 	/** "Nephrology manual › Peritonitis › Table 5 (page 251)". */
 	location: string;
-	/** The passage's Markdown, at most MAX characters. */
+	/** The passage's Markdown, at most MAX characters, except a table row that is longer with its header. */
 	content: string;
 };
 
@@ -70,9 +74,10 @@ function unitsOf(block: Block, index: number): Unit[] {
 	if (block.kind === "heading") return [{ ...place, kind: "heading", text: block.text }];
 	const asText = (text: string) => splitText(text, TARGET).map((piece): Unit => ({ ...place, kind: "text", text: piece }));
 	if (block.kind === "text") return asText(block.text);
+	if (block.rows.length === 0) return asText(block.header);
 	const table = { header: block.header, length: [block.header, ...block.rows].join("\n").length };
-	// A row so long that it and the header pass MAX is cut as text: rare, and better than a passage past MAX.
-	return block.rows.flatMap((row) => (block.header.length + 1 + row.length <= MAX ? [{ ...place, kind: "row" as const, text: row, table }] : asText(row)));
+	// Each piece of a cut row is longer than MAX, so it is a passage of its own, and gets the header.
+	return block.rows.flatMap((row) => (row.length <= MAX_ROW ? [row] : splitText(row, MAX_ROW)).map((text): Unit => ({ ...place, kind: "row", text, table })));
 }
 
 type Draft = {
@@ -117,9 +122,17 @@ class Packer {
 
 	finish() {
 		this.flush();
-		// A passage of headings alone says nothing that the next passage's location line does not.
-		const kept = this.done.filter((draft) => !draft.headingsOnly);
-		return kept.length > 0 ? kept : this.done;
+		// Headings alone, before a unit too big to join them, open the next passage: the
+		// location line may cut a long heading or leave it out. At the end, they stay alone.
+		const kept: Draft[] = [];
+		let headings: Draft | null = null;
+		for (const draft of this.done) {
+			const merged: Draft = headings ? { ...draft, text: `${headings.text}\n\n${draft.text}`, page: headings.page } : draft;
+			headings = merged.headingsOnly ? merged : null;
+			if (!merged.headingsOnly) kept.push(merged);
+		}
+		if (headings) kept.push(headings);
+		return kept;
 	}
 
 	private flush() {
