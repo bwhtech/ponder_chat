@@ -77,7 +77,8 @@ function headingLine(raw: RawBlock, rule: HeadingRule) {
 function withPlace(raw: RawBlock, page: number | null, path: string[]): Block {
 	if (raw.kind !== "table" || !SEPARATOR.test(raw.lines[1] ?? "")) return { kind: "text", text: raw.lines.join("\n"), page, path };
 	// A row of empty cells says nothing. LiteParse writes them under a page of text that it took for a table's header.
-	const rows = raw.lines.slice(2).filter((row) => /[\p{L}\p{N}]/u.test(row));
+	// A row of symbols, such as "| ✓ | ✗ |", says something.
+	const rows = raw.lines.slice(2).filter((row) => !EMPTY_ROW.test(row));
 	return { kind: "table", header: raw.lines.slice(0, 2).join("\n"), rows, page, path };
 }
 
@@ -85,6 +86,7 @@ const HEADING = /^#{1,6}\s+\S/;
 // LiteParse marks a whole bold paragraph as a heading at times; a line this long is text.
 const MAX_HEADING = 200;
 const SEPARATOR = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)*\|?$/;
+const EMPTY_ROW = /^[\s|]*$/;
 const NUMBER = /^(\d{1,2}(?:\.\d{1,2}){0,5})\.?\s+\S/;
 const MAX_TITLE = 80;
 

@@ -152,14 +152,14 @@ describe("chunkDocument", () => {
 		assert.notInclude(passages.map((passage) => passage.content).join("\n"), "|  |  |");
 	});
 
-	it("keeps every line of text of the input in some passage", () => {
+	it("keeps every line of the input in some passage, but rows of empty cells", () => {
 		for (let seed = 1; seed <= 60; seed++) {
 			const pages = randomPages(seed);
 			for (const headings of ["numbered", "levels"] as const) {
 				const passages = chunkDocument({ name: "Doc", pages, headings });
 				const all = squash(passages.map((passage) => passage.content).join("\n"));
 				for (const page of pages) {
-					for (const line of page.markdown.split("\n").filter((one) => /[\p{L}\p{N}]/u.test(one))) {
+					for (const line of page.markdown.split("\n").filter((one) => !/^[\s|]*$/.test(one))) {
 						assert.include(all, squash(line), `seed ${seed}, ${headings}: lost ${JSON.stringify(line.slice(0, 80))}`);
 					}
 				}
@@ -195,6 +195,7 @@ function randomPages(seed: number): DocumentPage[] {
 		() => Array.from({ length: 1 + count(4) }, () => `| ${words(2)} | ${words(2)} |`).join("\n"),
 		() => "| Drug | Dose |\n| --- | --- |",
 		() => `| ${words(count(600))} |\n|---|---|\n|  |  |\n|  |  |`,
+		() => `| Drug | ${pick(["Taken", "Change"])} |\n| --- | --- |\n| ✓ | ✗ |\n| + | − |\n| — | ${pick(["-", "%", "→"])} |`,
 		() => `| Long | ${words(700)} |`,
 		() => "```\nconst dose = 10;\n\n| not a table |\n```",
 		() => "Text then a pipe line\n| A | B |\nand more text",
