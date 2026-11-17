@@ -23,14 +23,15 @@ const menu = computed(() => [
 
 <template>
 	<li class="flex gap-2.5 py-1" data-slot="workspace-document" :data-status="status" :aria-busy="status === 'reading' || undefined">
-		<span
-			:class="[
-				status === 'reading' ? 'lucide-loader-circle animate-spin motion-reduce:animate-none' : documentIcon(document),
-				status === 'failed' ? 'text-ink-red-6' : 'text-ink-gray-5',
-				'mt-0.5 size-4 shrink-0',
-			]"
-			aria-hidden="true"
-		/>
+		<span class="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
+			<span
+				:class="[
+					status === 'reading' ? 'lucide-loader-circle animate-spin motion-reduce:animate-none' : documentIcon(document),
+					status === 'failed' ? 'text-ink-red-6' : 'text-ink-gray-5',
+					'size-4',
+				]"
+			/>
+		</span>
 		<div class="min-w-0 flex-1">
 			<p class="truncate text-sm text-ink-gray-8" :title="document.name" data-slot="document-name">{{ document.name }}</p>
 			<p v-if="size || status !== 'ready'" class="text-p-sm text-ink-gray-6" data-slot="document-status">

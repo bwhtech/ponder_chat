@@ -638,9 +638,11 @@ function replyModelId(message: UIMessage) {
 
 	<footer ref="footer" class="scroll-gutter-match flex shrink-0 flex-col gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 		<!-- Above the field on phones; under it in the middle of the page. -->
-		<!-- The chips fade out with the greeting when the first message goes. -->
+		<!-- The chips fade out with the greeting when the first message goes. With a workspace
+		     picked they go too, but keep their space under a centred composer, so it does not
+		     jump under the pointer. -->
 		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
-			<Suggestions v-if="landing && !outOfCredits && !askIn" class="-mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
+			<Suggestions v-if="landing && !outOfCredits" :class="{ 'max-sm:hidden sm:invisible': askIn }" :inert="!!askIn" class="-mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
 				<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
 			</Suggestions>
 		</Transition>

@@ -65,13 +65,13 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 		</EmptyState>
 
 		<template v-else>
-			<section aria-label="For everyone" class="space-y-3" data-slot="org-workspaces">
-				<h2 class="text-base-semibold text-ink-gray-9">For everyone</h2>
+			<section aria-label="Organisation workspaces" class="space-y-3" data-slot="org-workspaces">
+				<h2 class="text-base-semibold text-ink-gray-9">Organisation workspaces</h2>
 				<ListSkeleton v-if="loading" :rows="4" :avatar="false" two-lines label="Loading workspaces" />
 				<EmptyState
 					v-else-if="!report?.org.length"
 					icon="lucide-building-2"
-					title="No workspaces for everyone yet"
+					title="No organisation workspaces yet"
 					body="Make one in the chat with New workspace."
 				/>
 				<div v-else class="space-y-8">
@@ -141,7 +141,7 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 					<NumberCard title="Cost to index" :loading="loading" :value="privateTotals?.costUsd ?? null" :format="money" />
 				</div>
 
-				<div v-if="privateTotals?.errors.length" class="space-y-2 pt-3" data-slot="private-errors">
+				<div v-if="privateTotals?.errors.length" class="space-y-1 pt-5" data-slot="private-errors">
 					<h3 class="text-base-medium text-ink-gray-8">Why documents failed</h3>
 					<List :columns="['minmax(0,1fr)', '7rem']" class="-mx-3 list-row-px-3">
 						<ListRows :items="privateTotals.errors" row-key="error" v-slot="{ item }">
