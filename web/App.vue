@@ -6,10 +6,10 @@ import { dialogsWanted, loadDialogs } from "./dialogs";
 import { loadToasts, toastsWanted } from "./toasts";
 import { loadModels } from "./models";
 import { useThreads } from "./threads";
-import Workspace from "./Workspace.vue";
+import Shell from "./Shell.vue";
 import EmptyState from "./EmptyState.vue";
 
-/** Sign-in first, then the workspace. Someone signed in never needs the sign-in page, so it loads only when shown. */
+/** Sign-in first, then the signed-in shell. Someone signed in never needs the sign-in page, so it loads only when shown. */
 const SignIn = defineAsyncComponent(() => import("./SignIn.vue"));
 // What frappe-ui's FrappeUIProvider mounts, each only once it is needed: the dialogs' host
 // when a dialog opens (dialogs.ts), the toasts' host when a toast shows (toasts.ts).
@@ -44,6 +44,6 @@ watch(
 	</EmptyState>
 	<div v-else-if="me === undefined" class="h-dvh bg-surface-base" aria-busy="true" />
 	<SignIn v-else-if="me === null" />
-	<Workspace v-else />
+	<Shell v-else />
 	<Dialogs v-if="dialogsWanted" />
 </template>

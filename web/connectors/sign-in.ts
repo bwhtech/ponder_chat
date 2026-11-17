@@ -8,7 +8,7 @@ import type { SignInMessage } from "./api";
  * (Cross-Origin-Opener-Policy), so the channel is what Ponder relies on.
  *
  * On a phone, and when the popup is blocked, the sign-in uses this tab and comes back to
- * /?settings=connectors (Workspace.vue).
+ * /?settings=connectors (Shell.vue).
  */
 const CHANNEL = "ponder-connectors";
 

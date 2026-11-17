@@ -7,7 +7,7 @@ import ThreadRowsSkeleton from "./ThreadRowsSkeleton.vue";
 /**
  * The chats panel (ChatsPanel.vue) while its chunk arrives, in the sidebar or in the phone's
  * bottom sheet: the same layout, with skeleton rows for the chats and the credits, so nothing
- * moves when the panel takes its place. Vue gives it ChatsPanel's props (Workspace.vue).
+ * moves when the panel takes its place. Vue gives it ChatsPanel's props (Shell.vue).
  */
 defineOptions({ inheritAttrs: false });
 defineProps<{ sheet?: boolean; name: string }>();

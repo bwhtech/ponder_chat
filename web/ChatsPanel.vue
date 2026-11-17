@@ -9,7 +9,7 @@ import ThreadList from "./ThreadList.vue";
  * The chats: the account menu, the list, New chat and the credits. A sidebar on a wide
  * screen, or the content of the bottom sheet on a phone (`sheet`). Its own chunk: a phone
  * draws it only when the sheet opens, and a wide screen fetches it beside the page's first
- * code (server/boot-page.ts), so it does not wait for it (Workspace.vue).
+ * code (server/boot-page.ts), so it does not wait for it (Shell.vue).
  */
 defineProps<{ sheet?: boolean; name: string; menu: DropdownOptions; highlight: boolean }>();
 const emit = defineEmits<{ select: [id: string]; newChat: [] }>();

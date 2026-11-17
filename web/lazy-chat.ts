@@ -6,14 +6,14 @@ import { once } from "./once";
 type ChatSdk = typeof import("./chat-sdk");
 type Chat = UseChatHelpers<UIMessage>;
 
-/** The AI SDK (chat-sdk.ts), loaded once: by the first chat that needs it, or ahead of time (Workspace.vue). */
+/** The AI SDK (chat-sdk.ts), loaded once: by the first chat that needs it, or ahead of time (Shell.vue). */
 export const loadChatSdk = once(() => import("./chat-sdk"));
 
 /**
  * useChat from @ai-sdk/vue, without the SDK in the page's first code. The chat shows its
  * messages and status at once, from `initialMessages`. The SDK loads at the first call
  * (send, stop, resume), which waits for it; the shell loads it ahead once the page is idle
- * (Workspace.vue). Call it in a component's setup: the chat stops with the component, as
+ * (Shell.vue). Call it in a component's setup: the chat stops with the component, as
  * useChat's does.
  */
 export function useLazyChat(options: (sdk: ChatSdk) => UseChatOptions<UIMessage>, initialMessages: UIMessage[]) {

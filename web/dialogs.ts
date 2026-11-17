@@ -17,7 +17,7 @@ export const dialogsWanted = ref(false);
 export const loadDialogs = once(() => import("./dialogs-host"));
 
 /**
- * A dialog asked for while that code is still on its way. Workspace.vue draws it meanwhile
+ * A dialog asked for while that code is still on its way. Shell.vue draws it meanwhile
  * (DialogPlaceholder.vue): its title, message and buttons, or its fields' labels.
  */
 export type PendingDialog = { kind: "confirm"; args: ConfirmArgs } | { kind: "danger"; args: DangerArgs } | { kind: "prompt"; args: PromptArgs };

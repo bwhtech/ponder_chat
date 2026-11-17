@@ -48,7 +48,7 @@ export function fileKind(mediaType: string, name = ""): "pdf" | "image" | "table
 }
 
 /**
- * The chat's file viewer (frappe-ui-ai-elements' FileViewer, given in Workspace.vue): a file the
+ * The chat's file viewer (frappe-ui-ai-elements' FileViewer, given in Shell.vue): a file the
  * panel can show opens there. Other files return false and open as a link.
  */
 export function viewInPanel(file: ViewedFile) {
