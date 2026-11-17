@@ -1,5 +1,5 @@
 import type { UIMessage } from "ai";
-import { computed, ref, shallowRef } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import { nameFromFirstMessage } from "../shared/thread-name";
 import { client, unwrap, type Answer } from "./api";
 import { fromBoot } from "./boot";
@@ -111,8 +111,41 @@ async function refresh() {
 
 /** The list from the server; undefined when it refused. The first one comes with the page (boot.ts). */
 async function fetchList(): Promise<ThreadSummary[] | undefined> {
-	const response = await client.api.threads.$get();
+	const response = await client.api.threads.$get({ query: {} });
 	return response.ok ? (await response.json()).threads : undefined;
+}
+
+/**
+ * The person's chats in one workspace, newest first: the server's list for the workspace,
+ * which it filters before its limit of 200, so a workspace's older chats are there however
+ * many newer chats are elsewhere. With the chats of the person's list in that workspace,
+ * which has a chat started on this page and its new title first. Asked again whenever the
+ * person's list changes (a refresh, a rename, a delete), so the two never disagree for long.
+ */
+export function useWorkspaceThreads(workspaceId: () => string) {
+	const fetched = ref<ThreadSummary[]>([]);
+	// Each ask takes a number; a slower answer for another workspace, or an older one, is dropped.
+	let asking = 0;
+	async function ask() {
+		const id = workspaceId();
+		const token = ++asking;
+		if (!id) return void (fetched.value = []);
+		try {
+			const response = await client.api.threads.$get({ query: { workspace: id } });
+			if (token === asking && response.ok) fetched.value = (await response.json()).threads;
+		} catch {
+			// Offline: the person's list still gives the chats it has.
+		}
+	}
+	watch([workspaceId, threads], ask, { immediate: true });
+	const chats = computed(() => {
+		const id = workspaceId();
+		if (!id) return [];
+		const byId = new Map(fetched.value.filter((thread) => thread.workspaceId === id).map((thread) => [thread.id, thread]));
+		if (listLoaded.value) for (const thread of threads.value) if (thread.workspaceId === id) byId.set(thread.id, thread);
+		return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+	});
+	return { chats };
 }
 
 async function open(id: string, { push = true } = {}) {

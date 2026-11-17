@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import { when } from "../dates";
-import { useThreads } from "../threads";
+import { useThreads, useWorkspaceThreads } from "../threads";
 
 /**
  * "Your chats": the person's own chats in this workspace, newest first, once there is one.
  * A chat stays its writer's own, also in a shared workspace, so nobody else's chats are
- * listed; where other people use the workspace (`shared`), the heading says so.
+ * listed; where other people use the workspace (`shared`), the heading says so. The list is
+ * the server's for this workspace, so older chats show however many newer ones are elsewhere.
  */
 const props = defineProps<{ workspaceId: string; shared: boolean }>();
 const emit = defineEmits<{ open: [id: string] }>();
 
-const { threads, listLoaded, prefetch } = useThreads();
-const chats = computed(() => (listLoaded.value && props.workspaceId ? threads.value.filter((thread) => thread.workspaceId === props.workspaceId) : []));
+const { prefetch } = useThreads();
+const { chats } = useWorkspaceThreads(() => props.workspaceId);
 </script>
 
 <template>
