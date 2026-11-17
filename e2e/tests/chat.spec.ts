@@ -77,7 +77,7 @@ test("an Auto reply stays on the model that answered, through its tool steps", a
 });
 
 test("asks the model the person picked", async ({ page, fake }) => {
-	await page.getByRole("button", { name: /Model/ }).click();
+	await page.getByRole("button", { name: /^Model:/ }).click();
 	await page.getByRole("option", { name: /Claude Haiku 5\.5/ }).click();
 
 	await chat.send(page, "Which model are you, picker test?");
@@ -136,7 +136,7 @@ test("a failed reply shows Retry, and Retry answers", async ({ page, fake }) => 
 test("New chat starts an empty chat", async ({ page }) => {
 	await chat.send(page, "A chat to leave");
 	await chat.idle(page);
-	await page.getByRole("button", { name: "New chat" }).click();
+	await page.getByRole("button", { name: "New chat", exact: true }).click();
 	await expect(page.getByText("What's on your mind?")).toBeVisible();
 	await expect(chat.messages(page)).toHaveCount(0);
 });
