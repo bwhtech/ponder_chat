@@ -2,6 +2,7 @@ import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import type { SqlError } from "effect/sql/SqlError";
 import * as PdfText from "../../pdf-text.ts";
 import * as Tracing from "../../tracing/Tracing.ts";
 import { dropRepeatedLines } from "./boilerplate.ts";
@@ -22,6 +23,10 @@ import { onePagePdfs } from "./pdf-pages.ts";
  *
  * When LiteParse does not load here, the text layer is read with pdf-text.ts instead, and
  * no page goes to a model.
+ *
+ * Each page read is paid for. The indexer gives a checkpoint: the pages read so far in its
+ * run are used again, each new one is kept as soon as it ends, and the read stops before
+ * its next batch once a newer run took over or the document is gone.
  */
 // Pages are copied and read a few at a time, so a scanned book of 400 pages is never all
 // in memory at once, and a page with no text that fails stops the read early.
@@ -38,6 +43,24 @@ export class PdfUnreadable extends Schema.TaggedError<PdfUnreadable>()("PdfUnrea
 	}
 }
 
+/** The pages read so far, how to keep each new one, and whether the run is still wanted. */
+export type PageCheckpoint = {
+	readonly done: ReadonlyMap<number, PageReader.PageReadResult>;
+	readonly save: (result: PageReader.PageReadResult) => Effect.Effect<void, SqlError>;
+	/** False once a newer run took over, or the document is settled or gone. */
+	readonly live: Effect.Effect<boolean, SqlError>;
+};
+
+/** For a read with nothing to keep: a test, the test questions. */
+export const NO_CHECKPOINT: PageCheckpoint = { done: new Map(), save: () => Effect.void, live: Effect.succeed(true) };
+
+/** A newer run took over, or the document is gone: no more pages are paid for. */
+export class ReadStopped extends Schema.TaggedError<ReadStopped>()("ReadStopped", {}) {
+	override get message() {
+		return "The read stopped: a newer run took over, or the document is gone.";
+	}
+}
+
 /** A page with no text that the model could not read. `pageReads` are the calls made so far, for the log. */
 export class PageUnreadable extends Schema.TaggedError<PageUnreadable>()("PageUnreadable", {
 	page: Schema.Number,
@@ -48,11 +71,11 @@ export class PageUnreadable extends Schema.TaggedError<PageUnreadable>()("PageUn
 	}
 }
 
-export const readPdf = Effect.fn("PdfReader.read")(function* (data: Uint8Array) {
+export const readPdf = Effect.fn("PdfReader.read")(function* (data: Uint8Array, checkpoint: PageCheckpoint = NO_CHECKPOINT) {
 	const started = yield* Clock.currentTimeMillis;
 	yield* Tracing.annotate({ "ponder.bytes": data.length });
 	const parsed = yield* parseWithLiteParse(data).pipe(Effect.catchTags({ LiteParseFailed: (error) => Effect.fail(new PdfUnreadable({ reason: "failed", cause: error.cause })) }));
-	const read = Option.isSome(parsed) ? yield* withModelPages(data, parsed.value.pages, parsed.value.pageCount) : yield* withPdfText(data);
+	const read = Option.isSome(parsed) ? yield* withModelPages(data, parsed.value.pages, parsed.value.pageCount, checkpoint) : yield* withPdfText(data);
 	const done: DocumentText = { ...read, chars: totalChars(read.pages), ms: (yield* Clock.currentTimeMillis) - started };
 	yield* Tracing.annotate({ "ponder.pages": done.pageCount, "ponder.chars": done.chars, "ponder.page_reads": done.pageReads.length });
 	return done;
@@ -60,14 +83,15 @@ export const readPdf = Effect.fn("PdfReader.read")(function* (data: Uint8Array) 
 
 type Read = Omit<DocumentText, "chars" | "ms">;
 
-const withModelPages = Effect.fnUntraced(function* (data: Uint8Array, parsed: LiteParsePage[], pageCount: number) {
+const withModelPages = Effect.fnUntraced(function* (data: Uint8Array, parsed: LiteParsePage[], pageCount: number, checkpoint: PageCheckpoint) {
 	const pages = dropRepeatedLines(parsed);
 	const toModel = pages.flatMap((page) => (Option.isSome(page.modelReason) ? [{ page: page.page, reason: page.modelReason.value, hasText: hasText(page.markdown) }] : []));
 	const texts = new Map<number, string>();
 	const pageReads: PageRead[] = [];
 	for (let start = 0; start < toModel.length; start += BATCH) {
 		const batch = toModel.slice(start, start + BATCH);
-		const results = yield* readBatch(data, batch);
+		if (!(yield* checkpoint.live)) return yield* new ReadStopped();
+		const results = yield* readBatch(data, batch, checkpoint);
 		for (const [index, result] of results.entries()) {
 			pageReads.push(result.record);
 			if (Option.isSome(result.text)) texts.set(batch[index].page, result.text.value);
@@ -79,12 +103,22 @@ const withModelPages = Effect.fnUntraced(function* (data: Uint8Array, parsed: Li
 	return { engine: "liteparse", pages: merged, pageCount, pageReads } satisfies Read;
 });
 
-/** Copies the batch's pages out of the PDF, then reads them a few at a time. A page that can't be copied is a failed read. */
-const readBatch = Effect.fnUntraced(function* (data: Uint8Array, batch: ReadonlyArray<{ page: number; reason: PageReadReason }>) {
+/**
+ * The batch's pages that this run read already, and the others: copied out of the PDF, then
+ * read a few at a time, each kept as soon as it ends. A page that can't be copied is a
+ * failed read, and is not kept: it cost nothing.
+ */
+const readBatch = Effect.fnUntraced(function* (data: Uint8Array, batch: ReadonlyArray<{ page: number; reason: PageReadReason }>, checkpoint: PageCheckpoint) {
 	const reader = yield* PageReader.PageReader;
-	const copies = yield* Effect.option(onePagePdfs(data, batch.map((page) => page.page)));
-	if (Option.isNone(copies)) return batch.map((page) => notCopied(page.page, page.reason));
-	return yield* Effect.forEach(batch, (page, index) => reader.read({ page: page.page, reason: page.reason, pdf: copies.value[index] }), { concurrency: CALLS_AT_ONCE });
+	const todo = batch.filter((page) => !checkpoint.done.has(page.page));
+	const copies = todo.length ? yield* Effect.option(onePagePdfs(data, todo.map((page) => page.page))) : Option.some([]);
+	const read = Option.isNone(copies)
+		? todo.map((page) => notCopied(page.page, page.reason))
+		: yield* Effect.forEach(todo, (page, index) => reader.read({ page: page.page, reason: page.reason, pdf: copies.value[index] }).pipe(Effect.tap(checkpoint.save)), {
+				concurrency: CALLS_AT_ONCE,
+			});
+	const byPage = new Map(todo.map((page, index) => [page.page, read[index]]));
+	return batch.map((page) => checkpoint.done.get(page.page) ?? byPage.get(page.page)!);
 });
 
 const withPdfText = Effect.fnUntraced(function* (data: Uint8Array) {

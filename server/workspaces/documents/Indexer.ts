@@ -14,9 +14,11 @@ import * as Tracing from "../../tracing/Tracing.ts";
 import { chunkDocument, embeddingText } from "./chunk.ts";
 import { cutError, type DocumentText, type PageRead } from "./document.ts";
 import { indexLog, type LogDetail, type LogRow } from "./log.ts";
+import { pageReadStore } from "./page-reads.ts";
 import * as PageReader from "./page-reader.ts";
 import { BATCH_SIZE, passageStore } from "./passages.ts";
 import { headingRule, readDocument, storedPages, storedText } from "./read-document.ts";
+import type { PageCheckpoint } from "./read-pdf.ts";
 import { documentStore, type DocumentRow } from "./store.ts";
 
 /**
@@ -63,6 +65,7 @@ const make = Effect.gen(function* () {
 	const store = documentStore(sql, yield* ObjectStore.ObjectStore);
 	const log = indexLog(sql);
 	const passages = passageStore(sql);
+	const pageReads = pageReadStore(sql);
 	const embedder = yield* makeEmbedder;
 	const readers = yield* Effect.context<PageReader.PageReader | PdfText.PdfText>();
 
@@ -88,11 +91,12 @@ const make = Effect.gen(function* () {
 		);
 
 	/** Failed, with the page reads that led to it. "gone" when a newer run took over. */
-	const failRow = Effect.fnUntraced(function* (row: DocumentRow, stage: IndexStage, error: string, extra: LogDetail = {}, pageReads: ReadonlyArray<PageRead> = []) {
+	const failRow = Effect.fnUntraced(function* (row: DocumentRow, stage: IndexStage, error: string, extra: LogDetail = {}, reads: ReadonlyArray<PageRead> = []) {
 		const message = cutError(error);
 		const failed = yield* fenced(row, (locked) =>
 			Effect.gen(function* () {
-				yield* logPageReads(locked, pageReads);
+				yield* logPageReads(locked, reads);
+				yield* pageReads.clear(locked.id);
 				const ms = yield* log.elapsedMs(locked.id, locked.generation);
 				yield* store.settle(locked.id, locked.generation, "failed", message);
 				yield* logRow(locked, "failed", { step: stage, error: message, ms, ...extra });
@@ -111,14 +115,27 @@ const make = Effect.gen(function* () {
 		fenced(row, (locked) =>
 			Effect.gen(function* () {
 				yield* store.saveText(locked.id, storedText(read.pages));
+				yield* pageReads.clear(locked.id);
 				yield* logRow(locked, "parsed", { engine: read.engine, pages: read.pageCount, chars: read.chars, ms: read.ms });
 				yield* logPageReads(locked, read.pageReads);
 			}),
 		);
 
-	/** The `runs` rows of the page reads: their spend is kept, also for a run that a newer one overtook. */
-	const recordPageRuns = Effect.fnUntraced(function* (row: DocumentRow, reads: ReadonlyArray<PageRead>) {
-		for (const read of reads) for (const run of pageReadRuns(row, read)) yield* runs.insert(run);
+	/**
+	 * The pages this run read already, and how to keep each new one: its `runs` rows first, so
+	 * its spend is kept also for a run that a newer one overtook, then the page. The read stops
+	 * once this run is no longer the document's latest (a delete, "Try again").
+	 */
+	const checkpointOf = Effect.fnUntraced(function* (row: DocumentRow) {
+		return {
+			done: yield* pageReads.done(row.id, row.generation),
+			save: (result) =>
+				Effect.andThen(
+					Effect.forEach(pageReadRuns(row, result.record), runs.insert, { discard: true }),
+					pageReads.save(row.id, row.generation, result),
+				),
+			live: Effect.map(current({ documentId: row.id, generation: row.generation }), (found) => Option.isSome(found) && found.value.status === "reading"),
+		} satisfies PageCheckpoint;
 	});
 
 	const logPageReads = Effect.fnUntraced(function* (row: DocumentRow, reads: ReadonlyArray<PageRead>) {
@@ -133,15 +150,16 @@ const make = Effect.gen(function* () {
 		yield* Tracing.annotate({ "ponder.bytes": row.size });
 		const bytes = yield* store.bytes(row);
 		if (Option.isNone(bytes)) return yield* failRow(row, "parse", "The file is missing from storage. Upload it again.");
-		const read = yield* readDocument(row.media_type, new Uint8Array(bytes.value)).pipe(Effect.provideContext(readers), Effect.result);
+		const checkpoint = yield* checkpointOf(row);
+		const read = yield* readDocument(row.media_type, new Uint8Array(bytes.value), checkpoint).pipe(Effect.provideContext(readers), Effect.result);
 		if (read._tag === "Failure") {
 			const error = read.failure;
+			if (error._tag === "SqlError") return yield* error;
+			if (error._tag === "ReadStopped") return "gone" as const;
 			if (error._tag === "PdfUnreadable" || error._tag === "TableTooLarge") return yield* failRow(row, "parse", error.message);
-			yield* recordPageRuns(row, error.pageReads);
 			return yield* failRow(row, "page-read", error.message, { page: error.page }, error.pageReads);
 		}
 		if (read.success.chars === 0) return yield* failRow(row, "parse", "The document has no text.");
-		yield* recordPageRuns(row, read.success.pageReads);
 		return Option.isSome(yield* saveRead(row, read.success)) ? ("parsed" as const) : ("gone" as const);
 	});
 

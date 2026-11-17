@@ -6,7 +6,8 @@ import { delimitedToMarkdown, MAX_TABLE_CHARS, type TableTooLarge } from "./csv.
 import { totalChars, type DocumentPage, type DocumentText } from "./document.ts";
 import type * as PdfText from "../../pdf-text.ts";
 import type * as PageReader from "./page-reader.ts";
-import { type PageUnreadable, type PdfUnreadable, pdfTextPages, readPdf } from "./read-pdf.ts";
+import type { SqlError } from "effect/sql/SqlError";
+import { NO_CHECKPOINT, type PageCheckpoint, type PageUnreadable, type PdfUnreadable, pdfTextPages, readPdf, type ReadStopped } from "./read-pdf.ts";
 
 /**
  * Reads a document of a workspace into Markdown pages: a PDF with read-pdf.ts, and the
@@ -15,10 +16,14 @@ import { type PageUnreadable, type PdfUnreadable, pdfTextPages, readPdf } from "
  */
 export const PDF_TYPE = "application/pdf";
 
-export const readDocument = (mediaType: string, data: Uint8Array): Effect.Effect<DocumentText, ReadFailure, PageReader.PageReader | PdfText.PdfText> =>
-	mediaType === PDF_TYPE ? readPdf(data) : Effect.fromResult(readText(mediaType, data));
+export const readDocument = (
+	mediaType: string,
+	data: Uint8Array,
+	checkpoint: PageCheckpoint = NO_CHECKPOINT,
+): Effect.Effect<DocumentText, ReadFailure, PageReader.PageReader | PdfText.PdfText> =>
+	mediaType === PDF_TYPE ? readPdf(data, checkpoint) : Effect.fromResult(readText(mediaType, data));
 
-export type ReadFailure = PdfUnreadable | PageUnreadable | TableTooLarge;
+export type ReadFailure = PdfUnreadable | PageUnreadable | ReadStopped | TableTooLarge | SqlError;
 
 /**
  * How the chunker reads the headings of a document of this type: a PDF's heading levels

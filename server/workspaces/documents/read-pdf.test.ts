@@ -10,7 +10,7 @@ import * as Option from "effect/Option";
 import * as PdfText from "../../pdf-text.ts";
 import type { PageRead } from "./document.ts";
 import * as PageReader from "./page-reader.ts";
-import { readPdf } from "./read-pdf.ts";
+import { NO_CHECKPOINT, readPdf } from "./read-pdf.ts";
 
 const FIXTURE = new Uint8Array(readFileSync(new URL("./fixtures/picture-pages.pdf", import.meta.url)));
 const TABLE = "| Drug | Intermittent (daily) |\n| --- | --- |\n| Cefazolin | 15 mg/kg daily |";
@@ -96,6 +96,39 @@ describe("readPdf", () => {
 					[3, false],
 				],
 			);
+		}).pipe(Effect.provide(model.layer));
+	});
+
+	it.effect("uses the pages this run read already, and keeps each new one as soon as it is read", () => {
+		const earlier = fakeModel({ 2: TABLE });
+		const model = fakeModel({ 2: "fail", 3: SCAN });
+		const saved: number[] = [];
+		return Effect.gen(function* () {
+			const page2 = yield* earlier.layer.pipe(Layer.build, Effect.flatMap((context) => PageReader.PageReader.use((reader) => reader.read({ page: 2, reason: "picture", pdf: FIXTURE })).pipe(Effect.provideContext(context))), Effect.scoped);
+			const checkpoint = { ...NO_CHECKPOINT, done: new Map([[2, page2]]), save: (result: PageReader.PageReadResult) => Effect.sync(() => void saved.push(result.record.page)) };
+			const read = yield* readPdf(FIXTURE, checkpoint);
+			assert.deepStrictEqual(
+				model.asked.map(({ page }) => page),
+				[3],
+			);
+			assert.deepStrictEqual(saved, [3]);
+			assert.strictEqual(read.pages[1].markdown, TABLE);
+			assert.deepStrictEqual(
+				read.pageReads.map((page) => [page.page, page.ok]),
+				[
+					[2, true],
+					[3, true],
+				],
+			);
+		}).pipe(Effect.provide(model.layer));
+	});
+
+	it.effect("stops before it pays for a page once the run is no longer wanted", () => {
+		const model = fakeModel({ 2: TABLE, 3: SCAN });
+		return Effect.gen(function* () {
+			const error = yield* Effect.flip(readPdf(FIXTURE, { ...NO_CHECKPOINT, live: Effect.succeed(false) }));
+			assert.strictEqual(error._tag, "ReadStopped");
+			assert.deepStrictEqual(model.asked, []);
 		}).pipe(Effect.provide(model.layer));
 	});
 

@@ -15,6 +15,9 @@ import * as Effect from "effect/Effect";
  *   sweep reads both to start again a run that never started or ended without settling.
  * - `workspace_document_log`: what each indexing run did, as numbers only. Rows are only
  *   added, and go with their document.
+ * - `workspace_page_reads`: the pages a model read in an indexing run, kept as each ends,
+ *   so a run that starts again pays for none twice (page-reads.ts). Gone once the run saved
+ *   its text or failed.
  * - `workspace_object_deletions`: the bucket keys of deleted documents, written in the
  *   transaction that deletes their rows. The objects are deleted after it commits, and a
  *   key stays here until its object is gone, so the sweep deletes what a crash left.
@@ -74,6 +77,15 @@ export const migrateDocuments = (sql: PgClient.PgClient) =>
 		yield* sql`create index if not exists workspace_passages_document on workspace_passages (document_id, ordinal)`;
 		yield* sql`create index if not exists workspace_passages_workspace on workspace_passages (workspace_id, model)`;
 		yield* sql`create index if not exists workspace_passages_search on workspace_passages using gin (search)`;
+		yield* sql`
+			create table if not exists workspace_page_reads (
+				document_id text not null references workspace_documents (id) on delete cascade,
+				generation integer not null,
+				page integer not null,
+				record jsonb not null,
+				text text,
+				primary key (document_id, generation, page)
+			)`;
 		// A document's model calls in `runs`, by the document id in their run id (log.ts, DOCUMENT_RUNS).
 		yield* sql`
 			create index if not exists runs_workspace_document on runs (split_part(id, ':', 2))

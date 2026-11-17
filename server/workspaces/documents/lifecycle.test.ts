@@ -147,6 +147,46 @@ describe.skipIf(!base)("workspace document lifecycle", () => {
 		assert.ok(keys.every((key) => !bucket.objects.has(key)));
 	});
 
+	it("a run that starts again pays for no page twice, and stops paying once the document is deleted", async () => {
+		openRouter.pages.set(2, "| Drug | Dose |\n| --- | --- |\n| Cefazolin | 15 mg/kg |").set(3, "Exit site care: clean the exit site every second day.");
+		const workspaceId = await newWorkspace("Restarted");
+		const pdf = () => run(Documents.Documents.use((documents) => documents.upload(ana, workspaceId, file("restarted.pdf", FIXTURE, "application/pdf"))));
+		const document = await pdf();
+		const request = asked.at(-1)!;
+		// What the run kept of page 2 before a crash cut it short.
+		const calls: number[] = [];
+		openRouter.gate = (kind) => (kind === "page" ? void calls.push(1) : undefined);
+		// Its runs row first, as the run saves it.
+		const call = { generationId: "gen-2", costUsd: 0.002, inputTokens: 1, outputTokens: 1 };
+		const record = { page: 2, reason: "picture", model: "google/gemini-3.8-flash", ok: true, error: null, ms: 5, attempts: 1, ...call, reasoningTokens: 0, calls: [call], chars: 10 };
+		await runPromise(
+			Runs.Runs.use((runs) =>
+				runs.insert({ id: `workspace-pdf:${document.id}:${request.generation}:2`, parentId: null, threadId: null, user: who.ana, functionId: "workspace-pdf", model: record.model, steps: 1, inputTokens: 1, outputTokens: 1, cachedTokens: 0, costUsd: 0.002, durationMs: 5, toolCalls: [], finishReason: "stop", generationId: "gen-2" }),
+			),
+		);
+		await database((sql) => sql`insert into workspace_page_reads (document_id, generation, page, record, text) values (${document.id}, ${request.generation}, 2, ${sql.json(record)}, 'Kept page.')`);
+		assert.deepStrictEqual(await indexer((service) => service.prepare(request)), { state: "chunked", batches: 1 });
+		assert.strictEqual(calls.length, 1);
+		const text = await database((sql) => sql<{ text: string }>`select text from workspace_documents where id = ${document.id}`);
+		assert.include(text[0].text, "--- Page 2 ---\nKept page.");
+		const pages = await database((sql) => sql<{ page: number }>`select (detail->>'page')::int as page from workspace_document_log where document_id = ${document.id} and step = 'page-read' order by 1`);
+		assert.deepStrictEqual(
+			pages.map((row) => row.page),
+			[2, 3],
+		);
+		// Once the text is saved, the pages are no longer kept.
+		const left = await database((sql) => sql<{ count: number }>`select count(*)::int as count from workspace_page_reads where document_id = ${document.id}`);
+		assert.strictEqual(left[0].count, 0);
+
+		// A document deleted while its run reads pays for no page after.
+		const deleted = await pdf();
+		await run(Documents.Documents.use((documents) => documents.remove(ana, workspaceId, deleted.id)));
+		calls.length = 0;
+		assert.deepStrictEqual(await indexer((service) => service.prepare(asked.at(-1)!)), { state: "gone" });
+		openRouter.gate = undefined;
+		assert.strictEqual(calls.length, 0);
+	});
+
 	it("an embedding call that a newer run overtakes writes nothing into the new run's passages", async () => {
 		const workspaceId = await newWorkspace("Overtaken");
 		const document = await upload(workspaceId, "slow.md");
