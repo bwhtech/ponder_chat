@@ -8,6 +8,24 @@ import * as SqlSchema from "effect/sql/SqlSchema";
 
 /** The `function_id` of the calls that name threads. The app makes them, not the person, so they cost no credits. */
 export const TITLE_FUNCTION_ID = "thread-title";
+
+/**
+ * The calls the app makes, not one person's reply (docs/workspaces-plan.md, "System
+ * spend"). Each is kept in `runs` with the person who caused it, so admins can see the
+ * spend, and none costs credits: `charged_runs` leaves them out.
+ */
+export const SYSTEM_FUNCTION_IDS = [
+	TITLE_FUNCTION_ID,
+	// Memories and memory searches (memory/pgvector-index.ts).
+	"memory-embed",
+	// A workspace document's passages, one row for each batch (workspaces/documents/Indexer.ts).
+	"workspace-index",
+	// A picture page of a workspace PDF, read by a model.
+	"workspace-pdf",
+	// The question of a workspace search, in a chat.
+	"workspace-search",
+] as const;
+export type SystemFunctionId = (typeof SYSTEM_FUNCTION_IDS)[number];
 /** The calls that summarize a long chat (compaction/summarize.ts). The person's reply needs them, so they cost credits. */
 export const COMPACTION_FUNCTION_ID = "compaction";
 
@@ -35,6 +53,8 @@ export type RunRow = {
 	durationMs: number;
 	toolCalls: ToolCallRecord[];
 	finishReason: string;
+	/** OpenRouter's id of the call, when its cost may come later (ModelCalls.fillCosts). */
+	generationId?: string | null;
 };
 
 /** A tool call without its input or output, which can hold site data. */
@@ -85,8 +105,8 @@ export class Runs extends Context.Service<
 		/**
 		 * Read-only usage for `GET /api/usage?thread=`: a person's runs, for one thread or the latest 100,
 		 * with totals. Subagent runs carry the thread of the run that called them. The list has
-		 * every row; the totals leave out the model calls that did not finish (UNCHARGED_CALLS),
-		 * which cost the person nothing.
+		 * every row; the totals leave out the model calls that did not finish (UNCHARGED_CALLS)
+		 * and the app's own calls (SYSTEM_FUNCTION_IDS), which cost the person nothing.
 		 */
 		readonly usageReport: (query: { user: string; thread?: string }) => Effect.Effect<UsageReport, SqlError>;
 	}
@@ -102,7 +122,7 @@ const make = Effect.gen(function* () {
 	 *
 	 * A reply writes one "chat" run per model call; the calls before the last end in
 	 * "tool-calls", so only the last one is the reply. Web searches, memory and titles have
-	 * their own function_id. Model calls that a crash, an error or Stop cut short are kept in
+	 * their own function_id; the app's own calls (SYSTEM_FUNCTION_IDS) cost no credits. Model calls that a crash, an error or Stop cut short are kept in
 	 * `runs` but cost no credits (UNCHARGED_CALLS, ModelCalls.ts). The view is made again at
 	 * each start, because `runs.*` changes when `runs` gets a column.
 	 */
@@ -113,8 +133,8 @@ const make = Effect.gen(function* () {
 			yield* sql.unsafe(`
 				create view charged_runs as
 				select runs.*, (function_id = 'chat' and parent_id is null and finish_reason <> 'tool-calls') as is_reply
-				from runs where function_id is distinct from '${TITLE_FUNCTION_ID}'
-					and finish_reason not in (${UNCHARGED_CALLS.map((reason) => `'${reason}'`).join(", ")})`);
+				from runs where coalesce(function_id, '') not in (${quoted(SYSTEM_FUNCTION_IDS)})
+					and finish_reason not in (${quoted(UNCHARGED_CALLS)})`);
 		}),
 	);
 
@@ -152,10 +172,10 @@ const make = Effect.gen(function* () {
 	const insert = Effect.fn("Runs.insert")(function* (run: RunRow) {
 		yield* sql`
 			insert into runs (id, parent_id, thread_id, "user", function_id, model, steps, input_tokens, output_tokens,
-				cached_tokens, cost_usd, duration_ms, tool_calls, finish_reason)
+				cached_tokens, cost_usd, duration_ms, tool_calls, finish_reason, generation_id)
 			values (${run.id}, ${run.parentId}, ${run.threadId}, ${run.user}, ${run.functionId}, ${run.model}, ${run.steps},
 				${run.inputTokens}, ${run.outputTokens}, ${run.cachedTokens}, ${run.costUsd}, ${run.durationMs},
-				${sql.json(run.toolCalls)}, ${run.finishReason})
+				${sql.json(run.toolCalls)}, ${run.finishReason}, ${run.generationId ?? null})
 			on conflict (id) do nothing`;
 	});
 
@@ -176,7 +196,8 @@ const make = Effect.gen(function* () {
 			select count(*)::int as runs, coalesce(sum(input_tokens), 0)::int as input_tokens,
 				coalesce(sum(output_tokens), 0)::int as output_tokens, coalesce(sum(cached_tokens), 0)::int as cached_tokens,
 				coalesce(sum(cost_usd), 0)::float8 as cost_usd
-			from runs where ${where(query)} and finish_reason <> all(${[...UNCHARGED_CALLS]})`,
+			from runs where ${where(query)} and finish_reason <> all(${[...UNCHARGED_CALLS]})
+				and coalesce(function_id, '') <> all(${[...SYSTEM_FUNCTION_IDS]})`,
 	});
 
 	const usageReport = Effect.fn("Runs.usageReport")(function* (query: { user: string; thread?: string }) {
@@ -193,3 +214,8 @@ const make = Effect.gen(function* () {
 });
 
 export const layer = Layer.effect(Runs, make);
+
+/** Constants into a view's SQL, which can't take parameters. */
+function quoted(values: ReadonlyArray<string>) {
+	return values.map((value) => `'${value}'`).join(", ");
+}

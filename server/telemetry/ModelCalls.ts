@@ -204,7 +204,9 @@ const make = Effect.gen(function* () {
 		Result: CostRow,
 		execute: () => sql`
 			select id, generation_id from runs
-			where generation_id is not null and cost_usd is null and finish_reason in ('interrupted', 'retried', 'failed', 'stopped')
+			where generation_id is not null and cost_usd is null
+				-- A page that a model read for a workspace document (workspaces/documents/) may come back without its cost.
+				and (finish_reason in ('interrupted', 'retried', 'failed', 'stopped') or function_id = 'workspace-pdf')
 				and created_at > now() - make_interval(days => ${COST_LOOKUP_DAYS})
 				and (cost_next_at is null or cost_next_at <= now())
 			order by coalesce(cost_next_at, created_at) limit ${COST_LOOKUPS_PER_SWEEP}`,
