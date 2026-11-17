@@ -437,5 +437,35 @@ await check("a compaction's span keeps its outcome and counts, and no summary or
 	assert.deepEqual(clean.attributes, { "ponder.between_steps": false, "ponder.last_attempt": false, "ponder.outcome": "compacted", "ponder.tokens": 24_000 });
 });
 
+await check("a workspace's spans keep their names, and no workspace name or instructions", async () => {
+	const span = (name: string) =>
+		({
+			name,
+			kind: SpanKind.INTERNAL,
+			spanContext: () => ({ traceId: "a".repeat(32), spanId: "f".repeat(16), traceFlags: TraceFlags.SAMPLED }),
+			startTime: [0, 0],
+			endTime: [1, 0],
+			duration: [1, 0],
+			ended: true,
+			status: { code: SpanStatusCode.OK },
+			// Workspaces.ts sets none of these; they stand for a mistake that would.
+			attributes: { "ponder.workspace": MARKER, "ponder.workspace_name": MARKER, "ponder.instructions": MARKER, "ponder.messages": 2 },
+			links: [],
+			events: [],
+			resource: { attributes: {} },
+			instrumentationScope: { name: "ponder" },
+			droppedAttributesCount: 0,
+			droppedEventsCount: 0,
+			droppedLinksCount: 0,
+		}) as unknown as ReadableSpan;
+	for (const name of ["Workspaces.accessOf", "Workspaces.instructionsFor", "Workspaces.share", "Threads.workspaceOf", "Accounts.search"]) {
+		const clean = cleanSpan(span(name));
+		assert.equal(clean.name, name);
+		assert.deepEqual(clean.attributes, { "ponder.messages": 2 });
+	}
+	// A workspace's name is never a span's name.
+	assert.equal(cleanSpan(span(`Workspaces.${MARKER}`)).name, "span");
+});
+
 await effects.dispose();
 process.exit(failed ? 1 : 0);
