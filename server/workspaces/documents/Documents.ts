@@ -87,6 +87,8 @@ export class Documents extends Context.Service<
 		readonly reindexOutdated: Effect.Effect<number, SqlError>;
 		/** For the sweep: start again the indexing of stalled documents. Gives how many. */
 		readonly restartStalled: Effect.Effect<number, SqlError>;
+		/** For the sweep: delete the bucket objects of deleted documents that are still there (a crash, a bucket that failed). Gives how many were tried. */
+		readonly removeLeftObjects: Effect.Effect<number, SqlError>;
 	}
 >()("ponder/workspaces/Documents") {}
 
@@ -206,7 +208,10 @@ const make = Effect.gen(function* () {
 		return restarted;
 	}).pipe(Effect.withSpan("Documents.restartStalled"));
 
-	return Documents.of({ upload, remove, log: readLog, retry, file, reindexOutdated, restartStalled });
+	// A minute: the delete that wrote the key deletes its object right after it commits.
+	const removeLeftObjects = store.removeLeftObjects(60).pipe(Effect.withSpan("Documents.removeLeftObjects"));
+
+	return Documents.of({ upload, remove, log: readLog, retry, file, reindexOutdated, restartStalled, removeLeftObjects });
 });
 
 export const layer = Layer.effect(Documents, make);

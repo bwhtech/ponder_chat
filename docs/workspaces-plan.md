@@ -195,8 +195,13 @@ workspace_passages (
 	id, document_id → workspace_documents on delete cascade, workspace_id,
 	ordinal, location, page, content, embedding vector, model
 )
+workspace_object_deletions (
+	object_key primary key, added_at   -- the bucket keys of deleted documents, until their objects are gone
+)
 threads.workspace_id               -- null for a chat outside a workspace
 ```
+
+Deleting a document or a workspace deletes the rows and writes their bucket keys to `workspace_object_deletions` in one transaction. The objects are deleted only after it commits, and each key is removed once its object is gone. A key that is still there after a minute (a crash, a bucket that failed) is deleted by the sweep. So a rollback never leaves a document whose file is gone, and no bucket call holds a transaction open.
 
 The tables are made in a `migrate` effect in a new `Workspaces` service, added to `migrateAll` after `Auth` and `Threads` (`server/startup.ts`).
 

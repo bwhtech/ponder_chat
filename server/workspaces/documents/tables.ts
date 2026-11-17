@@ -15,6 +15,9 @@ import * as Effect from "effect/Effect";
  *   sweep reads both to start again a run that never started or ended without settling.
  * - `workspace_document_log`: what each indexing run did, as numbers only. Rows are only
  *   added, and go with their document.
+ * - `workspace_object_deletions`: the bucket keys of deleted documents, written in the
+ *   transaction that deletes their rows. The objects are deleted after it commits, and a
+ *   key stays here until its object is gone, so the sweep deletes what a crash left.
  * - `workspace_passages`: the passages that search returns. `embedding` has no width, so
  *   any embedding model fits; `model` names the one that made it, and search reads only
  *   the current model's. `search` is the keyword index of the location line and the text.
@@ -71,4 +74,9 @@ export const migrateDocuments = (sql: PgClient.PgClient) =>
 		yield* sql`create index if not exists workspace_passages_document on workspace_passages (document_id, ordinal)`;
 		yield* sql`create index if not exists workspace_passages_workspace on workspace_passages (workspace_id, model)`;
 		yield* sql`create index if not exists workspace_passages_search on workspace_passages using gin (search)`;
+		yield* sql`
+			create table if not exists workspace_object_deletions (
+				object_key text primary key,
+				added_at timestamptz not null default now()
+			)`;
 	});

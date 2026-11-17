@@ -295,16 +295,18 @@ const make = Effect.gen(function* () {
 	const remove = Effect.fn("Workspaces.remove")(function* (actor: Actor, workspaceId: string) {
 		const found = yield* withAccess(actor.id, workspaceId, "manage");
 		const before = yield* detail(workspaceId, found.access, found.admin);
-		yield* sql.withTransaction(
+		const keys = yield* sql.withTransaction(
 			Effect.gen(function* () {
 				yield* sql`update workspaces set deleted_at = now(), updated_at = now() where id = ${workspaceId}`;
 				yield* sql`delete from workspace_members where workspace_id = ${workspaceId}`;
 				// The chats stay their writers', in no workspace.
 				yield* sql`update threads set workspace_id = null where workspace_id = ${workspaceId}`;
-				// With their passages and logs; the bytes in the bucket after them.
-				yield* documents.removeAll(workspaceId);
+				// With their passages and logs.
+				return yield* documents.removeAll(workspaceId);
 			}),
 		);
+		// The bytes in the bucket only once the rows are gone for good: no bucket call holds the transaction open.
+		yield* documents.removeObjects(keys);
 		yield* audit(actor, "delete-workspace", [before.kind], auditView(before), null);
 	});
 
