@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ApiError } from "../api";
 import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
-import { dialogTitle, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
+import { dialogTitle, useFrameFocus, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
 import { plainSteps } from "./document-log";
 import { fetchDocumentLog, retryDocument, type LogEntry, type WorkspaceDocument } from "./documents";
 import { Poller } from "./poller";
@@ -27,6 +27,7 @@ const loadError = ref("");
 const retrying = ref(false);
 const shown = computed(() => steps.value && plainSteps(steps.value));
 const poller = new Poller(load);
+useFrameFocus();
 
 poller.start(0);
 watch(open, (now) => {

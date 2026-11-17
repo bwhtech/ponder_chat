@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { nextTick, onMounted, reactive, ref } from "vue";
 import type { WorkspaceDocument } from "./documents";
 import type { WorkspaceDetail } from "./store";
 
@@ -29,6 +29,23 @@ export function openWorkspaceDialog(request: WorkspaceDialogRequest) {
 
 export function closeWorkspaceDialog() {
 	workspaceDialog.open = false;
+}
+
+/**
+ * A dialog with no field to start in (Details; Share on a phone) rests on its frame, as reka-ui
+ * does when there is nothing to focus, not on ×: opened from a menu, × would wear its focus
+ * ring as if chosen. Tab still reaches ×. It runs after frappe-ui's own focus on open, which
+ * waits a tick and a frame too.
+ */
+export function useFrameFocus() {
+	onMounted(() =>
+		nextTick(() =>
+			requestAnimationFrame(() => {
+				const active = document.activeElement;
+				if (active instanceof HTMLButtonElement) active.closest<HTMLElement>('[role="dialog"]')?.focus({ preventScroll: true });
+			}),
+		),
+	);
 }
 
 /** Who can use a workspace, as the dialogs offer it to an admin. */

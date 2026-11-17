@@ -58,14 +58,23 @@ export function fileSize(bytes: number) {
 export const STATUS_LABELS: Record<DocumentStatus, string> = { reading: "Reading…", ready: "Ready", failed: "Failed" };
 
 /**
- * Why a document failed, in a few plain words, for its row; Details has the rest. A page the
- * model could not read is named by its number (server/workspaces/documents/read-pdf.ts). The
- * server's "Try again." goes, as the row has the button.
+ * Why a document failed, in a few words: the row's status ("2.3 MB · Could not read page 3")
+ * and the title of the step that failed in Details say the same. A page the model could not
+ * read is named by its number (server/workspaces/documents/read-pdf.ts). The admin's log keeps
+ * the server's own words.
  */
 export function failureReason(error: string | null) {
 	const page = /^Page (\d+)\b/.exec(error ?? "");
-	if (page) return `Page ${page[1]} could not be read.`;
-	return error?.replace(/\s*Try again\.$/, "").trim() || "It could not be read.";
+	if (page) return `Could not read page ${page[1]}`;
+	if (/\bno text\b/.test(error ?? "")) return "Found no text to read";
+	return "Could not read it";
+}
+
+/** A failure's cause, when it has plain words (a model's own error has none): the line under the failed step in Details. */
+export function failureCause(error: string | null) {
+	if (/time(d)? ?out/i.test(error ?? "")) return "It took too long.";
+	if (/missing from storage/.test(error ?? "")) return "The file is missing. Upload it again.";
+	return null;
 }
 
 /** A PDF's icon, or a text file's. */

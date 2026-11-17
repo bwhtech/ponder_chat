@@ -51,7 +51,7 @@ async function save() {
 <template>
 	<Dialog v-model:open="open" :title="dialogTitle(request)" size="lg">
 		<form class="space-y-4" @submit.prevent="save">
-			<FormControl v-model="form.name" label="Name" :placeholder="NAME_PLACEHOLDER" :error="nameError" />
+			<FormControl v-model="form.name" label="Name" :placeholder="NAME_PLACEHOLDER" :error="nameError" autofocus />
 			<FormControl v-model="form.description" type="textarea" label="Description (optional)" :placeholder="DESCRIPTION_PLACEHOLDER" :rows="2" />
 			<FormControl v-if="request.kind === 'new' && isAdmin" v-model="form.kind" type="select" label="Who can use it" :options="KIND_OPTIONS" />
 			<FormControl v-model="form.instructions" type="textarea" label="Instructions (optional)" :placeholder="INSTRUCTIONS_PLACEHOLDER" :rows="6" />

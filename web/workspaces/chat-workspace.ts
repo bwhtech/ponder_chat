@@ -4,8 +4,6 @@ import { takeFirstMessage } from "./first-message";
 import { loadWorkspaces, workspaceById, workspaces, workspacesLoaded } from "./store";
 import WorkspaceChip from "./WorkspaceChip.vue";
 
-export { WorkspaceChip };
-
 /**
  * The workspace menu of a new chat's composer, as its own chunk: it brings frappe-ui's
  * Dropdown, which the first page does not need. Its button stands in until it is here.

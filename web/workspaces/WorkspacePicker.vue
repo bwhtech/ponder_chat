@@ -18,7 +18,8 @@ const options = computed<DropdownOptions>(() => [
 	{
 		group: "No workspace",
 		hideLabel: true,
-		options: [{ label: "No workspace", onClick: () => (chosen.value = null), slots: check(!chosen.value) }],
+		// An empty icon slot, so its label starts on the workspaces' lane.
+		options: [{ label: "No workspace", onClick: () => (chosen.value = null), slots: { ...check(!chosen.value), prefix: () => h("span", { class: "size-4 shrink-0", "aria-hidden": "true" }) } }],
 	},
 	{
 		group: "Workspaces",

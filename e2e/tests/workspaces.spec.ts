@@ -72,9 +72,9 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		chatId = new URL(b.page.url()).searchParams.get("t")!;
 		await expect(chat.reply(b.page)).toContainText(`Workspace “${name}” says: ${marker}`);
 		await chat.idle(b.page);
-		// The chat is in the workspace: its header and its composer name it, and both link to it.
+		// The chat is in the workspace: its header links to it, and its composer names it.
 		await expect(b.page.locator('[data-slot="chat-breadcrumb"]')).toContainText(name);
-		await expect(b.page.locator('[data-slot="workspace-chip"]')).toHaveText(name);
+		await expect(chat.field(b.page)).toHaveAttribute("placeholder", new RegExp(`^Ask in ${escape(name)}`));
 		const [call] = await fake.calls(question);
 		expect(call.system).toContain(marker);
 

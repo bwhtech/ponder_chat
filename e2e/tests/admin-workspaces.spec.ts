@@ -77,7 +77,7 @@ test("an admin sees organisation workspaces with each document's log, and privat
 
 	const totals = page.locator('[data-slot="private-workspaces"]');
 	await expect(totals.getByText("Private workspaces", { exact: true }).first()).toBeVisible();
-	await expect(totals.getByText("Ready documents")).toBeVisible();
+	await expect(totals.getByText("Ready", { exact: true })).toBeVisible();
 	for (const hidden of [secret.workspace, secret.document]) await expect(page.getByText(hidden)).toHaveCount(0);
 
 	// An admin is no one special in a private workspace.

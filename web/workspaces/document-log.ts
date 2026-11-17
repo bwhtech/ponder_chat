@@ -1,6 +1,6 @@
 import { clockTime } from "../dates";
 import { count, money } from "../numbers";
-import { fileSize, type LogEntry } from "./documents";
+import { failureCause, failureReason, fileSize, type LogEntry } from "./documents";
 
 /**
  * The indexing log in words. The server keeps numbers and labels only
@@ -128,21 +128,20 @@ function join(...parts: (string | null)[]) {
 /**
  * The same log in plain steps, for the Details view of people who edit the workspace: what
  * happened, without models, times or costs. "Uploaded · PDF, 3 pages", "Read page 2 from a
- * picture", "Indexed", "Ready". Reading the text and splitting it fold into Uploaded and
- * Indexed. A page that could not be read is one step with its error, not a second "failed".
- * The admin's log keeps every detail (stepView).
+ * picture", "Ready". Reading the text, splitting it and indexing it fold into Uploaded and
+ * Ready. A step that failed is titled as the document's row says it (failureReason), with its
+ * cause only when that has plain words; a page that could not be read is one step, not a
+ * second "failed". The admin's log keeps every detail (stepView).
  */
 export type PlainStep = { step: LogEntry["step"]; title: string; facts: string; error: string | null; failed: boolean };
 
 export function plainSteps(entries: LogEntry[]): PlainStep[] {
-	return entries.flatMap((entry, index) => {
+	return entries.flatMap((entry) => {
 		const step = plainStep(
 			entry,
 			entries.filter((other) => other.generation === entry.generation),
 		);
-		// One "Indexed" a run, however many batches it embedded.
-		const repeated = entry.step === "embedded" && entries.slice(0, index).some((other) => other.generation === entry.generation && other.step === "embedded");
-		return step && !repeated ? [step] : [];
+		return step ? [step] : [];
 	});
 }
 
@@ -157,10 +156,8 @@ function plainStep(entry: LogEntry, run: LogEntry[]): PlainStep | null {
 		case "reindexed":
 			return { ...plain, title: "Read again", facts: detail.reason === "model-changed" ? "The search model changed" : reindexReason(detail) };
 		case "page-read":
-			if (detail.ok === false) return { ...plain, title: `Could not read page ${text(detail.page)}`, error: text(detail.error) || null, failed: true };
+			if (detail.ok === false) return { ...plain, title: failureReason(`Page ${text(detail.page)}`), error: failureCause(text(detail.error)), failed: true };
 			return { ...plain, title: `Read page ${text(detail.page)} from a picture` };
-		case "embedded":
-			return { ...plain, title: "Indexed" };
 		case "ready":
 			return { ...plain, title: "Ready" };
 		case "failed":
@@ -175,9 +172,6 @@ function failedStep(entry: LogEntry, run: LogEntry[]): PlainStep | null {
 	const { detail } = entry;
 	const page = detail.page === undefined || detail.page === null ? null : text(detail.page);
 	if (page && run.some((other) => other.step === "page-read" && other.detail.ok === false && text(other.detail.page) === page)) return null;
-	const what = page ? `read page ${page}` : (FAILED_STAGES[text(detail.step)] ?? "index it");
-	const error = page ? null : text(detail.error).replace(/\s*Try again\.$/, "") || null;
-	return { step: entry.step, title: `Could not ${what}`, facts: "", error, failed: true };
+	const error = text(detail.error) || null;
+	return { step: entry.step, title: failureReason(error), facts: "", error: failureCause(error), failed: true };
 }
-
-const FAILED_STAGES: Record<string, string> = { parse: "read the text", chunk: "index it", embed: "index it", finish: "finish" };

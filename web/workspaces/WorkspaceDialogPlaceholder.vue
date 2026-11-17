@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { Avatar, Button, Skeleton } from "frappe-ui";
+import { Button, Skeleton } from "frappe-ui";
 import { displayName } from "../../shared/display-name";
 import { computed } from "vue";
 import { me } from "../account";
 import DialogFrame from "../DialogFrame.vue";
+import ShareRow from "./ShareRow.vue";
 import { closeWorkspaceDialog, DESCRIPTION_PLACEHOLDER, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
 import { isAdmin, type Member, type Person } from "./store";
 
@@ -28,7 +29,7 @@ const sharing = computed(() => {
 });
 const ACCESS_LABELS = { ask: "Can ask", edit: "Can edit" } as const;
 const nameOf = (person: Person) => displayName(person.name, person.email);
-const shownName = (person: Person) => (person.id === sharing.value?.owner.id && person.id === me.value?.user.id ? "You" : nameOf(person));
+const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 </script>
 
 <template>
@@ -81,17 +82,11 @@ const shownName = (person: Person) => (person.id === sharing.value?.owner.id && 
 						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">Add people by name or email</div>
 						<!-- PeoplePicker.vue's rows, with what each can do as text. -->
 						<ul>
-							<li v-for="person in [sharing.owner, ...sharing.members]" :key="person.id" class="flex flex-wrap items-center gap-x-2.5 gap-y-1 py-1.5 sm:h-8 sm:flex-nowrap sm:py-0">
-								<Avatar :label="nameOf(person)" size="sm" class="shrink-0" />
-								<p class="min-w-0 flex-1 text-sm sm:truncate">
-									<span class="text-ink-gray-8">{{ shownName(person) }}</span>
-									<span class="ml-1.5 break-all text-ink-gray-6">{{ person.email }}</span>
-								</p>
-								<div class="flex basis-full items-center gap-2.5 pl-[1.875rem] sm:basis-auto sm:pl-0 [@media(pointer:coarse)]:gap-x-4">
-									<span class="flex h-7 w-28 shrink-0 items-center border border-transparent px-2 text-sm text-ink-gray-6">{{ "access" in person ? ACCESS_LABELS[(person as Member).access] : "Owner" }}</span>
-									<span class="size-7 shrink-0" aria-hidden="true" />
-								</div>
-							</li>
+							<ShareRow :avatar="nameOf(sharing.owner)" :name="ownerIsMe ? 'You' : nameOf(sharing.owner)" :email="ownerIsMe ? undefined : sharing.owner.email" owner />
+							<ShareRow v-for="member in sharing.members" :key="member.id" :avatar="nameOf(member)" :name="nameOf(member)" :email="member.email">
+								<span class="flex h-7 w-28 shrink-0 items-center border border-transparent px-2 text-sm text-ink-gray-6">{{ ACCESS_LABELS[member.access] }}</span>
+								<span class="size-7 shrink-0" aria-hidden="true" />
+							</ShareRow>
 						</ul>
 					</div>
 				</template>

@@ -9,8 +9,8 @@ import WorkspacePeople from "./WorkspacePeople.vue";
 
 /**
  * The workspace page's side panel: the instructions that every chat here follows, its
- * documents, and its people. Beside the chats on a wide screen, under them on a phone. For
- * people who can edit, files dropped anywhere on the panel are uploaded, and empty sections
+ * documents, and its people (once it has more than its owner). Beside the chats on a wide
+ * screen, under them on a phone. For people who can edit, files dropped anywhere on the panel are uploaded, and empty sections
  * offer to fill them; for people who can only ask, empty sections are not shown. While the
  * workspace loads, the headings and their buttons stay, and skeleton lines stand in for the values.
  */
@@ -22,6 +22,11 @@ const LONG = 600;
 const expanded = ref(false);
 const instructions = computed(() => props.detail?.instructions.trim() ?? "");
 const editable = computed(() => Boolean(props.workspace && canEdit(props.workspace)));
+/** A private workspace with only its owner has no People to show until someone is added. */
+const shared = computed(() => {
+	const workspace = props.detail ?? props.workspace;
+	return !workspace || workspace.kind === "org" || workspace.memberCount > 0;
+});
 
 const documents = ref<InstanceType<typeof WorkspaceDocuments>>();
 const drop = useFileDrop(
@@ -32,7 +37,7 @@ const drop = useFileDrop(
 
 <template>
 	<aside
-		class="relative min-w-0 space-y-8 border-t border-outline-gray-1 pt-6 lg:border-t-0 lg:pt-0"
+		class="relative min-w-0 space-y-8"
 		aria-label="About this workspace"
 		data-slot="workspace-aside"
 		v-on="drop.listeners"
@@ -46,7 +51,7 @@ const drop = useFileDrop(
 				<p data-slot="workspace-instructions" class="whitespace-pre-wrap break-words text-p-sm text-ink-gray-8" :class="{ 'line-clamp-[12]': !expanded && instructions.length > LONG }">{{ instructions }}</p>
 				<Button v-if="instructions.length > LONG" variant="ghost" size="sm" class="-ml-2" :label="expanded ? 'Show less' : 'Show all'" @click="expanded = !expanded" />
 			</template>
-			<Button v-else variant="ghost" label="Add instructions" class="-ml-2" data-slot="workspace-add-instructions" @click="emit('edit')" />
+			<Button v-else variant="ghost" icon-left="lucide-plus" label="Add instructions" class="touch-target -ml-2" data-slot="workspace-add-instructions" @click="emit('edit')" />
 		</section>
 
 		<WorkspaceDocuments
@@ -58,7 +63,7 @@ const drop = useFileDrop(
 			@changed="emit('documents', $event)"
 		/>
 
-		<WorkspacePeople :detail="detail" />
+		<WorkspacePeople v-if="shared" :detail="detail" />
 
 		<div
 			v-if="drop.active.value"

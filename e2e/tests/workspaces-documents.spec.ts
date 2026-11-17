@@ -102,7 +102,7 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 		const details = page.getByRole("dialog", { name: "manual.pdf" });
 		const steps = details.locator('[data-slot="document-step"]');
 		// Plain steps: the scanned page was read from a picture. Models and costs are the admin's.
-		await expect(steps).toHaveText(["Uploaded · PDF, 2 pages", "Read page 2 from a picture", "Indexed", "Ready"]);
+		await expect(steps).toHaveText(["Uploaded · PDF, 2 pages", "Read page 2 from a picture", "Ready"]);
 		await expect(details).not.toContainText("$");
 		await expect(details.getByRole("button", { name: "Try again" })).toHaveCount(0);
 		// No text of the document is in the log.
@@ -143,15 +143,15 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 
 	const scan = row(page, "scan.pdf");
 	await expect(scan).toHaveAttribute("data-status", "failed", { timeout: 60_000 });
-	await expect(scan.locator('[data-slot="document-status"]')).toContainText("Failed");
-	await expect(scan.locator('[data-slot="document-error"]')).toHaveText("Page 2 could not be read.");
+	await expect(scan.locator('[data-slot="document-status"]')).toContainText("Could not read page 2");
 
-	await test.step("Details name the page and the model's error", async () => {
+	await test.step("Details name the page, in the row's words", async () => {
 		await scan.getByRole("button", { name: "Actions for “scan.pdf”" }).click();
 		await page.getByRole("menuitem", { name: "Details" }).click();
 		const details = page.getByRole("dialog", { name: "scan.pdf" });
 		await expect(details.locator('[data-step="page-read"]')).toContainText("Could not read page 2");
-		await expect(details.locator('[data-step="page-read"] [data-slot="document-step-error"]')).toHaveText("The fake page model is down.");
+		// The model's own error has no plain words: the admin's log keeps it.
+		await expect(details.locator('[data-step="page-read"] [data-slot="document-step-error"]')).toHaveCount(0);
 		// Said once: no second step for the run that failed on that page.
 		await expect(details.locator('[data-step="failed"]')).toHaveCount(0);
 		await expect(details.getByRole("button", { name: "Try again" })).toBeVisible();
@@ -162,9 +162,9 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 	await test.step("Try again reads it again, and it is Ready", async () => {
 		await scan.getByRole("button", { name: "Try again" }).click();
 		await expect(scan).toHaveAttribute("data-status", "reading");
-		await expect(scan.locator('[data-slot="document-error"]')).toHaveCount(0);
+		await expect(scan.locator('[data-slot="document-status"]')).not.toContainText("Could not read");
 		await expect(scan).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
-		await expect(scan.locator('[data-slot="document-status"]')).not.toContainText("Failed");
+		await expect(scan.locator('[data-slot="document-status"]')).not.toContainText("Could not read");
 
 		await scan.getByRole("button", { name: "Actions for “scan.pdf”" }).click();
 		await page.getByRole("menuitem", { name: "Details" }).click();

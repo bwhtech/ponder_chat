@@ -6,7 +6,8 @@ import { canEdit, canShare, kindIcon, type WorkspaceSummary } from "./store";
 /**
  * The workspace page's title row: its kind and name, and what the person may change. Whoever
  * shares it (the owner; admins on an organisation workspace) gets Share and a menu with Edit
- * and Delete; on a phone Share moves into the menu. Someone who can only edit gets Edit.
+ * and Delete; on a phone Share moves into the menu. Someone who can only edit gets Edit, drawn
+ * as Share is.
  * Everything here comes from the sidebar's row, so it draws at once; the actions wait
  * (`ready`) for the workspace itself.
  */
@@ -39,5 +40,5 @@ const menu = computed(() => [
 			<Button variant="ghost" icon="lucide-ellipsis" aria-label="Workspace actions" class="touch-target" :disabled="!ready" />
 		</Dropdown>
 	</div>
-	<Button v-else-if="canEdit(workspace)" variant="ghost" label="Edit" class="shrink-0" :disabled="!ready" @click="emit('edit')" />
+	<Button v-else-if="canEdit(workspace)" icon-left="lucide-pencil" label="Edit" class="shrink-0" :disabled="!ready" @click="emit('edit')" />
 </template>

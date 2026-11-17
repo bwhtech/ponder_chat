@@ -2,7 +2,7 @@
 import { Button, Dialog, ErrorMessage, FormControl } from "frappe-ui";
 import { computed, ref } from "vue";
 import { toast } from "../toasts";
-import { dialogTitle, KIND_OPTIONS, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
+import { dialogTitle, KIND_OPTIONS, useFrameFocus, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
 import PeoplePicker from "./PeoplePicker.vue";
 import { isAdmin, shareWorkspace, type Member } from "./store";
 
@@ -19,6 +19,7 @@ const kind = ref(workspace.kind);
 const members = ref<Member[]>((workspace.members ?? []).map((member: Member) => ({ ...member })));
 const error = ref("");
 const saving = ref(false);
+useFrameFocus();
 
 async function save() {
 	saving.value = true;

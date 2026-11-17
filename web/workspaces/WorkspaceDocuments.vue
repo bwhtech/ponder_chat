@@ -97,7 +97,7 @@ function askDelete(document: WorkspaceDocument) {
 		<div class="flex h-7 items-center justify-between">
 			<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
 			<template v-if="editable">
-				<Button variant="ghost" icon-left="lucide-upload" label="Upload" class="-mr-2" :loading="uploading > 0" :disabled="!documents" @click="picker?.click()" />
+				<Button variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" :disabled="!documents" @click="picker?.click()" />
 				<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" />
 			</template>
 		</div>

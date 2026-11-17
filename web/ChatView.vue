@@ -22,7 +22,7 @@ import { useThreads } from "./threads";
 import { useLazyChat } from "./lazy-chat";
 import { once } from "./once";
 import { preloadChat } from "./preload";
-import { useChatWorkspace, WorkspaceChip, WorkspacePicker } from "./workspaces/chat-workspace";
+import { useChatWorkspace, WorkspacePicker } from "./workspaces/chat-workspace";
 // The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
 import {
 	CitationChip,
@@ -194,8 +194,8 @@ const {
 	listeners: skillListeners,
 } = useSkillPicker(input, composer);
 void loadSkills();
-// A new chat with a workspace chosen names it, as the workspace page does.
-const askIn = computed(() => (workspace.locked.value ? undefined : workspace.summary.value?.name));
+// A chat in a workspace names it, as the workspace page does: the header's breadcrumb leads back to it.
+const askIn = computed(() => workspace.summary.value?.name);
 const placeholder = computed(() => withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat"));
 
 /** The skills the person asked for in the message this reply answers, for the line above the reply. */
@@ -701,8 +701,7 @@ function replyModelId(message: UIMessage) {
 					<PromptInputTools>
 						<PromptInputAttachButton />
 						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
-						<WorkspaceChip v-if="workspace.locked.value && workspace.summary.value" :workspace="workspace.summary.value" locked />
-						<WorkspacePicker v-else-if="workspace.pickable.value" v-model="workspace.chosen.value" />
+						<WorkspacePicker v-if="workspace.pickable.value" v-model="workspace.chosen.value" />
 						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-6">Uploading…</span>
 					</PromptInputTools>
 					<PromptInputSubmit />

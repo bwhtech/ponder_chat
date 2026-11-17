@@ -1,18 +1,21 @@
 <script setup lang="ts">
 import { displayName as nameToShow } from "../../shared/display-name";
-import { Avatar, Button, Combobox, Select } from "frappe-ui";
+import { Button, Combobox, Select } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { me } from "../account";
+import ShareRow from "./ShareRow.vue";
 import { searchPeople, type Member, type Person } from "./store";
 
 /**
  * The people of a private workspace (ShareDialog.vue): its owner, then each member with
  * "Can ask" or "Can edit". The search asks the server (GET /api/people), so the
- * Combobox does not filter again; each row shows the name with the email after it.
+ * Combobox does not filter again. Each person's row is ShareRow.vue.
  */
 const props = defineProps<{ owner: Person }>();
 const members = defineModel<Member[]>({ required: true });
 const ownerIsMe = computed(() => me.value?.user.id === props.owner.id);
+// Tailwind's sm.
+const wide = matchMedia("(min-width: 640px)").matches;
 
 const query = ref("");
 const results = ref<readonly Person[]>([]);
@@ -70,14 +73,6 @@ function displayName(person: Person) {
 	return nameToShow(person.name, person.email);
 }
 
-/**
- * A person's row, drawn as the side panel's People: one line on a wider screen. On a phone
- * the name and email take the first line, and what they can do goes under the name.
- */
-const ROW = "flex flex-wrap items-center gap-x-2.5 gap-y-1 py-1.5 sm:h-8 sm:flex-nowrap sm:py-0";
-const WHO = "min-w-0 flex-1 text-sm sm:truncate";
-const ACCESS = "flex basis-full items-center gap-2.5 pl-[1.875rem] sm:basis-auto sm:pl-0 [@media(pointer:coarse)]:gap-x-4";
-
 const ACCESS_OPTIONS = [
 	{ label: "Can ask", value: "ask" },
 	{ label: "Can edit", value: "edit" },
@@ -86,41 +81,28 @@ const ACCESS_OPTIONS = [
 
 <template>
 	<div class="space-y-2">
-		<Combobox
-			v-model="picked"
-			class="w-full"
-			v-model:query="query"
-			:options="options"
-			:filterable="false"
-			:loading="searching && !options.length"
-			:empty-text="searchError || (query.trim() ? 'Nobody matches' : 'Nobody else to add')"
-			placeholder="Add people by name or email"
-			aria-label="Add people by name or email"
-			@update:open="onOpen"
-		/>
+		<!-- The dialog opens in the search on a wider screen (frappe-ui's Dialog focuses [autofocus]).
+		     On a phone the keyboard would cover the people, so it does not. -->
+		<div :autofocus="wide">
+			<Combobox
+				v-model="picked"
+				class="w-full"
+				v-model:query="query"
+				:options="options"
+				:filterable="false"
+				:loading="searching && !options.length"
+				:empty-text="searchError || (query.trim() ? 'Nobody matches' : 'Nobody else to add')"
+				placeholder="Add people by name or email"
+				aria-label="Add people by name or email"
+				@update:open="onOpen"
+			/>
+		</div>
 		<ul aria-label="People">
-			<li :class="ROW">
-				<Avatar :label="displayName(owner)" size="sm" class="shrink-0" />
-				<p :class="WHO">
-					<span class="text-ink-gray-8">{{ ownerIsMe ? "You" : displayName(owner) }}</span>
-					<span class="ml-1.5 break-all text-ink-gray-6">{{ owner.email }}</span>
-				</p>
-				<div :class="ACCESS">
-					<span class="flex h-7 w-28 shrink-0 items-center border border-transparent px-2 text-sm text-ink-gray-6">Owner</span>
-					<span class="size-7 shrink-0" aria-hidden="true" />
-				</div>
-			</li>
-			<li v-for="member in members" :key="member.id" :class="ROW" data-slot="workspace-member">
-				<Avatar :label="displayName(member)" size="sm" class="shrink-0" />
-				<p :class="WHO">
-					<span class="text-ink-gray-8">{{ displayName(member) }}</span>
-					<span class="ml-1.5 break-all text-ink-gray-6">{{ member.email }}</span>
-				</p>
-				<div :class="ACCESS">
-					<Select v-model="member.access" :options="ACCESS_OPTIONS" size="sm" class="touch-target w-28 shrink-0" :aria-label="`What ${displayName(member)} can do`" />
-					<Button variant="ghost" icon="lucide-x" class="touch-target" :aria-label="`Remove ${displayName(member)}`" @click="remove(member.id)" />
-				</div>
-			</li>
+			<ShareRow :avatar="displayName(owner)" :name="ownerIsMe ? 'You' : displayName(owner)" :email="ownerIsMe ? undefined : owner.email" owner />
+			<ShareRow v-for="member in members" :key="member.id" :avatar="displayName(member)" :name="displayName(member)" :email="member.email" data-slot="workspace-member">
+				<Select v-model="member.access" :options="ACCESS_OPTIONS" size="sm" class="touch-target w-28 shrink-0" :aria-label="`What ${displayName(member)} can do`" />
+				<Button variant="ghost" icon="lucide-x" class="touch-target" :aria-label="`Remove ${displayName(member)}`" @click="remove(member.id)" />
+			</ShareRow>
 		</ul>
 	</div>
 </template>
