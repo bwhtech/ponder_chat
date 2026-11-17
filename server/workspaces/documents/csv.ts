@@ -5,7 +5,9 @@
 export function delimitedToMarkdown(text: string, delimiter: "," | "\t") {
 	const rows = parseDelimited(text, delimiter).filter((row) => row.some((cell) => cell.trim() !== ""));
 	if (rows.length === 0) return "";
-	const width = Math.max(...rows.map((row) => row.length));
+	// A loop, not Math.max(...rows): spread arguments overflow the stack at about 150,000 rows.
+	let width = 0;
+	for (const row of rows) width = Math.max(width, row.length);
 	const line = (row: string[]) => `| ${Array.from({ length: width }, (_, index) => cell(row[index] ?? "")).join(" | ")} |`;
 	const [header, ...body] = rows;
 	return [line(header), `| ${Array.from({ length: width }, () => "---").join(" | ")} |`, ...body.map(line)].join("\n");

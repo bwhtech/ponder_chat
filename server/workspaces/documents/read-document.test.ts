@@ -23,6 +23,13 @@ describe("readText", () => {
 		assert.deepStrictEqual(read.pageReads, []);
 	});
 
+	it("reads a CSV of 300,000 rows", () => {
+		const csv = ["drug,dose", ...Array.from({ length: 300_000 }, (_, index) => `${index},1`)].join("\n");
+		const lines = readText("text/csv", bytes(csv)).pages[0].markdown.split("\n");
+		assert.strictEqual(lines.length, 300_002);
+		assert.strictEqual(lines.at(-1), "| 299999 | 1 |");
+	});
+
 	it("reads a TSV, and keeps a pipe in a cell from ending it", () => {
 		const read = readText("text/tab-separated-values", bytes("a\tb\n1|2\t3\n"));
 		assert.strictEqual(read.pages[0].markdown, "| a | b |\n| --- | --- |\n| 1\\|2 | 3 |");
