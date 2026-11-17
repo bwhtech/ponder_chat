@@ -94,7 +94,7 @@ export function fakeApp() {
 			sessionId: body.session_id,
 			at: Date.now(),
 		});
-		const { step, key } = chatStep(messages, chats);
+		const { step, key } = chatStep(messages, chats, system);
 		const attempt = (attempts.get(key) ?? 0) + 1;
 		attempts.set(key, attempt);
 		const fails = step.failFirst === undefined ? Boolean(step.error) : attempt <= step.failFirst;
@@ -183,11 +183,15 @@ function promptTokens(body: Completion) {
 const generations = new Map<string, { cost: number; tokens: number }>();
 let generationCount = 0;
 
-/** The step for this call: the turn's script, at the number of model calls made since the person's message. */
-function chatStep(messages: Message[], scripts: ChatScript[]): { step: Step; key: string } {
+/**
+ * The step for this call: the turn's script, at the number of model calls made since the person's message.
+ * With no script, "You said: <message>", and in a workspace chat also the first line of the workspace's
+ * instructions, so a test can see that they reached the model (workspaces.spec.ts).
+ */
+function chatStep(messages: Message[], scripts: ChatScript[], system: string): { step: Step; key: string } {
 	const said = latestUserText(messages);
 	const script = scripts.find((candidate) => said.includes(candidate.match));
-	if (!script) return { step: { text: `You said: ${said}` }, key: "" };
+	if (!script) return { step: { text: [`You said: ${said}`, workspaceLine(system)].filter(Boolean).join("\n\n") }, key: "" };
 	const lastUser = messages.findLastIndex((message) => message.role === "user");
 	const callsSince = messages.slice(lastUser + 1).filter((message) => message.role === "assistant").length;
 	const summarized = messages.some((message) => message.role === "user" && textOf(message.content).startsWith("<summary>"));
@@ -327,6 +331,12 @@ function textOf(content: Message["content"]) {
 function latestUserText(messages: Message[]) {
 	const message = messages.findLast((candidate) => candidate.role === "user");
 	return message ? textOf(message.content) : "";
+}
+
+/** "Workspace “<name>” says: <first line of its instructions>", from the system prompt's <workspace> block; "" outside a workspace. */
+function workspaceLine(system: string) {
+	const block = /<workspace name="([^"]*)">\n([^\n]*)/.exec(system);
+	return block ? `Workspace “${block[1]}” says: ${block[2]}` : "";
 }
 
 // --- Traces -------------------------------------------------------------------
