@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Button, TabButtons } from "frappe-ui";
-import { computed, defineAsyncComponent, onBeforeUnmount, ref, watch } from "vue";
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import DocumentView from "../artifacts/DocumentView.vue";
 import HtmlView from "../artifacts/HtmlView.vue";
 import PresentMode from "../artifacts/PresentMode.vue";
@@ -35,6 +35,15 @@ const pageViews = [
 	{ value: "preview", label: "Preview" },
 	{ value: "code", label: "Code" },
 ];
+// Below lg the panel covers the page, and the page behind it is inert (Shell.vue): focus moves
+// into the panel, so the keyboard and screen readers start there. Beside the chat it stays put.
+const aside = ref<HTMLElement>();
+const covers = matchMedia("(max-width: 1023.98px)");
+watch(
+	() => Boolean(item.value),
+	(open) => open && covers.matches && void nextTick(() => aside.value?.focus({ preventScroll: true })),
+	{ immediate: true },
+);
 watch(item, () => {
 	rows.value = null;
 	presenting.value = false;
@@ -73,9 +82,11 @@ onBeforeUnmount(() => {
 	<Transition name="side-panel" :appear="!panelStandIn.shown">
 		<aside
 			v-if="item"
+			ref="aside"
 			data-slot="side-panel"
 			:aria-label="header.title"
-			class="fixed inset-0 z-30 flex flex-col bg-surface-base pt-[env(safe-area-inset-top)] lg:static lg:z-auto lg:w-[clamp(380px,46vw,880px)] lg:shrink-0 lg:border-l lg:border-outline-gray-1 lg:pt-0"
+			tabindex="-1"
+			class="outline-none fixed inset-0 z-30 flex flex-col bg-surface-base pt-[env(safe-area-inset-top)] lg:static lg:z-auto lg:w-[clamp(380px,46vw,880px)] lg:shrink-0 lg:border-l lg:border-outline-gray-1 lg:pt-0"
 		>
 			<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-outline-gray-1 pl-4 pr-2 sm:pl-5">
 				<span :class="[header.icon, header.ink, 'size-4 shrink-0']" aria-hidden="true" />

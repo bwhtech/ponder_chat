@@ -28,17 +28,23 @@ watch(
 	() => open.value && props.document && void load(),
 	{ immediate: true },
 );
+// The page reads the report again while a document is Reading (Workspaces.vue): when this
+// one's status or cost changes, its steps are read again, in place.
+watch(
+	() => [props.document?.status, props.document?.costUsd],
+	() => open.value && props.document && void load({ quiet: true }),
+);
 
-async function load() {
+async function load({ quiet = false } = {}) {
 	const mine = ++asked;
-	steps.value = undefined;
+	if (!quiet) steps.value = undefined;
 	loadError.value = "";
 	try {
 		const param = { id: props.workspaceId, doc: props.document!.id };
 		const log = await unwrap(admin.workspaces[":id"].documents[":doc"].log.$get({ param }), "The log could not load.");
 		if (mine === asked) steps.value = log.steps;
 	} catch (error) {
-		if (mine === asked) loadError.value = (error as Error).message;
+		if (mine === asked && !quiet) loadError.value = (error as Error).message;
 	}
 }
 </script>
@@ -53,7 +59,7 @@ async function load() {
 			</p>
 
 			<EmptyState v-if="loadError" icon="lucide-circle-alert" title="The log could not load" :body="loadError" alert class="!py-8">
-				<Button label="Try again" @click="load" />
+				<Button label="Try again" @click="load()" />
 			</EmptyState>
 			<ol v-else-if="!views" class="divide-y divide-outline-gray-1" aria-busy="true" aria-label="Loading the steps">
 				<li v-for="width in ['w-24', 'w-32', 'w-28', 'w-20']" :key="width" class="py-2.5">

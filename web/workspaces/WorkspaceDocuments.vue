@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
 import { useFileViewer } from "frappe-ui-ai-elements";
+import { closeFile } from "../side-panel/panel";
 import { ref } from "vue";
 import { dialog } from "../dialogs";
 import { toast } from "../toasts";
@@ -91,6 +92,7 @@ function askDelete(document: WorkspaceDocument) {
 		message: `“${document.name}” will be deleted.`,
 		onConfirm: async () => {
 			await deleteDocument(props.workspaceId, document.id);
+			closeFile(documentFile(props.workspaceId, document).url);
 			emit(
 				"changed",
 				current().filter((other) => other.id !== document.id),

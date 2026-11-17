@@ -3,7 +3,7 @@ import { displayName } from "../../../shared/display-name";
 import { Button, PageHeader, PageHeaderMobile } from "frappe-ui";
 import { NumberCard } from "frappe-ui/charts";
 import { List, ListCell, ListHeader, ListHeaderCell, ListRow, ListRows } from "frappe-ui/list";
-import { computed, ref } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { admin, unwrap, type OrgDocument, type OrgWorkspace, type WorkspacesReport } from "../api";
 import AccountMenu from "../components/AccountMenu.vue";
 import DocumentLogDialog from "../components/DocumentLogDialog.vue";
@@ -12,6 +12,7 @@ import PrivacyNote from "../components/PrivacyNote.vue";
 import EmptyState from "../../EmptyState.vue";
 import { count } from "../../numbers";
 import { fileSize, STATUS_LABELS } from "../../workspaces/documents";
+import { Poller } from "../../workspaces/poller";
 import { money } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 
@@ -36,10 +37,34 @@ async function load() {
 }
 void load();
 
+/**
+ * While an organisation document is Reading, the report is read again every few seconds, so
+ * its status and cost, and the log open on it, follow the indexing. A failed read changes
+ * nothing; the next one tries again. None runs once the page is left (poller.ts).
+ */
+const POLL_MS = 4000;
+const reading = computed(() => Boolean(report.value?.org.some((workspace) => workspace.documents.some((document) => document.status === "reading"))));
+const poller = new Poller(async (current) => {
+	try {
+		const fresh = await unwrap(admin.workspaces.$get(), "The workspaces could not load.");
+		if (current()) report.value = fresh;
+	} catch {
+		// Offline for a moment: the next read tries again.
+	}
+	return current() && reading.value ? POLL_MS : null;
+});
+watch(reading, (now) => (now ? poller.start(POLL_MS) : poller.stop()));
+onBeforeUnmount(() => poller.stop());
+
 const logOpen = ref(false);
-const logOf = ref<{ workspaceId: string; document: OrgDocument } | null>(null);
+const logOf = ref<{ workspaceId: string; documentId: string } | null>(null);
+// From the report, so the log shows the document as it is now.
+const logDocument = computed(() => {
+	const workspace = report.value?.org.find((other) => other.id === logOf.value?.workspaceId);
+	return workspace?.documents.find((document) => document.id === logOf.value?.documentId) ?? null;
+});
 function openLog(workspace: OrgWorkspace, document: OrgDocument) {
-	logOf.value = { workspaceId: workspace.id, document };
+	logOf.value = { workspaceId: workspace.id, documentId: document.id };
 	logOpen.value = true;
 }
 
@@ -157,5 +182,5 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 		<PrivacyNote>Admins see private workspaces as totals, never their names, documents or chats.</PrivacyNote>
 	</div>
 
-	<DocumentLogDialog v-model:open="logOpen" :workspace-id="logOf?.workspaceId ?? ''" :document="logOf?.document ?? null" />
+	<DocumentLogDialog v-model:open="logOpen" :workspace-id="logOf?.workspaceId ?? ''" :document="logDocument" />
 </template>

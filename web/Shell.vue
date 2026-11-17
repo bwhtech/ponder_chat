@@ -71,6 +71,14 @@ const wide = ref(wideScreen.matches);
 const onWidth = () => (wide.value = wideScreen.matches);
 wideScreen.addEventListener("change", onWidth);
 onBeforeUnmount(() => wideScreen.removeEventListener("change", onWidth));
+// Below Tailwind's lg the side panel covers the page (SidePanel.vue): what is behind it takes
+// no focus and no clicks until it closes.
+const panelScreen = matchMedia("(min-width: 1024px)");
+const panelBeside = ref(panelScreen.matches);
+const onPanelWidth = () => (panelBeside.value = panelScreen.matches);
+panelScreen.addEventListener("change", onPanelWidth);
+onBeforeUnmount(() => panelScreen.removeEventListener("change", onPanelWidth));
+const panelCovers = computed(() => Boolean(panelItem.value) && !panelBeside.value);
 // The chats (ChatsPanel.vue), their own chunk. A wide screen fetches it beside the first code
 // (boot-page.ts). Until it is here, the sidebar or the sheet shows its layout with skeleton rows
 // (SidebarPlaceholder.vue), so nothing moves.
@@ -224,6 +232,7 @@ function onSaved() {
 			<!-- Phones get the chats in the bottom sheet, so there the sidebar is not drawn at all, not only hidden. -->
 			<ChatsPanel
 				v-if="wide"
+				:inert="panelCovers"
 				:name="name"
 				:menu="menu"
 				:highlight="page === 'chat'"
@@ -235,7 +244,7 @@ function onSaved() {
 			/>
 
 			<!-- The page's main landmark, as on the sign-in page: the open chat, Memory or a workspace. -->
-			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column">
+			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column" :inert="panelCovers">
 				<!-- A workspace draws its own header, wider, for its side panel. -->
 				<WorkspacePage v-if="page === 'workspace'" :slug-or-id="openWorkspaceKey" :key="openWorkspace?.id ?? openWorkspaceKey" @open-chat="pick" @ask="askInWorkspace" @deleted="newThread" @new-chat="newThread">
 					<template #start><Button class="-ml-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-panel-left" aria-label="Chats" @click="sheetOpen = true" /></template>

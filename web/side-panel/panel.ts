@@ -1,5 +1,5 @@
 import type { ViewedFile } from "frappe-ui-ai-elements";
-import { computed, shallowRef, type Ref } from "vue";
+import { computed, nextTick, shallowRef, type Ref } from "vue";
 
 /**
  * The side panel at the right of the chat: one for the whole app. It shows a file (a PDF,
@@ -18,21 +18,46 @@ export type PanelItem =
 	| { type: "artifact"; key: string; artifact: Readonly<Ref<Artifact>> };
 
 const current = shallowRef<PanelItem | null>(null);
+// What had focus when the panel opened. On a phone the panel covers the page and takes focus;
+// closing it gives focus back there.
+let opener: HTMLElement | null = null;
+
+function show(item: PanelItem) {
+	if (!current.value) opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+	current.value = item;
+}
 
 /** What the panel shows, or null when it is closed. A computed, not readonly(): a deep proxy breaks the artifact's own computed. */
 export const panelItem = computed(() => current.value);
 
 export function viewFile(file: ViewedFile) {
-	current.value = { type: "file", key: `file:${file.url}`, file };
+	show({ type: "file", key: `file:${file.url}`, file });
 }
 
 /** `key` names this version of the artifact, so its card in the chat can show that it is open. */
 export function viewArtifact(key: string, artifact: Readonly<Ref<Artifact>>) {
-	current.value = { type: "artifact", key, artifact };
+	show({ type: "artifact", key, artifact });
 }
 
+/**
+ * Focus goes back to what opened the panel when it was lost with the panel (on the page, or
+ * inside the panel), not when something else took it, such as a link that opened another chat.
+ */
 export function closePanel() {
+	if (!current.value) return;
 	current.value = null;
+	const back = opener;
+	opener = null;
+	void nextTick(() => {
+		const active = document.activeElement;
+		const lost = !active || active === document.body || !active.isConnected || Boolean(active.closest("[data-slot=side-panel]"));
+		if (lost && back?.isConnected) back.focus({ preventScroll: true });
+	});
+}
+
+/** A file that is gone, such as a deleted document: the panel closes if it shows it. */
+export function closeFile(url: string) {
+	if (current.value?.type === "file" && current.value.file.url === url) closePanel();
 }
 
 /** PDFs, CSV and TSV files, text, Markdown and JSON, and the image types that browsers show. Other files open as a link. */

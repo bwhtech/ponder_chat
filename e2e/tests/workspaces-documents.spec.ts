@@ -305,6 +305,38 @@ test("11. a person who can only ask opens a document in the side viewer; a perso
 		await expect(panel).toHaveCount(0);
 	});
 
+	await test.step("on a phone the viewer covers the page: focus moves into it, the page behind takes none, and comes back on close", async () => {
+		await asker.page.setViewportSize({ width: 390, height: 844 });
+		const opener = row(asker.page, "handover.md").getByRole("button", { name: "handover.md" });
+		await opener.click();
+		await expect(panel.locator('[data-slot="text-file"]')).toContainText("Night shift handover");
+		await expect(panel).toBeFocused();
+		await expect(asker.page.locator('[data-slot="chat-column"]')).toHaveAttribute("inert", "");
+		for (let tab = 0; tab < 4; tab++) {
+			await asker.page.keyboard.press("Tab");
+			// Past its last control focus leaves the page (the body), never for a control behind it.
+			expect(await asker.page.evaluate(() => document.activeElement === document.body || Boolean(document.activeElement?.closest('[data-slot="side-panel"]'))), "no control behind the viewer takes focus").toBe(true);
+		}
+		await asker.page.keyboard.press("Escape");
+		await expect(panel).toHaveCount(0);
+		await expect(asker.page.locator('[data-slot="chat-column"]')).not.toHaveAttribute("inert");
+		await expect(opener).toBeFocused();
+		await asker.page.setViewportSize({ width: 1280, height: 720 });
+	});
+
+	await test.step("an editor deletes the document that is open: the viewer closes", async () => {
+		await page.goto(`/?w=${slug}`);
+		const ownerPanel = page.locator('[data-slot="side-panel"]');
+		const handover = row(page, "handover.md");
+		await handover.getByRole("button", { name: "handover.md", exact: true }).click();
+		await expect(ownerPanel.getByRole("heading", { name: "handover.md" })).toBeVisible();
+		await handover.getByRole("button", { name: "Actions for “handover.md”" }).click();
+		await page.getByRole("menuitem", { name: "Delete" }).click();
+		await page.getByRole("dialog", { name: "Delete this document?" }).getByRole("button", { name: "Delete" }).click();
+		await expect(handover).toHaveCount(0);
+		await expect(ownerPanel).toHaveCount(0);
+	});
+
 	await test.step("a person outside the workspace gets 404 for the file", async () => {
 		const outsider = await newPerson(browser, db, fake, "not a member");
 		expect((await outsider.page.request.get(`/api/workspaces/${id}/documents/${pdfId}/file`)).status()).toBe(404);

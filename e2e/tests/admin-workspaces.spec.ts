@@ -89,6 +89,38 @@ test("an admin sees organisation workspaces with each document's log, and privat
 	await expect(page.getByText(`Made the workspace “${orgName}” for everyone`).first()).toBeVisible();
 });
 
+test("the page follows a document while it is being read, and so does its open log", async ({ page, admin }) => {
+	void admin;
+	const mark = randomBytes(3).toString("hex");
+	const orgName = `Reading ward ${mark}`;
+	const orgDocument = `rota-${mark}.md`;
+	const orgId = await createWorkspace(page.request, "org", orgName);
+	await addDocument(page.request, orgId, orgDocument);
+
+	// The first answers say the document is still Reading; the later ones say what the server says (Ready).
+	let held = 2;
+	await page.route("**/api/admin/workspaces", async (route) => {
+		const response = await route.fetch();
+		const body = (await response.json()) as { org: { id: string; documents: { status: string }[] }[] };
+		if (held > 0) {
+			held--;
+			for (const document of body.org.find((workspace) => workspace.id === orgId)?.documents ?? []) document.status = "reading";
+		}
+		await route.fulfill({ response, json: body });
+	});
+
+	await page.goto("/admin/workspaces");
+	const row = page.getByRole("article", { name: orgName }).locator(`[data-document="${orgDocument}"]`);
+	await expect(row).toContainText("Reading");
+	await row.click();
+	const log = page.getByRole("dialog");
+	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Reading");
+	// No reload: the page reads the report again, and the row and the open log say Ready.
+	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Ready", { timeout: 15_000 });
+	await page.keyboard.press("Escape");
+	await expect(row).toContainText("Ready");
+});
+
 test("a person who is not an admin can't read workspaces through /api/admin", async ({ page, person }) => {
 	void person;
 	expect((await page.request.get("/api/admin/workspaces")).status()).toBe(403);

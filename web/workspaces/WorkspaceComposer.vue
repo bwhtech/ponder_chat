@@ -60,7 +60,8 @@ function ask({ text, files }: { text: string; files: File[] }) {
 				<div v-if="skills.chosen.value.length" data-slot="prompt-input-skills" class="flex flex-wrap gap-1.5 px-3 pt-3 [@media(pointer:coarse)]:gap-y-5">
 					<SkillChip v-for="skill in skills.chosen.value" :key="skill" :name="skill" removable @remove="skills.remove(skill)" />
 				</div>
-				<PromptInputTextarea :placeholder="placeholder" :aria-label="label" />
+				<!-- Keyed: the field sets its height from its text and placeholder when it mounts, and a rename changes the placeholder. -->
+				<PromptInputTextarea :key="placeholder" :placeholder="placeholder" :aria-label="label" />
 				<PromptInputFooter>
 					<PromptInputTools>
 						<PromptInputAttachButton />
