@@ -14,7 +14,7 @@ import * as Layer from "effect/Layer";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../../auth.ts";
 import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
-import { PAGE_COST, startFakeOpenRouter } from "./fake-openrouter.ts";
+import { EMBED_COST, PAGE_COST, startFakeOpenRouter } from "./fake-openrouter.ts";
 import type { Documents as DocumentsService } from "./Documents.ts";
 import type { IndexRequest } from "./Indexer.ts";
 
@@ -216,6 +216,21 @@ describe.skipIf(!base)("workspace documents", () => {
 		);
 		assert.deepStrictEqual(log[0].detail, { reason: "model-changed", from: "old/embedding", to: "google/gemini-embedding-2" });
 		assert.strictEqual(await documents((service) => service.reindexOutdated), 0);
+	});
+
+	it("embeds one passage a call when the model takes no more, with one runs row for the batch", async () => {
+		openRouter.oneAtATime = true;
+		const uploaded = await documents((service) => service.upload(actor("ana"), ids.workspace, file("short.md", manual(3), "text/markdown")));
+		assert.strictEqual(await indexLatest(), "ready");
+		openRouter.oneAtATime = false;
+		const [run] = await database((sql) => sql<{ steps: number; cost: number }>`
+			select steps, cost_usd::float8 as cost from runs where id = ${`workspace-index:${uploaded.id}:1:0`}`);
+		assert.strictEqual(run.steps, 3);
+		assert.closeTo(run.cost, 3 * EMBED_COST, 1e-9);
+		assert.deepStrictEqual(
+			openRouter.embedded.slice(-3).map((call) => call.length),
+			[1, 1, 1],
+		);
 	});
 
 	it("lets only people who can edit upload, delete, read the log and try again; others get 403, and non-members 404", async () => {

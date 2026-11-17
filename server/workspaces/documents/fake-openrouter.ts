@@ -23,12 +23,14 @@ export type FakeOpenRouter = {
 	pages: Map<number, string>;
 	/** The texts of each embedding call, in order. */
 	embedded: string[][];
+	/** Refuse an embedding call with more than one value, as for a model with no such endpoint. */
+	oneAtATime: boolean;
 	close: () => Promise<void>;
 };
 
 export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
-	const pages = new Map<number, string>();
-	const embedded: string[][] = [];
+	const fake: FakeOpenRouter = { url: "", pages: new Map(), embedded: [], oneAtATime: false, close: async () => undefined };
+	const { pages, embedded } = fake;
 	const server = createServer(async (request, response) => {
 		const body = request.method === "POST" ? JSON.parse(await read(request)) : {};
 		const send = (status: number, json: unknown) => {
@@ -37,6 +39,8 @@ export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
 		};
 		if (request.url?.endsWith("/v1/embeddings")) {
 			const input = body.input as string[];
+			// As OpenRouter answers for google/gemini-embedding-2 under Zero Data Retention.
+			if (fake.oneAtATime && input.length > 1) return send(404, { error: { message: "No endpoints found matching your data policy (Zero data retention).", code: 404 } });
 			embedded.push(input);
 			const data = input.map((text, index) => ({ object: "embedding", index, embedding: meaning(text) }));
 			return send(200, { object: "list", model: body.model, data, usage: { prompt_tokens: input.length * 7, total_tokens: input.length * 7, cost: EMBED_COST } });
@@ -51,8 +55,9 @@ export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
 		send(404, { error: { message: "Not here" } });
 	});
 	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-	const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
-	return { url, pages, embedded, close: () => new Promise((resolve) => server.close(() => resolve())) };
+	fake.url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/api`;
+	fake.close = () => new Promise((resolve) => server.close(() => resolve()));
+	return fake;
 }
 
 async function read(request: IncomingMessage) {
