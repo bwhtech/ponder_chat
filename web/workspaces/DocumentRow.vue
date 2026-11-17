@@ -14,6 +14,8 @@ const emit = defineEmits<{ open: []; details: []; retry: []; delete: [] }>();
 
 const status = computed(() => props.document.status);
 const size = computed(() => (props.editable ? fileSize(props.document.size) : ""));
+/** Only the name (someone who can only ask, a Ready document): the row keeps 28px (44px on touch), its name centred. */
+const oneLine = computed(() => !size.value && status.value === "ready");
 const statusText = computed(() => (status.value === "failed" ? failureReason(props.document.error) : STATUS_LABELS[status.value]));
 const menu = computed(() => [
 	{ label: "Details", icon: "lucide-info", onClick: () => emit("details") },
@@ -23,12 +25,14 @@ const menu = computed(() => [
 
 <template>
 	<li
-		class="relative flex gap-2.5 rounded-4 px-2 py-1 transition-colors duration-150 ease-out-strong has-[[data-slot=document-name]:hover]:bg-surface-gray-2 has-[[data-slot=document-name]:active]:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center"
+		class="relative flex gap-2.5 rounded-4 px-2 py-1 transition-colors duration-150 ease-out-strong has-[[data-slot=document-name]:hover]:bg-surface-gray-2 has-[[data-slot=document-name]:active]:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:min-h-11"
+		:class="{ 'min-h-7 items-center': oneLine }"
 		data-slot="workspace-document"
 		:data-status="status"
 		:aria-busy="status === 'reading' || undefined"
 	>
-		<span class="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
+		<!-- The icon and the menu sit on the name's line, however many lines the row has. -->
+		<span class="flex h-[1lh] w-5 shrink-0 items-center justify-center text-sm" aria-hidden="true">
 			<span
 				:class="[
 					status === 'reading' ? 'lucide-loader-circle animate-spin motion-reduce:animate-none' : documentIcon(document),
@@ -60,8 +64,10 @@ const menu = computed(() => [
 				@click="emit('retry')"
 			/>
 		</div>
-		<Dropdown v-if="editable" :options="menu" align="end">
-			<Button variant="ghost" icon="lucide-ellipsis" :aria-label="`Actions for “${document.name}”`" class="touch-target relative -mr-1 shrink-0" />
-		</Dropdown>
+		<div v-if="editable" class="flex h-[1lh] shrink-0 items-center text-sm">
+			<Dropdown :options="menu" align="end">
+				<Button variant="ghost" icon="lucide-ellipsis" :aria-label="`Actions for “${document.name}”`" class="touch-target relative -mr-1 shrink-0" />
+			</Dropdown>
+		</div>
 	</li>
 </template>

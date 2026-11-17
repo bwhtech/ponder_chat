@@ -13,8 +13,9 @@ import WorkspacePeople from "./WorkspacePeople.vue";
  * screen, under them on a phone. For people who can edit, an empty section is one area that
  * fills it, and files dropped anywhere on the panel are uploaded, with "Drop to upload" over
  * the documents while they are dragged over it. For people who can only ask, empty sections
- * are not shown. While the workspace loads, the headings stay, and skeleton lines stand in
- * for the values.
+ * are not shown, so their panel waits for the workspace: which sections it has is not known
+ * before. For editors, while the workspace loads, the headings stay, and skeleton lines stand
+ * in for the values.
  */
 const props = defineProps<{ workspace?: WorkspaceSummary; detail?: WorkspaceDetail }>();
 const emit = defineEmits<{ instructions: []; documents: [documents: WorkspaceDocument[]] }>();
@@ -35,7 +36,7 @@ const drop = useFileDrop(
 </script>
 
 <template>
-	<aside class="min-w-0 space-y-8" aria-label="About this workspace" data-slot="workspace-aside" v-on="drop.listeners">
+	<aside v-if="detail || editable" class="min-w-0 space-y-8" aria-label="About this workspace" data-slot="workspace-aside" v-on="drop.listeners">
 		<WorkspaceInstructions v-if="!detail || instructions || editable" :instructions="instructions" :editable="editable" @edit="emit('instructions')" />
 
 		<WorkspaceDocuments
