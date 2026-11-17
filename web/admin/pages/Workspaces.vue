@@ -82,7 +82,6 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 								<p class="text-sm text-ink-gray-6">
 									{{ ownerName(workspace) }} · {{ documentCount(workspace.documents.length) }}
 								</p>
-								<p v-if="workspace.description" class="line-clamp-2 text-p-sm text-ink-gray-6">{{ workspace.description }}</p>
 							</div>
 							<Button class="shrink-0" label="Open" icon-right="lucide-arrow-up-right" :link="`/?w=${encodeURIComponent(workspace.slug)}`" />
 						</div>

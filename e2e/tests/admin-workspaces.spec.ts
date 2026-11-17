@@ -62,7 +62,8 @@ test("an admin sees organisation workspaces with each document's log, and privat
 	await expect(page.getByRole("heading", { name: "Workspaces", exact: true })).toBeVisible();
 	const workspace = page.getByRole("article", { name: orgName });
 	await expect(workspace.getByRole("heading", { name: orgName })).toBeVisible();
-	await expect(workspace.getByText(`About ${orgName}`)).toBeVisible();
+	// Descriptions are kept, but not shown for now.
+	await expect(workspace.getByText(`About ${orgName}`)).toHaveCount(0);
 	const row = workspace.locator(`[data-document="${orgDocument}"]`);
 	await expect(row).toContainText("Ready");
 
@@ -99,10 +100,11 @@ test("the overview shows the System line, apart from anyone's credits", async ({
 	await page.goto("/admin");
 	const system = page.locator('[data-slot="system-spend"]');
 	await expect(system.getByRole("heading", { name: "System" })).toBeVisible();
-	await expect(system.getByText(/^Last 14 days · \$/)).toBeVisible();
+	// A tiny spend reads "<$0.0001".
+	await expect(system.getByText(/^Last 14 days · <?\$/)).toBeVisible();
 	await expect(system.getByText("They are not counted against anyone's credits.", { exact: false })).toBeVisible();
 	for (const line of ["Chat names", "Memory", "Workspace documents", "Picture pages", "Workspace search"]) await expect(system.getByText(line, { exact: true })).toBeVisible();
 
 	await page.getByText("30 days", { exact: true }).first().click();
-	await expect(system.getByText(/^Last 30 days · \$/)).toBeVisible();
+	await expect(system.getByText(/^Last 30 days · <?\$/)).toBeVisible();
 });

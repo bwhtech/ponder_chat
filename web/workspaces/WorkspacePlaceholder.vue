@@ -30,7 +30,6 @@ const workspace = computed(() => workspaceByKey(props.slugOrId));
 	<div class="min-h-0 flex-1 overflow-hidden sm:[scrollbar-gutter:stable_both-edges]" aria-busy="true">
 		<div class="mx-auto grid w-full max-w-[1120px] gap-8 px-4 pb-10 pt-6 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
 			<div class="min-w-0 space-y-8">
-				<p v-if="workspace?.description" class="text-p-base text-ink-gray-6">{{ workspace.description }}</p>
 				<Skeleton class="h-[7.5rem] w-full rounded-[1.25rem]" />
 			</div>
 		</div>
