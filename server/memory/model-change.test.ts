@@ -1,8 +1,9 @@
 /**
  * A change of PONDER_EMBEDDING_MODEL: the memory index made with one fake model (vectors of
  * width 3) is opened with another (width 5). Search must not fail on the old rows, and
- * `syncIndex` must rebuild them with the new model. On a real Postgres with pgvector
- * (TEST_DATABASE_URL), in a schema of its own: a rebuild empties the whole table.
+ * `syncIndex` must embed them again with the new model. It also repairs rows of older text,
+ * as an edit during that pass leaves. On a real Postgres with pgvector (TEST_DATABASE_URL),
+ * in a schema of its own: a repair reads the whole table.
  */
 import * as PgClient from "@effect/sql-pg/PgClient";
 import { assert, describe, it } from "@effect/vitest";
@@ -17,20 +18,29 @@ import * as Runs from "../telemetry/Runs.ts";
 import type { Extractor } from "./extract.ts";
 import { makePgvectorIndex } from "./pgvector-index.ts";
 import * as MemoryStore from "./postgres.ts";
+import type { MemoryIndex } from "./types.ts";
 
 const MODEL_A = "fake/three";
 const MODEL_B = "fake/five";
 const TOPICS = [/cook|food|eat|dinner/i, /run|marathon|km/i, /python|code|data/i];
 
+/** Runs once, inside the next embedding call: a test's edit while the index embeds. */
+let duringEmbed: (() => Promise<unknown>) | undefined;
+
 /** A fake model whose vectors have `width` numbers: the topics first, then zeros. */
 const fakeModel = (width: number) =>
 	new MockEmbeddingModelV4({
-		doEmbed: async ({ values }) => ({
-			embeddings: values.map((text) => Array.from({ length: width }, (_, i) => (TOPICS[i]?.test(text) ? 1 : 0.01))),
-			usage: { tokens: values.length * 5 },
-			providerMetadata: { openrouter: { usage: { cost: 0.00001 } } },
-			warnings: [],
-		}),
+		doEmbed: async ({ values }) => {
+			const edit = duringEmbed;
+			duringEmbed = undefined;
+			await edit?.();
+			return {
+				embeddings: values.map((text) => Array.from({ length: width }, (_, i) => (TOPICS[i]?.test(text) ? 1 : 0.01))),
+				usage: { tokens: values.length * 5 },
+				providerMetadata: { openrouter: { usage: { cost: 0.00001 } } },
+				warnings: [],
+			};
+		},
 	});
 const models: Record<string, MockEmbeddingModelV4> = { [MODEL_A]: fakeModel(3), [MODEL_B]: fakeModel(5) };
 const provider = { textEmbeddingModel: (id: string) => models[id] } as unknown as OpenRouterProvider;
@@ -66,6 +76,17 @@ const embedCalls = Effect.gen(function* () {
 	return row.count;
 });
 
+/** The index's rows made by the current model, and by another model or by none. */
+const countsOf = <E>(index: MemoryIndex<E>) =>
+	Effect.map(index.entries, (entries) => ({ current: entries.filter((entry) => entry.current).length, outdated: entries.filter((entry) => !entry.current).length }));
+
+/** Each row of the index, with the text of its memory in use, if any. */
+const vectorTexts = Effect.gen(function* () {
+	const sql = yield* PgClient.PgClient;
+	return yield* sql<{ text: string; model: string; memory: string | null }>`
+		select v.text, v.model, m.text as memory from memory_vectors v left join memories m on m.id = v.id and m.forgotten_at is null order by v.text`;
+});
+
 const vectorRows = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
 	return yield* sql<{ model: string | null; width: number }>`select model, vector_dims(embedding) as width from memory_vectors order by id`;
@@ -97,7 +118,7 @@ describe.skipIf(!base)("the memory index after a change of embedding model", () 
 				const store = yield* storeOf(MODEL_B);
 				// Rows of model A only: model B's search reads none of them, so it can't compare widths.
 				assert.deepStrictEqual(yield* index.search(scope.userId, "marathon", 1), []);
-				assert.deepStrictEqual(yield* index.counts, { current: 0, outdated: 2 });
+				assert.deepStrictEqual(yield* countsOf(index), { current: 0, outdated: 2 });
 				// The store falls back to Postgres's words meanwhile.
 				const meanwhile = yield* store.recall(scope, "marathon");
 				assert.deepStrictEqual(meanwhile.fragments?.map((fragment) => fragment.text), ["I run a marathon in March"]);
@@ -106,7 +127,7 @@ describe.skipIf(!base)("the memory index after a change of embedding model", () 
 				yield* store.save(scope, { user: "I write Python code", assistant: "Ok." });
 				assert.deepStrictEqual(yield* index.search(scope.userId, "python", 1), [(yield* store.list(scope)).find((m) => m.text.includes("Python"))!.id]);
 				// Three rows, three memories: the old count check saw nothing to do.
-				assert.deepStrictEqual(yield* index.counts, { current: 1, outdated: 2 });
+				assert.deepStrictEqual(yield* countsOf(index), { current: 1, outdated: 2 });
 
 				const before = yield* embedCalls;
 				yield* store.syncIndex;
@@ -118,7 +139,7 @@ describe.skipIf(!base)("the memory index after a change of embedding model", () 
 						[MODEL_B, 5],
 					],
 				);
-				assert.deepStrictEqual(yield* index.counts, { current: 3, outdated: 0 });
+				assert.deepStrictEqual(yield* countsOf(index), { current: 3, outdated: 0 });
 				// The rebuild's embeddings are the app's spend, in runs.
 				assert.strictEqual(yield* embedCalls, before + 1);
 
@@ -137,9 +158,9 @@ describe.skipIf(!base)("the memory index after a change of embedding model", () 
 				yield* sql`update memory_vectors set model = null where text like '%marathon%'`;
 				const store = yield* storeOf(MODEL_B);
 				const index = yield* indexOf(MODEL_B);
-				assert.deepStrictEqual(yield* index.counts, { current: 2, outdated: 1 });
+				assert.deepStrictEqual(yield* countsOf(index), { current: 2, outdated: 1 });
 				yield* store.syncIndex;
-				assert.deepStrictEqual(yield* index.counts, { current: 3, outdated: 0 });
+				assert.deepStrictEqual(yield* countsOf(index), { current: 3, outdated: 0 });
 				assert.ok((yield* vectorRows).every((row) => row.model === MODEL_B));
 			}),
 		);
@@ -149,9 +170,60 @@ describe.skipIf(!base)("the memory index after a change of embedding model", () 
 				const sql = yield* PgClient.PgClient;
 				yield* sql`alter table memory_vectors drop column model`;
 				const index = yield* indexOf(MODEL_B);
-				assert.deepStrictEqual(yield* index.counts, { current: 0, outdated: 3 });
+				assert.deepStrictEqual(yield* countsOf(index), { current: 0, outdated: 3 });
 				yield* (yield* storeOf(MODEL_B)).syncIndex;
-				assert.deepStrictEqual(yield* index.counts, { current: 3, outdated: 0 });
+				assert.deepStrictEqual(yield* countsOf(index), { current: 3, outdated: 0 });
+			}),
+		);
+
+		it.effect("embeds again a memory edited while the index re-embeds, so its row has the newer text", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const store = yield* storeOf(MODEL_B);
+				const cooking = (yield* store.list(scope)).find((m) => m.text.includes("cook"))!;
+				yield* sql`update memory_vectors set model = null`;
+				const context = yield* Effect.context<PgClient.PgClient>();
+				// The person edits the memory while syncIndex embeds its older text.
+				duringEmbed = () => Effect.runPromiseWith(context)(store.update(scope, cooking.id, "I cook vegan food"));
+				const before = yield* embedCalls;
+				yield* store.syncIndex;
+				assert.isUndefined(duringEmbed);
+				assert.deepStrictEqual(
+					(yield* vectorTexts).map((row) => [row.text, row.model, row.memory]),
+					[
+						["I cook vegan food", MODEL_B, "I cook vegan food"],
+						["I run a marathon in March", MODEL_B, "I run a marathon in March"],
+						["I write Python code", MODEL_B, "I write Python code"],
+					],
+				);
+				// The pass, the edit, and the repair of the edited memory: each a memory-embed row in runs.
+				assert.strictEqual(yield* embedCalls, before + 3);
+			}),
+		);
+
+		it.effect("repairs on start a row of older text, a row of a forgotten memory and a missing row, though the counts match", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const store = yield* storeOf(MODEL_B);
+				yield* sql`update memory_vectors set text = 'I run a half marathon' where text like '%marathon%'`;
+				yield* sql`update memories set forgotten_at = now() where text like '%Python%'`;
+				yield* sql`delete from memory_vectors where id in (select id from memories where text like '%cook%')`;
+				const index = yield* indexOf(MODEL_B);
+				assert.deepStrictEqual(yield* countsOf(index), { current: 2, outdated: 0 });
+				const before = yield* embedCalls;
+				yield* store.syncIndex;
+				assert.deepStrictEqual(
+					(yield* vectorTexts).map((row) => [row.text, row.memory]),
+					[
+						["I cook vegan food", "I cook vegan food"],
+						["I run a marathon in March", "I run a marathon in March"],
+					],
+				);
+				// Both memories in one call, a memory-embed row; the forgotten one's row is only deleted.
+				assert.strictEqual(yield* embedCalls, before + 1);
+				const settled = yield* embedCalls;
+				yield* store.syncIndex;
+				assert.strictEqual(yield* embedCalls, settled);
 			}),
 		);
 

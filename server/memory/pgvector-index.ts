@@ -11,15 +11,15 @@ import type { IndexedMemory, MemoryIndex } from "./types.ts";
 
 /**
  * The search index for memories, in Ponder's own Postgres with pgvector. It holds only
- * text, owner and vectors, and can be rebuilt from `memories`. Search mixes meaning
- * (cosine distance) and words (full text with the 'simple' configuration, so any
- * language works), fused with reciprocal-rank fusion.
+ * text, owner and vectors, and is repaired from `memories` (postgres.ts, `syncIndex`).
+ * Search mixes meaning (cosine distance) and words (full text with the 'simple'
+ * configuration, so any language works), fused with reciprocal-rank fusion.
  *
  * Memories per person are few, so the person's rows are scanned exactly; no vector index
  * is needed, and the vector width follows the embedding model (PONDER_EMBEDDING_MODEL).
  * Each row keeps the model that made it. A vector of another model is in another space,
  * and may have another width, so search reads only the current model's rows, and
- * `counts` tells the store to rebuild when any row is another model's.
+ * `entries` tells the store which rows to embed again.
  *
  * The `embedding` column is never read: the client has no codec for a vector
  * (docs/effect.md, "Database"). Search computes the distance in SQL.
@@ -35,9 +35,9 @@ const K = 60;
 export type IndexError = EmbeddingError;
 
 const IdRow = Schema.Struct({ id: Schema.String });
-const CountsRow = Schema.Struct({ current: Schema.Number, outdated: Schema.Number });
+const EntryRow = Schema.Struct({ id: Schema.String, text: Schema.String, current: Schema.Boolean });
 
-/** The `runs` row of one embedding call: for the person, or for no one when a rebuild embeds many people's memories. */
+/** The `runs` row of one embedding call: for the person, or for no one when a repair embeds many people's memories. */
 const memoryRun = (owners: ReadonlyArray<string>) => ({
 	id: `memory-embed:${randomUUID()}`,
 	functionId: "memory-embed" as const,
@@ -105,12 +105,10 @@ export const makePgvectorIndex = Effect.gen(function* () {
 			) ranked
 			group by id order by sum(score) desc limit ${limit}`,
 	});
-	const findCounts = SqlSchema.findAll({
+	const findEntries = SqlSchema.findAll({
 		Request: Schema.String,
-		Result: CountsRow,
-		execute: (model) => sql`
-			select count(*) filter (where model = ${model})::int as current, count(*) filter (where model is distinct from ${model})::int as outdated
-			from memory_vectors`,
+		Result: EntryRow,
+		execute: (model) => sql`select id, text, model is not distinct from ${model} as current from memory_vectors`,
 	});
 
 	// No spans of their own: they run inside memory.recall, memory.save and the Memory page's calls.
@@ -130,15 +128,9 @@ export const makePgvectorIndex = Effect.gen(function* () {
 			const rows = yield* findBest({ owner, model: embedder.model, query, vector: vectorLiteral(embedding), limit }).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 			return rows.map((row) => row.id);
 		}),
-		rebuild: Effect.fnUntraced(function* (memories: IndexedMemory[]) {
+		entries: Effect.gen(function* () {
 			yield* migrate;
-			yield* sql`delete from memory_vectors`;
-			if (memories.length) yield* write(memories);
-		}),
-		counts: Effect.gen(function* () {
-			yield* migrate;
-			const [row] = yield* findCounts(embedder.model).pipe(Effect.catchTags({ SchemaError: Effect.die }));
-			return row;
+			return yield* findEntries(embedder.model).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 		}),
 	};
 	return index;

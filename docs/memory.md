@@ -92,7 +92,7 @@ With 30 or fewer memories, recall gives all of them. Above that it finds the 8 m
 
 The recalled block quotes each memory's text as JSON, so a saved sentence cannot break out of the list and pose as instructions. It tells the model that what the person says now wins over memory.
 
-The index is the `memory_vectors` table. Saves, edits and forgets update it after `memories`; if that fails, the memory is still saved and the log says the index failed. Each row keeps the embedding model that made it. On start, `syncIndex` rebuilds the index when its count differs from `memories`, or when any row is from another model (or from no model: rows from before the column). Until the rebuild ends, search reads only the current model's rows, so it finds fewer memories but never compares vectors of two models.
+The index is the `memory_vectors` table. Saves, edits and forgets update it after `memories`; if that fails, the memory is still saved and the log says the index failed. Each row keeps the embedding model that made it. On start, `syncIndex` compares each row with `memories`. It embeds a memory again when its row is missing, is from another model (or from no model: rows from before the column), or has text other than the memory's. It removes the rows of memories that are forgotten. If that pass changed something, a second pass follows: a memory edited while the first pass embedded can have a row of its older text. The `runs` table records each call as `memory-embed`. Until the pass ends, search reads only the current model's rows, so it finds fewer memories but never compares vectors of two models.
 
 ## On the page
 
@@ -117,7 +117,7 @@ The index is the `memory_vectors` table. Saves, edits and forgets update it afte
 | `PONDER_MEMORY_INDEX` | pgvector | `off` leaves the index out; search then uses Postgres only. |
 | `PONDER_MEMORY_GATE_MODEL` | `perplexity/pplx-decider-v1.2` | The gate's decision model. |
 | `PONDER_MEMORY_MODEL` | `z-ai/glm-5.3-flash` | The writer's model. |
-| `PONDER_EMBEDDING_MODEL` | `qwen/qwen3-embedding-8b` | The embedding model. After a change, the next start rebuilds the memory index and indexes the workspace documents again. |
+| `PONDER_EMBEDDING_MODEL` | `qwen/qwen3-embedding-8b` | The embedding model. After a change, the next start embeds the memory index again and indexes the workspace documents again. |
 
 ## Checks
 

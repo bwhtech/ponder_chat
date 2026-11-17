@@ -13,7 +13,7 @@ import { problem, recoverAll } from "./errors.ts";
 import { KINDS, makeLlmExtractor, quotedIn, type Decision, type ExistingMemory, type Extractor, type MemoryKind, type Operation } from "./extract.ts";
 import { makePgvectorIndex, type IndexError } from "./pgvector-index.ts";
 import { saveLog, type AppliedOperation, type MemorySave } from "./save-log.ts";
-import type { IndexedMemory, MemoryAdapter, MemoryFact, MemoryIndex, MemoryScope, MemorySnapshot, MemoryTurn, RecallResult, SaveReceipt } from "./types.ts";
+import type { IndexedMemory, IndexEntry, MemoryAdapter, MemoryFact, MemoryIndex, MemoryScope, MemorySnapshot, MemoryTurn, RecallResult, SaveReceipt } from "./types.ts";
 
 export type { AppliedOperation, MemorySave } from "./save-log.ts";
 
@@ -88,7 +88,7 @@ export class MemoryStore extends Context.Service<
 		readonly saves: (scope: MemoryScope, options?: { threadId?: string; limit?: number }) => Effect.Effect<MemorySave[], SqlError>;
 		/** Creates the tables of memories and of the save log. */
 		readonly migrate: Effect.Effect<void, SqlError>;
-		/** Rebuilds the index from Postgres when the two disagree, or when any row is from another embedding model. */
+		/** Repairs the index from Postgres: embeds again the memories whose row is missing, another model's or of other text, and removes the rows of memories not in use. */
 		readonly syncIndex: Effect.Effect<void, IndexError>;
 		/** The person's memories, for the Memory page. */
 		readonly list: (scope: MemoryScope) => Effect.Effect<StoredMemory[], SqlError>;
@@ -317,15 +317,24 @@ export const makeWith = Effect.fnUntraced(function* ({ extract, index, recallAll
 		execute: () => sql`select * from memories where forgotten_at is null`,
 	});
 
-	const syncIndex = Effect.gen(function* () {
-		if (!index) return;
+	/** One pass: embeds again each memory whose row is missing, another model's or of other text, and removes the rows of memories not in use. */
+	const repairIndex = Effect.fnUntraced(function* (index: MemoryIndex<IndexError>) {
+		// The rows before the memories: a memory saved in between is not taken for a forgotten one.
+		const entries = yield* index.entries;
 		const rows = yield* findInUse(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die }));
-		const { current, outdated } = yield* index.counts;
-		if (current === rows.length && outdated === 0) return;
+		const { stale, gone, outdated } = indexDrift(rows.map(toIndexed), entries);
 		// After a change of PONDER_EMBEDDING_MODEL: search reads only the new model's rows until this ends.
 		if (outdated) yield* Effect.log(`memory: ${outdated} rows of the search index are from another embedding model`);
-		yield* index.rebuild(rows.map(toIndexed));
-		yield* Effect.log(`memory: rebuilt the search index with ${rows.length} memories`);
+		if (stale.length) yield* index.upsert(stale);
+		if (gone.length) yield* index.remove(gone);
+		if (stale.length || gone.length) yield* Effect.log(`memory: embedded ${stale.length} memories again and removed ${gone.length} rows of the search index`);
+		return stale.length + gone.length;
+	});
+
+	const syncIndex = Effect.gen(function* () {
+		if (!index) return;
+		// A memory edited while a pass embeds can get a row of its older text: a second pass finds it.
+		if (yield* repairIndex(index)) yield* repairIndex(index);
 	});
 
 	const list = Effect.fn("MemoryStore.list")(function* (scope: MemoryScope) {
@@ -390,4 +399,16 @@ function toStored(row: Row): StoredMemory {
 
 function toIndexed(row: Row): IndexedMemory {
 	return { id: row.id, owner: row.owner, text: row.text };
+}
+
+/** Where the index differs from the memories in use: the memories to embed again, and the rows to remove. */
+function indexDrift(memories: IndexedMemory[], entries: ReadonlyArray<IndexEntry>) {
+	const byId = new Map(entries.map((entry) => [entry.id, entry]));
+	const inUse = new Set(memories.map((memory) => memory.id));
+	const stale = memories.filter((memory) => {
+		const entry = byId.get(memory.id);
+		return !entry || !entry.current || entry.text !== memory.text;
+	});
+	const gone = entries.filter((entry) => !inUse.has(entry.id)).map((entry) => entry.id);
+	return { stale, gone, outdated: entries.filter((entry) => !entry.current).length };
 }
