@@ -64,16 +64,32 @@ Attachments in a chat:
 
 ## Documents: what Ponder does
 
+Flow is the starting point, not a rule. Where a better way is found and the test questions (below) show that it is better, Ponder uses it. "Where Ponder does better than Flow" lists the changes so far.
+
 Ponder uses the same steps, with Postgres in place of MariaDB and SQLite. Memory already does hybrid search this way (`server/memory/pgvector-index.ts`): pgvector, `to_tsvector('simple', …)` and reciprocal rank fusion. Embeddings use `PONDER_EMBEDDING_MODEL` through OpenRouter.
 
 1. **Upload.** `POST /api/workspaces/:id/documents` takes the same file types and the same 10 MB limit as a chat attachment: PDF, text, Markdown, CSV, TSV and JSON. The bytes go to the object store under `workspaces/<id>/<document>`. DOCX and spreadsheets are in "Later".
 2. **Extract.** The text is read once and kept in `workspace_documents.text`. A PDF is read as "PDF reading" below tells.
-3. **Index.** A workflow run splits the text into passages (1,000 characters, 200 overlap, Flow's chunker), embeds them in batches of 96, and saves them in one transaction. The document shows "Reading" until the run ends, then "Ready" or "Failed".
+3. **Index.** A workflow run splits the text into passages (about 1,000 characters, split by structure: see below), embeds them in batches of 96, and saves them in one transaction. The document shows "Reading" until the run ends, then "Ready" or "Failed".
 4. **Choose inline or search, on each turn.** Use Flow's attachment rule. When the text of all ready documents fits in half of the model's context window, all of it goes into the system prompt as `<document name="…">` blocks. Otherwise, the largest documents move to search until the rest fit. The existing limit of 300,000 characters for files in one call also applies.
 5. **Search.** For documents in search, the 8 best passages for the person's message go into the latest message as a `<workspace_excerpts>` block, the way memory adds `<memory>`. The model also gets a `workspace_search(query)` tool for more searches. The server binds the tool to the chat's workspace, so the model cannot search another one.
 6. **Model change.** Each passage stores the embedding model that made it. Search reads only passages from the current model. When the model changes, a check at startup indexes the old documents again.
 
 Instructions and inline documents stay the same during a chat, so the provider's prompt cache keeps them. Excerpts change on each message, so they go in the latest message, outside the cache.
+
+### Where Ponder does better than Flow
+
+1. **Split by structure, not by character count.** Flow cuts every 1,000 characters, with 200 characters of overlap. The dose table in the nephrology manual is 2,500 characters, and the FIGO regimens are 3,800 characters. A cut every 1,000 characters puts a dose such as "LD 500 mg/L" in a passage without its drug name or its column heading. Ponder splits LiteParse's Markdown:
+   - At headings first, then at paragraphs. Never inside a table row.
+   - A table that is too long for one passage is split by rows, and each part repeats the table's header row.
+   - A passage can be longer than 1,000 characters to keep a row or a short table whole. The limit is 2,000.
+2. **Each passage knows where it is.** Before embedding, each passage gets a first line with the document name, the headings above it, and the page: `Nephrology manual › Peritonitis › Table 5 (page 251)`. The line is also kept with the passage, so excerpts and answers can name the page.
+3. **Test questions decide.** `server/workspaces/eval/` has about 30 questions on the two procedure manuals, each with the page that answers it. Some questions are answered only by a table or a picture page. The manuals are not in the repo: the script reads them from a folder in `WORKSPACE_EVAL_DIR`. It indexes them and reports how many answers are in the top 8 passages. Run it before and after each change to chunking, search or the PDF reader, and put the numbers in the pull request.
+
+To try next, each only if the test questions show a gain:
+- A reranking model on the top 30 passages.
+- More or fewer than 8 excerpts.
+- Different weights for keyword and vector results in the fusion.
 
 ### PDF reading
 
@@ -169,7 +185,7 @@ workspace_document_log (
 )
 workspace_passages (
 	id, document_id → workspace_documents on delete cascade, workspace_id,
-	ordinal, content, embedding vector, model
+	ordinal, location, page, content, embedding vector, model
 )
 threads.workspace_id               -- null for a chat outside a workspace
 ```
@@ -235,7 +251,8 @@ Each pull request ships alone, and each one updates the README. The first one al
   - Every cell of the access table.
   - Sharing changes, and a member who loses access.
   - People search.
-  - The chunker, and the order of hybrid search results.
+  - The chunker: no table row is split, a split table repeats its header row, and each passage has its location line.
+  - The order of hybrid search results.
   - The inline or search choice at the edge of the budget.
 - **End-to-end** (`e2e/tests/workspaces.spec.ts`):
   1. Person A makes a private workspace and shares it with B.
