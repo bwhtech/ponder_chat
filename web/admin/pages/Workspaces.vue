@@ -80,7 +80,7 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 							<div class="min-w-0 space-y-0.5">
 								<h3 class="truncate text-base-medium text-ink-gray-8">{{ workspace.name }}</h3>
 								<p class="text-sm text-ink-gray-6">
-									{{ ownerName(workspace) }} · {{ documentCount(workspace.documents.length) }}<template v-if="workspace.costUsd !== null"> · {{ money(workspace.costUsd) }} to index</template>
+									{{ ownerName(workspace) }} · {{ documentCount(workspace.documents.length) }}
 								</p>
 								<p v-if="workspace.description" class="line-clamp-2 text-p-sm text-ink-gray-6">{{ workspace.description }}</p>
 							</div>
@@ -134,12 +134,11 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 
 			<section aria-label="Private workspaces" class="space-y-3" data-slot="private-workspaces">
 				<h2 class="text-base-semibold text-ink-gray-9">Private workspaces</h2>
-				<div data-slot="dashboard" class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-					<NumberCard title="Private workspaces" :loading="loading" :value="privateTotals?.workspaces ?? null" :format="count" />
+				<div data-slot="dashboard" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
+					<NumberCard title="Workspaces" :loading="loading" :value="privateTotals?.workspaces ?? null" :format="count" />
 					<NumberCard title="Ready documents" :loading="loading" :value="privateTotals?.documents.ready ?? null" :format="count" />
-					<NumberCard title="Reading" :loading="loading" :value="privateTotals?.documents.reading ?? null" :format="count" />
 					<NumberCard title="Failed" :loading="loading" :value="privateTotals?.documents.failed ?? null" :format="count" />
-					<NumberCard title="Cost to index" :loading="loading" :value="privateTotals?.costUsd ?? null" :format="money" class="col-span-2 sm:col-span-1" />
+					<NumberCard title="Cost to index" :loading="loading" :value="privateTotals?.costUsd ?? null" :format="money" />
 				</div>
 
 				<div v-if="privateTotals?.errors.length" class="space-y-2 pt-3" data-slot="private-errors">

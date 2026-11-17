@@ -1,6 +1,6 @@
 const grouped = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
 const usd = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 });
-const usdExact = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumSignificantDigits: 3 });
+const usdSmall = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 4 });
 
 /** A count grouped the same way everywhere, such as "10,000" or "47.3". */
 export function count(value: number) {
@@ -12,7 +12,8 @@ export function credits(value: number) {
 	return count(value >= 100 ? Math.round(value) : value);
 }
 
-/** US dollars, such as "$0.05". Amounts under a cent keep their digits, such as "$0.0004", not "$0.00". */
+/** US dollars, such as "$0.05". Under a cent, up to 4 decimals, such as "$0.0018", not "$0.00"; less than that is "<$0.0001". */
 export function money(value: number) {
-	return value > 0 && value < 0.01 ? usdExact.format(value) : usd.format(value);
+	if (value > 0 && value < 0.0001) return "<$0.0001";
+	return value > 0 && value < 0.01 ? usdSmall.format(value) : usd.format(value);
 }
