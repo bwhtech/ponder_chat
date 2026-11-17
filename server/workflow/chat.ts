@@ -23,7 +23,9 @@ import {
 	trustedPagesStep,
 	webFetchStep,
 	webSearchStep,
+	workspaceContextStep,
 } from "./steps.ts";
+import { workspacePrompt } from "../workspaces/prompt.ts";
 
 export type ChatTurn = {
 	threadId: string;
@@ -40,6 +42,8 @@ export type ChatTurn = {
 	 * last call (replies.ts). The run goes to it, and the reply keeps its reasoning.
 	 */
 	answeredBy?: string;
+	/** The chat's workspace, checked by the route (replies.ts). Its instructions go into the system prompt. */
+	workspaceId?: string;
 };
 
 /**
@@ -73,6 +77,8 @@ export async function chatTurn(turn: ChatTurn) {
 		const skills = await skillsStep().catch(() => []);
 		// Without it, every page waits for the person: safe, only slower.
 		const trustedPages = await trustedPagesStep(turn.threadId).catch(() => []);
+		// The workspace's instructions (server/workspaces/). Without them the reply is still written.
+		const workspace = turn.workspaceId ? await workspaceContextStep(turn.workspaceId, turn.owner).catch(() => null) : null;
 		const tools: ToolSet = {
 			[WEB_SEARCH]: tool({
 				description: WEB_SEARCH_DESCRIPTION,
@@ -100,7 +106,10 @@ export async function chatTurn(turn: ChatTurn) {
 			// Changes only when an admin changes the skills.
 			...skillTools(skills),
 		};
-		const system = [instructions(turn), skillsGuidance(skills), catalog.connectors.length ? CONNECTOR_GUIDANCE : "", memory.guidance].filter(Boolean).join("\n\n");
+		// The workspace comes right after Ponder's own rules: it stays the same for the whole chat, so the cache keeps it.
+		const system = [instructions(turn), workspace ? workspacePrompt(workspace) : "", skillsGuidance(skills), catalog.connectors.length ? CONNECTOR_GUIDANCE : "", memory.guidance]
+			.filter(Boolean)
+			.join("\n\n");
 		// The <connectors> note goes with the latest message, as memory's does, and is never summarized.
 		const connectors = connectorNote(catalog);
 		// A long chat is summarized before a call would go over the model's window (context-guard.ts).

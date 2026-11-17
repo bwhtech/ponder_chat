@@ -7,6 +7,7 @@ import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
 import { COMPACTION_MARKER } from "./reply-chunks.ts";
 import type { Continued } from "./runs.ts";
 import type { ThreadContext } from "./thread-messages.ts";
+import type { WorkspaceContext } from "../workspaces/prompt.ts";
 
 /**
  * The chat workflow's steps. Each is recorded in Postgres when it finishes; after a
@@ -86,6 +87,22 @@ export async function recallMemoryStep(threadId: string, owner: string): Promise
 	});
 }
 recallMemoryStep.maxRetries = CONTEXT_STEP_RETRIES;
+
+/**
+ * The workspace's name and instructions for the system prompt (workspaces/prompt.ts),
+ * read again with the person's access, as every read of a workspace is. Null when they
+ * can no longer ask in it: the route checked before the run started, so that is a race.
+ */
+export async function workspaceContextStep(workspaceId: string, owner: string): Promise<WorkspaceContext | null> {
+	"use step";
+	return contextStep("workspace", `workspace ${workspaceId}`, async () => {
+		const { runStep } = await import("../runtime/step.ts");
+		const Option = await import("effect/Option");
+		const Workspaces = await import("../workspaces/Workspaces.ts");
+		return Option.getOrNull(await runStep(Workspaces.Workspaces.use((workspaces) => workspaces.instructionsFor(owner, workspaceId))));
+	});
+}
+workspaceContextStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function runPythonStep(input: RunPythonInput, threadId: string, owner: string) {
 	"use step";

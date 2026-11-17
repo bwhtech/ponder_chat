@@ -130,7 +130,8 @@ const perPerson = (limit: LimitName, options?: { plain?: boolean }) => limitPerP
 const searchQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
 const threadTitle = z.object({ title: z.string().optional().transform((title) => (title ?? "").slice(0, 120)) });
 // The messages are the AI SDK's UIMessages, which the workflow reads; only the shape is checked here.
-const chatBody = z.object({ id: z.string(), messages: z.array(z.custom<UIMessage>()).min(1), model: z.string().optional() });
+// workspaceId is read on a new chat's first message only (workflow/replies.ts).
+const chatBody = z.object({ id: z.string(), messages: z.array(z.custom<UIMessage>()).min(1), model: z.string().optional(), workspaceId: z.string().max(200).optional() });
 const streamQuery = z.object({ startIndex: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0).catch(0) });
 const memoryQuery = z.object({ wait: z.string().optional().catch(undefined) });
 const usageQuery = z.object({ thread: z.string().optional().catch(undefined) });
@@ -242,12 +243,15 @@ const api = app
 		return route(
 			c,
 			Effect.map(
-				Replies.Replies.use((replies) => replies.start({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model })),
+				Replies.Replies.use((replies) => replies.start({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model, workspaceId: body.workspaceId })),
 				(reply) => createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } }),
 			),
 			{
 				OutOfCredits: (error, c) => c.text(error.message, 402),
 				ThreadNotYours: (_, c) => c.json({ error: "Not found" }, 404),
+				WorkspaceNotFound: (error, c) => c.text(error.message, 404),
+				// The chat is the person's own, so it may say why: they were removed from its workspace.
+				WorkspaceAccessLost: (error, c) => c.text(error.message, 403),
 			},
 		);
 	})
