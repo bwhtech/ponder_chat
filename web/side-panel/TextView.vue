@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TextColumn from "./TextColumn.vue";
 import TextLines from "./TextLines.vue";
 import { Response } from "frappe-ui-ai-elements";
 import { computed, onMounted, ref } from "vue";
@@ -40,9 +41,9 @@ function readable(raw: string) {
 		<a :href="url" :download="name" class="text-sm-medium text-ink-gray-8 underline underline-offset-2">Download it</a>
 	</div>
 	<p v-else-if="text !== null && !text.trim()" class="px-6 pt-[20vh] text-center text-base text-ink-gray-6">This file is empty.</p>
-	<article v-else data-slot="text-file" class="mx-auto w-full max-w-[680px] px-5 pb-16 pt-8 sm:px-10 sm:pt-10" :aria-busy="text === null || undefined">
+	<TextColumn v-else data-slot="text-file" :aria-busy="text === null || undefined">
 		<TextLines v-if="text === null" />
 		<Response v-else-if="markdown" :content="text" />
 		<pre v-else class="whitespace-pre-wrap break-words font-mono text-sm text-ink-gray-8">{{ text }}</pre>
-	</article>
+	</TextColumn>
 </template>

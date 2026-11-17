@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Button } from "frappe-ui";
+import { Button, Skeleton } from "frappe-ui";
 import TablePlaceholder from "./TablePlaceholder.vue";
+import TextColumn from "./TextColumn.vue";
 import TextLines from "./TextLines.vue";
 import { computed, onMounted } from "vue";
 import { ARTIFACT_LOOK, FILE_LOOK, panelStandIn } from "./look";
@@ -12,15 +13,15 @@ import "./slide.css";
  * The side panel (SidePanel.vue) while its code arrives: the same panel, sliding in the same
  * way, with the file's or the artifact's icon and title, Close, and lines where the content
  * goes. The buttons that act on the content come with the panel, at the header's far end.
- * The lines sit where the viewer that follows draws its own (a PDF's page, TextView's column),
- * so nothing moves when it arrives.
+ * Each kind's skeleton sits where the viewer that follows draws its own (a PDF's page, a
+ * table's rows, the text column, a slide), so nothing moves when it arrives.
  */
 defineOptions({ inheritAttrs: false });
 const header = computed(() => {
 	const item = panelItem.value;
 	if (item?.type === "artifact") {
 		const artifact = item.artifact.value;
-		return { title: artifact.title || "Untitled", ...ARTIFACT_LOOK[artifact.kind], inset: artifact.kind === "slides", kind: null };
+		return { title: artifact.title || "Untitled", ...ARTIFACT_LOOK[artifact.kind], inset: artifact.kind === "slides", kind: artifact.kind };
 	}
 	const kind = item ? fileKind(item.file.mediaType, item.file.name) : null;
 	return { title: item?.file.name ?? "", ...FILE_LOOK[kind ?? "image"], inset: kind === "pdf", kind };
@@ -47,9 +48,9 @@ onMounted(() => (panelStandIn.shown = true));
 			<div class="min-h-0 flex-1 overflow-hidden" :class="header.inset ? 'bg-surface-gray-1' : ''">
 				<PdfPagesPlaceholder v-if="header.kind === 'pdf'" />
 				<TablePlaceholder v-else-if="header.kind === 'table'" />
-				<div v-else-if="header.kind === 'text'" class="mx-auto w-full max-w-[680px] px-5 pt-8 sm:px-10 sm:pt-10"><TextLines /></div>
-				<!-- An image has no skeleton of its own: it appears centred, so lines would only flash. -->
-				<div v-else-if="header.kind !== 'image'" class="p-4 sm:p-6"><TextLines /></div>
+				<TextColumn v-else-if="header.kind === 'text' || header.kind === 'document'"><TextLines /></TextColumn>
+				<div v-else-if="header.kind === 'slides'" class="p-4 sm:p-6"><Skeleton class="aspect-video w-full rounded-4" /></div>
+				<!-- An image appears centred and a web page fills the panel: neither has a skeleton, so lines would only flash. -->
 			</div>
 		</aside>
 	</Transition>
