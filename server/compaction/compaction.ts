@@ -31,6 +31,8 @@ export type CompactRequest = {
 	recalled: string;
 	/** The <connectors> note: like `recalled`, it goes with the latest message, never into the summary. */
 	connectors: string;
+	/** The <workspace_excerpts> block (workspaces/prompt.ts): like `recalled`, with the latest message, never summarized. */
+	excerpts?: string;
 	skills: ActiveSkill[];
 	/** A reply that keeps its reasoning (workflow/context.ts), as the messages without a summary would. */
 	keepReasoningOf?: string;
@@ -64,7 +66,7 @@ export type CompactionDeps<E> = {
 	writeSummary(input: { run: { threadId: string; user: string }; chatModel: string; previous: string | undefined; messages: UIMessage[]; ratio: number }): Effect.Effect<{ text: string; model: string }, E>;
 	modelMessages(
 		thread: UIMessage[],
-		options: { owner: string; modelId: string; recalled: string; skills: ActiveSkill[]; connectors: string; keepReasoningOf?: string },
+		options: { owner: string; modelId: string; recalled: string; skills: ActiveSkill[]; connectors: string; excerpts?: string; keepReasoningOf?: string },
 	): Effect.Effect<ModelMessage[], E>;
 	status(state: CompactionState): Effect.Effect<void, E>;
 	log(message: string): Effect.Effect<void>;
@@ -90,8 +92,8 @@ export function runCompaction<E>(request: CompactRequest, deps: CompactionDeps<E
 	const total = (messages: ModelMessage[]) => addEstimates(estimate(messages), { text: request.envelope, media: 0 }, request.turn ?? { text: 0, media: 0 });
 
 	const messagesWith = (thread: UIMessage[], summary: Summary) => {
-		const { recalled, skills, connectors, keepReasoningOf } = request;
-		if (mode === "start") return deps.modelMessages(withSummary(thread, summary), { owner, modelId, recalled, skills, connectors, keepReasoningOf });
+		const { recalled, skills, connectors, excerpts, keepReasoningOf } = request;
+		if (mode === "start") return deps.modelMessages(withSummary(thread, summary), { owner, modelId, recalled, skills, connectors, excerpts, keepReasoningOf });
 		// Between steps, only the summary message is new: the current turn is already in the prompt, memory and connector notes included.
 		const message = summaryMessage(thread.slice(0, summary.covers), thread.slice(summary.covers), summary);
 		return deps.modelMessages([message], { owner, modelId, recalled: "", skills, connectors: "" });

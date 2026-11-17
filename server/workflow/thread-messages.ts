@@ -13,7 +13,7 @@ import * as Threads from "../threads/Threads.ts";
 import { openAnswersSettled } from "./answered-again.ts";
 import { citationPartText } from "./citations.ts";
 import { addConnectorNote, connectorCallsInHistory } from "./connector-messages.ts";
-import { addRecalledMemory, dropOtherModelsReasoning, trimOldToolResults } from "./context.ts";
+import { addRecalledMemory, addWorkspaceExcerpts, dropOtherModelsReasoning, trimOldToolResults } from "./context.ts";
 import { skillPartText } from "./skills.ts";
 
 /** Who and what a reply's messages are for. */
@@ -24,6 +24,8 @@ export type MessageOptions = {
 	skills: ActiveSkill[];
 	/** The <connectors> note (mcp/catalog-note.ts). Like `recalled`, it goes with the latest message and is never summarized. */
 	connectors: string;
+	/** The <workspace_excerpts> block (workspaces/prompt.ts). Like `recalled`, it goes with the latest message and is never summarized. */
+	excerpts?: string;
 	/** A reply that keeps its reasoning (context.ts, dropOtherModelsReasoning). */
 	keepReasoningOf?: string;
 };
@@ -64,10 +66,10 @@ export const loadThreadContext = Effect.fnUntraced(function* (threadId: string, 
  * (file-context.ts), the skills they chose with $name swapped for their instructions (skills.ts),
  * the reply text they cited marked as a quote (citations.ts), the reasoning of replies
  * another model wrote left out, tool results of earlier turns trimmed, and what memory
- * recalled and the person's connectors added to the person's latest message (context.ts,
- * connector-messages.ts).
+ * recalled, the workspace's excerpts and the person's connectors added to the person's
+ * latest message (context.ts, connector-messages.ts).
  */
-export const modelMessages = Effect.fnUntraced(function* (thread: UIMessage[], { owner, modelId, recalled, skills, connectors, keepReasoningOf }: MessageOptions) {
+export const modelMessages = Effect.fnUntraced(function* (thread: UIMessage[], { owner, modelId, recalled, skills, connectors, excerpts = "", keepReasoningOf }: MessageOptions) {
 	const readsPdf = MODELS.find((model) => model.id === modelId)?.readsPdf ?? false;
 	const pdfAsText = !readsPdf && (yield* Settings.Settings.use((settings) => settings.get)).pdfTextOnServer;
 	const resolved = yield* resolveFileParts(dropOtherModelsReasoning(openAnswersSettled(thread), modelId, keepReasoningOf), owner, { pdfAsText });
@@ -77,5 +79,5 @@ export const modelMessages = Effect.fnUntraced(function* (thread: UIMessage[], {
 			convertDataPart: (part) => skillPartText(part, skills) ?? citationPartText(part),
 		}),
 	);
-	return addConnectorNote(addRecalledMemory(trimOldToolResults(connectorCallsInHistory(messages)), recalled), connectors);
+	return addConnectorNote(addWorkspaceExcerpts(addRecalledMemory(trimOldToolResults(connectorCallsInHistory(messages)), recalled), excerpts), connectors);
 });

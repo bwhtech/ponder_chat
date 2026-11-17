@@ -7,7 +7,7 @@ import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
 import { COMPACTION_MARKER } from "./reply-chunks.ts";
 import type { Continued } from "./runs.ts";
 import type { ThreadContext } from "./thread-messages.ts";
-import type { WorkspaceContext } from "../workspaces/prompt.ts";
+import type { WorkspaceSearchInput, WorkspaceTurn } from "../workspaces/prompt.ts";
 
 /**
  * The chat workflow's steps. Each is recorded in Postgres when it finishes; after a
@@ -35,11 +35,13 @@ export async function loadModelMessages(
 	connectors = "",
 	/** A reply that keeps its reasoning (context.ts). */
 	keepReasoningOf?: string,
+	/** The <workspace_excerpts> block (workspaces/prompt.ts). */
+	excerpts = "",
 ): Promise<ThreadContext> {
 	"use step";
 	const { runStep } = await import("../runtime/step.ts");
 	const { loadThreadContext } = await import("./thread-messages.ts");
-	const context = await runStep(loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, keepReasoningOf }));
+	const context = await runStep(loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, excerpts, keepReasoningOf }));
 	if (context.through) await writeCompactionState(writable, { state: "done", through: context.through });
 	return context;
 }
@@ -89,20 +91,31 @@ export async function recallMemoryStep(threadId: string, owner: string): Promise
 recallMemoryStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 /**
- * The workspace's name and instructions for the system prompt (workspaces/prompt.ts),
- * read again with the person's access, as every read of a workspace is. Null when they
- * can no longer ask in it: the route checked before the run started, so that is a race.
+ * The workspace's part of the turn (workspaces/documents/turn.ts): its name, instructions
+ * and the documents that fit, for the system prompt; the excerpts for the latest message;
+ * the documents that workspace_search reads. Read again with the person's access, as
+ * every read of a workspace is. Null when they can no longer ask in it: the route checked
+ * before the run started, so that is a race.
  */
-export async function workspaceContextStep(workspaceId: string, owner: string): Promise<WorkspaceContext | null> {
+export async function workspaceContextStep(workspaceId: string, owner: string, threadId: string, modelId: string): Promise<WorkspaceTurn | null> {
 	"use step";
 	return contextStep("workspace", `workspace ${workspaceId}`, async () => {
 		const { runStep } = await import("../runtime/step.ts");
 		const Option = await import("effect/Option");
-		const Workspaces = await import("../workspaces/Workspaces.ts");
-		return Option.getOrNull(await runStep(Workspaces.Workspaces.use((workspaces) => workspaces.instructionsFor(owner, workspaceId))));
+		const { workspaceTurn } = await import("../workspaces/documents/turn.ts");
+		return Option.getOrNull(await runStep(workspaceTurn({ owner, workspaceId, threadId, modelId })));
 	});
 }
 workspaceContextStep.maxRetries = CONTEXT_STEP_RETRIES;
+
+/** workspace_search, bound by the workflow to the chat's workspace and the documents in search: the model gives only the query. */
+export async function workspaceSearchStep(input: WorkspaceSearchInput, scope: { owner: string; workspaceId: string; threadId: string; documentIds: string[] }): Promise<string> {
+	"use step";
+	const { runStep } = await import("../runtime/step.ts");
+	const { searchWorkspace } = await import("../workspaces/documents/turn.ts");
+	const { searchResult } = await import("../workspaces/prompt.ts");
+	return searchResult(await runStep(searchWorkspace({ ...scope, query: input.query })));
+}
 
 export async function runPythonStep(input: RunPythonInput, threadId: string, owner: string) {
 	"use step";
