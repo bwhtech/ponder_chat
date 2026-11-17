@@ -1,8 +1,9 @@
 import { reactive, ref } from "vue";
+import type { WorkspaceDocument } from "./documents";
 import type { WorkspaceDetail } from "./store";
 
 /**
- * The workspace dialogs: New workspace, Edit details and Share (WorkspaceDialogs.vue). Their
+ * The workspace dialogs: New workspace, Edit details, Share and a document's Details (WorkspaceDialogs.vue). Their
  * code loads the first time one opens; meanwhile the shell draws the dialog's frame and fields
  * (WorkspaceDialogPlaceholder.vue), as it does for Settings. `request` stays after closing, so
  * the dialog can play its closing transition.
@@ -10,7 +11,8 @@ import type { WorkspaceDetail } from "./store";
 export type WorkspaceDialogRequest =
 	| { kind: "new" }
 	| { kind: "edit"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
-	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void };
+	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
+	| { kind: "document"; workspaceId: string; document: WorkspaceDocument; onChanged: (document: WorkspaceDocument) => void };
 
 /** `serial` goes up with each request, so a dialog opened again starts from its workspace, not from what was typed before. */
 export const workspaceDialog = reactive({ open: false, serial: 0, request: null as WorkspaceDialogRequest | null });
@@ -38,5 +40,6 @@ export const KIND_OPTIONS = [
 export function dialogTitle(request: WorkspaceDialogRequest) {
 	if (request.kind === "new") return "New workspace";
 	if (request.kind === "edit") return "Edit workspace";
+	if (request.kind === "document") return request.document.name;
 	return `Share “${request.workspace.name}”`;
 }

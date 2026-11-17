@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
-import { computed, ref, shallowRef, watch } from "vue";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { ApiError } from "../api";
 import { dialog } from "../dialogs";
 import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
 import { useThreads } from "../threads";
 import { openWorkspaceDialog } from "./dialogs";
+import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
 import WorkspaceAside from "./WorkspaceAside.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
@@ -16,9 +17,9 @@ import { deleteWorkspace, fetchWorkspace, loadWorkspaces, workspaceById, type Wo
 
 /**
  * A workspace (`?w=<id>`): its name and who can use it, the composer, whose new chat is in
- * this workspace, the person's own chats in it, and a side panel with the instructions and
- * "Shared with" (under the chats on a phone). The sidebar's row draws the header at once;
- * the rest fills in when the workspace loads. A workspace the person cannot use is not found.
+ * this workspace, the person's own chats in it, and a side panel with the instructions, the
+ * documents and "Shared with" (under the chats on a phone). The sidebar's row draws the
+ * header at once; the rest fills in when the workspace loads. A workspace the person cannot use is not found.
  *
  * It renders its own header, as the main area's first child, so the hairline under it follows
  * this page's scroller (style.css).
@@ -39,6 +40,7 @@ watch(() => props.id, load, { immediate: true });
 
 async function load() {
 	const mine = ++asked;
+	// No document is Reading now, so the polls stop (below).
 	detail.value = undefined;
 	missing.value = false;
 	loadError.value = "";
@@ -53,6 +55,55 @@ async function load() {
 			void loadWorkspaces();
 		} else loadError.value = (error as Error).message;
 	}
+}
+
+/**
+ * While a document is Reading, the workspace is read again, a little less often each time
+ * (2 s up to 10 s), until none is. A failed poll changes nothing on the page; the next one
+ * tries again. An answer asked for before a change in the side panel is dropped: it may not
+ * have the new document yet.
+ */
+const POLL_FIRST_MS = 2000;
+const POLL_MAX_MS = 10_000;
+let pollTimer: ReturnType<typeof setTimeout> | undefined;
+let pollDelay = POLL_FIRST_MS;
+let changes = 0;
+const reading = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading")));
+watch(reading, (now) => (now ? startPolling() : stopPolling()));
+onBeforeUnmount(stopPolling);
+
+function startPolling() {
+	stopPolling();
+	pollDelay = POLL_FIRST_MS;
+	pollTimer = setTimeout(poll, pollDelay);
+}
+
+function stopPolling() {
+	clearTimeout(pollTimer);
+	pollTimer = undefined;
+}
+
+async function poll() {
+	const mine = asked;
+	const seen = changes;
+	try {
+		const fresh = await fetchWorkspace(props.id);
+		if (mine === asked && seen === changes) detail.value = fresh;
+	} catch {
+		// Offline for a moment: the next poll tries again.
+	}
+	if (mine !== asked || !reading.value) return;
+	pollDelay = Math.min(POLL_MAX_MS, pollDelay * 1.5);
+	pollTimer = setTimeout(poll, pollDelay);
+}
+
+/** An upload, a delete or "Try again" in the side panel. */
+function documentsChanged(documents: WorkspaceDocument[]) {
+	if (!detail.value) return;
+	changes++;
+	detail.value = { ...detail.value, documents };
+	// A new Reading document starts the polls again from the shortest wait.
+	if (reading.value) startPolling();
 }
 
 function edit() {
@@ -110,7 +161,7 @@ function askDelete() {
 				<WorkspaceComposer :workspace-id="id" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
 				<WorkspaceChats :workspace-id="id" @open="emit('openChat', $event)" />
 			</div>
-			<WorkspaceAside :workspace="summary" :detail="detail" @edit="edit" @share="share" />
+			<WorkspaceAside :workspace="summary" :detail="detail" @edit="edit" @share="share" @documents="documentsChanged" />
 		</div>
 	</div>
 </template>

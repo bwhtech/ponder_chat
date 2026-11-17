@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
 import { computed, ref } from "vue";
+import type { WorkspaceDocument } from "./documents";
 import { canEdit, canShare, kindIcon, people, type Member, type WorkspaceDetail, type WorkspaceSummary } from "./store";
+import WorkspaceDocuments from "./WorkspaceDocuments.vue";
 
 /**
- * The workspace page's side panel: the instructions that every chat here follows, and who
- * can use it. Beside the chats on a wide screen, under them on a phone. While the workspace
+ * The workspace page's side panel: the instructions that every chat here follows, its
+ * documents, and who can use it. Beside the chats on a wide screen, under them on a phone. While the workspace
  * loads, the headings and their buttons stay, and skeleton lines stand in for the values.
  */
 const props = defineProps<{ workspace?: WorkspaceSummary; detail?: WorkspaceDetail }>();
-const emit = defineEmits<{ edit: []; share: [] }>();
+const emit = defineEmits<{ edit: []; share: []; documents: [documents: WorkspaceDocument[]] }>();
 
 /** Long instructions show their first lines until asked for all. */
 const LONG = 600;
@@ -45,7 +47,12 @@ const ACCESS_LABELS = { ask: "Can ask", edit: "Can edit" } as const;
 			<p v-else class="text-p-sm text-ink-gray-6">No instructions yet. Chats here answer as other chats do.</p>
 		</section>
 
-		<!-- Documents (the next pull request) go here, between the instructions and "Shared with". -->
+		<WorkspaceDocuments
+			:workspace-id="detail?.id ?? workspace?.id ?? ''"
+			:documents="detail?.documents"
+			:editable="Boolean(workspace && canEdit(workspace))"
+			@changed="emit('documents', $event)"
+		/>
 
 		<section class="space-y-3" aria-labelledby="workspace-shared-heading" data-slot="workspace-sharing">
 			<div class="flex h-7 items-center justify-between">
