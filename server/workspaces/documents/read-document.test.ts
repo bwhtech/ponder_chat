@@ -78,6 +78,19 @@ describe("dropRepeatedLines", () => {
 		);
 	});
 
+	it("keeps headings and lines whose number follows the page but is not a page number", () => {
+		const pages = TOPICS.slice(0, 4).map((topic, index) => ({
+			page: index + 1,
+			markdown: [`## Case ${index + 1}`, `Notes about ${topic}.`, `Day ${index + 1} of the course: check the dose.`, `Review on day ${index + 1} of care`].join("\n"),
+		}));
+		assert.deepStrictEqual(dropRepeatedLines(pages), pages);
+		// A page number at the edge still goes, in each of its shapes.
+		for (const shape of [(page: number) => `Page ${page}`, (page: number) => `Ward notes, ${page} / 4`, (page: number) => `Ward notes - p. ${page}`]) {
+			const numbered = pages.map((page) => ({ ...page, markdown: `${page.markdown}\n${shape(page.page)}` }));
+			assert.deepStrictEqual(dropRepeatedLines(numbered), pages, shape(1));
+		}
+	});
+
 	it("keeps the first copy of a line that repeats word for word at the top of each page", () => {
 		const pages = [1, 2, 3, 4].map((page) => ({ page, markdown: "Take 5 mg daily." }));
 		assert.deepStrictEqual(

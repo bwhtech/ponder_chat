@@ -14,9 +14,11 @@
  * - A line that repeats word for word (marks and spaces aside) at the edge of at least
  *   20% of the pages goes, but the first page with it keeps its copy. The manual's header
  *   lines are on 39% of the pages.
- * - Lines that differ only in their numbers go only when one of the numbers follows the
- *   page ("Pg. 250", "Pg. 251"), on at least 20% of the pages. "Take 5 mg" and "Take 10 mg"
- *   stay.
+ * - Lines that differ only in their numbers go only when one of the numbers is written as
+ *   a page number ("Pg. 250", "Page 7", "250 of 398", "3 / 9") and follows the page, on at
+ *   least 20% of the pages and at least 3. "Take 5 mg" and "Take 10 mg" stay, and so does
+ *   "Day 3 of the course" on page 3. A heading never goes this way: "## Case 1" to
+ *   "## Case 4" at the top of pages 1 to 4 are the document's own.
  * - At the edge, a line that is only the page's own number, or a "---" line, goes too.
  *
  * Table rows are kept: a table header can repeat on purpose.
@@ -28,6 +30,9 @@ const MAX_LINE = 200;
 const MIN_LETTERS = 4;
 /** A thematic break: LiteParse puts one above each page's footer. */
 const RULE = /^(-{3,}|\*{3,}|_{3,})$/;
+const HEADING = /^#{1,6}\s/;
+/** "Pg. 250", "Page 7", "p. 7", "250 of 398", "3 / 9": the page's number is the first. */
+const PAGE_NUMBER = /\b(?:page|pg|p)\.?\s*(\d+)|\b(\d+)\s*(?:of|\/)\s*\d+/gi;
 
 type Page = { page: number | null; markdown: string };
 
@@ -72,9 +77,9 @@ class Boilerplate {
 		}
 	}
 
-	/** Lines that differ only in their numbers, when a number follows the page. */
+	/** Lines that differ only in their numbers, when a page number in them follows the page. */
 	private dropPageNumbered() {
-		const numbered = this.edges.filter((edge) => edge.pageNumber !== null && /\d/.test(edge.text));
+		const numbered = this.edges.filter((edge) => edge.pageNumber !== null && !HEADING.test(edge.text) && pageNumbersIn(edge.text).length > 0);
 		for (const group of groupBy(numbered, (edge) => candidate(edge.text) && plain(edge.text).replace(/\d+/g, "#")).values()) {
 			const paged = followingThePage(group);
 			if (pageCount(paged) >= this.least) for (const edge of paged) this.drop(edge);
@@ -93,7 +98,7 @@ class Boilerplate {
 function followingThePage(group: EdgeLine[]) {
 	const byOffset = new Map<string, EdgeLine[]>();
 	for (const edge of group) {
-		for (const [place, number] of numbersIn(edge.text).entries()) addTo(byOffset, `${place}:${number - edge.pageNumber!}`, edge);
+		for (const [place, number] of pageNumbersIn(edge.text).entries()) addTo(byOffset, `${place}:${number - edge.pageNumber!}`, edge);
 	}
 	let best: EdgeLine[] = [];
 	for (const edges of byOffset.values()) if (pageCount(edges) > pageCount(best)) best = edges;
@@ -122,8 +127,10 @@ function plain(text: string) {
 		.toLowerCase();
 }
 
-function numbersIn(text: string) {
-	return (plain(text).match(/\d+/g) ?? []).map(Number);
+/** The numbers written as page numbers, without HTML and Markdown marks around them. */
+function pageNumbersIn(text: string) {
+	const bare = text.replace(/<[^>]+>/g, " ").replace(/[*_`]/g, "");
+	return [...bare.matchAll(PAGE_NUMBER)].map((match) => Number(match[1] ?? match[2]));
 }
 
 /** Groups by key; a false key leaves the item out. */
