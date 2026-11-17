@@ -3,7 +3,6 @@ import { Button, Skeleton } from "frappe-ui";
 import { useFileViewer } from "frappe-ui-ai-elements";
 import { ref } from "vue";
 import { dialog } from "../dialogs";
-import { count } from "../numbers";
 import { toast } from "../toasts";
 import DocumentRow from "./DocumentRow.vue";
 import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, uploadDocument, type WorkspaceDocument } from "./documents";
@@ -11,7 +10,7 @@ import { openWorkspaceDialog } from "./dialogs";
 import WorkspaceEmptyArea from "./WorkspaceEmptyArea.vue";
 
 /**
- * The workspace's documents, in its side panel, with their count by the heading. Everyone who
+ * The workspace's documents, in its side panel. Everyone who
  * can ask sees each document's name, and its status while it is not Ready, and opens its file
  * by the name. People who can edit also see its size and why it failed, upload (the "Upload
  * documents" area while there are none, then Upload by the heading, or files dropped on the
@@ -105,10 +104,7 @@ function askDelete(document: WorkspaceDocument) {
 <template>
 	<section class="space-y-3" aria-labelledby="workspace-documents-heading" data-slot="workspace-documents">
 		<div class="flex h-7 items-center justify-between">
-			<div class="flex min-w-0 items-baseline gap-2">
-				<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
-				<span v-if="documents?.length" class="text-base tabular-nums text-ink-gray-6" data-slot="document-count">{{ count(documents.length) }}</span>
-			</div>
+			<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
 			<template v-if="editable">
 				<Button v-if="documents?.length" variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" @click="picker?.click()" />
 				<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" />

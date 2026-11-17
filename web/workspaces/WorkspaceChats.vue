@@ -28,11 +28,14 @@ const chats = computed(() => (listLoaded.value && props.workspaceId ? threads.va
 			<li v-for="chat in chats" :key="chat.id">
 				<button
 					type="button"
-					class="flex h-10 w-full items-center gap-3 rounded-4 px-2 text-left transition-colors duration-150 ease-out-strong hover:bg-surface-gray-2 active:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:h-11"
+					class="flex h-10 w-full items-center gap-2.5 rounded-4 px-2 text-left transition-colors duration-150 ease-out-strong hover:bg-surface-gray-2 active:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:h-11"
 					@click="emit('open', chat.id)"
 					@pointerenter="prefetch(chat.id)"
 					@focus="prefetch(chat.id)"
 				>
+					<span class="flex size-5 shrink-0 items-center justify-center" aria-hidden="true">
+						<span class="lucide-message-circle size-4 text-ink-gray-5" />
+					</span>
 					<span class="min-w-0 flex-1 truncate text-base text-ink-gray-8">{{ chat.title }}</span>
 					<span class="shrink-0 text-sm tabular-nums text-ink-gray-6">{{ when(chat.updatedAt) }}</span>
 				</button>

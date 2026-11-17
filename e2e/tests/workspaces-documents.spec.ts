@@ -27,9 +27,8 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 	const tag = person.id.slice(0, 6);
 	const { id, slug } = await createWorkspace(page, `Office handbook ${tag}`);
 	await page.goto(`/?w=${slug}`);
-	// No documents yet: the section is one "Upload documents" area, and no count.
+	// No documents yet: the section is one "Upload documents" area.
 	await expect(documents(page).getByRole("button", { name: "Upload", exact: true })).toHaveCount(0);
-	await expect(documents(page).locator('[data-slot="document-count"]')).toHaveCount(0);
 	await expect(rows(page)).toHaveCount(0);
 
 	await test.step("a file the server can't read, picked from the empty area, shows why", async () => {
@@ -49,8 +48,8 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 		await expect(leaveRow).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
 		await expect(leaveRow).not.toContainText("Reading…");
 		await expect(documents(page).getByRole("alert")).toHaveCount(0);
-		// One document: its count by the heading, and Upload in place of the empty area.
-		await expect(documents(page).locator('[data-slot="document-count"]')).toHaveText("1");
+		// One document: its row, and Upload in place of the empty area.
+		await expect(rows(page)).toHaveCount(1);
 		await expect(documents(page).getByRole("button", { name: "Upload documents" })).toHaveCount(0);
 	});
 
@@ -68,7 +67,7 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 	await test.step("a document too large for the model's window is searched, and the answer quotes its passage", async () => {
 		await page.goto(`/?w=${slug}`);
 		await choose(page, documents(page).getByRole("button", { name: "Upload", exact: true }), textFile("handbook.txt", handbook(permit), "text/plain"));
-		await expect(documents(page).locator('[data-slot="document-count"]')).toHaveText("2");
+		await expect(rows(page)).toHaveCount(2);
 		await expect(row(page, "handbook.txt")).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
 
 		await page.getByRole("button", { name: /^Model:/ }).click();
@@ -124,7 +123,7 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 		await expect(manual).toHaveText("manual.pdf");
 		// Its one button is the name, which opens the file (test 11).
 		await expect(documents(asker.page).getByRole("button")).toHaveText(["manual.pdf"]);
-		await expect(documents(asker.page).locator('[data-slot="document-count"]')).toHaveText("1");
+		await expect(rows(asker.page)).toHaveCount(1);
 		// No instructions, and nothing to add them with: no Instructions.
 		await expect(asker.page.getByRole("region", { name: "Instructions" })).toHaveCount(0);
 		await expect(asker.page.locator('[data-slot="document-picker"]')).toHaveCount(0);
