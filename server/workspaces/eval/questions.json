@@ -1,0 +1,324 @@
+{
+	"documents": [
+		{
+			"file": "nephrology.pdf",
+			"name": "Nephrology manual"
+		},
+		{
+			"file": "obgyn.pdf",
+			"name": "Obstetrics manual"
+		}
+	],
+	"questions": [
+		{
+			"id": "n01",
+			"document": "nephrology.pdf",
+			"pages": [
+				251
+			],
+			"source": "picture",
+			"question": "What is the continuous intraperitoneal dose of cefazolin for CAPD peritonitis?",
+			"answer": "LD 500 mg/L, MD 125 mg/L"
+		},
+		{
+			"id": "n02",
+			"document": "nephrology.pdf",
+			"pages": [
+				251
+			],
+			"source": "picture",
+			"question": "How often is intermittent intraperitoneal vancomycin given for peritonitis, and at what dose?",
+			"answer": "15–30 mg/kg every 5–7 days"
+		},
+		{
+			"id": "n03",
+			"document": "nephrology.pdf",
+			"pages": [
+				251
+			],
+			"source": "picture",
+			"question": "What is the intermittent intraperitoneal dose of gentamicin?",
+			"answer": "0.6 mg/kg daily (254)"
+		},
+		{
+			"id": "n04",
+			"document": "nephrology.pdf",
+			"pages": [
+				252
+			],
+			"source": "picture",
+			"question": "What is the systemic dose of linezolid for PD peritonitis?",
+			"answer": "IV or oral 600 mg BD"
+		},
+		{
+			"id": "n05",
+			"document": "nephrology.pdf",
+			"pages": [
+				252
+			],
+			"source": "picture",
+			"question": "How is caspofungin dosed for fungal peritonitis?",
+			"answer": "IV 70 mg loading, then 50 mg daily"
+		},
+		{
+			"id": "n06",
+			"document": "nephrology.pdf",
+			"pages": [
+				262
+			],
+			"source": "picture",
+			"question": "What oral dose of cephalexin is used for a PD catheter-related infection?",
+			"answer": "500 mg BD to TID"
+		},
+		{
+			"id": "n07",
+			"document": "nephrology.pdf",
+			"pages": [
+				20
+			],
+			"source": "picture",
+			"question": "About how many hemodialysis sessions did the department do in 2022?",
+			"answer": "| 2022 | 35500 |"
+		},
+		{
+			"id": "n08",
+			"document": "nephrology.pdf",
+			"pages": [
+				17
+			],
+			"source": "picture",
+			"question": "About how many out-patient visits did the nephrology OPD have in 2022?",
+			"answer": "| 2022 | 53000 |"
+		},
+		{
+			"id": "n09",
+			"document": "nephrology.pdf",
+			"pages": [
+				285
+			],
+			"source": "picture",
+			"question": "Which vaccine is given at the start of the HLA desensitization workup?",
+			"answer": "Inj Prevnar 13 0.5 cc IM"
+		},
+		{
+			"id": "n10",
+			"document": "nephrology.pdf",
+			"pages": [
+				281
+			],
+			"source": "picture",
+			"question": "For an HCV-positive transplant candidate, what ARFI value counts as normal?",
+			"answer": "ARFI ≤ 1.5"
+		},
+		{
+			"id": "n11",
+			"document": "nephrology.pdf",
+			"pages": [
+				160
+			],
+			"source": "table",
+			"question": "What blood flow is ordered for maintenance hemodialysis?",
+			"answer": "at least 250 ml/min"
+		},
+		{
+			"id": "n12",
+			"document": "nephrology.pdf",
+			"pages": [
+				160
+			],
+			"source": "table",
+			"question": "What is the heparin dose for rigid heparinization during hemodialysis?",
+			"answer": "1000 U bolus + 700 U per hour"
+		},
+		{
+			"id": "n13",
+			"document": "nephrology.pdf",
+			"pages": [
+				175
+			],
+			"source": "table",
+			"question": "What dialysate flow is used for SLED?",
+			"answer": "100 - 200 ml/min"
+		},
+		{
+			"id": "n14",
+			"document": "nephrology.pdf",
+			"pages": [
+				136
+			],
+			"source": "table",
+			"question": "After exposure to an HBsAg-positive patient, what does a health worker with an antibody level between 10 and 100 mIU get?",
+			"answer": "Booster dose of vaccine"
+		},
+		{
+			"id": "n15",
+			"document": "nephrology.pdf",
+			"pages": [
+				249
+			],
+			"source": "text",
+			"question": "How much heparin is added to the PD bag when the effluent is cloudy?",
+			"answer": "heparin 500 to 1000 U/L"
+		},
+		{
+			"id": "n16",
+			"document": "nephrology.pdf",
+			"pages": [
+				250
+			],
+			"source": "text",
+			"question": "How long is anti-fungal prophylaxis continued after PD patients stop antibiotics?",
+			"answer": "continued for one week after stopping antibiotics"
+		},
+		{
+			"id": "n17",
+			"document": "nephrology.pdf",
+			"pages": [
+				175
+			],
+			"source": "text",
+			"question": "What blood flow rate is used for standard plasmapheresis?",
+			"answer": "Blood flow rate = 100 - 150ml/min"
+		},
+		{
+			"id": "n18",
+			"document": "nephrology.pdf",
+			"pages": [
+				138
+			],
+			"source": "text",
+			"question": "What is the hydroxychloroquine regimen for class I and II lupus nephritis?",
+			"answer": "200 mg BD for 3 months and then 200 mg daily"
+		},
+		{
+			"id": "n19",
+			"document": "nephrology.pdf",
+			"pages": [
+				136
+			],
+			"source": "text",
+			"question": "How long are antivirals given to a health worker with a detectable HCV viral load after exposure?",
+			"answer": "12 weeks of directly acting antivirals"
+		},
+		{
+			"id": "o01",
+			"document": "obgyn.pdf",
+			"pages": [
+				110
+			],
+			"source": "picture",
+			"question": "What is the FIGO misoprostol regimen for an incomplete abortion before 13 weeks?",
+			"answer": "600µg po (x1)"
+		},
+		{
+			"id": "o02",
+			"document": "obgyn.pdf",
+			"pages": [
+				110
+			],
+			"source": "picture",
+			"question": "What misoprostol dose does FIGO recommend for pregnancy termination at 13 to 24 weeks?",
+			"answer": "13–24 weeks: 400µg"
+		},
+		{
+			"id": "o03",
+			"document": "obgyn.pdf",
+			"pages": [
+				129
+			],
+			"source": "picture",
+			"question": "What sublingual misoprostol dose is used to treat postpartum hemorrhage?",
+			"answer": "800 µg sublingually"
+		},
+		{
+			"id": "o04",
+			"document": "obgyn.pdf",
+			"pages": [
+				130
+			],
+			"source": "picture",
+			"question": "What blood loss defines postpartum hemorrhage after a cesarean delivery?",
+			"answer": "Cesarean delivery >1L of blood loss"
+		},
+		{
+			"id": "o05",
+			"document": "obgyn.pdf",
+			"pages": [
+				91
+			],
+			"source": "table",
+			"question": "On a heparin infusion, what is done when the PTT is 45 to 54 seconds?",
+			"answer": "40units/kg Bolus"
+		},
+		{
+			"id": "o06",
+			"document": "obgyn.pdf",
+			"pages": [
+				107
+			],
+			"source": "table",
+			"question": "How much insulin is given in labour for a blood glucose of 200 to 300?",
+			"answer": "| 200-300 | 3 (12) |"
+		},
+		{
+			"id": "o07",
+			"document": "obgyn.pdf",
+			"pages": [
+				119
+			],
+			"source": "table",
+			"question": "What cefazolin dose is given before a caesarean delivery to a woman over 100 kg?",
+			"answer": ">100Kg: 2g IV"
+		},
+		{
+			"id": "o08",
+			"document": "obgyn.pdf",
+			"pages": [
+				91
+			],
+			"source": "text",
+			"question": "What is the initial IV heparin bolus for deep vein thrombosis in pregnancy?",
+			"answer": "80 units/kg (rounded to nearest 100) Maximum 7500 units"
+		},
+		{
+			"id": "o09",
+			"document": "obgyn.pdf",
+			"pages": [
+				102
+			],
+			"source": "text",
+			"question": "At what respiratory rate is magnesium sulphate withheld?",
+			"answer": "Respiratory rate falls below 16/min"
+		},
+		{
+			"id": "o10",
+			"document": "obgyn.pdf",
+			"pages": [
+				84
+			],
+			"source": "text",
+			"question": "How long should a needle stick injury be washed?",
+			"answer": "Wash for 10 minute with soap and water"
+		},
+		{
+			"id": "o11",
+			"document": "obgyn.pdf",
+			"pages": [
+				107
+			],
+			"source": "text",
+			"question": "From when is a weekly BPS done for women with GDM?",
+			"answer": "weekly BPS after 36 weeks"
+		},
+		{
+			"id": "o12",
+			"document": "obgyn.pdf",
+			"pages": [
+				71
+			],
+			"source": "text",
+			"question": "Who may stay with a patient admitted to the ward?",
+			"answer": "One female relative to be staying with the patient"
+		}
+	]
+}
