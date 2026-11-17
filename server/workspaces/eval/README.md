@@ -23,6 +23,16 @@ WORKSPACE_EVAL_DIR=~/eval npx tsx server/workspaces/eval/run.ts
 - `--recorded <file>` reads the model's text from another file.
 - `--passages <file>` writes every passage to a JSON file.
 
-## Next
+## Search
 
-When search exists, the script will also index the passages, search with each question, and score the top-8 hit rate: the share of questions with a passage of the right page, holding the answer, in the 8 best results. Run it before and after each change to the chunker, search or the PDF reader, and put the numbers in the pull request.
+With a database in `WORKSPACE_EVAL_DATABASE_URL` (or `TEST_DATABASE_URL`) and `OPENROUTER_API_KEY`, the script also indexes the manuals and searches (`search.ts`). It makes a schema of its own in that database, indexes both manuals there with the real `Indexer` and `PONDER_EMBEDDING_MODEL`, runs each question through the real hybrid search over both manuals, and drops the schema. It never reads `DATABASE_URL`.
+
+It prints the rank of the first passage that answers each question, and the top-8 hit rate: the share of questions with a passage of the right page, holding the answer, in the 8 best results. Run it before and after each change to the chunker, search or the PDF reader, and put the numbers in the pull request.
+
+```sh
+OPENROUTER_API_KEY=... WORKSPACE_EVAL_DATABASE_URL=postgres://... WORKSPACE_EVAL_DIR=~/eval npx tsx server/workspaces/eval/run.ts
+```
+
+| Date | Embedding model | Top-8 hit rate | Embeddings |
+| --- | --- | --- | --- |
+| 17 November 2026 | `google/gemini-embedding-2` | 30/31 (97%): text 9/10, table 7/7, picture 14/14 | $0.049, 1,229 passages |

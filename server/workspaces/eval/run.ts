@@ -1,10 +1,14 @@
 /**
  * Reads the eval manuals with the PDF reader and the chunker, and prints for each question
- * whether a passage of its page holds the answer, and the passages' sizes. Search is not
- * built yet: the next step adds the top-8 hit rate (README.md).
+ * whether a passage of its page holds the answer, and the passages' sizes. With a
+ * database, it also indexes them with the real embedding model and prints the top-8 hit
+ * rate: the share of questions with a passage of the right page, holding the answer, in
+ * the 8 best results of the real hybrid search (search.ts, README.md).
  *
  * Run:
  *   WORKSPACE_EVAL_DIR=<folder with the PDFs> npx tsx server/workspaces/eval/run.ts [options]
+ * With WORKSPACE_EVAL_DATABASE_URL (or TEST_DATABASE_URL) and OPENROUTER_API_KEY set, it
+ * searches too, in a schema of its own that it drops (about $0.05 of embeddings).
  *   --live             read the picture pages with the real model (about $0.06), and save
  *                      its text in WORKSPACE_EVAL_DIR/model-pages.json for the next runs.
  *                      Needs the app's environment: set -a; . ~/.config/ponder-chat/.env; set +a
@@ -22,9 +26,11 @@ import * as ManagedRuntime from "effect/ManagedRuntime";
 import { chunkDocument, TARGET, type Passage } from "../documents/chunk.ts";
 import type { DocumentText } from "../documents/document.ts";
 import type * as PageReader from "../documents/page-reader.ts";
+import { PDF_TYPE, storedPages, storedText } from "../documents/read-document.ts";
 import { readPdf } from "../documents/read-pdf.ts";
 import type * as PdfText from "../../pdf-text.ts";
 import { liveLayer, recordedLayer } from "./layers.ts";
+import { searchAll, TOP, type EvalDocument } from "./search.ts";
 
 type Question = { id: string; document: string; question: string; pages: number[]; answer: string; source: "text" | "table" | "picture" };
 type Questions = { documents: { file: string; name: string }[]; questions: Question[] };
@@ -44,6 +50,7 @@ const passagesFile = option("--passages");
 const { documents, questions } = JSON.parse(readFileSync(new URL("./questions.json", import.meta.url), "utf8")) as Questions;
 
 const passagesOf = new Map<string, Passage[]>();
+const read: EvalDocument[] = [];
 for (const document of documents) {
 	const data = new Uint8Array(readFileSync(join(dir, document.file)));
 	const stem = document.file.replace(/\.pdf$/, "");
@@ -53,24 +60,52 @@ for (const document of documents) {
 		continue;
 	}
 	if (live) saveModelPages(stem, text);
-	const passages = chunkDocument({ name: document.name, pages: text.pages, headings: "numbered" });
+	// Through the stored text, as the Indexer splits it, so the passages' ordinals are the search's.
+	const passages = chunkDocument({ name: document.name, pages: storedPages(PDF_TYPE, storedText(text.pages)), headings: "numbered" });
 	passagesOf.set(document.file, passages);
+	read.push({ ...document, text });
 	const cost = text.pageReads.reduce((sum, page) => sum + (page.costUsd ?? 0), 0);
 	const failed = text.pageReads.filter((page) => !page.ok).length;
 	console.log(`${document.file}: ${text.engine}, ${text.pageCount} pages, ${text.chars} chars, ${text.ms} ms; ${text.pageReads.length} pages to the model (${failed} not read, $${cost.toFixed(4)})`);
 	console.log(`  ${sizes(passages)}`);
 }
 
-console.log("\nid      source   page   passage  answer");
+const databaseUrl = process.env.WORKSPACE_EVAL_DATABASE_URL || process.env.TEST_DATABASE_URL;
+const searched = databaseUrl && process.env.OPENROUTER_API_KEY ? await searchAll(databaseUrl, read, questions) : undefined;
+if (searched) console.log(`\nIndexed ${searched.passages} passages with ${searched.model}; embeddings cost $${searched.costUsd.toFixed(4)}.`);
+else console.log("\nNo search: set WORKSPACE_EVAL_DATABASE_URL (or TEST_DATABASE_URL) and OPENROUTER_API_KEY.");
+
+console.log(`\nid      source   page   passage  answer  top ${TOP}`);
 let found = 0;
+const hits = { all: 0, text: 0, table: 0, picture: 0 };
 for (const question of questions) {
 	const passages = passagesOf.get(question.document) ?? [];
+	const answers = (passage: Passage) => question.pages.some((page) => covers(passages, passage, page)) && normalize(passage.content).includes(normalize(question.answer));
 	const onPage = passages.filter((passage) => question.pages.some((page) => covers(passages, passage, page)));
-	const hit = onPage.some((passage) => normalize(passage.content).includes(normalize(question.answer)));
+	const hit = onPage.some(answers);
 	if (hit) found++;
-	console.log(`${question.id.padEnd(8)}${question.source.padEnd(9)}${question.pages.join(",").padEnd(7)}${(onPage.length ? "yes" : "no").padEnd(9)}${hit ? "yes" : "NO"}`);
+	const rank = searched ? searchRank(question, passages, answers) : undefined;
+	if (rank) {
+		hits.all++;
+		hits[question.source]++;
+	}
+	const top = searched ? (rank ? `#${rank}` : "NO") : "-";
+	console.log(`${question.id.padEnd(8)}${question.source.padEnd(9)}${question.pages.join(",").padEnd(7)}${(onPage.length ? "yes" : "no").padEnd(9)}${(hit ? "yes" : "NO").padEnd(8)}${top}`);
 }
 console.log(`\nAnswer in a passage of its page: ${found}/${questions.length}`);
+if (searched) {
+	const count = (source: Question["source"]) => questions.filter((question) => question.source === source).length;
+	const share = (part: number, whole: number) => `${part}/${whole} (${Math.round((part / whole) * 100)}%)`;
+	console.log(`Top-${TOP} hit rate: ${share(hits.all, questions.length)}; text ${share(hits.text, count("text"))}, table ${share(hits.table, count("table"))}, picture ${share(hits.picture, count("picture"))}`);
+}
+
+/** Where the first passage that answers comes in the question's results, or undefined. */
+function searchRank(question: Question, passages: Passage[], answers: (passage: Passage) => boolean) {
+	const documentId = searched!.documentIds.get(question.document);
+	const results = searched!.found.get(question.id) ?? [];
+	const index = results.findIndex((excerpt) => excerpt.documentId === documentId && passages[excerpt.ordinal] !== undefined && answers(passages[excerpt.ordinal]));
+	return index === -1 ? undefined : index + 1;
+}
 
 if (passagesFile) {
 	writeFileSync(passagesFile, JSON.stringify(Object.fromEntries(passagesOf), null, 1));

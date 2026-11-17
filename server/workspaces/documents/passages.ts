@@ -28,7 +28,7 @@ const K = 60;
 const INSERT_ROWS = 500;
 
 /** A passage that search found, with where it is. */
-export type Excerpt = { documentId: string; document: string; page: number | null; location: string; content: string };
+export type Excerpt = { documentId: string; document: string; ordinal: number; page: number | null; location: string; content: string };
 
 export type SearchRequest = { workspaceId: string; documentIds: ReadonlyArray<string>; model: string; query: string; vector: ReadonlyArray<number>; limit: number };
 
@@ -37,6 +37,7 @@ const CountRow = Schema.Struct({ count: Schema.Number });
 const ExcerptRow = Schema.Struct({
 	document_id: Schema.String,
 	document: Schema.String,
+	ordinal: Schema.Number,
 	page: Schema.NullOr(Schema.Number),
 	location: Schema.String,
 	content: Schema.String,
@@ -122,7 +123,7 @@ export function passageStore(sql: PgClient.PgClient): PassageStore {
 					select id, 1.0 / (${K} + rank) from by_words
 				) ranked group by id
 			)
-			select p.document_id, d.name as document, p.page, p.location, p.content
+			select p.document_id, d.name as document, p.ordinal, p.page, p.location, p.content
 			from fused f join workspace_passages p on p.id = f.id join workspace_documents d on d.id = p.document_id
 			order by f.score desc, p.document_id, p.ordinal limit ${limit}`,
 	});
@@ -154,7 +155,7 @@ export function passageStore(sql: PgClient.PgClient): PassageStore {
 		request.documentIds.length === 0
 			? Effect.succeed([])
 			: decoded(findBest({ ...request, documentIds: [...request.documentIds], words: keywordQuery(request.query), vector: vectorLiteral(request.vector) })).pipe(
-					Effect.map((rows) => rows.map((row): Excerpt => ({ documentId: row.document_id, document: row.document, page: row.page, location: row.location, content: row.content }))),
+					Effect.map((rows) => rows.map((row): Excerpt => ({ documentId: row.document_id, document: row.document, ordinal: row.ordinal, page: row.page, location: row.location, content: row.content }))),
 				);
 
 	return {
