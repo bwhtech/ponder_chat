@@ -1,0 +1,173 @@
+import type * as PgClient from "@effect/sql-pg/PgClient";
+import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import type { SqlError } from "effect/sql/SqlError";
+import * as SqlSchema from "effect/sql/SqlSchema";
+import type * as ObjectStore from "../../files/ObjectStore.ts";
+
+/**
+ * The rows of `workspace_documents`, and the bytes of each document: in the bucket when
+ * one is set up (files/ObjectStore.ts), else in the row. Access is checked by the callers
+ * (Documents.ts, Workspaces.ts); a document is always read with its workspace's id, so an
+ * id from another workspace is never found.
+ */
+export type DocumentStatus = "reading" | "ready" | "failed";
+
+/** A document as the workspace page lists it. */
+export type DocumentSummary = {
+	id: string;
+	name: string;
+	mediaType: string;
+	size: number;
+	status: DocumentStatus;
+	/** Why it failed, for the person; null unless failed. */
+	error: string | null;
+	createdAt: string;
+};
+
+const StatusSchema = Schema.Literals(["reading", "ready", "failed"]);
+
+const DocumentRow = Schema.Struct({
+	id: Schema.String,
+	workspace_id: Schema.String,
+	name: Schema.String,
+	media_type: Schema.String,
+	size: Schema.Number,
+	object_key: Schema.NullOr(Schema.String),
+	status: StatusSchema,
+	error: Schema.NullOr(Schema.String),
+	generation: Schema.Number,
+	added_by: Schema.String,
+	created_at: Schema.Date,
+	has_text: Schema.Boolean,
+});
+export type DocumentRow = typeof DocumentRow.Type;
+
+const BytesRow = Schema.Struct({ data: Schema.NullOr(Schema.Uint8Array) });
+const TextRow = Schema.Struct({ text: Schema.NullOr(Schema.String) });
+const KeyRow = Schema.Struct({ object_key: Schema.NullOr(Schema.String) });
+const GenerationRow = Schema.Struct({ generation: Schema.Number });
+const SizeRow = Schema.Struct({ id: Schema.String, name: Schema.String, chars: Schema.Number });
+const TextOfRow = Schema.Struct({ id: Schema.String, name: Schema.String, text: Schema.String });
+
+const COLUMNS = "id, workspace_id, name, media_type, size, object_key, status, error, generation, added_by, created_at, text is not null as has_text";
+
+export type NewDocument = { id: string; workspaceId: string; name: string; mediaType: string; data: Uint8Array; addedBy: string };
+
+export function documentStore(sql: PgClient.PgClient, objects: ObjectStore.ObjectStore["Service"]): DocumentStore {
+	const decoded = <A, E, R>(effect: Effect.Effect<A, E | Schema.SchemaError, R>) => effect.pipe(Effect.catchTags({ SchemaError: Effect.die }));
+
+	const findAll = SqlSchema.findAll({
+		Request: Schema.String,
+		Result: DocumentRow,
+		execute: (workspaceId) => sql`select ${sql.literal(COLUMNS)} from workspace_documents where workspace_id = ${workspaceId} order by created_at, id`,
+	});
+	const findOne = SqlSchema.findOneOption({
+		Request: Schema.Struct({ workspaceId: Schema.String, documentId: Schema.String }),
+		Result: DocumentRow,
+		execute: ({ workspaceId, documentId }) => sql`select ${sql.literal(COLUMNS)} from workspace_documents where id = ${documentId} and workspace_id = ${workspaceId}`,
+	});
+	const findById = SqlSchema.findOneOption({
+		Request: Schema.String,
+		Result: DocumentRow,
+		execute: (documentId) => sql`select ${sql.literal(COLUMNS)} from workspace_documents where id = ${documentId}`,
+	});
+	const findBytes = SqlSchema.findOneOption({ Request: Schema.String, Result: BytesRow, execute: (id) => sql`select data from workspace_documents where id = ${id}` });
+	const findText = SqlSchema.findOneOption({ Request: Schema.String, Result: TextRow, execute: (id) => sql`select text from workspace_documents where id = ${id}` });
+	const findKeys = SqlSchema.findAll({ Request: Schema.String, Result: KeyRow, execute: (workspaceId) => sql`select object_key from workspace_documents where workspace_id = ${workspaceId}` });
+	const findSizes = SqlSchema.findAll({
+		Request: Schema.String,
+		Result: SizeRow,
+		execute: (workspaceId) => sql`
+			select id, name, length(text)::int as chars from workspace_documents
+			where workspace_id = ${workspaceId} and status = 'ready' and text is not null order by created_at, id`,
+	});
+	const findTexts = SqlSchema.findAll({
+		Request: Schema.Array(Schema.String),
+		Result: TextOfRow,
+		execute: (ids) => sql`select id, name, text from workspace_documents where id = any(${ids}) and text is not null order by created_at, id`,
+	});
+	const restartWhere = SqlSchema.findOneOption({
+		Request: Schema.Struct({ documentId: Schema.String, from: Schema.Array(StatusSchema) }),
+		Result: GenerationRow,
+		execute: ({ documentId, from }) => sql`
+			update workspace_documents set status = 'reading', error = null, generation = generation + 1
+			where id = ${documentId} and status = any(${from}) returning generation`,
+	});
+
+	/** Deletes the objects; a failure is logged, never the key: the rows are gone already, and an object left over harms no one. */
+	const removeObjects = (keys: ReadonlyArray<string>) =>
+		Effect.forEach(keys, (key) => objects.remove(key).pipe(Effect.catchTags({ ObjectStoreError: (error) => Effect.logWarning("workspace documents: could not delete an object:", error.message) })), {
+			concurrency: 4,
+			discard: true,
+		});
+
+	return {
+		list: (workspaceId: string) => decoded(findAll(workspaceId)).pipe(Effect.map((rows) => rows.map(summaryOf))),
+		find: (workspaceId: string, documentId: string) => decoded(findOne({ workspaceId, documentId })),
+		byId: (documentId: string) => decoded(findById(documentId)),
+
+		/** Stores the bytes, then the row. The caller adds the first log row in the same transaction. */
+		create: Effect.fnUntraced(function* (document: NewDocument) {
+			const key = objects.enabled ? `workspaces/${document.workspaceId}/${document.id}` : null;
+			if (key) yield* objects.put(key, document.data, document.mediaType);
+			yield* sql`
+				insert into workspace_documents (id, workspace_id, name, media_type, size, object_key, data, added_by)
+				values (${document.id}, ${document.workspaceId}, ${document.name}, ${document.mediaType}, ${document.data.length}, ${key},
+					${key ? null : document.data}, ${document.addedBy})`;
+		}),
+
+		bytes: Effect.fnUntraced(function* (row: DocumentRow) {
+			if (row.object_key) return yield* objects.get(row.object_key);
+			const found = yield* decoded(findBytes(row.id));
+			return Option.flatMap(found, (bytes) => Option.fromNullOr(bytes.data)).pipe(Option.map((data) => Buffer.from(data)));
+		}),
+
+		text: (documentId: string) => decoded(findText(documentId)).pipe(Effect.map((row) => Option.flatMap(row, (found) => Option.fromNullOr(found.text)))),
+		saveText: (documentId: string, text: string) => sql`update workspace_documents set text = ${text} where id = ${documentId}`.pipe(Effect.asVoid),
+
+		/** The ready documents with text, and their length, oldest first. */
+		readySizes: (workspaceId: string) => decoded(findSizes(workspaceId)),
+		texts: (ids: ReadonlyArray<string>) => (ids.length ? decoded(findTexts(ids)) : Effect.succeed([])),
+
+		/** Starts a new indexing run: "Reading", and its generation. None when the status is not one of `from`. */
+		restart: (documentId: string, from: ReadonlyArray<DocumentStatus>) => decoded(restartWhere({ documentId, from })).pipe(Effect.map(Option.map((row) => row.generation))),
+
+		/** The end of an indexing run, unless a newer run took over. */
+		settle: (documentId: string, generation: number, status: Exclude<DocumentStatus, "reading">, error: string | null) =>
+			sql`update workspace_documents set status = ${status}, error = ${error} where id = ${documentId} and generation = ${generation}`.pipe(Effect.asVoid),
+
+		remove: Effect.fnUntraced(function* (row: DocumentRow) {
+			yield* sql`delete from workspace_documents where id = ${row.id}`;
+			if (row.object_key) yield* removeObjects([row.object_key]);
+		}),
+
+		/** All of a workspace's documents: their passages and logs go with them. */
+		removeAll: Effect.fnUntraced(function* (workspaceId: string) {
+			const keys = (yield* decoded(findKeys(workspaceId))).flatMap((row) => (row.object_key ? [row.object_key] : []));
+			yield* sql`delete from workspace_documents where workspace_id = ${workspaceId}`;
+			yield* removeObjects(keys);
+		}),
+	};
+}
+
+export type DocumentStore = {
+	readonly list: (workspaceId: string) => Effect.Effect<DocumentSummary[], SqlError>;
+	readonly find: (workspaceId: string, documentId: string) => Effect.Effect<Option.Option<DocumentRow>, SqlError>;
+	readonly byId: (documentId: string) => Effect.Effect<Option.Option<DocumentRow>, SqlError>;
+	readonly create: (document: NewDocument) => Effect.Effect<void, SqlError | ObjectStore.ObjectStoreError>;
+	readonly bytes: (row: DocumentRow) => Effect.Effect<Option.Option<Buffer>, SqlError | ObjectStore.ObjectStoreError>;
+	readonly text: (documentId: string) => Effect.Effect<Option.Option<string>, SqlError>;
+	readonly saveText: (documentId: string, text: string) => Effect.Effect<void, SqlError>;
+	readonly readySizes: (workspaceId: string) => Effect.Effect<ReadonlyArray<typeof SizeRow.Type>, SqlError>;
+	readonly texts: (ids: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<typeof TextOfRow.Type>, SqlError>;
+	readonly restart: (documentId: string, from: ReadonlyArray<DocumentStatus>) => Effect.Effect<Option.Option<number>, SqlError>;
+	readonly settle: (documentId: string, generation: number, status: Exclude<DocumentStatus, "reading">, error: string | null) => Effect.Effect<void, SqlError>;
+	readonly remove: (row: DocumentRow) => Effect.Effect<void, SqlError>;
+	readonly removeAll: (workspaceId: string) => Effect.Effect<void, SqlError>;
+};
+
+export function summaryOf(row: DocumentRow): DocumentSummary {
+	return { id: row.id, name: row.name, mediaType: row.media_type, size: row.size, status: row.status, error: row.error, createdAt: row.created_at.toISOString() };
+}

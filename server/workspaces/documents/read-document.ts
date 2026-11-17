@@ -1,8 +1,8 @@
 import * as Effect from "effect/Effect";
 import type { HeadingRule } from "./markdown-blocks.ts";
 import { delimitedToMarkdown } from "./csv.ts";
-import { totalChars, type DocumentText } from "./document.ts";
-import { readPdf } from "./read-pdf.ts";
+import { totalChars, type DocumentPage, type DocumentText } from "./document.ts";
+import { pdfTextPages, readPdf } from "./read-pdf.ts";
 
 /**
  * Reads a document of a workspace into Markdown pages: a PDF with read-pdf.ts, and the
@@ -19,6 +19,22 @@ export const readDocument = (mediaType: string, data: Uint8Array) => (mediaType 
  */
 export function headingRule(mediaType: string): HeadingRule {
 	return mediaType === PDF_TYPE ? "numbered" : "levels";
+}
+
+/**
+ * The text kept in `workspace_documents.text`: a PDF's pages each start with
+ * "--- Page N ---", as pdf-text.ts writes them, so the chunker gets the pages back and a
+ * model that reads the whole document can name a page. Postgres text can't hold NUL.
+ */
+export function storedText(pages: ReadonlyArray<DocumentPage>) {
+	const text = pages.map((page) => (page.page === null ? page.markdown : `--- Page ${page.page} ---\n${page.markdown}`)).join("\n\n");
+	return text.replaceAll("\0", "");
+}
+
+/** The pages of a stored text. */
+export function storedPages(mediaType: string, text: string): DocumentPage[] {
+	if (mediaType === PDF_TYPE) return pdfTextPages(text);
+	return text ? [{ page: null, markdown: text }] : [];
 }
 
 /** A text document: one page, no page number, no model calls. Not an Effect: it does no I/O. */

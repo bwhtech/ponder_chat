@@ -25,12 +25,12 @@ import * as PonderConfig from "../config.ts";
  * reached (the cause). Not the bucket's answer, which can name the file's key.
  */
 export class ObjectStoreError extends Schema.TaggedError<ObjectStoreError>()("ObjectStoreError", {
-	operation: Schema.Literals(["put", "get"]),
+	operation: Schema.Literals(["put", "get", "delete"]),
 	status: Schema.optional(Schema.Number),
 	cause: Schema.optional(Schema.Defect()),
 }) {
 	override get message() {
-		const what = this.operation === "put" ? "stored" : "read";
+		const what = { put: "stored", get: "read", delete: "deleted" }[this.operation];
 		return this.status === undefined ? `The file could not be ${what}.` : `The file could not be ${what} (${this.status}).`;
 	}
 }
@@ -43,6 +43,8 @@ export class ObjectStore extends Context.Service<
 		readonly put: (key: string, data: Uint8Array, contentType: string) => Effect.Effect<void, ObjectStoreError>;
 		/** The object's bytes, or none when it is not there. */
 		readonly get: (key: string) => Effect.Effect<Option.Option<Buffer>, ObjectStoreError>;
+		/** Deletes the object. One that is not there is no error. */
+		readonly remove: (key: string) => Effect.Effect<void, ObjectStoreError>;
 	}
 >()("ponder/files/ObjectStore") {}
 
@@ -85,7 +87,18 @@ const make = Effect.gen(function* () {
 		return Option.some(Buffer.from(yield* Effect.tryPromise({ try: () => response.arrayBuffer(), catch: failed })));
 	});
 
-	return ObjectStore.of({ enabled: Option.isSome(store), put, get });
+	const remove = Effect.fn("ObjectStore.remove")(function* (key: string) {
+		const found = yield* bucket;
+		const response = yield* Effect.tryPromise({
+			try: (signal) => found.client.fetch(urlOf(found, key), { method: "DELETE", signal }),
+			catch: (cause) => new ObjectStoreError({ operation: "delete", cause }),
+		});
+		yield* Effect.promise(() => response.body?.cancel() ?? Promise.resolve());
+		// S3 answers 204 for a key that is not there too.
+		if (!response.ok && response.status !== 404) return yield* new ObjectStoreError({ operation: "delete", status: response.status });
+	});
+
+	return ObjectStore.of({ enabled: Option.isSome(store), put, get, remove });
 });
 
 export const layer = Layer.effect(ObjectStore, make);

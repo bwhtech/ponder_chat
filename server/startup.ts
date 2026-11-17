@@ -27,6 +27,7 @@ import * as ApprovalUses from "./workflow/approval-uses.ts";
 import * as ThreadRuns from "./workflow/runs.ts";
 import * as WebBuild from "./web-build.ts";
 import * as OpenRouter from "./openrouter/OpenRouter.ts";
+import * as Documents from "./workspaces/documents/Documents.ts";
 import * as Workspaces from "./workspaces/Workspaces.ts";
 
 /**
@@ -53,6 +54,12 @@ export async function startup() {
 	const { getWorld } = await import("workflow/runtime");
 	const world = await getWorld();
 	await world.start?.();
+	// Once the worker runs: documents whose passages another embedding model made are indexed again.
+	await runPromise(
+		Documents.Documents.use((documents) => documents.reindexOutdated).pipe(
+			Effect.catchTags({ SqlError: (error) => Effect.logError("workspace documents: could not check for documents to index again:", sqlMessage(error)) }),
+		),
+	);
 	// Loaded here: replies.ts, which the sweep runs, loads the workflow.
 	const { sweeps } = await import("./workflow/sweep.ts");
 	const sweeping = runtime().runFork(sweeps);

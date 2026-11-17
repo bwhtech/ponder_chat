@@ -1,21 +1,34 @@
 import { type Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import * as Effect from "effect/Effect";
 import { z } from "zod";
 import type { SignedInEnv } from "../auth.ts";
+import { MAX_FILE_BYTES } from "../files.ts";
 import * as Accounts from "../people/Accounts.ts";
+import { limitPerPerson } from "../rate-limit.ts";
 import { route } from "../runtime/route.ts";
 import { validate } from "../validate.ts";
+import * as Documents from "./documents/Documents.ts";
 import * as Workspaces from "./Workspaces.ts";
 
 /**
- * /api/workspaces and /api/people (Workspaces.ts). A workspace the person cannot use
- * answers 404, never 403, so an answer does not show that it exists. A person who can use
- * it, but not for this, gets 403 with a message the page can show.
+ * /api/workspaces and /api/people (Workspaces.ts, documents/Documents.ts). A workspace
+ * the person cannot use answers 404, never 403, so an answer does not show that it
+ * exists. A person who can use it, but not for this, gets 403 with a message the page
+ * can show. A document that is not in the workspace is a 404 too.
  */
 type Env = SignedInEnv;
 
 const actorOf = (c: Context<Env>): Workspaces.Actor => ({ id: c.get("user").id, email: c.get("user").email });
 const workspaces = <A, E>(use: (service: Workspaces.Workspaces["Service"]) => Effect.Effect<A, E>) => Workspaces.Workspaces.use(use);
+const documents = <A, E>(use: (service: Documents.Documents["Service"]) => Effect.Effect<A, E>) => Documents.Documents.use(use);
+
+// The same limits as a chat attachment (app.ts).
+const uploadLimit = bodyLimit({
+	maxSize: MAX_FILE_BYTES + 64 * 1024,
+	onError: (c) => c.json({ error: "That file is larger than 10 MB." }, 413),
+});
+const perPerson = limitPerPerson("upload", (c: Context<Env>) => c.get("user").id);
 
 /** A JSON body that fits the schema, or a 400 with the first problem. */
 const body = <Schema extends z.ZodType>(schema: Schema) => validate("json", schema, { error: "Check the values and try again." });
@@ -40,8 +53,9 @@ const sharingBody = z.object({
 // A repeated or odd query value is ignored, not refused.
 const peopleQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
 
-const notFound = (_: Workspaces.WorkspaceNotFound, c: Context) => c.json({ error: "Not found" }, 404);
+const notFound = (_: Workspaces.WorkspaceNotFound | Documents.DocumentNotFound, c: Context) => c.json({ error: "Not found" }, 404);
 const refused = (error: Workspaces.WorkspaceRefused, c: Context) => c.json({ error: error.message }, 403);
+const documentErrors = { WorkspaceNotFound: notFound, WorkspaceRefused: refused, DocumentNotFound: notFound } as const;
 
 export const workspacesApi = new Hono<Env>()
 	// The sidebar's list. Also in the chat page's boot data (boot-page.ts).
@@ -78,6 +92,36 @@ export const workspacesApi = new Hono<Env>()
 		route(c, Effect.map(workspaces((service) => service.remove(actorOf(c), c.req.param("id"))), () => c.json({ ok: true })), {
 			WorkspaceNotFound: notFound,
 			WorkspaceRefused: refused,
+		}),
+	)
+
+	// A document: the form's `file`, read and indexed in the background. Answers at once, with the document "reading".
+	// The upload is a form, read by the route: a form validator would turn "too large" (uploadLimit) into a 400.
+	.post("/:id/documents", perPerson, uploadLimit, async (c) => {
+		const form = await c.req.formData();
+		const file = form.get("file");
+		if (!(file instanceof File)) return c.json({ error: "No file in the upload." }, 400);
+		return route(c, Effect.map(documents((service) => service.upload(actorOf(c), c.req.param("id"), file)), (document) => c.json({ document }, 201)), {
+			WorkspaceNotFound: notFound,
+			WorkspaceRefused: refused,
+			DocumentRefused: (error, c) => c.json({ error: Documents.refusalText(file.name, error) }, 400),
+		});
+	})
+
+	.delete("/:id/documents/:doc", (c) =>
+		route(c, Effect.map(documents((service) => service.remove(actorOf(c), c.req.param("id"), c.req.param("doc"))), () => c.json({ ok: true })), documentErrors),
+	)
+
+	// The indexing log, for the Details view: people who can edit only.
+	.get("/:id/documents/:doc/log", (c) =>
+		route(c, Effect.map(documents((service) => service.log(actorOf(c), c.req.param("id"), c.req.param("doc"))), (log) => c.json(log)), documentErrors),
+	)
+
+	// "Try again", for a document that failed.
+	.post("/:id/documents/:doc/retry", (c) =>
+		route(c, Effect.map(documents((service) => service.retry(actorOf(c), c.req.param("id"), c.req.param("doc"))), (document) => c.json({ document })), {
+			...documentErrors,
+			DocumentNotFailed: (error, c) => c.json({ error: error.message }, 409),
 		}),
 	);
 

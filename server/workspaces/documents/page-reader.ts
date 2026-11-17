@@ -83,7 +83,7 @@ const make = Effect.gen(function* () {
 	const client = yield* HttpClient.HttpClient;
 	const endpoint = openRouter.url("v1/chat/completions");
 
-	// Per attempt: the span is PageReader.read's.
+	// Per attempt: the span is read's (workspace.page-read).
 	const attempt = Effect.fnUntraced(function* (request: PageRequest) {
 		const key = yield* keys.key.pipe(
 			Effect.catchTags({
@@ -105,7 +105,8 @@ const make = Effect.gen(function* () {
 		return attemptOf(answer.success.status, answer.success.body);
 	});
 
-	const read = Effect.fn("PageReader.read")(function* (request: PageRequest) {
+	// One span for each page, under the indexing run's workspace.parse (docs/workspaces-plan.md, "Indexing log").
+	const read = Effect.fn("workspace.page-read")(function* (request: PageRequest) {
 		const started = yield* Clock.currentTimeMillis;
 		const attempts: Attempt[] = [];
 		for (let tries = 0; tries < MAX_ATTEMPTS; tries++) {

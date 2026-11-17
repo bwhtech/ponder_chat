@@ -35,6 +35,10 @@ import * as ChatModels from "../workflow/model.ts";
 import * as Replies from "../workflow/replies.ts";
 import * as ThreadRuns from "../workflow/runs.ts";
 import * as WorkflowRuns from "../workflow/WorkflowRuns.ts";
+import * as Documents from "../workspaces/documents/Documents.ts";
+import * as Indexer from "../workspaces/documents/Indexer.ts";
+import * as IndexRuns from "../workspaces/documents/IndexRuns.ts";
+import * as PageReader from "../workspaces/documents/page-reader.ts";
 import * as Workspaces from "../workspaces/Workspaces.ts";
 import * as Database from "./Database.ts";
 import * as Http from "./Http.ts";
@@ -46,8 +50,8 @@ import * as Http from "./Http.ts";
  * Tracing and the logger come last, so every layer above, and every effect the runtime
  * runs, logs and traces through them.
  */
-export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer).pipe(
-	Layer.provideMerge(Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer, Workspaces.layer)),
+export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer, Documents.layer).pipe(
+	Layer.provideMerge(Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer, Workspaces.layer, Indexer.layer)),
 	Layer.provideMerge(
 		Layer.mergeAll(
 			Threads.layer,
@@ -66,6 +70,8 @@ export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer).pipe(
 			ThreadRuns.layer,
 			ApprovalUses.layer,
 			WorkflowRuns.layer,
+			PageReader.layer,
+			IndexRuns.layer,
 		),
 	),
 	Layer.provideMerge(Layer.mergeAll(Models.layer, OpenRouterKey.layer, Runs.layer)),

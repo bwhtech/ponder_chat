@@ -26,7 +26,7 @@ export const URL_PREFIX = "/api/files/";
 /** What the model can read, by media type. Everything else is refused at upload. */
 const BINARY_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]);
 export const TEXT_TYPES = new Set(["text/plain", "text/csv", "text/markdown", "application/json", "text/tab-separated-values"]);
-const TEXT_EXTENSIONS: Record<string, string> = { csv: "text/csv", tsv: "text/tab-separated-values", txt: "text/plain", md: "text/markdown", json: "application/json" };
+export const TEXT_EXTENSIONS: Record<string, string> = { csv: "text/csv", tsv: "text/tab-separated-values", txt: "text/plain", md: "text/markdown", json: "application/json" };
 const SPREADSHEET = /\.(xlsx|xls|ods)$/i;
 /** Spreadsheets only Python can read, so they are taken only while it is on. */
 export const SPREADSHEET_TYPES: Record<string, string> = {

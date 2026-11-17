@@ -113,6 +113,30 @@ export function endReplyTrace(run: { runId: string; threadId: string; model: str
 	root.end();
 }
 
+/**
+ * Sends the root span of a document's indexing run (workspaces/documents/index-workflow.ts),
+ * named `workspace.index`. Its steps ran inside the trace that flow-middleware.ts gives every
+ * workflow run, as a reply's do, so they are its children. Ids and counts only.
+ */
+export function endIndexTrace(run: { runId: string; outcome: "ready" | "failed" | "gone"; passages?: number }) {
+	const state = tracingState();
+	if (!state) return;
+	const root = state.ids.withIds({ ...replyIds(run.runId), samplingDecision: 2 }, () =>
+		tracer.startSpan(
+			"workspace.index",
+			{
+				kind: SpanKind.INTERNAL,
+				root: true,
+				startTime: runStartTime(run.runId),
+				attributes: defined({ "workflow.run.id": run.runId, "ponder.outcome": run.outcome, "ponder.passages": run.passages }),
+			},
+			ROOT_CONTEXT,
+		),
+	);
+	if (run.outcome === "failed") root.setStatus({ code: SpanStatusCode.ERROR });
+	root.end();
+}
+
 /** When the run started: Workflow's run ids are `wrun_` and a ULID, whose first 10 characters are the time in ms. */
 export function runStartTime(runId: string): number | undefined {
 	const ulid = runId.replace(/^wrun_/, "").toUpperCase();
