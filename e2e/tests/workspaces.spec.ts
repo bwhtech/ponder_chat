@@ -8,7 +8,8 @@ import { createWorkspace, newPerson } from "../workspaces.ts";
  * instructions and shares it; the people in it ask with those instructions; nobody else can
  * find it; chats stay their writers' own; and a person who is removed can read their chat
  * but not send in it. An admin's workspace for everyone shows for everyone. The owner renames
- * a workspace by its title, and adds or edits its instructions from their own section.
+ * a workspace by its title, and adds or edits its instructions from their own section. A person
+ * who can only ask sees no controls there, and no empty sections.
  *
  * The fake model echoes the first line of a workspace's instructions (fake/server.ts), so a
  * reply shows that they reached the model.
@@ -69,6 +70,8 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(b.page.getByRole("button", { name: "Rename", exact: true })).toHaveCount(0);
 		await expect(instructionsSection(b.page)).toContainText(marker);
 		await expect(instructionsSection(b.page).getByRole("button")).toHaveCount(0);
+		// No documents, and nothing to add them with: no Documents.
+		await expect(aside(b.page).locator('[data-slot="workspace-documents"]')).toHaveCount(0);
 		// No chat of B's in it yet: no "Your chats".
 		await expect(b.page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
 
@@ -208,16 +211,21 @@ test("the owner renames a workspace by its title, and adds and edits its instruc
 		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
 	});
 
-	await test.step("Add opens the instructions on their own, and Edit opens them again", async () => {
-		await instructionsSection(page).getByRole("button", { name: "Add", exact: true }).click();
+	await test.step("Add instructions opens them on their own; Edit and their lines open them again", async () => {
 		const dialog = page.getByRole("dialog", { name: "Instructions" });
+		await instructionsSection(page).getByRole("button", { name: "Add instructions" }).click();
 		await expect(dialog.getByLabel("Instructions")).toBeFocused();
 		await expect(dialog.getByLabel("Name")).toHaveCount(0);
 		await dialog.getByLabel("Instructions").fill(first);
 		await dialog.getByRole("button", { name: "Save" }).click();
 		await expect(dialog).toHaveCount(0);
 		await expect(aside(page).getByText(first)).toBeVisible();
-		await expect(instructionsSection(page).getByRole("button", { name: "Add", exact: true })).toHaveCount(0);
+		await expect(instructionsSection(page).getByRole("button", { name: "Add instructions" })).toHaveCount(0);
+
+		await aside(page).getByText(first).click();
+		await expect(dialog.getByLabel("Instructions")).toHaveValue(first);
+		await dialog.getByRole("button", { name: "Cancel" }).click();
+		await expect(dialog).toHaveCount(0);
 
 		await instructionsSection(page).getByRole("button", { name: "Edit", exact: true }).click();
 		await expect(dialog.getByLabel("Instructions")).toHaveValue(first);

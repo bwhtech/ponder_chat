@@ -3,22 +3,24 @@ import { Button, Skeleton } from "frappe-ui";
 import { useFileViewer } from "frappe-ui-ai-elements";
 import { ref } from "vue";
 import { dialog } from "../dialogs";
+import { count } from "../numbers";
 import { toast } from "../toasts";
 import DocumentRow from "./DocumentRow.vue";
 import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, uploadDocument, type WorkspaceDocument } from "./documents";
 import { openWorkspaceDialog } from "./dialogs";
+import WorkspaceEmptyArea from "./WorkspaceEmptyArea.vue";
 
 /**
- * The workspace's documents, in its side panel. Everyone who can ask sees each document's
- * name, and its status while it is not Ready, and opens its file by the name. People who can edit also see its size and why
- * it failed, upload (the button, or files dropped on the panel: WorkspaceAside.vue calls
- * `upload`), delete, open its Details (the indexing log) and "Try again" a document that
- * failed. The file picker
- * offers only the types the server reads; a file it refuses gets the server's reason. The
- * page polls while one is Reading (WorkspacePage.vue); `changed` hands it the new list
- * after each change here.
+ * The workspace's documents, in its side panel, with their count by the heading. Everyone who
+ * can ask sees each document's name, and its status while it is not Ready, and opens its file
+ * by the name. People who can edit also see its size and why it failed, upload (the "Upload
+ * documents" area while there are none, then Upload by the heading, or files dropped on the
+ * panel: WorkspaceAside.vue calls `upload` and sets `dropping`), delete, open its Details (the
+ * indexing log) and "Try again" a document that failed. The file picker offers only the types
+ * the server reads; a file it refuses gets the server's reason. The page polls while one is
+ * Reading (WorkspacePage.vue); `changed` hands it the new list after each change here.
  */
-const props = defineProps<{ workspaceId: string; documents?: WorkspaceDocument[]; editable: boolean }>();
+const props = defineProps<{ workspaceId: string; documents?: WorkspaceDocument[]; editable: boolean; dropping: boolean }>();
 const emit = defineEmits<{ changed: [documents: WorkspaceDocument[]] }>();
 
 const picker = ref<HTMLInputElement>();
@@ -103,9 +105,12 @@ function askDelete(document: WorkspaceDocument) {
 <template>
 	<section class="space-y-3" aria-labelledby="workspace-documents-heading" data-slot="workspace-documents">
 		<div class="flex h-7 items-center justify-between">
-			<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
+			<div class="flex min-w-0 items-baseline gap-2">
+				<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
+				<span v-if="documents?.length" class="text-base tabular-nums text-ink-gray-6" data-slot="document-count">{{ count(documents.length) }}</span>
+			</div>
 			<template v-if="editable">
-				<Button variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" :disabled="!documents" @click="picker?.click()" />
+				<Button v-if="documents?.length" variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" @click="picker?.click()" />
 				<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" />
 			</template>
 		</div>
@@ -120,20 +125,40 @@ function askDelete(document: WorkspaceDocument) {
 			</li>
 		</ul>
 
-		<!-- Pulled out by the rows' padding, so the hover background reaches past the text, as in the chats. -->
-		<ul v-else-if="documents.length" class="-mx-2 space-y-1" data-slot="document-list">
-			<DocumentRow
-				v-for="document in documents"
-				:key="document.id"
-				:document="document"
-				:editable="editable"
-				:retrying="retrying.has(document.id)"
-				@open="open(document)"
-				@details="details(document)"
-				@retry="retry(document)"
-				@delete="askDelete(document)"
+		<div v-else class="relative">
+			<WorkspaceEmptyArea
+				v-if="!documents.length"
+				icon="lucide-upload"
+				label="Upload documents"
+				:busy="uploading > 0"
+				data-slot="document-upload-area"
+				@click="picker?.click()"
 			/>
-		</ul>
+			<!-- Pulled out by the rows' padding, so the hover background reaches past the text, as in the chats. -->
+			<ul v-else class="-mx-2 space-y-1" data-slot="document-list">
+				<DocumentRow
+					v-for="document in documents"
+					:key="document.id"
+					:document="document"
+					:editable="editable"
+					:retrying="retrying.has(document.id)"
+					@open="open(document)"
+					@details="details(document)"
+					@retry="retry(document)"
+					@delete="askDelete(document)"
+				/>
+			</ul>
+			<!-- Files dragged over the panel: the empty area says so where its label was; over the list, in the middle. -->
+			<div
+				v-if="dropping"
+				class="pointer-events-none absolute inset-0 flex items-center gap-2 rounded-4 border border-outline-gray-3 bg-surface-gray-2 px-3 text-base text-ink-gray-8"
+				:class="{ 'justify-center': documents.length }"
+				data-slot="document-drop"
+				aria-hidden="true"
+			>
+				<span class="lucide-upload size-4 shrink-0" aria-hidden="true" />Drop to upload
+			</div>
+		</div>
 
 		<ul v-if="errors.length" class="space-y-1" role="alert" data-slot="document-upload-errors">
 			<li v-for="error in errors" :key="error" class="break-words text-p-sm text-ink-red-6">{{ error }}</li>

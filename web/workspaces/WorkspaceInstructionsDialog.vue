@@ -6,8 +6,9 @@ import { dialogTitle, INSTRUCTIONS_PLACEHOLDER, workspaceDialog, type WorkspaceD
 import { updateWorkspace } from "./store";
 
 /**
- * A workspace's instructions, on their own: from "Add" by the empty Instructions, or "Edit"
- * by the filled ones. Saving changes only the instructions; empty ones clear them.
+ * A workspace's instructions, on their own: from "Add instructions" while there are none, or
+ * Edit and the instructions' lines once there are (WorkspaceInstructions.vue).
+ * Saving changes only the instructions; empty ones clear them.
  */
 const props = defineProps<{ request: Extract<WorkspaceDialogRequest, { kind: "instructions" }> }>();
 const open = computed({ get: () => workspaceDialog.open, set: (value) => (workspaceDialog.open = value) });

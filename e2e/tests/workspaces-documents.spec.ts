@@ -1,8 +1,8 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import type { ReceivedCall } from "../fake/script.ts";
 import { chat, expect, test } from "../fixtures.ts";
 import { scanPdf, textPdf } from "../pdfs.ts";
-import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady } from "../workspaces.ts";
+import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady, type Upload } from "../workspaces.ts";
 
 /**
  * Workspace documents (docs/workspaces-plan.md, "Tests", 7 to 9): an editor uploads a document,
@@ -27,12 +27,13 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 	const tag = person.id.slice(0, 6);
 	const { id, slug } = await createWorkspace(page, `Office handbook ${tag}`);
 	await page.goto(`/?w=${slug}`);
-	// No documents yet: the section offers Upload.
-	await expect(documents(page).getByRole("button", { name: "Upload" })).toBeEnabled();
+	// No documents yet: the section is one "Upload documents" area, and no count.
+	await expect(documents(page).getByRole("button", { name: "Upload", exact: true })).toHaveCount(0);
+	await expect(documents(page).locator('[data-slot="document-count"]')).toHaveCount(0);
 	await expect(rows(page)).toHaveCount(0);
 
-	await test.step("a file the server can't read shows why", async () => {
-		await picker(page).setInputFiles({ name: "photo.png", mimeType: "image/png", buffer: Buffer.from("not a document") });
+	await test.step("a file the server can't read, picked from the empty area, shows why", async () => {
+		await choose(page, documents(page).getByRole("button", { name: "Upload documents" }), { name: "photo.png", mimeType: "image/png", buffer: Buffer.from("not a document") });
 		await expect(documents(page).getByRole("alert")).toHaveText(`"photo.png" can't be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.`);
 		await expect(rows(page)).toHaveCount(0);
 	});
@@ -48,6 +49,9 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 		await expect(leaveRow).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
 		await expect(leaveRow).not.toContainText("Reading…");
 		await expect(documents(page).getByRole("alert")).toHaveCount(0);
+		// One document: its count by the heading, and Upload in place of the empty area.
+		await expect(documents(page).locator('[data-slot="document-count"]')).toHaveText("1");
+		await expect(documents(page).getByRole("button", { name: "Upload documents" })).toHaveCount(0);
 	});
 
 	await test.step("a document that fits goes whole to the model, and the answer quotes it", async () => {
@@ -63,7 +67,8 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 	const permit = `The visitor parking permit code is PK-${tag}.`;
 	await test.step("a document too large for the model's window is searched, and the answer quotes its passage", async () => {
 		await page.goto(`/?w=${slug}`);
-		await picker(page).setInputFiles(textFile("handbook.txt", handbook(permit), "text/plain"));
+		await choose(page, documents(page).getByRole("button", { name: "Upload", exact: true }), textFile("handbook.txt", handbook(permit), "text/plain"));
+		await expect(documents(page).locator('[data-slot="document-count"]')).toHaveText("2");
 		await expect(row(page, "handbook.txt")).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
 
 		await page.getByRole("button", { name: /^Model:/ }).click();
@@ -119,6 +124,9 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 		await expect(manual).toHaveText("manual.pdf");
 		// Its one button is the name, which opens the file (test 11).
 		await expect(documents(asker.page).getByRole("button")).toHaveText(["manual.pdf"]);
+		await expect(documents(asker.page).locator('[data-slot="document-count"]')).toHaveText("1");
+		// No instructions, and nothing to add them with: no Instructions.
+		await expect(asker.page.getByRole("region", { name: "Instructions" })).toHaveCount(0);
 		await expect(asker.page.locator('[data-slot="document-picker"]')).toHaveCount(0);
 
 		const document = (await documentOf(page, id, "manual.pdf"))!;
@@ -310,6 +318,13 @@ test("11. a person who can only ask opens a document in the side viewer; a perso
 /** What the person's messages sent to the model hold, without the system prompt, which names the excerpts block too. */
 function userMessages(call: ReceivedCall) {
 	return JSON.stringify((call.messages as { role: string }[]).filter((message) => message.role === "user"));
+}
+
+/** Clicks a button that opens the file picker, and picks the file. */
+async function choose(page: Page, button: Locator, file: Upload) {
+	const chooser = page.waitForEvent("filechooser");
+	await button.click();
+	await (await chooser).setFiles(file);
 }
 
 /** Drags a file over the documents list (dragenter), or drops it there. */
