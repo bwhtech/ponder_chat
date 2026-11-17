@@ -6,7 +6,7 @@ The design comes from the prototype at https://sketch.netchamp.dev/u/nagariahuss
 
 ## Status
 
-Planned. Nothing is built.
+Pull request 1, the server part, is built: the tables without documents, `accessOf`, the API, people search, `threads.workspace_id` and the instructions in the prompt (`server/workspaces/`). The pages of pull request 1 come next.
 
 ## Words
 

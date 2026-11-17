@@ -213,6 +213,29 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 - Artifacts (`server/artifacts/schema.ts`, `web/artifacts/`): a deck is HTML, one `<section>` per 1280×720 slide. The content is the tool call's input, so it is saved with the message. Writing the same id again makes a new version. Slides run no scripts and load nothing from other addresses. While a reply writes an artifact, the card lists its steps (`web/artifacts/steps.ts`). Replies skip OpenRouter providers that send a tool call only when it is complete (Wafer), so the artifact shows as it is written (`server/workflow/model.ts`).
 - Memory: see `docs/memory.md`.
 
+### Workspaces
+
+A workspace holds a name, a description and instructions for chats. A chat can be in one workspace. The plan, with documents and the pages, is in `docs/workspaces-plan.md`. The server part of the first pull request is built. The pages come next.
+
+- Kinds: an organisation workspace is for everyone, and only an admin makes one. A private workspace is for its owner and the people the owner adds. Anyone makes one.
+- Access (`server/workspaces/access.ts`): `Workspaces.accessOf` gives `none`, `ask`, `edit` or `owner`. In an organisation workspace, the owner is `owner`, admins `edit` and everyone else `ask`. In a private workspace, the owner is `owner`, each member has the access the owner gave, and everyone else is `none`. An admin is `none` there too, until the owner adds them. A deleted workspace is `none` for everyone.
+- A workspace that the person cannot use answers 404, never 403. A request does not show that it exists.
+- Chats stay private to the person who wrote them, also in a shared workspace. Members share the instructions, never the chats.
+- The first message of a new chat sets its workspace (`threads.workspace_id`). It never changes. The server checks the person's access on each message. A person who was removed can still read the chat, but gets a 403 when they send.
+- The instructions go in the system prompt in a `<workspace>` block, after Ponder's own rules, so the prompt cache keeps them. A fixed guidance text calls the block data from people, which never overrides Ponder's rules (`server/workspaces/prompt.ts`).
+- Changes to organisation workspaces go to the admin activity log. Deleting a workspace marks it deleted, and its chats stay, in no workspace.
+
+| Route | Who | Answer |
+| --- | --- | --- |
+| `GET /api/workspaces` | Anyone | `{ workspaces }`: the workspaces the person can use, organisation ones first, then shared, then their own. Also in the boot data. |
+| `POST /api/workspaces` | Anyone for `private`, admins for `org` | `{ workspace }` (201) |
+| `GET /api/workspaces/:id` | `ask` and above | `{ workspace }`. `members` is null except for a person who can share it. |
+| `PATCH /api/workspaces/:id` | `edit` and above | `{ workspace }`: name, description, instructions, icon |
+| `PUT /api/workspaces/:id/sharing` | The owner of a private workspace, an admin for an organisation one | `{ workspace }`: kind and members. Only an admin changes the kind. |
+| `DELETE /api/workspaces/:id` | The same as sharing | `{ ok: true }` |
+| `GET /api/people?q=` | Anyone | `{ people }`: at most 20, by name or email, with id, name and email |
+| `POST /api/chat` | `ask` and above | The body takes `workspaceId`, read on a new chat's first message only. |
+
 ### Credits
 
 | Setting | Meaning |
