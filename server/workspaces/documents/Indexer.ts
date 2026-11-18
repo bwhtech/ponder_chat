@@ -5,6 +5,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Semaphore from "effect/Semaphore";
 import type { SqlError } from "effect/sql/SqlError";
 import * as ObjectStore from "../../files/ObjectStore.ts";
 import { makeEmbedder, type EmbeddingError } from "../../openrouter/embeddings.ts";
@@ -40,7 +41,16 @@ import { documentStore, type DocumentRow } from "./store.ts";
 export type IndexRequest = { documentId: string; generation: number };
 /** One embedding call of a batch of 96 passages at most; then the step fails, and Workflow tries it again. */
 const INDEX_TIMEOUT = "2 minutes";
-
+/**
+ * A document in preparation holds its bytes, its text and its passages in this process,
+ * from loading them until its passages are saved. Each takes a permit for each MB of its
+ * file (at least one), of PREPARING_MB in all: four of the largest uploads at once, or
+ * many small ones. A document waits for its permits before it loads anything, so the
+ * Workflow queue's runs that wait hold only their ids. A PDF keeps its permits while a
+ * model reads its picture pages: its bytes are needed for each page.
+ */
+const PREPARING_MB = 40;
+const MB = 1024 * 1024;
 export type Prepared = { state: "gone" } | { state: "failed" } | { state: "chunked"; batches: number };
 export type IndexStage = "parse" | "page-read" | "chunk" | "embed" | "finish";
 export type IndexOutcome = "gone" | "ready" | "failed";
@@ -73,6 +83,7 @@ const make = Effect.gen(function* () {
 	const embedder = yield* makeEmbedder;
 	const readers = yield* Effect.context<PageReader.PageReader | PrepareText.PrepareText>();
 	const prepareText = yield* PrepareText.PrepareText;
+	const preparing = yield* Semaphore.make(PREPARING_MB);
 
 	/** The document, while this run is its latest. A first look: each write checks again (fenced). */
 	const current = (request: IndexRequest) =>
@@ -205,6 +216,20 @@ const make = Effect.gen(function* () {
 		failRow(row, stage, error.message, error._tag === "PrepareTextError" ? { reason: error.reason } : {});
 
 	const prepare = Effect.fn("Indexer.prepare")(function* (request: IndexRequest) {
+		const found = yield* current(request);
+		if (Option.isNone(found)) return { state: "gone" } satisfies Prepared;
+		const permits = Math.min(PREPARING_MB, Math.max(1, Math.ceil(found.value.size / MB)));
+		const waiting = yield* Clock.currentTimeMillis;
+		return yield* preparing.withPermits(permits)(
+			Effect.gen(function* () {
+				yield* Tracing.annotate({ "ponder.wait_ms": (yield* Clock.currentTimeMillis) - waiting });
+				return yield* prepareAdmitted(request);
+			}),
+		);
+	});
+
+	/** With its permits: a run that waited for them may have been overtaken meanwhile, so the row is read again. */
+	const prepareAdmitted = Effect.fnUntraced(function* (request: IndexRequest) {
 		const found = yield* current(request);
 		if (Option.isNone(found)) return { state: "gone" } satisfies Prepared;
 		const row = found.value;

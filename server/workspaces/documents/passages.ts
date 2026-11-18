@@ -132,16 +132,19 @@ export function passageStore(sql: PgClient.PgClient): PassageStore {
 		sql.withTransaction(
 			Effect.gen(function* () {
 				yield* sql`delete from workspace_passages where document_id = ${documentId}`;
-				const rows = passages.map((passage) => ({
-					id: `${documentId}:${passage.ordinal}`,
-					document_id: documentId,
-					workspace_id: workspaceId,
-					ordinal: passage.ordinal,
-					page: passage.page,
-					location: passage.location,
-					content: passage.content,
-				}));
-				for (const part of Arr.chunksOf(rows, INSERT_ROWS)) yield* sql`insert into workspace_passages ${sql.insert(part)}`;
+				// The rows of one insert at a time: the document's passages are not copied whole into rows first.
+				for (const part of Arr.chunksOf(passages, INSERT_ROWS)) {
+					const rows = Arr.map(part, (passage) => ({
+						id: `${documentId}:${passage.ordinal}`,
+						document_id: documentId,
+						workspace_id: workspaceId,
+						ordinal: passage.ordinal,
+						page: passage.page,
+						location: passage.location,
+						content: passage.content,
+					}));
+					yield* sql`insert into workspace_passages ${sql.insert(rows)}`;
+				}
 			}),
 		);
 

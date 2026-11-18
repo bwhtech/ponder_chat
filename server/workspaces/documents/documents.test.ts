@@ -9,8 +9,11 @@
 import { readFileSync } from "node:fs";
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../../auth.ts";
 import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
@@ -36,6 +39,7 @@ const Documents = await import("./Documents.ts");
 const Indexer = await import("./Indexer.ts");
 const PrepareText = await import("./prepare-text.ts");
 const IndexRuns = await import("./IndexRuns.ts");
+const ObjectStore = await import("../../files/ObjectStore.ts");
 const { workspacesApi } = await import("../routes.ts");
 const { searchWorkspace } = await import("./turn.ts");
 
@@ -258,6 +262,79 @@ describe.skipIf(!base)("workspace documents", () => {
 		await documents((service) => service.retry(actor("ana"), ids.workspace, uploaded.id));
 		assert.strictEqual(await indexLatest(), "ready");
 		await documents((service) => service.remove(actor("ana"), ids.workspace, uploaded.id));
+	});
+
+	it("loads no document's bytes while the documents being prepared hold the whole budget, until their passages are saved", async () => {
+		const upload = (name: string) => documents((service) => service.upload(actor("ana"), ids.workspace, file(name, manual(2), "text/markdown"))).then(() => asked.at(-1)!);
+		const [large, small] = [await upload("large.md"), await upload("small.md")];
+		// From a bucket that says which file it gives. The large one counts as 40 MB: every permit.
+		await database((sql) => sql`update workspace_documents set object_key = 'held/' || id, data = null where id in (${large.documentId}, ${small.documentId})`);
+		await database((sql) => sql`update workspace_documents set size = ${40 * 1024 * 1024} where id = ${large.documentId}`);
+		const loaded: string[] = [];
+		const largeLoaded = await runPromise(Deferred.make<void>());
+		/** When the small one is loaded: the large one's passages, which must be saved by then. */
+		let largeSavedFirst: number | undefined;
+		const bucket = Layer.effect(
+			ObjectStore.ObjectStore,
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const savedPassages = sql<{ count: number }>`select count(*)::int as count from workspace_passages where document_id = ${large.documentId}`.pipe(Effect.orDie);
+				return ObjectStore.ObjectStore.of({
+					enabled: true,
+					put: () => Effect.void,
+					remove: () => Effect.void,
+					get: (key) =>
+						Effect.gen(function* () {
+							loaded.push(key);
+							if (key === `held/${large.documentId}`) yield* Deferred.succeed(largeLoaded, undefined);
+							else largeSavedFirst = (yield* savedPassages)[0].count;
+							return Option.some(Buffer.from(manual(2)));
+						}),
+				});
+			}),
+		);
+		const indexer = Layer.fresh(Indexer.layer).pipe(Layer.provide(bucket));
+		// The large one's row stays locked, so it can't save its text or passages.
+		const locked = await runPromise(Deferred.make<void>());
+		const release = await runPromise(Deferred.make<void>());
+		const holding = database((sql) =>
+			sql.withTransaction(
+				Effect.gen(function* () {
+					yield* sql`select id from workspace_documents where id = ${large.documentId} for update`;
+					yield* Deferred.succeed(locked, undefined);
+					yield* Deferred.await(release);
+				}),
+			),
+		);
+		await runPromise(Deferred.await(locked));
+
+		const prepared = await runPromise(
+			Effect.gen(function* () {
+				const both = yield* Indexer.Indexer.use((service) =>
+					Effect.gen(function* () {
+						const first = yield* Effect.forkChild(service.prepare(large));
+						yield* Deferred.await(largeLoaded);
+						const second = yield* Effect.forkChild(service.prepare(small));
+						// Time for the small one to reach its turn, and to load its bytes if the large one had let go.
+						yield* Effect.sleep("500 millis");
+						assert.deepStrictEqual(loaded, [`held/${large.documentId}`]);
+						yield* Deferred.succeed(release, undefined);
+						return yield* Effect.all([Fiber.join(first), Fiber.join(second)]);
+					}),
+				);
+				return both;
+			}).pipe(Effect.provide(indexer)),
+		);
+		await holding;
+		assert.deepStrictEqual(prepared, [
+			{ state: "chunked", batches: 1 },
+			{ state: "chunked", batches: 1 },
+		]);
+		assert.deepStrictEqual(loaded, [`held/${large.documentId}`, `held/${small.documentId}`]);
+		assert.isAbove(largeSavedFirst!, 0);
+		// The app has no bucket to delete them from.
+		await database((sql) => sql`update workspace_documents set object_key = null where id in (${large.documentId}, ${small.documentId})`);
+		for (const request of [large, small]) await documents((service) => service.remove(actor("ana"), ids.workspace, request.documentId));
 	});
 
 	it("indexes again the documents that another embedding model made, at start-up; search works meanwhile", async () => {
