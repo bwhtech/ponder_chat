@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * An empty section of the workspace's side panel, for people who can edit: one dashed row,
- * the whole of it a button that fills the section ("Add instructions", "Upload documents").
+ * the whole of it a button that fills the section ("Add instructions", "Upload files").
  * `busy` turns its icon while that is under way.
  */
 defineProps<{ icon: string; label: string; busy?: boolean }>();

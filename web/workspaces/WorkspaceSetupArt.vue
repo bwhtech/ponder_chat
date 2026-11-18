@@ -4,7 +4,7 @@ import type { SetupStepKey } from "./onboarding";
 
 /**
  * The small scene at the top of a setup card (WorkspaceSetupCard.vue), drawn with CSS, in the
- * gray tones, so it follows dark mode. Instructions: a Markdown note with a pencil. Documents:
+ * gray tones, so it follows dark mode. Instructions: a Markdown note with a pencil. Sources:
  * a fan of files and a tile to add one. People: faces and a free seat. The card is the `group`:
  * on its hover the scene moves a little toward what the step does (the pencil writes, the
  * files spread, the faces make room), where the pointer can hover and motion is allowed (the
@@ -113,9 +113,10 @@ const faces = computed(() => (props.compact ? FACES.slice(0, 2) : FACES));
 					:key="face.initial"
 					:class="[MOVE, face.tone, face.place, 'relative flex size-[3.25rem] items-center justify-center rounded-full border-[3px] border-[--surface-gray-1] text-lg font-medium shadow-sm']"
 				>
-					{{ face.initial }}
+					<!-- In a tile the letters would be a few pixels high: plain discs, as the files have no labels. -->
+					<template v-if="!compact">{{ face.initial }}</template>
 				</span>
-				<!-- The free seat: a dashed circle, as the Documents tile, tucked behind the faces. -->
+				<!-- The free seat: a dashed circle, as the Sources tile, tucked behind the faces. -->
 				<span
 					class="relative -ms-4 flex size-[3.25rem] items-center justify-center rounded-full border-dashed bg-surface-gray-1 transition-[border-color,color,transform] duration-300 ease-out-strong pose:translate-x-1"
 					:class="dashed"

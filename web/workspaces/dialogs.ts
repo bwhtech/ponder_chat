@@ -7,12 +7,16 @@ import type { WorkspaceDetail } from "./store";
  * (WorkspaceDialogPlaceholder.vue), as it does for Settings. `request` stays after closing, so
  * the dialog can play its closing transition. A document's Details open in the side panel
  * (DocumentDetails.vue).
+ *
+ * `quiet`: no "saved" toast. The page asks for it when the save does a setup step still to do:
+ * the step's card leaves, its progress fills and the status line says so, where a toast would
+ * cover them (WorkspacePage.vue).
  */
 export type WorkspaceDialogRequest =
 	/** `onMade` opens the new workspace as the sidebar does. */
 	| { kind: "new"; onMade: (slug: string) => void }
-	| { kind: "instructions"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
-	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void };
+	| { kind: "instructions"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void; quiet?: boolean }
+	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void; quiet?: boolean };
 
 /** `serial` goes up with each request, so a dialog opened again starts from its workspace, not from what was typed before. */
 export const workspaceDialog = reactive({ open: false, serial: 0, request: null as WorkspaceDialogRequest | null });

@@ -42,12 +42,12 @@ test("7. an editor uploads documents; they go from Indexing to Ready, and answer
 	await addChats(db, person.id, id, 1);
 	await page.goto(`/?w=${slug}`);
 	await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(1);
-	// No documents yet: the section is one "Upload documents" area.
+	// No documents yet: the section is one "Upload files" area.
 	await expect(documents(page).getByRole("button", { name: "Upload", exact: true })).toHaveCount(0);
 	await expect(rows(page)).toHaveCount(0);
 
 	await test.step("a file the server can't read, picked from the empty area, shows why", async () => {
-		await choose(page, documents(page).getByRole("button", { name: "Upload documents" }), { name: "photo.png", mimeType: "image/png", buffer: Buffer.from("not a document") });
+		await choose(page, documents(page).getByRole("button", { name: "Upload files" }), { name: "photo.png", mimeType: "image/png", buffer: Buffer.from("not a document") });
 		await expect(documents(page).getByRole("alert")).toHaveText(`“photo.png” can't be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.`);
 		await expect(rows(page)).toHaveCount(0);
 	});
@@ -65,7 +65,7 @@ test("7. an editor uploads documents; they go from Indexing to Ready, and answer
 		await expect(documents(page).getByRole("alert")).toHaveCount(0);
 		// One document: its row, and Upload in place of the empty area.
 		await expect(rows(page)).toHaveCount(1);
-		await expect(documents(page).getByRole("button", { name: "Upload documents" })).toHaveCount(0);
+		await expect(documents(page).getByRole("button", { name: "Upload files" })).toHaveCount(0);
 	});
 
 	await test.step("a document that fits goes whole to the model, and the answer quotes it", async () => {

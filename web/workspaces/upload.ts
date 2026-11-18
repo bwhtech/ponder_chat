@@ -4,7 +4,7 @@ import { uploadDocument, type WorkspaceDocument } from "./documents";
 /**
  * Uploads documents to a workspace, one at a time and in order: each answer adds its row at
  * once (`changed` gets the new list). A file the server refuses adds its reason to `errors`.
- * The side panel's Documents section has one of these, and the setup steps another
+ * The page's Sources section has one of these, and the setup steps another
  * (WorkspaceOnboarding.vue); each takes files from its own file picker (`pickedFiles`) or a drop.
  */
 export function useDocumentUpload(workspaceId: () => string, documents: () => readonly WorkspaceDocument[], changed: (documents: WorkspaceDocument[]) => void) {

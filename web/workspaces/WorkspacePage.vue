@@ -10,6 +10,7 @@ import { openWorkspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
 import type { ComposerHandle, UploadHandle } from "./handles";
+import { setupSteps, type SetupStepKey } from "./onboarding";
 import { Poller } from "./poller";
 import WorkspaceAbout from "./WorkspaceAbout.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
@@ -69,25 +70,46 @@ const composer = ref<ComposerHandle>();
 
 /**
  * Files dropped anywhere else on the page, such as the blank space under the setup cards, are
- * uploaded too, for a person who can edit: on the setup while they have no chat here, so the
- * Documents step counts them, else in the Documents section. For anyone else they are refused,
- * so the browser does not open the file in place of the app. The setup, the sections and the
- * message box take their own drops first (they mark the event handled).
+ * uploaded too, for a person who can edit, once the page is ready: on the setup while they have
+ * no chat here, so the Sources step counts them, else in the Sources section. Otherwise
+ * (still loading, or they can only ask) the drop is refused, so the browser does not open the
+ * file in place of the app. The setup, the sections and the message box take their own drops
+ * first (they mark the event handled).
+ *
+ * While files are dragged over the page, and a drop would upload them, the Sources step says
+ * so (`dragging`), except over the message box, which attaches them to the question. The count
+ * goes up and down as the drag enters and leaves each element, so it does not flicker between
+ * them; a drop, or the drag leaving the page or being cancelled (Esc), brings it to zero.
  */
 const onboardingUpload = ref<UploadHandle>();
 const aboutUpload = ref<UploadHandle>();
-const dropsHere = (event: DragEvent) => !event.defaultPrevented && Boolean(event.dataTransfer?.types.includes("Files"));
+const hasFiles = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes("Files"));
+function dropTarget() {
+	if (!ready.value || !detail.value || !canEdit(detail.value)) return undefined;
+	return chats.value.length ? aboutUpload.value : onboardingUpload.value;
+}
+const dragDepth = ref(0);
+const dragOverBox = ref(false);
+const pageDragging = computed(() => dragDepth.value > 0 && !dragOverBox.value && Boolean(dropTarget()));
+function pageDragEnter(event: DragEvent) {
+	if (hasFiles(event)) dragDepth.value++;
+}
+function pageDragLeave(event: DragEvent) {
+	if (hasFiles(event)) dragDepth.value = Math.max(0, dragDepth.value - 1);
+}
 function pageDragOver(event: DragEvent) {
-	if (!dropsHere(event) || !event.dataTransfer) return;
+	if (!hasFiles(event) || !event.dataTransfer) return;
+	dragOverBox.value = event.target instanceof Node && Boolean(dock.value?.contains(event.target));
+	if (event.defaultPrevented) return;
 	event.preventDefault();
-	event.dataTransfer.dropEffect = detail.value && canEdit(detail.value) ? "copy" : "none";
+	event.dataTransfer.dropEffect = dropTarget() ? "copy" : "none";
 }
 function pageDrop(event: DragEvent) {
-	if (!dropsHere(event)) return;
+	dragDepth.value = 0;
+	if (!hasFiles(event) || event.defaultPrevented) return;
 	event.preventDefault();
 	const files = Array.from(event.dataTransfer?.files ?? []);
-	if (!files.length || !detail.value || !canEdit(detail.value)) return;
-	void (chats.value.length ? aboutUpload.value : onboardingUpload.value)?.upload(files);
+	if (files.length) void dropTarget()?.upload(files);
 }
 
 // Each load takes a number: the answer for a workspace no longer open is dropped.
@@ -191,11 +213,16 @@ async function rename(name: string) {
 }
 
 function editInstructions() {
-	if (detail.value) openWorkspaceDialog({ kind: "instructions", workspace: detail.value, onSaved: savedHere });
+	if (detail.value) openWorkspaceDialog({ kind: "instructions", workspace: detail.value, onSaved: savedHere, quiet: stepToDo("instructions") });
 }
 
 function share() {
-	if (detail.value) openWorkspaceDialog({ kind: "share", workspace: detail.value, onSaved: savedHere });
+	if (detail.value) openWorkspaceDialog({ kind: "share", workspace: detail.value, onSaved: savedHere, quiet: stepToDo("people") });
+}
+
+/** The setup shows this step still to do: saving it is confirmed there, with no toast over the setup. */
+function stepToDo(key: SetupStepKey) {
+	return Boolean(detail.value && onboarding.value && setupSteps(detail.value).some((step) => step.key === key && !step.done));
 }
 
 /** A change saved on this page: a load or a poll asked for before it is older, and is dropped. */
@@ -249,6 +276,8 @@ function askDelete() {
 	<div
 		v-else
 		data-slot="workspace-view"
+		@dragenter="pageDragEnter"
+		@dragleave="pageDragLeave"
 		@dragover="pageDragOver"
 		@drop="pageDrop"
 		class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]"
@@ -270,7 +299,7 @@ function askDelete() {
 				<Transition enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
 					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8">
 						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="detail.kind === 'org' || detail.memberCount > 0" @open="emit('openChat', $event)" />
-						<WorkspaceOnboarding v-else ref="onboardingUpload" :workspace="detail" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
+						<WorkspaceOnboarding v-else ref="onboardingUpload" :workspace="detail" :dragging="pageDragging" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
 						<WorkspaceAbout ref="aboutUpload" :workspace="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
 					</div>
 				</Transition>

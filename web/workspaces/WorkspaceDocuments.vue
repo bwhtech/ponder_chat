@@ -12,10 +12,11 @@ import type { DocumentsHandle } from "./handles";
 import { pickedFiles, useDocumentUpload } from "./upload";
 
 /**
- * The workspace's documents, on its page. Everyone who
+ * The workspace's documents, on its page, in the section "Sources" (the files are one kind of
+ * source; each one is still a document). Everyone who
  * can ask sees each document's name, and its status while it is not Ready, and opens its file
  * by the name. People who can edit also see its size and why it failed, upload (the "Upload
- * documents" area while there are none, then Upload by the heading, or files dropped on the
+ * files" area while there are none, then Upload by the heading, or files dropped on the
  * workspace's sections: WorkspaceAbout.vue calls `upload` and sets `dropping`), delete, open its Details (its
  * status and indexing log, in the side panel) and "Try again" a document that failed. The file picker offers only the types
  * the server reads; a file it refuses gets the server's reason. The page polls while one is
@@ -91,10 +92,10 @@ function askDelete(document: WorkspaceDocument) {
 <template>
 	<section class="space-y-3" aria-labelledby="workspace-documents-heading" data-slot="workspace-documents">
 		<div class="flex h-7 items-center justify-between">
-			<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
+			<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Sources</h2>
 			<template v-if="editable">
 				<Button v-if="documents.length" variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" @click="picker?.click()" />
-				<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" />
+				<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload files" data-slot="document-picker" @change="picked" />
 			</template>
 		</div>
 
@@ -102,7 +103,7 @@ function askDelete(document: WorkspaceDocument) {
 			<WorkspaceEmptyArea
 				v-if="!documents.length"
 				icon="lucide-upload"
-				label="Upload documents"
+				label="Upload files"
 				:busy="uploading > 0"
 				data-slot="document-upload-area"
 				@click="picker?.click()"

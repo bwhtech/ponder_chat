@@ -35,7 +35,7 @@ describe("a new workspace's setup steps", () => {
 		const steps = setupSteps(workspace());
 		expect(steps.map((step) => [step.key, step.done, step.action])).toEqual([
 			["instructions", false, "Add instructions"],
-			["documents", false, "Upload documents"],
+			["documents", false, "Upload files"],
 			["people", false, "Share workspace"],
 		]);
 	});

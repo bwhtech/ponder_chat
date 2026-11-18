@@ -74,10 +74,10 @@ test("on a phone, a new workspace's three setup steps are rows, all in view abov
 	await page.goto(`/?w=${slug}`);
 	const setup = page.locator('[data-slot="workspace-setup"]');
 	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("0 of 3 done");
-	await expect(setup.getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Documents", "People"]);
+	await expect(setup.getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Sources", "People"]);
 
 	const boxTop = (await workspacePage.box(page).boundingBox())!.y;
-	for (const action of ["Add instructions", "Upload documents", "Share workspace"]) {
+	for (const action of ["Add instructions", "Upload files", "Share workspace"]) {
 		const row = setup.getByRole("button", { name: action });
 		await expect(row).toBeInViewport({ ratio: 1 });
 		const { y, height } = (await row.boundingBox())!;

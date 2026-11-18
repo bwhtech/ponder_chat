@@ -173,7 +173,7 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	// Everyone uses it already: it has no People step. The instructions from the dialog are done, so the one card left is Documents.
 	await expect(setup(page).getByRole("heading", { name: "Set up this workspace" })).toBeVisible();
 	await expect(setupCount(page)).toHaveText("1 of 2 done");
-	await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Documents"]);
+	await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Sources"]);
 	await expect(setup(page).getByRole("button", { name: "Share workspace" })).toHaveCount(0);
 	const workspaceUrl = page.url();
 
@@ -212,8 +212,14 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 		await expect(setup(page).getByRole("heading", { name: "Set up this workspace" })).toBeVisible();
 		await expect(setupCount(page)).toHaveText("0 of 3 done");
-		await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Documents", "People"]);
-		await expect(setup(page).getByRole("button")).toHaveText(["Add instructions", "Upload documents", "Share workspace"]);
+		await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Sources", "People"]);
+		// Every toast from here on, to check that none covers the setup as a step is done.
+		await page.evaluate(() => {
+			const seen: string[] = [];
+			Object.assign(window, { toastsSeen: seen });
+			new MutationObserver(() => document.querySelectorAll("[data-sonner-toast]").forEach((toast) => seen.push(toast.textContent ?? ""))).observe(document.body, { childList: true, subtree: true });
+		});
+		await expect(setup(page).getByRole("button")).toHaveText(["Add instructions", "Upload files", "Share workspace"]);
 		// The cards add what the sections' empty areas would, so no empty section shows under them.
 		await expect(about(page).getByRole("button", { name: "Add instructions" })).toHaveCount(0);
 		await expect(about(page).locator('[data-slot="document-upload-area"]')).toHaveCount(0);
@@ -230,17 +236,17 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await expect(step(page, "instructions")).toHaveCount(0);
 		await expect(setupCount(page)).toHaveText("1 of 3 done");
 		await expect(instructionsSection(page)).toContainText(marker);
-		await expect(setup(page).getByRole("button", { name: "Upload documents" })).toBeFocused();
+		await expect(setup(page).getByRole("button", { name: "Upload files" })).toBeFocused();
 		await expect(setupStatus(page)).toHaveText("Instructions added. 1 of 3 done.");
 	});
 
-	await test.step("Upload documents, from its card: the card leaves, and the document shows below", async () => {
+	await test.step("Upload files, from the Sources card: the card leaves, and the document shows below", async () => {
 		const chooser = page.waitForEvent("filechooser");
-		await setup(page).getByRole("button", { name: "Upload documents" }).click();
+		await setup(page).getByRole("button", { name: "Upload files" }).click();
 		await (await chooser).setFiles(textFile("Leave policy.md", `# Leave policy\n\nStaff get 27 days of paid leave a year, ${tag}.`));
 		await expect(step(page, "documents")).toHaveCount(0);
 		await expect(setupCount(page)).toHaveText("2 of 3 done");
-		await expect(setupStatus(page)).toHaveText("Documents added. 2 of 3 done.");
+		await expect(setupStatus(page)).toHaveText("Sources added. 2 of 3 done.");
 		// Its button had focus: the one step left takes it.
 		await expect(setup(page).getByRole("button", { name: "Share workspace" })).toBeFocused();
 		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
@@ -256,10 +262,14 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await expect(setup(page)).toHaveCount(0);
 		await expect(setupStatus(page)).toHaveText("Workspace shared. Workspace set up.");
 		await expect(field).toBeFocused();
-		await expect(about(page).getByRole("region")).toHaveText([/^Instructions/, /^Documents/, /^People/]);
+		await expect(about(page).getByRole("region")).toHaveText([/^Instructions/, /^Sources/, /^People/]);
 		await expect(about(page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
 		// The instructions show once, in their own section.
 		await expect(page.getByText(marker)).toHaveCount(1);
+		// The setup said each save: no "saved" toast covered it.
+		const toasts = await page.evaluate(() => (window as unknown as { toastsSeen: string[] }).toastsSeen.join(" | "));
+		expect(toasts).not.toContain("Instructions saved");
+		expect(toasts).not.toContain("Sharing saved");
 	});
 
 	await test.step("A question in the box opens a chat that follows the instructions", async () => {
@@ -282,7 +292,79 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		expect(chats.y + chats.height).toBeLessThan((await about(page).boundingBox())!.y);
 	});
 
+	await test.step("With no setup on the page, saving the instructions says so in a toast", async () => {
+		await instructionsSection(page).getByRole("button", { name: "Edit instructions" }).click();
+		const dialog = page.getByRole("dialog", { name: "Instructions" });
+		await dialog.getByRole("textbox", { name: "Instructions" }).fill(`${marker}\nKeep answers very short.`);
+		await dialog.getByRole("button", { name: "Save" }).click();
+		await expect(page.getByText("Instructions saved")).toBeVisible();
+	});
+
 	await other.context.close();
+});
+
+test("saving instructions while a file still goes up moves focus to the next step that can take it", async ({ page, person }) => {
+	const { slug } = await createWorkspace(page, `Slow upload ${person.id.slice(0, 6)}`);
+	// The file's upload is held until the test lets it go.
+	let release = () => {};
+	const released = new Promise<void>((resolve) => (release = resolve));
+	await page.route(
+		(url) => /^\/api\/workspaces\/[^/]+\/documents$/.test(url.pathname),
+		async (route) => {
+			if (route.request().method() !== "POST") return route.fallback();
+			await released;
+			await route.fallback();
+		},
+	);
+	await page.goto(`/?w=${slug}`);
+	await expect(setupCount(page)).toHaveText("0 of 3 done");
+	const chooser = page.waitForEvent("filechooser");
+	await setup(page).getByRole("button", { name: "Upload files" }).click();
+	await (await chooser).setFiles(textFile("Rota.md", "# Rota\n\nNights rotate every four weeks."));
+	await expect(step(page, "documents").getByRole("button")).toBeDisabled();
+
+	await setup(page).getByRole("button", { name: "Add instructions" }).focus();
+	await page.keyboard.press("Enter");
+	const dialog = page.getByRole("dialog", { name: "Instructions" });
+	await dialog.getByRole("textbox", { name: "Instructions" }).fill("Answer from the rota only.");
+	await dialog.getByRole("button", { name: "Save" }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect(setupCount(page)).toHaveText("1 of 3 done");
+	// Not the Documents step, whose button waits for the upload: the next one that can take focus.
+	await expect(setup(page).getByRole("button", { name: "Share workspace" })).toBeFocused();
+
+	release();
+	await expect(setupCount(page)).toHaveText("2 of 3 done");
+});
+
+test("files dropped on a workspace page that is still loading are refused, not lost", async ({ page, person }) => {
+	const { id, slug } = await createWorkspace(page, `Loading drop ${person.id.slice(0, 6)}`);
+	// The person's chats in it are held: the page has the workspace, but cannot show it yet.
+	let release = () => {};
+	const released = new Promise<void>((resolve) => (release = resolve));
+	await page.route(
+		(url) => url.pathname === "/api/threads" && url.searchParams.get("workspace") === id,
+		async (route) => {
+			await released;
+			await route.fallback();
+		},
+	);
+	const loaded = page.waitForResponse((response) => new URL(response.url()).pathname === `/api/workspaces/${slug}`);
+	await page.goto(`/?w=${slug}`);
+	await loaded;
+
+	const outcome = await page.locator('[data-slot="workspace-view"]').evaluate((view) => {
+		const data = new DataTransfer();
+		data.items.add(new File(["# Rota"], "Rota.md", { type: "text/markdown" }));
+		const over = view.dispatchEvent(new DragEvent("dragover", { dataTransfer: data, bubbles: true, cancelable: true }));
+		return { handled: !over, effect: data.dropEffect };
+	});
+	// Handled, so the browser does not open the file, and refused: nothing can take it yet.
+	expect(outcome).toEqual({ handled: true, effect: "none" });
+
+	release();
+	await expect(setupCount(page)).toHaveText("0 of 3 done");
+	await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveCount(0);
 });
 
 test("a new workspace keeps what is set up while it still loads, and a refused file's reason stays once the last card leaves", async ({ page, person, fake, db, browser }) => {
@@ -315,7 +397,7 @@ test("a new workspace keeps what is set up while it still loads, and a refused f
 		await expect.poll(() => armed).toBe(false);
 
 		const chooser = page.waitForEvent("filechooser");
-		await setup(page).getByRole("button", { name: "Upload documents" }).click();
+		await setup(page).getByRole("button", { name: "Upload files" }).click();
 		await (await chooser).setFiles(textFile("Rota.md", `# Rota\n\nNights rotate every four weeks, ${tag}.`));
 		await expect(step(page, "documents")).toHaveCount(0);
 		await expect(setupCount(page)).toHaveText("1 of 3 done");
@@ -585,6 +667,11 @@ test("files dropped on the blank page under a new workspace's setup go up as its
 	});
 	expect(handled).toEqual({ over: true, drop: true });
 	await expect(setupCount(page)).toHaveText("1 of 3 done");
+	// One step done, the Documents one: the progress fills from the left.
+	const segments = setup(page).locator('[data-slot="workspace-setup-progress"] > *');
+	await expect(segments.nth(0)).toHaveAttribute("data-filled", "true");
+	await expect(segments.nth(1)).not.toHaveAttribute("data-filled");
+	await expect(segments.nth(2)).not.toHaveAttribute("data-filled");
 	await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveCount(1);
 	await expect(page).toHaveURL(new RegExp(`[?&]w=${escape(slug)}$`));
 });

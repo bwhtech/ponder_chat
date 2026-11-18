@@ -18,7 +18,7 @@ export type SetupStep = {
 };
 
 /**
- * The steps this person can take: Instructions and Documents for whoever can edit, and People
+ * The steps this person can take: Instructions and Sources for whoever can edit, and People
  * for whoever can share a private workspace (its owner). Everyone in the organisation uses an
  * organisation workspace already, so it has no People step.
  */
@@ -35,10 +35,10 @@ export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 		},
 		{
 			key: "documents",
-			title: "Documents",
-			description: "Add the files Ponder answers from.",
+			title: "Sources",
+			description: "Add files for Ponder to answer from.",
 			done: workspace.documents.length > 0,
-			action: "Upload documents",
+			action: "Upload files",
 		},
 	];
 	if (workspace.canShare && workspace.kind !== "org") {

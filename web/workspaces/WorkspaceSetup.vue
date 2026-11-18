@@ -13,7 +13,7 @@ import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
  * for a person who can edit it (WorkspaceOnboarding.vue). Each card's button opens what the
  * page opens elsewhere: the instructions dialog, the file picker, Share. A done step's card
  * leaves (the others slide into its place), and its segment of the progress fills. The
- * Documents card stays while its files go up. Files picked, or dropped on the cards, go to
+ * Sources card stays while its files go up. Files picked, or dropped on the cards, go to
  * `upload` (WorkspaceOnboarding.vue), which settles once they are all up or refused.
  *
  * One column for each step this person has (two or three), so a workspace looks the same after
@@ -21,10 +21,16 @@ import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
  * the column is too narrow for that (a phone, or a sidebar and side panel beside it), and when
  * one step is left: a lone card would leave a hole beside it.
  */
-const props = defineProps<{ steps: SetupStep[]; uploading: number; upload: (files: File[]) => Promise<void> }>();
-const emit = defineEmits<{ instructions: []; share: [] }>();
+/**
+ * `dragging`: files are dragged somewhere over the page, and a drop there uploads them
+ * (WorkspacePage.vue): the Sources step says it takes them. `askNext`: focus fell to the page
+ * and no step's button can take it (the one left is busy uploading): the message box should.
+ */
+const props = defineProps<{ steps: SetupStep[]; uploading: number; upload: (files: File[]) => Promise<void>; dragging?: boolean }>();
+const emit = defineEmits<{ instructions: []; share: []; askNext: [] }>();
 
 const done = computed(() => props.steps.filter((step) => step.done).length);
+const filled = (index: number) => index < done.value;
 const cards = computed(() => props.steps.filter((step) => !step.done || (step.key === "documents" && props.uploading > 0)));
 
 /**
@@ -53,12 +59,27 @@ const rows = computed(() => cards.value.length === 1 || narrow.value);
  */
 const list = ref<HTMLElement>();
 const listHeight = ref(0);
-const heightObserver = new ResizeObserver(([entry]) => (listHeight.value = entry ? Math.ceil(entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height) : 0));
+/** While the height moves, what is outside it is clipped: steps that grow do not spill over the sections below. */
+const clipping = ref(false);
+const HEIGHT_MS = 300;
+let clipTimer = 0;
+const heightObserver = new ResizeObserver(([entry]) => {
+	const height = entry ? Math.ceil(entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height) : 0;
+	if (listHeight.value && height !== listHeight.value) {
+		clipping.value = true;
+		clearTimeout(clipTimer);
+		clipTimer = window.setTimeout(() => (clipping.value = false), HEIGHT_MS);
+	}
+	listHeight.value = height;
+});
 watch(list, (now, before) => {
 	if (before) heightObserver.unobserve(before);
 	if (now) heightObserver.observe(now);
 });
-onBeforeUnmount(() => heightObserver.disconnect());
+onBeforeUnmount(() => {
+	heightObserver.disconnect();
+	clearTimeout(clipTimer);
+});
 watch(
 	rows,
 	async () => {
@@ -75,6 +96,7 @@ const drop = useFileDrop(
 	() => cards.value.some((step) => step.key === "documents"),
 	(files) => void props.upload(files),
 );
+const documentsDropping = computed(() => drop.active.value || Boolean(props.dragging && cards.value.some((step) => step.key === "documents")));
 
 /**
  * The card whose button was used last: its dialog or file picker gives focus back to that
@@ -130,7 +152,8 @@ function pinBeforeLeave(element: Element) {
 /**
  * A card leaves when its dialog saves, or its files are up, and takes its button with it.
  * Focus that would fall to the page (the dialog gives it back to the gone button as it
- * closes) goes to the next card's button instead. Focus elsewhere, such as the message box, stays.
+ * closes) goes to the next card's button that takes it, not one disabled while its files go
+ * up; with none, to the message box. Focus elsewhere, such as the message box, stays.
  */
 const REFOCUS_MS = 800;
 let focusLeaves = false;
@@ -143,8 +166,12 @@ function refocusAfterLeave() {
 	const until = performance.now() + REFOCUS_MS;
 	const check = () => {
 		const lost = document.activeElement === document.body || document.activeElement === null;
-		const next = section.value?.querySelector<HTMLElement>('[data-slot="workspace-setup-step"]:not([inert]) button');
-		if (lost && next) return next.focus();
+		if (lost) {
+			const next = section.value?.querySelector<HTMLElement>('[data-slot="workspace-setup-step"]:not([inert]) button:not(:disabled)');
+			next?.focus();
+			if (!next || document.activeElement !== next) return emit("askNext");
+			return;
+		}
 		if (performance.now() < until) refocusFrame = requestAnimationFrame(check);
 	};
 	check();
@@ -157,13 +184,14 @@ onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 		<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
 			<h2 id="workspace-setup-heading" class="text-lg-semibold text-ink-gray-9">Set up this workspace</h2>
 			<div class="flex shrink-0 items-center gap-2">
-				<!-- A segment for each step, filled once it is done. -->
+				<!-- A segment for each step; as many as are done fill, from the left, whichever steps they were. -->
 				<div class="flex gap-1" aria-hidden="true" data-slot="workspace-setup-progress">
 					<span
-						v-for="step in steps"
+						v-for="(step, index) in steps"
 						:key="step.key"
 						class="h-1.5 w-5 rounded-full transition-colors duration-300 ease-out-strong motion-reduce:transition-none"
-						:class="step.done ? 'bg-surface-gray-7' : 'bg-surface-gray-3'"
+						:class="filled(index) ? 'bg-surface-gray-7' : 'bg-surface-gray-3'"
+						:data-filled="filled(index) || undefined"
 					/>
 				</div>
 				<p class="text-sm tabular-nums text-ink-gray-6" data-slot="workspace-setup-count">{{ count(done) }} of {{ count(steps.length) }} done</p>
@@ -171,7 +199,11 @@ onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 		</div>
 		<p class="mt-1 text-p-sm text-ink-gray-6">You can ask questions now and set these up any time.</p>
 
-		<div class="mt-4 transition-[height] duration-300 ease-out-strong motion-reduce:transition-none" :style="listHeight ? { height: `${listHeight}px` } : undefined">
+		<div
+			class="mt-4 transition-[height] duration-300 ease-out-strong motion-reduce:transition-none"
+			:class="{ 'overflow-hidden': clipping }"
+			:style="listHeight ? { height: `${listHeight}px` } : undefined"
+		>
 			<div ref="list">
 				<TransitionGroup
 					v-if="width"
@@ -192,12 +224,12 @@ onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 						:step="step"
 						:compact="rows"
 						:busy="step.key === 'documents' && uploading > 0"
-						:dropping="step.key === 'documents' && drop.active.value"
+						:dropping="step.key === 'documents' && documentsDropping"
 						@act="act(step)"
 					/>
 				</TransitionGroup>
 			</div>
 		</div>
-		<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" @cancel="picked" />
+		<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload files" data-slot="document-picker" @change="picked" @cancel="picked" />
 	</section>
 </template>

@@ -32,7 +32,7 @@ async function save() {
 		const shared = members.value.map((member) => ({ userId: member.id, access: member.access }));
 		const saved = await shareWorkspace(workspace.id, kind.value, kind.value === "org" ? [] : shared);
 		props.request.onSaved(saved);
-		toast.success("Sharing saved");
+		if (!props.request.quiet) toast.success("Sharing saved");
 		open.value = false;
 	} catch (failure) {
 		error.value = (failure as Error).message;

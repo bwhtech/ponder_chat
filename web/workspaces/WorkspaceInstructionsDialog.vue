@@ -40,7 +40,7 @@ async function save() {
 	error.value = "";
 	try {
 		props.request.onSaved(await updateWorkspace(props.request.workspace.id, { instructions: instructions.value.trim() }));
-		toast.success("Instructions saved");
+		if (!props.request.quiet) toast.success("Instructions saved");
 		open.value = false;
 	} catch (failure) {
 		error.value = failure instanceof Error ? failure.message : String(failure);

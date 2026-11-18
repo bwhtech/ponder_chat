@@ -21,7 +21,8 @@ import WorkspaceSetup from "./WorkspaceSetup.vue";
  * The status line, for screen readers, stays after the cards: it says what each step added, and
  * when the workspace is set up.
  */
-const props = defineProps<{ workspace: WorkspaceDetail }>();
+/** `dragging`: files are dragged over the page, and a drop anywhere on it comes here (WorkspacePage.vue). */
+const props = defineProps<{ workspace: WorkspaceDetail; dragging?: boolean }>();
 const emit = defineEmits<{ instructions: []; share: []; documents: [documents: WorkspaceDocument[]]; finished: [] }>();
 
 const steps = computed(() => setupSteps(props.workspace));
@@ -33,7 +34,7 @@ const { uploading, errors, upload } = useDocumentUpload(
 const toDo = computed(() => steps.value.some((step) => !step.done) || uploading.value > 0);
 const fresh = computed(() => steps.value.every((step) => !step.done));
 
-const ADDED: Record<SetupStepKey, string> = { instructions: "Instructions added.", documents: "Documents added.", people: "Workspace shared." };
+const ADDED: Record<SetupStepKey, string> = { instructions: "Instructions added.", documents: "Sources added.", people: "Workspace shared." };
 const doneKeys = computed(() => steps.value.filter((step) => step.done).map((step) => step.key));
 const announcement = ref("");
 watch([doneKeys, toDo], ([now, wanted], [before, wanted0]) => {
@@ -67,7 +68,7 @@ function refocusAfterLeave() {
 }
 onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 
-/** Files dropped on the page around the setup (WorkspacePage.vue) go up here too, so the Documents step counts them. */
+/** Files dropped on the page around the setup (WorkspacePage.vue) go up here too, so the Sources step counts them. */
 defineExpose<UploadHandle>({ upload });
 </script>
 
@@ -91,8 +92,10 @@ defineExpose<UploadHandle>({ upload });
 						:steps="steps"
 						:uploading="uploading"
 						:upload="upload"
+						:dragging="dragging"
 						@instructions="emit('instructions')"
 						@share="emit('share')"
+						@ask-next="emit('finished')"
 					/>
 				</div>
 			</div>
