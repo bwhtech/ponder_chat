@@ -16,3 +16,12 @@ export function credits(value: number) {
 export function money(value: number) {
 	return value > 0 && value < 0.01 ? usdExact.format(value) : usd.format(value);
 }
+
+/** An amount in any currency, such as "€12.50" or "$1,200". Whole amounts show no cents. An unknown code falls back to the number and the code. */
+export function amount(value: number, currency = "USD") {
+	try {
+		return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: Number.isInteger(value) ? 0 : 2 }).format(value);
+	} catch {
+		return `${count(value)} ${currency}`;
+	}
+}

@@ -53,6 +53,12 @@ Sheets open in the same panel. Ask for data, and Ponder makes a CSV file with Py
 
 ![A chat that asked for sample data for 100 students. Python made students.csv, and the side panel shows it as a table with Student, Class, Maths, Science and English columns and 100 rows.](docs/images/table.webp)
 
+### Cards in a reply
+
+Ask for a comparison, a breakdown or a chart, and Ponder can answer with a card: headline figures, charts, a table or a list, drawn with frappe-ui while the reply streams. The figures come from the chat: what Ponder searched, read or computed, or what you gave it. Buttons on a card switch between views, or send a follow-up question. See [`docs/cards.md`](docs/cards.md).
+
+![A reply about monthly spending. A card shows needs of $1,770, wants of $295 and $300 saved, a donut chart of where the money goes, and All, Needs and Wants buttons above a table of the items.](docs/images/cards.webp)
+
 ### Python on your files
 
 Attach a CSV or Excel file and ask a question. Ponder writes Python (pandas, matplotlib and more) and runs it in a sandbox with no network. The charts and files it makes come back into the chat. The code and its output are one click away.
@@ -493,6 +499,7 @@ A chat can grow longer than its model can read. `server/compaction/` and `server
 | Summaries of long chats | `server/compaction/`, `server/workflow/context-guard.ts`, `web/compaction.ts` |
 | Rate limits | `server/limits/RateLimits.ts`, `server/rate-limit.ts` |
 | Search in chats, Markdown export | `server/thread-search.ts`, `web/thread-search.ts`, `web/export-markdown.ts` |
+| Cards in a reply (OpenUI) | `shared/genui.ts`, `server/genui/`, `web/genui/`, [`docs/cards.md`](docs/cards.md) |
 | Citation chips | `inline-citation/collect.ts`, `CitationCard.vue` and `response/Response.vue` in [frappe-ui-ai-elements](https://github.com/bwhtech/frappe-ui-ai-elements) |
 | Models | `server/models/Models.ts`, `web/models.ts` |
 | OpenRouter key and other secrets | `server/openrouter/OpenRouterKey.ts`, `server/secrets/Secrets.ts` |
