@@ -55,7 +55,7 @@ Sheets open in the same panel. Ask for data, and Ponder makes a CSV file with Py
 
 ### Cards in a reply
 
-Ask for a comparison, a breakdown or a chart, and Ponder can answer with a card: headline figures, charts, a table or a list, drawn with frappe-ui while the reply streams. The figures come from the chat: what Ponder searched, read or computed, or what you gave it. Buttons on a card switch between views, or send a follow-up question. See [`docs/cards.md`](docs/cards.md).
+Ask for a comparison, a breakdown or a chart, and Ponder can answer with a card: headline figures, charts, a table or a list, drawn with frappe-ui while the reply streams. The figures come from the chat: what Ponder searched, read or computed, or what you gave it. Tabs on a card switch between views, and buttons send a follow-up question. See [`docs/cards.md`](docs/cards.md).
 
 ![A reply about monthly spending. A card shows needs of $1,770, wants of $295 and $300 saved, a donut chart of where the money goes, and All, Needs and Wants buttons above a table of the items.](docs/images/cards.webp)
 

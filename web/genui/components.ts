@@ -1,8 +1,9 @@
-import { useIsStreaming, useTriggerAction, type ActionConfig, type ComponentRenderProps } from "@openuidev/vue-lang";
-import { Alert, Badge, Button } from "frappe-ui";
+import { resolveStateField } from "@openuidev/lang-core";
+import { useIsStreaming, useOpenUI, useTriggerAction, type ActionConfig, type ComponentRenderProps } from "@openuidev/vue-lang";
+import { Alert, Badge, Button, TabButtons } from "frappe-ui";
 import { BarChart, DonutChart, LineChart, NumberCard } from "frappe-ui/charts";
 import { List, ListCell, ListHeader, ListHeaderCell, ListRow } from "frappe-ui/list";
-import { defineComponent, h, type VNode } from "vue";
+import { computed, defineComponent, h, onUnmounted, ref, type VNode } from "vue";
 import { fullDate } from "../dates";
 import { amount, count } from "../numbers";
 import { genuiLibrary, type GenuiRenderers } from "../../shared/genui";
@@ -63,6 +64,39 @@ const ButtonNode = defineComponent({
 
 const Buttons = ({ props, renderNode }: Render<{ buttons: unknown[] }>) =>
 	h("div", { class: "flex flex-wrap gap-2 [@media(pointer:coarse)]:gap-4" }, [renderNode(props.buttons)]);
+
+/**
+ * Tabs bound to a $variable: a click sets it, and the parts of the card that read it change.
+ * Unbound, or bound to a $variable never declared, they keep their own choice, from the first option.
+ */
+const TabButtonsNode = defineComponent({
+	props: ["props", "renderNode"],
+	setup(attrs: Render<{ options: string[]; value: unknown }>) {
+		const openui = useOpenUI();
+		// The store is not a Vue ref: count its changes so the computed below reads it again.
+		const version = ref(0);
+		onUnmounted(openui.store.subscribe(() => version.value++));
+		const own = ref<string>();
+		const options = computed(() => (Array.isArray(attrs.props.options) ? attrs.props.options.filter((option) => option != null).map(String) : []));
+		const field = computed(() => {
+			void version.value;
+			return resolveStateField<string>("tabs", attrs.props.value, openui.store, openui.evaluationContext, () => own.value, (_, next) => (own.value = String(next)));
+		});
+		const current = computed(() => {
+			const value = field.value.value;
+			return typeof value === "string" && options.value.includes(value) ? value : options.value[0];
+		});
+		return () =>
+			options.value.length
+				? h(TabButtons, {
+						class: "self-start",
+						options: options.value.map((option) => ({ label: option, value: option })),
+						modelValue: current.value,
+						"onUpdate:modelValue": (next: unknown) => field.value.setValue(String(next)),
+					})
+				: null;
+	},
+});
 
 const NumberCardNode = ({ props }: Render<{ title: string; value: number | string; prefix: string; suffix: string; delta: number }>) =>
 	h(NumberCard, {
@@ -170,6 +204,7 @@ const RENDERERS: GenuiRenderers = {
 	Alert: AlertNode,
 	Button: ButtonNode,
 	Buttons,
+	TabButtons: TabButtonsNode,
 	NumberCard: NumberCardNode,
 	BarChart: BarChartNode,
 	LineChart: LineChartNode,

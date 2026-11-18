@@ -1,4 +1,4 @@
-import { createLibrary, defineComponent, tagSchemaId, type Library, type PromptOptions } from "@openuidev/lang-core";
+import { createLibrary, defineComponent, markReactive, tagSchemaId, type Library, type PromptOptions } from "@openuidev/lang-core";
 import { z } from "zod";
 
 /**
@@ -7,7 +7,7 @@ import { z } from "zod";
  *
  * The components follow frappe-ui's OpenUI library (frappe/frappe-ui#1329): the same names,
  * arguments in the same order, and frappe-ui's own words for values (theme, variant, amber).
- * Ponder adds Table and Col, for comparisons. When frappe-ui ships its library, the web side
+ * Ponder adds Table and Col, for comparisons, and TabButtons, to switch views. When frappe-ui ships its library, the web side
  * can use it, and programs saved in chats keep drawing.
  *
  * One definition for both sides. The server builds the prompt and checks the model's code
@@ -25,6 +25,7 @@ export const COMPONENT_NAMES = [
 	"Alert",
 	"Button",
 	"Buttons",
+	"TabButtons",
 	"NumberCard",
 	"BarChart",
 	"LineChart",
@@ -41,6 +42,12 @@ export type GenuiRenderers = Record<GenuiComponentName, unknown>;
 // An Action([...]) expression. The tag gives it a readable type in the prompt and turns on the prompt's section on actions.
 const action = z.any();
 tagSchemaId(action, "ActionExpression");
+
+/** A value the person changes, bound to a $variable: the prompt prints its type as $binding<…>. */
+function reactive<T extends z.ZodType>(schema: T): T {
+	markReactive(schema);
+	return schema;
+}
 
 // Rows: an array of objects that the model writes, one per category, date or item.
 const rows = z.array(z.record(z.string(), z.any()));
@@ -115,6 +122,11 @@ export function genuiLibrary(renderers?: Partial<GenuiRenderers>): Library {
 			Button,
 			define("Buttons", "A row of Buttons.", z.object({ buttons: z.array(Button.ref) })),
 			define(
+				"TabButtons",
+				"Segmented tabs that switch a card between views. Bind value to a $variable, then pick what shows with it: chart = $view == \"Pace\" ? paceChart : distanceChart.",
+				z.object({ options: z.array(z.string()), value: reactive(z.string()) }),
+			),
+			define(
 				"NumberCard",
 				"One number with a title, such as a count, a total or a rate.",
 				z.object({
@@ -153,7 +165,7 @@ export function genuiLibrary(renderers?: Partial<GenuiRenderers>): Library {
 		componentGroups: [
 			{ name: "Layout", components: ["Stack", "Row"] },
 			{ name: "Content", components: ["Heading", "Text", "Badge", "Alert"] },
-			{ name: "Actions", components: ["Button", "Buttons"] },
+			{ name: "Actions", components: ["Button", "Buttons", "TabButtons"] },
 			{ name: "Data", components: ["NumberCard", "BarChart", "LineChart", "DonutChart", "List", "ListRow", "Table", "Col"] },
 		],
 	});
@@ -162,8 +174,8 @@ export function genuiLibrary(renderers?: Partial<GenuiRenderers>): Library {
 /**
  * Ponder's rules for the prompt. A card has no live queries: the model puts the data in the
  * program, from what it found with search, Python or a connector, or from what it knows well.
- * Bindings stay on for the expressions (@Each, @Filter, pluck) and for $variables that a
- * Button sets, such as a toggle between two views. There are no inputs or forms.
+ * Bindings stay on for the expressions (@Each, @Filter, pluck) and for $variables: TabButtons
+ * switch a card between views, and a Button can @Set one. There are no inputs or forms.
  */
 export const GENUI_PROMPT_OPTIONS: PromptOptions = {
 	preamble: `You draw cards in Ponder's chat with OpenUI Lang: code that the chat renders as components while you write it. Pass the code to the ${SHOW_UI} tool.`,
@@ -174,26 +186,28 @@ export const GENUI_PROMPT_OPTIONS: PromptOptions = {
 		"Write the data into the program once, as an array of rows, and pass it to every chart, list and table that shows it. Compute totals and counts with @Sum, @Count and @Filter.",
 		"Use only figures you found in this chat (search results, pages, a Python run, a connector) or know well. Never make up figures. If a figure is an estimate, say so in a Text or an Alert.",
 		"Keep a card to one clear view: a few NumberCards, one or two charts, a short table or list.",
-		"To let the person switch views, declare a $variable and set it with Buttons, and mark the button of the view on show: Button(\"5G only\", Action([@Set($network, \"5G\")]), $network == \"5G\" ? \"subtle\" : \"ghost\").",
+		"To let the person switch between views, declare a $variable with the first view, add TabButtons bound to it, and choose what shows with a ternary on it, or filter rows with it. Use Buttons for actions, not for switching views.",
 		"Use theme for meaning only: red for urgent or failed, amber for warnings, green for done. Use gray otherwise.",
 		'Give a card at most one Button with variant "solid".',
 		"Text in components is plain and short, with no Markdown.",
 	],
 	examples: [
-		`root = Stack([title, kpis, chart, filters, table, next])
+		`root = Stack([title, kpis, chart, tabs, table, next])
 $network = "All"
 title = Heading("Phone plans compared")
 plans = [{plan: "Basic", price: 15, data: 5, network: "4G"}, {plan: "Plus", price: 25, data: 20, network: "5G"}, {plan: "Max", price: 40, data: 100, network: "5G"}]
 shown = $network == "All" ? plans : @Filter(plans, "network", "==", $network)
 kpis = Row([NumberCard("Cheapest", @Min(plans.price), "$"), NumberCard("Most data", @Max(plans.data), null, " GB")])
 chart = BarChart(plans, "plan", "data", "Data per month (GB)")
-filters = Buttons([Button("All", Action([@Set($network, "All")]), $network == "All" ? "subtle" : "ghost"), Button("5G only", Action([@Set($network, "5G")]), $network == "5G" ? "subtle" : "ghost")])
+tabs = TabButtons(["All", "4G", "5G"], $network)
 table = Table(shown, [Col("Plan", "plan"), Col("Price", "price", "currency"), Col("Data (GB)", "data", "number"), Col("Network", "network", "badge")])
 next = Buttons([Button("Which plan fits me?", Action([@ToAssistant("Which of these plans fits me best?")]), "solid")])`,
-		`root = Stack([title, chart, items])
+		`root = Stack([title, tabs, chart, items])
+$metric = "Steps"
 title = Heading("Steps this week")
-days = [{day: "Mon", steps: 6200}, {day: "Tue", steps: 8100}, {day: "Wed", steps: 4300}]
-chart = LineChart(days, "day", "steps")
+days = [{day: "Mon", steps: 6200, minutes: 41}, {day: "Tue", steps: 8100, minutes: 55}, {day: "Wed", steps: 4300, minutes: 30}]
+tabs = TabButtons(["Steps", "Active minutes"], $metric)
+chart = $metric == "Steps" ? LineChart(days, "day", "steps") : BarChart(days, "day", "minutes")
 items = List(@Each(days, "d", ListRow(d.day, d.steps + " steps", Badge(d.steps >= 8000 ? "Goal met" : "Short", d.steps >= 8000 ? "green" : "gray"))))`,
 	],
 };

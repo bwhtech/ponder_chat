@@ -27,7 +27,20 @@ Cards use [OpenUI](https://www.openui.com) (MIT). OpenUI Lang is a short, line-b
 
 A card has no live queries. The model writes the data into the program, from what it found in the chat (search results, pages, a Python run, a connector) or from what it knows well. The guide tells it to never make up figures, and to mark an estimate as one.
 
-Expressions are on: `@Each`, `@Filter`, `@Sum`, `@Count`, `@Min`, `@Max`, a column of rows (`plans.price`), and `$variables`. A button can set a `$variable` with `@Set`, so a card can switch between views, such as "All" and "5G only", with no new message. The choice is not saved: a card that opens again starts from its defaults.
+Expressions are on: `@Each`, `@Filter`, `@Sum`, `@Count`, `@Min`, `@Max`, a column of rows (`plans.price`), ternaries, and `$variables`.
+
+## Switching views
+
+`TabButtons` switch a card between views with no new message. They are frappe-ui's `TabButtons`, bound to a `$variable`. A click sets the variable, and every part that reads it changes:
+
+```text
+$metric = "Distance"
+tabs = TabButtons(["Distance", "Pace"], $metric)
+chart = $metric == "Distance" ? BarChart(runs, "day", "km") : LineChart(runs, "day", "pace")
+shown = $network == "All" ? plans : @Filter(plans, "network", "==", $network)
+```
+
+The guide tells the model to use `TabButtons` to switch views, and `Buttons` for actions. A button can still `@Set` a variable. The choice is not saved: a card that opens again starts on its first view.
 
 ## Buttons
 
@@ -42,13 +55,13 @@ Buttons are off while the card is still being written. Cards never write anywher
 
 ## Components
 
-The components follow frappe-ui's OpenUI library ([frappe/frappe-ui#1329](https://github.com/frappe/frappe-ui/pull/1329)): the same names, the same argument order, and frappe-ui's own words for values (`theme`, `variant`, `amber`). Ponder adds `Table` and `Col`, for comparisons.
+The components follow frappe-ui's OpenUI library ([frappe/frappe-ui#1329](https://github.com/frappe/frappe-ui/pull/1329)): the same names, the same argument order, and frappe-ui's own words for values (`theme`, `variant`, `amber`). Ponder adds `Table` and `Col`, for comparisons, and `TabButtons`, to switch views.
 
 | Group | Components | Drawn with |
 | --- | --- | --- |
 | Layout | `Stack`, `Row` | Flex and grid. A `Row` wraps on a phone. |
 | Content | `Heading`, `Text`, `Badge`, `Alert` | frappe-ui `Badge` and `Alert` |
-| Actions | `Button`, `Buttons` | frappe-ui `Button` |
+| Actions | `Button`, `Buttons`, `TabButtons` | frappe-ui `Button`, `TabButtons` |
 | Data | `NumberCard`, `BarChart`, `LineChart`, `DonutChart` | `frappe-ui/charts` |
 | Data | `List`, `ListRow`, `Table`, `Col` | `frappe-ui/list` |
 

@@ -9,13 +9,13 @@ test.beforeEach(async ({ person, page }) => {
 	await page.goto("/");
 });
 
-const CARD = `root = Stack([title, kpis, filters, table, next])
+const CARD = `root = Stack([title, kpis, tabs, table, next])
 $network = "All"
 title = Heading("Phone plans compared")
 plans = [{plan: "Basic", price: 15, data: 5, network: "4G"}, {plan: "Plus", price: 25, data: 20, network: "5G"}, {plan: "Max", price: 40, data: 100, network: "5G"}]
 shown = $network == "All" ? plans : @Filter(plans, "network", "==", $network)
 kpis = Row([NumberCard("Cheapest", @Min(plans.price), "$"), NumberCard("Plans", @Count(shown))])
-filters = Buttons([Button("All", Action([@Set($network, "All")])), Button("5G only", Action([@Set($network, "5G")]))])
+tabs = TabButtons(["All", "4G", "5G"], $network)
 table = Table(shown, [Col("Plan", "plan"), Col("Price", "price", "currency"), Col("Network", "network", "badge")])
 next = Buttons([Button("Which plan fits me?", Action([@ToAssistant("Which of these plans fits me best?")]), "solid")])`;
 
@@ -46,8 +46,11 @@ test("a card that would not draw goes back to the model, and the next one draws"
 	await expect(card.getByText("$40")).toBeVisible();
 	await expect(card.getByText("Basic")).toBeVisible();
 
-	// A button that sets a $variable filters the table in place.
-	await card.getByRole("button", { name: "5G only" }).click();
+	// TabButtons bound to a $variable filter the table in place, and show which view is on.
+	const tab = (name: string) => card.getByRole("radio", { name, exact: true });
+	await expect(tab("All")).toBeChecked();
+	await tab("5G").click();
+	await expect(tab("5G")).toBeChecked();
 	await expect(card.getByText("Basic")).toBeHidden();
 	await expect(card.getByText("Max")).toBeVisible();
 
