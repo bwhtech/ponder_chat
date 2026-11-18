@@ -8,7 +8,8 @@
     "typecheck": "node scripts/vue-tsc.cjs --noEmit -p web/tsconfig.vue.json && npm run typecheck:browser",
     "typecheck:browser": "npm run api-types && tsx scripts/typecheck-browser.ts",
     "api-types": "tsc -p server/tsconfig.api-types.json",
-    "lint": "oxlint",
+    "lint": "npm run lint:vue && oxlint",
+    "lint:vue": "npm run api-types && node --require ./scripts/typescript5.cjs node_modules/eslint/bin/eslint.js --concurrency auto \"web/**/*.vue\"",
     "dev": "tsx scripts/dev.ts",
     "test": "vitest run",
     "start": "./start.sh",
@@ -80,14 +81,46 @@
     "@types/pg": "^8.23.1",
     "@vitejs/plugin-vue": "^6.0.10",
     "autoprefixer": "^10.6.1",
+    "eslint": "10.15.0",
     "oxlint": "1.94.0",
     "oxlint-tsgolint": "7.0.2007",
     "postcss": "^8.5.31",
     "tailwindcss": "^3.4.19",
     "typescript": "^7.0.2",
+    "typescript-eslint": "8.73.0",
     "vite": "^8.3.5",
     "vitest": "5.0.5",
+    "vue-eslint-parser": "10.4.2",
     "vue-tsc": "^3.3.13"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "typescript-eslint": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/parser": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/eslint-plugin": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/type-utils": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/utils": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/project-service": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/tsconfig-utils": {
+      "typescript": "$typescript"
+    },
+    "ts-api-utils": {
+      "typescript": "$typescript"
+    }
+  }
 }
