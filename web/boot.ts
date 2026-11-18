@@ -1,5 +1,6 @@
 import type { client, Answer } from "./api";
 import type { LogoVersions } from "./brand";
+import { isRecord } from "./json";
 
 /**
  * What the server put in the page for its first screen (server/boot-page.ts): who is
@@ -32,7 +33,9 @@ export function fromBoot<K extends keyof Boot>(key: K): Boot[K] | undefined {
 
 function read(): Boot {
 	try {
-		return JSON.parse(document.getElementById("ponder-boot")?.textContent || "{}") as Boot;
+		const parsed: unknown = JSON.parse(document.getElementById("ponder-boot")?.textContent || "{}");
+		// The server's own answers, as the typed client's are (server/boot-page.ts).
+		return isRecord(parsed) ? (parsed as Boot) : {};
 	} catch {
 		return {};
 	}

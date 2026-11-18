@@ -109,7 +109,8 @@ async function ages(): Promise<{ key: IDBValidKey; openedAt: number }[]> {
 		request.onsuccess = () => {
 			const cursor = request.result;
 			if (!cursor) return resolve(found);
-			found.push({ key: cursor.primaryKey, openedAt: (cursor.value as { openedAt?: number })?.openedAt ?? 0 });
+			const value: unknown = cursor.value;
+			found.push({ key: cursor.primaryKey, openedAt: isRecord(value) && typeof value.openedAt === "number" ? value.openedAt : 0 });
 			cursor.continue();
 		};
 		request.onerror = () => resolve(found);

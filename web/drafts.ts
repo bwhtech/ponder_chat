@@ -1,4 +1,5 @@
 import { onBeforeUnmount, watch, type Ref } from "vue";
+import { isRecord } from "./json";
 
 /**
  * What the person was writing, per thread, so switching threads, a reload or a closed
@@ -50,8 +51,18 @@ function save(threadId: string, text: string) {
 
 function read(): Drafts {
 	try {
-		return JSON.parse(localStorage.getItem(KEY) ?? "{}") as Drafts;
+		return draftsIn(JSON.parse(localStorage.getItem(KEY) ?? "{}"));
 	} catch {
 		return {};
 	}
+}
+
+/** The drafts kept on this device, possibly by an older version: an entry of another shape is dropped. */
+function draftsIn(value: unknown): Drafts {
+	if (!isRecord(value)) return {};
+	const drafts: Drafts = {};
+	for (const [threadId, draft] of Object.entries(value)) {
+		if (isRecord(draft) && typeof draft.text === "string" && typeof draft.savedAt === "number") drafts[threadId] = { text: draft.text, savedAt: draft.savedAt };
+	}
+	return drafts;
 }

@@ -15,7 +15,9 @@ export function isMessages(value: unknown): value is UIMessage[] {
 
 /** A plain copy of JSON-safe data, such as a reactive proxy's, for IndexedDB and localStorage. */
 export function plainCopy<T>(value: T): T {
-	return JSON.parse(JSON.stringify(value)) as T;
+	const copy: unknown = JSON.parse(JSON.stringify(value));
+	// The same data, without the proxy: for JSON-safe data, JSON keeps its shape.
+	return copy as T;
 }
 
 function isMessage(value: unknown) {

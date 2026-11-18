@@ -1,5 +1,6 @@
 import type { ViewedFile } from "frappe-ui-ai-elements";
 import { ApiError, client, unwrap } from "../api";
+import { isRecord } from "../json";
 import { count } from "../numbers";
 
 /**
@@ -31,9 +32,10 @@ export async function uploadDocument(workspaceId: string, file: File): Promise<W
 	const body = new FormData();
 	body.append("file", file);
 	const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/documents`, { method: "POST", body });
-	const answer = (await response.json().catch(() => ({}))) as { document?: WorkspaceDocument; error?: string };
-	if (!response.ok || !answer.document) throw new ApiError(answer.error ?? `“${file.name}” could not be uploaded.`, response.status);
-	return answer.document;
+	const answer: unknown = await response.json().catch(() => ({}));
+	if (response.ok && isRecord(answer) && isWorkspaceDocument(answer.document)) return answer.document;
+	const error = isRecord(answer) && typeof answer.error === "string" ? answer.error : undefined;
+	throw new ApiError(error ?? `“${file.name}” could not be uploaded.`, response.status);
 }
 
 export async function deleteDocument(workspaceId: string, documentId: string) {
@@ -95,4 +97,16 @@ export function documentIcon(document: Pick<WorkspaceDocument, "mediaType">) {
 	if (document.mediaType === "text/csv" || document.mediaType === "text/tab-separated-values") return "lucide-file-spreadsheet";
 	if (document.mediaType === "application/json") return "lucide-file-json";
 	return "lucide-file";
+}
+
+const STATUSES = new Set<unknown>(["reading", "ready", "failed"] satisfies DocumentStatus[]);
+
+function isWorkspaceDocument(value: unknown): value is WorkspaceDocument {
+	return (
+		isRecord(value) &&
+		[value.id, value.name, value.mediaType, value.createdAt].every((field) => typeof field === "string") &&
+		typeof value.size === "number" &&
+		STATUSES.has(value.status) &&
+		(value.error === null || typeof value.error === "string")
+	);
 }

@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai";
+import { isMessages, isRecord } from "./json";
 import { toast } from "./toasts";
 import { isAuto } from "../shared/auto-model";
 import { modelName } from "./models";
@@ -14,8 +15,9 @@ export async function downloadThreadMarkdown(id: string, title: string) {
 	try {
 		const response = await fetch(`/api/threads/${encodeURIComponent(id)}`, { cache: "no-store" });
 		if (!response.ok) throw new Error(String(response.status));
-		const { messages } = (await response.json()) as { messages: UIMessage[] };
-		download(`${fileName(title)}.md`, threadMarkdown(title, messages));
+		const thread: unknown = await response.json();
+		if (!isRecord(thread) || !isMessages(thread.messages)) throw new Error("Not a thread.");
+		download(`${fileName(title)}.md`, threadMarkdown(title, thread.messages));
 	} catch {
 		toast.error("The chat could not be exported. Try again.");
 	}
