@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Button, Dropdown, SidebarItem, SidebarLabel } from "frappe-ui";
-import { accessIcon, openWorkspace, pinWorkspace, sharedWith, workspaces, workspacesLoaded, type WorkspaceSummary } from "./store";
+import { prefetchWorkspaceChats } from "../threads";
+import { accessIcon, openWorkspace, pinWorkspace, prefetchWorkspace, sharedWith, workspaces, workspacesLoaded, type WorkspaceSummary } from "./store";
 import WorkspaceRowsSkeleton from "./WorkspaceRowsSkeleton.vue";
 
 /**
@@ -10,6 +11,9 @@ import WorkspaceRowsSkeleton from "./WorkspaceRowsSkeleton.vue";
  * a chat does when it is active again, and shows a pin after its name. The + makes a new one;
  * with no workspace yet, a "New workspace" row takes its place. WorkspaceRowsPlaceholder.vue
  * draws the same rows while this chunk loads.
+ *
+ * Pointing at a row, focusing it or touching it fetches the workspace and the person's chats
+ * in it ahead of the click, so its page shows at once, as a chat row does (ThreadList.vue).
  */
 const props = defineProps<{ highlight: boolean }>();
 const emit = defineEmits<{ select: [slug: string]; create: [] }>();
@@ -21,6 +25,11 @@ function menu(workspace: WorkspaceSummary) {
 }
 
 const isOpen = (workspace: WorkspaceSummary) => props.highlight && workspace.id === openWorkspace.value?.id;
+
+function prefetch(workspace: WorkspaceSummary) {
+	prefetchWorkspace(workspace);
+	prefetchWorkspaceChats(workspace.id);
+}
 </script>
 
 <template>
@@ -60,6 +69,9 @@ const isOpen = (workspace: WorkspaceSummary) => props.highlight && workspace.id 
 				:active="isOpen(workspace)"
 				:title="`${workspace.name} · ${sharedWith(workspace)}`"
 				@click="emit('select', workspace.slug)"
+				@pointerenter="prefetch(workspace)"
+				@focusin="prefetch(workspace)"
+				@touchstart.passive="prefetch(workspace)"
 			>
 				<template #prefix><span :class="[accessIcon(workspace), 'size-4 text-ink-gray-6']" aria-hidden="true" /></template>
 				<!-- The name gives way before the pin, so the pin stays in view; the row's name says "pinned" for screen readers. -->

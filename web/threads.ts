@@ -5,6 +5,7 @@ import { client, unwrap, type Answer } from "./api";
 import { fromBoot } from "./boot";
 import { isRecord } from "./json";
 import { forgetThread, peekThread, readThread, threadFrom, writeThread, type CachedThread } from "./thread-cache";
+import { forgetChat, peekWorkspaceChats, writeWorkspaceChats } from "./workspaces/cache";
 import { openWorkspaceKey } from "./workspaces/store";
 
 /**
@@ -133,13 +134,16 @@ export function useWorkspaceThreads(workspaceId: () => string) {
 		const id = workspaceId();
 		const token = ++asking;
 		if (!id) return void (fetched.value = []);
-		try {
-			const response = await client.api.threads.$get({ query: { workspace: id } });
-			if (token === asking && response.ok) fetched.value = (await response.json()).threads;
-		} catch {
-			// Offline: the person's list still gives the chats it has.
+		// A workspace opened before on this page (workspaces/cache.ts): its list shows at once, and is asked again.
+		const cached = askedFor.value === id ? undefined : peekWorkspaceChats(id);
+		if (cached) {
+			fetched.value = cached;
+			askedFor.value = id;
 		}
-		if (token === asking) askedFor.value = id;
+		const fresh = await fetchWorkspaceChats(id);
+		if (token !== asking) return;
+		if (fresh) fetched.value = fresh;
+		askedFor.value = id;
 	}
 	watch([workspaceId, threads], ask, { immediate: true });
 	const chats = computed(() => {
@@ -151,6 +155,38 @@ export function useWorkspaceThreads(workspaceId: () => string) {
 	});
 	const loaded = computed(() => Boolean(workspaceId()) && askedFor.value === workspaceId());
 	return { chats, loaded };
+}
+
+const chatsInflight = new Map<string, Promise<ThreadSummary[] | undefined>>();
+
+/**
+ * The server's list of the person's chats in a workspace, kept for the next visit
+ * (workspaces/cache.ts); undefined when it could not be reached (offline: the person's list
+ * still gives the chats it has). A request on its way for the workspace is shared.
+ */
+function fetchWorkspaceChats(id: string) {
+	const pending = chatsInflight.get(id);
+	if (pending) return pending;
+	const request = (async () => {
+		try {
+			const response = await client.api.threads.$get({ query: { workspace: id } });
+			if (!response.ok) return undefined;
+			const list = (await response.json()).threads;
+			writeWorkspaceChats(id, list);
+			return list;
+		} catch {
+			return undefined;
+		} finally {
+			chatsInflight.delete(id);
+		}
+	})();
+	chatsInflight.set(id, request);
+	return request;
+}
+
+/** Fetches a workspace's chats ahead of a click on its row, as `prefetch` does a chat's messages. */
+export function prefetchWorkspaceChats(id: string) {
+	if (!peekWorkspaceChats(id)) void fetchWorkspaceChats(id);
 }
 
 async function open(id: string, { push = true } = {}) {
@@ -305,6 +341,7 @@ async function rename(id: string, title: string) {
 async function remove(id: string) {
 	await unwrap(client.api.threads[":id"].$delete({ param: { id: encodeURIComponent(id) } }), "The thread could not be deleted.");
 	forgetThread(id);
+	forgetChat(id);
 	pending.delete(id);
 	await refresh();
 	if (id === current.value) {

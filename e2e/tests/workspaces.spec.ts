@@ -844,6 +844,84 @@ test("an older link by a workspace's id opens it, with the slug in its place", a
 	await expect(workspaceRows(page).locator('[data-state="active"]')).toHaveText(name);
 });
 
+test.describe("switching workspaces", () => {
+	/** Holds the workspace's own answer and its chats list until the test lets go. */
+	async function hold(page: Page, workspace: { id: string; slug: string }) {
+		let release = () => {};
+		const released = new Promise<void>((resolve) => (release = resolve));
+		const own = new RegExp(`/api/workspaces/(${workspace.id}|${escape(workspace.slug)})$`);
+		const held = (url: URL) => own.test(url.pathname) || (url.pathname === "/api/threads" && url.searchParams.get("workspace") === workspace.id);
+		await page.route(held, async (route) => {
+			await released;
+			await route.continue();
+		});
+		return release;
+	}
+
+	test("a workspace opened before shows at once while the server is asked, then takes the server's newer copy", async ({ page, person, db }) => {
+		const tag = person.id.slice(0, 6);
+		const [first, second] = [`Switch alpha ${tag}`, `Switch bravo ${tag}`];
+		const a = await createWorkspace(page, first, `Alpha rule one ${tag}.`);
+		await uploadReady(page, a.id, textFile("Alpha rota.md", "# Rota\n\nNights rotate."));
+		await addChats(db, person.id, a.id, 2);
+		await createWorkspace(page, second);
+
+		await page.goto(`/?w=${a.slug}`);
+		await expect(instructionsSection(page)).toContainText(`Alpha rule one ${tag}.`);
+		await workspaceRows(page).getByRole("button", { name: second, exact: true }).click();
+		await expect(page.getByRole("heading", { name: second, level: 1 })).toBeVisible();
+
+		// Meanwhile, elsewhere, the instructions change.
+		expect((await page.request.patch(`/api/workspaces/${a.id}`, { data: { instructions: `Alpha rule two ${tag}.` } })).ok()).toBe(true);
+		const release = await hold(page, a);
+		await workspaceRows(page).getByRole("button", { name: first, exact: true }).click();
+
+		await test.step("its instructions, sources and chats show while the server has not answered", async () => {
+			await expect(page.getByRole("heading", { name: first, level: 1 })).toBeVisible();
+			await expect(instructionsSection(page)).toContainText(`Alpha rule one ${tag}.`);
+			await expect(about(page).locator('[data-slot="workspace-document"]')).toContainText("Alpha rota.md");
+			for (const title of ["Question 1", "Question 2"]) await expect(page.locator('[data-slot="workspace-chats"]')).toContainText(title);
+			await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+		});
+
+		await test.step("the server's answer replaces it in place", async () => {
+			release();
+			await expect(instructionsSection(page)).toContainText(`Alpha rule two ${tag}.`);
+			await expect(instructionsSection(page)).not.toContainText(`Alpha rule one ${tag}.`);
+			await expect(about(page).locator('[data-slot="workspace-document"]')).toContainText("Alpha rota.md");
+		});
+	});
+
+	test("a workspace deleted elsewhere is not found when opened again, and does not show from memory after", async ({ page, person }) => {
+		const tag = person.id.slice(0, 6);
+		const [first, second] = [`Gone alpha ${tag}`, `Gone bravo ${tag}`];
+		const a = await createWorkspace(page, first, `Gone rule ${tag}.`);
+		await createWorkspace(page, second);
+		await page.goto(`/?w=${a.slug}`);
+		await expect(instructionsSection(page)).toContainText(`Gone rule ${tag}.`);
+		await workspaceRows(page).getByRole("button", { name: second, exact: true }).click();
+		await expect(page.getByRole("heading", { name: second, level: 1 })).toBeVisible();
+
+		expect((await page.request.delete(`/api/workspaces/${a.id}`)).ok()).toBe(true);
+		// Its row is still in this tab's sidebar, until the page learns it is gone.
+		await workspaceRows(page).getByRole("button", { name: first, exact: true }).click();
+		await expect(page.getByText("No workspace here")).toBeVisible();
+		await expect(instructionsSection(page)).toHaveCount(0);
+		await expect(workspaceRows(page).getByRole("button", { name: first, exact: true })).toHaveCount(0);
+
+		// Back to it by Back and Forward: it is asked for, not shown from memory.
+		await workspaceRows(page).getByRole("button", { name: second, exact: true }).click();
+		await expect(page.getByRole("heading", { name: second, level: 1 })).toBeVisible();
+		const release = await hold(page, a);
+		await page.goBack();
+		await expect(page).toHaveURL(new RegExp(`[?&]w=${escape(a.slug)}$`));
+		await expect(page.locator('[data-slot="workspace-view"] [aria-busy="true"]')).toBeVisible();
+		await expect(instructionsSection(page)).toHaveCount(0);
+		release();
+		await expect(page.getByText("No workspace here")).toBeVisible();
+	});
+});
+
 test("the newest workspace is first in the sidebar; a person pins one from its row's menu to the top, where it stays, and unpins it back to its place", async ({ page, person }) => {
 	const tag = person.id.slice(0, 6);
 	const [oldest, middle, newest] = ["Pin rota", "Pin minutes", "Pin budget"].map((name) => `${name} ${tag}`);

@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
-import { ApiError } from "../api";
 import { dialog } from "../dialogs";
 import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
 import { useThreads, useWorkspaceThreads } from "../threads";
+import { forgetWorkspace, peekWorkspace, writeWorkspace } from "./cache";
 import { openWorkspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
@@ -17,7 +17,20 @@ import WorkspaceChats from "./WorkspaceChats.vue";
 import WorkspaceComposer from "./WorkspaceComposer.vue";
 import WorkspaceHeading from "./WorkspaceHeading.vue";
 import WorkspaceOnboarding from "./WorkspaceOnboarding.vue";
-import { canEdit, deleteWorkspace, fetchWorkspace, isShared, loadWorkspaces, replaceWorkspaceKey, takeMadeWorkspace, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
+import {
+	canEdit,
+	deleteWorkspace,
+	fetchWorkspace,
+	isGone,
+	isShared,
+	loadWorkspaces,
+	openingWorkspace,
+	replaceWorkspaceKey,
+	takeMadeWorkspace,
+	updateWorkspace,
+	workspaceByKey,
+	type WorkspaceDetail,
+} from "./store";
 
 /**
  * A workspace (`?w=<slug>`), in one column, the chat's: its name, the person's own chats in
@@ -29,6 +42,11 @@ import { canEdit, deleteWorkspace, fetchWorkspace, isShared, loadWorkspaces, rep
  * the person's chats in it, so the column fades in once both are here, and nothing in it moves
  * then. A workspace just made in this tab shows at once. A workspace the person cannot use is
  * not found. An older link by the workspace's id opens it too, and the slug takes its place.
+ *
+ * A workspace opened before on this page, or fetched as the person pointed at its row, shows at
+ * once from memory (cache.ts), with no fade, as a chat does; the server is asked then, and its
+ * answer replaces what shows, in place. Each version the page shows is kept there for the next
+ * visit. A workspace the server no longer has for the person is not found, and leaves memory.
  *
  * It renders its own header, as the main area's first child, so the hairline under it follows
  * this page's scroller (style.css).
@@ -120,30 +138,39 @@ watch(() => props.slugOrId, (key) => (detail.value?.slug === key ? undefined : l
 
 async function load() {
 	const mine = ++asked;
-	// No document is Reading now, so the polls stop (below). One made in this tab shows as it was made.
+	// One made in this tab shows as it was made, and one opened before as it was last shown.
+	// Otherwise no document is Reading now, so the polls stop (below).
 	const made = takeMadeWorkspace(props.slugOrId);
-	detail.value = made;
+	detail.value = made ?? peekWorkspace(props.slugOrId);
 	madeHere.value = made?.id ?? "";
 	missing.value = false;
 	loadError.value = "";
-	// A workspace made in this tab can be changed (an upload, its instructions) before this answer
-	// comes. Then the answer is older than the page: it is dropped, and the workspace read again.
+	// The workspace shown can be changed (an upload, its instructions) before this answer comes.
+	// Then the answer is older than the page: it is dropped, and the workspace read again.
 	const seen = changes;
 	try {
-		const found = await fetchWorkspace(props.slugOrId);
+		const found = await openingWorkspace(props.slugOrId);
 		if (mine !== asked) return;
 		replaceWorkspaceKey(props.slugOrId, found.slug);
 		if (seen !== changes) return void poller.start(0);
-		detail.value = found;
+		// The same as the copy shown: nothing to draw again.
+		if (JSON.stringify(found) !== JSON.stringify(detail.value)) detail.value = found;
 	} catch (error) {
 		if (mine !== asked) return;
-		if (error instanceof ApiError && error.status === 404) {
+		if (isGone(error)) {
+			// Deleted, or not shared with the person (any more): a copy shown from memory goes too.
+			if (detail.value) forgetWorkspace(detail.value.id);
+			detail.value = undefined;
 			missing.value = true;
 			// It may have been in the sidebar: the person lost it, or it was deleted.
 			void loadWorkspaces();
-		} else loadError.value = (error as Error).message;
+		} else if (!detail.value) loadError.value = (error as Error).message;
+		// Offline for a moment, with a copy shown: it stays, as a chat's does.
 	}
 }
+
+/** Each version the page shows, for the next visit (cache.ts): a change made here is in it. */
+watch(detail, (now) => now && writeWorkspace(now));
 
 /**
  * While a document is Indexing, the workspace is read again, a little less often each time
@@ -161,7 +188,8 @@ const poller = new Poller(poll);
 let pollDelay = POLL_FIRST_MS;
 const reading = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading")));
 const counting = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading" && document.progress)));
-watch(reading, (now) => (now ? startPolling() : poller.stop()));
+// At once too: a copy from memory may show a document Reading as the page opens.
+watch(reading, (now) => (now ? startPolling() : poller.stop()), { immediate: true });
 onBeforeUnmount(() => poller.stop());
 
 function startPolling() {
@@ -177,8 +205,12 @@ async function poll(current: () => boolean) {
 		const fresh = await fetchWorkspace(workspaceId.value);
 		if (current() && mine === asked && seen === changes) detail.value = fresh;
 	} catch (error) {
-		// Deleted, or shared no more: asking again will not help. Offline for a moment: the next poll tries again.
-		if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return null;
+		// Deleted, or shared no more: asking again will not help, and the next visit asks first.
+		// Offline for a moment: the next poll tries again.
+		if (isGone(error)) {
+			forgetWorkspace(workspaceId.value);
+			return null;
+		}
 	}
 	if (!current() || mine !== asked || !reading.value) return null;
 	pollDelay = Math.min(counting.value ? POLL_PROGRESS_MAX_MS : POLL_MAX_MS, pollDelay * 1.5);
@@ -228,6 +260,7 @@ function share() {
 
 function sharedHere(saved: WorkspaceDetail) {
 	if (saved.access !== "none") return savedHere(saved);
+	forgetWorkspace(saved.id);
 	toast.success(`You left “${saved.name}”`);
 	emit("deleted");
 }
@@ -307,7 +340,8 @@ function askDelete() {
 			</div>
 			<!-- The column fills the page while it waits, so the box stays at the bottom. -->
 			<div class="mx-auto w-full max-w-[720px] flex-1 px-4 pb-10 pt-6 sm:px-5" :aria-busy="!ready || undefined">
-				<!-- Fades in when the workspace and the person's chats in it are here; a workspace made here shows at once. -->
+				<!-- Fades in when the workspace and the person's chats in it are here; a workspace made here, or opened
+				     before, shows at once. -->
 				<Transition enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
 					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8">
 						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="isShared(detail)" @open="emit('openChat', $event)" />

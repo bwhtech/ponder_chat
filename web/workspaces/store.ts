@@ -1,9 +1,10 @@
 import { computed, ref } from "vue";
 import { me } from "../account";
-import { client, unwrap, type Answer } from "../api";
+import { ApiError, client, unwrap, type Answer } from "../api";
 import { fromBoot } from "../boot";
 import { toast } from "../toasts";
 import { accessIcon, canEdit, canShare, isShared, people, sharedWith } from "./access";
+import { forgetWorkspace, keepOnlyWorkspaces, peekWorkspace, writeWorkspace } from "./cache";
 
 /**
  * The workspaces the person can use (server/workspaces/), for the sidebar, the composer's
@@ -51,6 +52,7 @@ export async function loadWorkspaces() {
 		workspaces.value = withPinsMadeSince(fresh, asked);
 		settlePins(asked);
 		workspacesLoaded.value = true;
+		keepOnlyWorkspaces(new Set(fresh.map((workspace) => workspace.id)));
 	} catch {
 		// Offline: keep the list the page has. The rows stay skeletons until one load works.
 	}
@@ -89,6 +91,40 @@ export function replaceWorkspaceKey(opened: string, slug: string) {
 /** By its id or its slug (server/workspaces/slug.ts). */
 export async function fetchWorkspace(idOrSlug: string): Promise<WorkspaceDetail> {
 	return (await unwrap(client.api.workspaces[":id"].$get({ param: { id: encodeURIComponent(idOrSlug) } }), "The workspace could not load.")).workspace;
+}
+
+/** The server has no such workspace for the person: deleted, or not shared with them (any more). */
+export const isGone = (error: unknown) => error instanceof ApiError && (error.status === 404 || error.status === 403);
+
+/** Prefetches on their way, by the key the page opens with (the slug). */
+const prefetching = new Map<string, Promise<WorkspaceDetail>>();
+
+/**
+ * Fetches a workspace into the cache (cache.ts) ahead of a click: on hover, focus or touch of
+ * its row in the sidebar, as a chat row does (threads.ts). Not the one open, nor one the cache
+ * has: opening that shows it at once and asks the server then.
+ */
+export function prefetchWorkspace(workspace: Pick<WorkspaceSummary, "id" | "slug">) {
+	if (openWorkspace.value?.id === workspace.id || peekWorkspace(workspace.id) || prefetching.has(workspace.slug)) return;
+	const request = fetchWorkspace(workspace.slug).finally(() => prefetching.delete(workspace.slug));
+	prefetching.set(workspace.slug, request);
+	void request.then(
+		(found) => {
+			// The page may have opened meanwhile and written its own copy, as new or newer.
+			if (!peekWorkspace(found.id)) writeWorkspace(found);
+		},
+		(error: unknown) => {
+			if (isGone(error)) forgetWorkspace(workspace.id);
+		},
+	);
+}
+
+/**
+ * The workspace as the page opens it: the answer to a prefetch still on its way, or a new
+ * request. A prefetch was asked before the page opened, so before any change made on it.
+ */
+export function openingWorkspace(idOrSlug: string) {
+	return prefetching.get(idOrSlug) ?? fetchWorkspace(idOrSlug);
 }
 
 /**
@@ -147,6 +183,7 @@ const SHARING_FAILED = "The change could not be saved.";
 
 export async function deleteWorkspace(id: string) {
 	await unwrap(client.api.workspaces[":id"].$delete({ param: { id: encodeURIComponent(id) } }), "The workspace could not be deleted.");
+	forgetWorkspace(id);
 	await loadWorkspaces();
 }
 
