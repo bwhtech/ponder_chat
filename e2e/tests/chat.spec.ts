@@ -141,7 +141,7 @@ test("New chat starts an empty chat", async ({ page }) => {
 	await expect(chat.messages(page)).toHaveCount(0);
 });
 
-test("a chat keeps every message after Memory or a workspace page, and sends with all of them", async ({ page, person, fake }) => {
+test("a chat keeps every message after a workspace page, and sends with all of them", async ({ page, person, fake }) => {
 	test.setTimeout(60_000);
 	const name = `Returns ${person.id.slice(0, 6)}`;
 	await createWorkspace(page, name);
@@ -168,16 +168,9 @@ test("a chat keeps every message after Memory or a workspace page, and sends wit
 		await workspaceRow.click();
 		await expect(workspaceHeading).toBeVisible();
 	};
-	const openMemory = async () => {
-		await page.getByRole("button", { name: /Ponder Chat/ }).first().click();
-		await page.getByRole("menuitem", { name: "Memory" }).click();
-		await expect(page.getByRole("heading", { name: "Memory", exact: true, level: 1 })).toBeVisible();
-	};
 	const ways: [string, () => Promise<unknown>, () => Promise<unknown>][] = [
 		["a workspace page, then the chat in the list", openWorkspace, () => threadRow.click()],
 		["a workspace page, then Back", openWorkspace, () => page.goBack()],
-		["Memory, then the chat in the list", openMemory, () => threadRow.click()],
-		["Memory, then Back", openMemory, () => page.goBack()],
 	];
 	for (const [title, away, back] of ways) {
 		await test.step(title, async () => {

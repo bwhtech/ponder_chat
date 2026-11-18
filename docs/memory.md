@@ -14,7 +14,7 @@ The design comes from the Seva platform (`~/.t3/projects/seva-studio/platform/do
 | `server/memory/decision-gate.ts`, `server/memory/gate.json` | The gate: a decision model and its questions. |
 | `server/memory/extract.ts`, `server/memory/extract.md` | The two steps together, and the writer and its prompt. |
 | `server/memory.ts` | The `Memory` service: the scope, the guidance for the model, the Memory page's calls, and `setup`. |
-| `web/MemoryView.vue`, `web/memory.ts` | The Memory page, and the "Remembered" notes under replies. |
+| `web/settings/MemoryPanel.vue`, `web/memory.ts` | Settings › Memory, and the "Remembered" notes under replies. |
 
 ## How a reply uses memory
 
@@ -96,8 +96,8 @@ The index is the `memory_vectors` table. Saves, edits and forgets update it afte
 
 ## On the page
 
-- **Under a reply:** "Remembered: …", "Updated memory: …" or "Forgot: …" for each change that reply led to, with **Undo**. When a reply finishes, the page asks again with `?wait=1`: the server waits for the run to save the reply and for the memory save to end. A click on a note opens the Memory page.
-- **Memory page** (sidebar, `?view=memory`), in three tabs: **Memories** (edit and forget), **Decisions** (the latest 30, including the ones that saved nothing, each with **Undo**), and **How it decides** (the gate's questions and the writer's prompt).
+- **Under a reply:** "Remembered: …", "Updated memory: …" or "Forgot: …" for each change that reply led to, with **Undo**. When a reply finishes, the page asks again with `?wait=1`: the server waits for the run to save the reply and for the memory save to end. A click on a note opens Settings › Memory.
+- **Settings › Memory** (the Memory tab in Settings; an older `?view=memory` link opens it too), in three tabs: **Memories** (edit and forget), **Decisions** (the latest 30, including the ones that saved nothing, each with **Undo**), and **How it decides** (the gate's questions and the writer's prompt).
 
 ## API
 

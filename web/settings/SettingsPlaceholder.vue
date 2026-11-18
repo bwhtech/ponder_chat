@@ -3,20 +3,17 @@ import { Button, Skeleton } from "frappe-ui";
 import { me, signOut } from "../account";
 import DialogFrame from "../DialogFrame.vue";
 import { credits } from "../numbers";
+import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
 import PanelHeader from "./PanelHeader.vue";
-import { creditsNote, settings, type SettingsTab } from "./state";
+import { creditsNote, MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, type SettingsTab } from "./state";
 
 /**
  * Settings (SettingsModal.vue) while its code arrives: the same dialog, the same sidebar, and
- * the open tab. Account has everything it shows already; Connectors shows rows shaped like
- * connectors, as its own loading does (connectors/ConnectorsPanel.vue). Nothing moves when
- * the dialog takes its place. The markup copies frappe-ui's SettingsDialog.
+ * the open tab. Account has everything it shows already; Memory and Connectors show rows
+ * shaped like theirs, as their own loading does (MemoryPanel.vue, connectors/ConnectorsPanel.vue).
+ * Nothing moves when the dialog takes its place. The markup copies frappe-ui's SettingsDialog,
+ * and Memory's tabs copy frappe-ui's TabButtons, with Memories chosen.
  */
-const tabs: { value: SettingsTab; label: string; icon: string }[] = [
-	{ value: "account", label: "Account", icon: "lucide-circle-user" },
-	{ value: "connectors", label: "Connectors", icon: "lucide-plug" },
-];
-
 function pick(tab: SettingsTab) {
 	settings.tab = tab;
 	settings.connector = null;
@@ -35,7 +32,7 @@ function pick(tab: SettingsTab) {
 						<div class="flex h-7 items-center px-2 text-base text-ink-gray-5">Settings</div>
 						<div class="flex flex-col gap-0.5">
 							<button
-								v-for="tab in tabs"
+								v-for="tab in SETTINGS_TABS"
 								:key="tab.value"
 								type="button"
 								:data-state="settings.tab === tab.value ? 'active' : 'inactive'"
@@ -73,6 +70,26 @@ function pick(tab: SettingsTab) {
 									<span class="whitespace-nowrap text-sm tabular-nums text-ink-gray-6">{{ credits(me.credits.remaining) }} left today</span>
 								</div>
 							</div>
+						</div>
+					</div>
+				</template>
+				<template v-else-if="settings.tab === 'memory'">
+					<PanelHeader title="Memory" :description="MEMORY_INTRO" />
+					<div class="min-h-0 flex-1 overflow-hidden px-4 pb-16 sm:px-12">
+						<div class="space-y-5 pt-5">
+							<div>
+								<div class="relative isolate inline-flex shrink-0 items-center gap-1 rounded-4 bg-surface-gray-2 p-px" aria-hidden="true">
+									<span
+										v-for="(tab, index) in MEMORY_TABS"
+										:key="tab.value"
+										class="inline-flex h-6.5 items-center justify-center whitespace-nowrap rounded-[7px] px-2 py-[5px] text-sm leading-[16.1px]"
+										:class="index === 0 ? 'bg-surface-elevation-3 text-ink-gray-8 shadow-base' : 'text-ink-gray-5'"
+									>
+										{{ tab.label }}
+									</span>
+								</div>
+							</div>
+							<MemoryRowsSkeleton />
 						</div>
 					</div>
 				</template>

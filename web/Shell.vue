@@ -24,8 +24,8 @@ import WorkspacePlaceholder from "./workspaces/WorkspacePlaceholder.vue";
 
 /**
  * The signed-in shell: workspaces and chats in a sidebar (a bottom sheet on phones), and the
- * open chat, the Memory page or a workspace. The header at the top of the sidebar opens the
- * account menu, as on /admin.
+ * open chat or a workspace. The header at the top of the sidebar opens the account menu, as on
+ * /admin. Memory and connectors are tabs in Settings.
  */
 const { current, currentThread, currentWorkspace, messages, running, failed, loading, revision, refresh, open, resume, start } = useThreads();
 // What answers a tap at once while the code it opens loads (stand-ins.ts): one small chunk,
@@ -33,17 +33,15 @@ const { current, currentThread, currentWorkspace, messages, running, failed, loa
 const loadStandIns = once(() => import("./stand-ins"));
 const standIn = <K extends keyof Awaited<ReturnType<typeof loadStandIns>>>(name: K) => defineAsyncComponent(() => loadStandIns().then((module) => module[name]));
 const SettingsPlaceholder = standIn("SettingsPlaceholder");
-const MemoryPlaceholder = standIn("MemoryPlaceholder");
 const PanelPlaceholder = standIn("PanelPlaceholder");
 const DialogPlaceholder = standIn("DialogPlaceholder");
 const PageOpening = standIn("PageOpening");
 const WorkspaceDialogPlaceholder = standIn("WorkspaceDialogPlaceholder");
 onMounted(() => void loadStandIns().catch(() => undefined));
-// What the first page does not show loads when it opens: Settings, Memory and the side panel.
+// What the first page does not show loads when it opens: Settings and the side panel.
 // Until each is here, its stand-in in its shape answers the tap. The overlays wait 100ms
-// first, so a quick load never flashes one; Memory takes the page at once.
+// first, so a quick load never flashes one.
 const SettingsModal = defineAsyncComponent({ loader: () => import("./settings/SettingsModal.vue"), loadingComponent: SettingsPlaceholder, delay: 100 });
-const MemoryView = defineAsyncComponent({ loader: () => import("./MemoryView.vue"), loadingComponent: MemoryPlaceholder, delay: 0 });
 const SidePanel = defineAsyncComponent({ loader: () => import("./side-panel/SidePanel.vue"), loadingComponent: PanelPlaceholder, delay: 100 });
 // A workspace page, and the workspace dialogs (New workspace, Edit, Share), the same way.
 // The page's stand-in comes with the first code: a workspace link draws its header at once.
@@ -99,16 +97,15 @@ const requestWaited = ref(false);
 watch(() => me.value?.credits.request?.status === "pending", (pending) => pending && (requestWaited.value = true), { immediate: true });
 // Files in the chat (attachments, images from Python) open in the side panel.
 provideFileViewer(viewInPanel);
-// The main area shows the open chat, the Memory page (?view=memory), or a workspace (?w=<slug>, workspaces/store.ts).
-const view = ref<"chat" | "memory">(viewInUrl());
+// The main area shows the open chat, or a workspace (?w=<slug>, workspaces/store.ts).
 addEventListener("popstate", () => {
-	view.value = viewInUrl();
 	openWorkspaceKey.value = workspaceInUrl();
+	openOldMemoryLink();
 });
-const page = computed(() => (view.value === "memory" ? "memory" : openWorkspaceKey.value ? "workspace" : "chat"));
+const page = computed(() => (openWorkspaceKey.value ? "workspace" : "chat"));
 // The side panel shows a file or an artifact of the open chat or workspace, so it closes when that changes.
 watch([current, page, openWorkspaceKey], closePanel);
-// Back to the chat from Memory or a workspace, by a click or by Back: its chat mounts again,
+// Back to the chat from a workspace, by a click or by Back: its chat mounts again,
 // with the messages it has now, not the ones it opened with. Before the render, so it never
 // draws the older ones.
 watch(page, (now, before) => now === "chat" && before !== "chat" && resume());
@@ -117,7 +114,7 @@ watch(page, (now, before) => now === "chat" && before !== "chat" && resume());
 // plain click opens it in this page. Breadcrumbs is its own chunk (breadcrumbs.ts), and its
 // stand-in draws the same until it is here.
 const crumbs = computed(() => {
-	const workspace = view.value === "chat" && currentThread.value ? workspaceById(currentWorkspace.value) : undefined;
+	const workspace = currentThread.value ? workspaceById(currentWorkspace.value) : undefined;
 	if (!workspace || !currentThread.value) return null;
 	return { parent: { label: workspace.name, href: workspaceHref(workspace.slug), onClick: () => showWorkspace(workspace.slug) }, current: currentThread.value.title };
 });
@@ -127,32 +124,18 @@ watch(crumbs, (shown) => shown && void loadBreadcrumbs().catch(() => undefined),
 // A tap on the model button before its menu's code came (models.ts) is for that chat only.
 watch(current, () => (modelMenuAsked.value = false));
 
-function viewInUrl() {
-	return new URL(location.href).searchParams.get("view") === "memory" ? "memory" : "chat";
-}
-
-function showChat() {
-	if (view.value === "chat") return;
-	view.value = "chat";
+/** Memory was a page of its own (?view=memory) before it moved into Settings: an older link opens Settings on Memory, and the URL loses it. */
+function openOldMemoryLink() {
 	const url = new URL(location.href);
+	if (url.searchParams.get("view") !== "memory") return;
 	url.searchParams.delete("view");
-	history.replaceState(null, "", url);
+	history.replaceState(history.state, "", url);
+	openSettings("memory");
 }
-
-function showMemory() {
-	sheetOpen.value = false;
-	if (view.value === "memory") return;
-	view.value = "memory";
-	openWorkspaceKey.value = "";
-	const url = new URL(location.href);
-	url.searchParams.delete("w");
-	url.searchParams.set("view", "memory");
-	history.pushState(null, "", url);
-}
+openOldMemoryLink();
 
 function pickWorkspace(slug: string) {
 	sheetOpen.value = false;
-	view.value = "chat";
 	showWorkspace(slug);
 }
 
@@ -169,7 +152,6 @@ function askInWorkspace(message: FirstMessage) {
 
 function pick(id: string) {
 	sheetOpen.value = false;
-	showChat();
 	void open(id);
 }
 
@@ -211,12 +193,10 @@ const backFromCache = (event: PageTransitionEvent) => event.persisted && (openin
 addEventListener("pageshow", backFromCache);
 onBeforeUnmount(() => removeEventListener("pageshow", backFromCache));
 
-// Memory, Admin (for admins), Settings, Theme and Sign out.
+// Admin (for admins), Settings, Theme and Sign out. Memory and Connectors are in Settings.
 const theme = useThemeMenu();
 const menu = computed(() => [
-	{ label: "Memory", icon: "lucide-brain", onClick: showMemory },
 	...(me.value?.user.role === "admin" ? [{ label: "Admin", icon: "lucide-shield", onClick: openAdmin }] : []),
-	{ label: "Connectors", icon: "lucide-plug", onClick: () => showSettings("connectors") },
 	{ label: "Settings", icon: "lucide-settings", onClick: () => showSettings() },
 	theme(),
 	{ label: "Sign out", icon: "lucide-log-out", onClick: () => void signOut() },
@@ -226,7 +206,6 @@ const name = computed(() => me.value ? displayName(me.value.user.name, me.value.
 
 function newThread() {
 	sheetOpen.value = false;
-	showChat();
 	start();
 }
 
@@ -254,7 +233,7 @@ function onSaved() {
 				@new-workspace="newWorkspace"
 			/>
 
-			<!-- The page's main landmark, as on the sign-in page: the open chat, Memory or a workspace. -->
+			<!-- The page's main landmark, as on the sign-in page: the open chat or a workspace. -->
 			<main class="flex min-w-0 flex-1 flex-col" data-slot="chat-column" :inert="panelCovers">
 				<!-- A workspace draws its own header, wider, for its side panel. -->
 				<WorkspacePage v-if="page === 'workspace'" :slug-or-id="openWorkspaceKey" :key="openWorkspace?.id ?? openWorkspaceKey" @open-chat="pick" @ask="askInWorkspace" @deleted="newThread" @new-chat="newThread">
@@ -262,7 +241,7 @@ function onSaved() {
 					<template #end><Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" /></template>
 				</WorkspacePage>
 				<template v-else>
-					<!-- The title sits in the same 720px column as the chat and Memory, so it shares their leading edge.
+					<!-- The title sits in the same 720px column as the chat, so it shares its leading edge.
 					     On phones the icon buttons pull out by their inner padding, so their glyphs sit on that edge too. -->
 					<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
 						<div class="scroll-gutter-match flex items-center gap-2">
@@ -281,12 +260,11 @@ function onSaved() {
 								/>
 								<BreadcrumbsStandIn v-else class="-ml-0.5 [&_a>span]:truncate [&_a]:min-w-0 [&_a]:max-w-[50%]" :parent="crumbs.parent" :current="crumbs.current" />
 							</nav>
-							<h1 v-else class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9" :class="{ 'md:sr-only': view === 'chat' && !currentThread }">{{ view === "memory" ? "Memory" : (currentThread?.title ?? "New chat") }}</h1>
+							<h1 v-else class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9" :class="{ 'md:sr-only': !currentThread }">{{ currentThread?.title ?? "New chat" }}</h1>
 							<Button class="-mr-1.5 md:hidden relative after:absolute after:-inset-2 after:content-['']" variant="ghost" icon="lucide-square-pen" aria-label="New chat" @click="newThread" />
 						</div>
 					</header>
-					<MemoryView v-if="view === 'memory'" @open-thread="pick" />
-					<ThreadSkeleton v-else-if="loading" />
+					<ThreadSkeleton v-if="loading" />
 					<ChatView
 						v-else-if="current"
 						:key="`${current}:${revision}`"
@@ -297,7 +275,7 @@ function onSaved() {
 						:workspace-id="currentWorkspace"
 						@saved="onSaved"
 						@refused="refreshCredits"
-						@open-memory="showMemory"
+						@open-memory="showSettings('memory')"
 					/>
 				</template>
 			</main>
@@ -319,7 +297,7 @@ function onSaved() {
 			/>
 		</BottomSheet>
 
-		<SettingsModal v-if="settingsUsed" />
+		<SettingsModal v-if="settingsUsed" @open-thread="pick" />
 		<WorkspaceDialogs v-if="workspaceDialogUsed" />
 		<CreditRequestWatch v-if="requestWaited" />
 		<DialogPlaceholder v-if="pendingDialog" :request="pendingDialog" />

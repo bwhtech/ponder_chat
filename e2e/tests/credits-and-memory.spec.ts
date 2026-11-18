@@ -37,3 +37,68 @@ test("remembers what the person said, and recalls it in a new chat", async ({ pa
 	const [call] = await fake.calls("recall test");
 	expect(JSON.stringify(call)).toContain("Drinks green tea, not coffee.");
 });
+
+test("the note under a reply opens Settings on Memory, where the person can open its chat or forget it", async ({ page, fake }) => {
+	await fake.memory({
+		match: "oolong",
+		save: 0.9,
+		operations: [{ op: "add", kind: "preference", text: "Likes oolong tea.", quote: "I like oolong" }],
+	});
+	await chat.send(page, "I like oolong tea. Any brewing tips?");
+	const note = page.locator('[data-slot="memory-note"]');
+	await expect(note).toContainText("Remembered: Likes oolong tea.");
+	await chat.idle(page);
+	const chatUrl = page.url();
+
+	await note.click();
+	const settings = page.getByRole("dialog", { name: "Settings" });
+	await expect(settings.getByRole("tab", { name: "Memory" })).toHaveAttribute("aria-selected", "true");
+	await expect(settings.getByRole("heading", { name: "Memory" })).toBeVisible();
+	const memory = settings.getByRole("listitem").filter({ hasText: "Likes oolong tea." });
+	await expect(memory).toBeVisible();
+
+	// "From “…”" opens the chat it came from, and Settings closes.
+	await memory.getByRole("button", { name: /^From “/ }).click();
+	await expect(settings).toHaveCount(0);
+	await expect(page).toHaveURL(chatUrl);
+	await expect(chat.messages(page)).toHaveCount(2);
+
+	// Forget asks first, over Settings, then the list is empty.
+	await note.click();
+	await settings.getByRole("button", { name: "Actions for Likes oolong tea." }).click();
+	await page.getByRole("menuitem", { name: "Forget" }).click();
+	await page.getByRole("dialog", { name: "Forget this?" }).getByRole("button", { name: "Forget" }).click();
+	await expect(settings.getByText("Nothing remembered yet")).toBeVisible();
+	await expect(settings).toBeVisible();
+});
+
+test("the account menu has Settings but no Memory or Connectors, which are tabs in Settings", async ({ page }) => {
+	await page.getByRole("button", { name: /Ponder Chat/ }).first().click();
+	await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+	await expect(page.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+	await expect(page.getByRole("menuitem", { name: "Memory" })).toHaveCount(0);
+	await expect(page.getByRole("menuitem", { name: "Connectors" })).toHaveCount(0);
+
+	await page.getByRole("menuitem", { name: "Settings" }).click();
+	const settings = page.getByRole("dialog", { name: "Settings" });
+	await expect(settings.getByRole("heading", { name: "Account" })).toBeVisible();
+	await settings.getByRole("tab", { name: "Memory" }).click();
+	await expect(settings.getByRole("heading", { name: "Memory" })).toBeVisible();
+	await expect(settings.getByText("Nothing remembered yet")).toBeVisible();
+	await settings.getByRole("radio", { name: "Decisions" }).click();
+	await expect(settings.getByText("No decisions yet")).toBeVisible();
+	await settings.getByRole("tab", { name: "Connectors" }).click();
+	await expect(settings.getByRole("heading", { name: "Connectors" })).toBeVisible();
+});
+
+test("an older Memory link, ?view=memory, opens Settings on Memory over the chat", async ({ page }) => {
+	await page.goto("/?view=memory");
+	const settings = page.getByRole("dialog", { name: "Settings" });
+	await expect(settings.getByRole("tab", { name: "Memory" })).toHaveAttribute("aria-selected", "true");
+	await expect(settings.getByRole("heading", { name: "Memory" })).toBeVisible();
+	await expect(page).not.toHaveURL(/view=memory/);
+
+	await settings.getByRole("button", { name: "Close settings" }).click();
+	await expect(settings).toHaveCount(0);
+	await expect(page.getByText("What's on your mind?")).toBeVisible();
+});

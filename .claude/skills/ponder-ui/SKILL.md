@@ -9,7 +9,7 @@ These rules took the chat and /admin from 6.5 to 10/10 in two design councils. F
 
 ## Before you write code
 
-- Find the nearest existing screen and copy its structure. Overview and Person are the admin models. ChatView and MemoryView are the chat models.
+- Find the nearest existing screen and copy its structure. Overview and Person are the admin models. ChatView and Settings (MemoryPanel, ConnectorsPanel) are the chat models.
 - Use the shared helpers. Do not write a second version of any of them:
 
 | Need | Use |
@@ -45,7 +45,7 @@ These rules took the chat and /admin from 6.5 to 10/10 in two design councils. F
 - Admin page body: `px-3 pt-4 sm:px-5 md:pt-6`. Sections are `space-y-8`. Sibling cards are 16px apart (`gap-4` / `space-y-4`) everywhere.
 - The chat column is 720px. Replies, bubbles, cards and the composer share one right edge.
 - Each screen picks one axis. Either everything starts on one leading edge, or the whole group is centred (sign-in, empty states, the greeting). A label, field or button never starts a second, left edge under a centred heading.
-- The chat header title, the transcript, Memory and the composer share one leading edge. Anything in the chat area outside a scroller (header, composer, loading skeleton) uses `scroll-gutter-match` in `web/style.css`, which adds the transcript's scrollbar gutter. That class owns the width and side padding, so do not put `mx-auto`, `max-w-*` or `px-*` next to it.
+- The chat header title, the transcript and the composer share one leading edge. Anything in the chat area outside a scroller (header, composer, loading skeleton) uses `scroll-gutter-match` in `web/style.css`, which adds the transcript's scrollbar gutter. That class owns the width and side padding, so do not put `mx-auto`, `max-w-*` or `px-*` next to it.
 - Sidebars have two edges: 16px for glyphs and text-only rows (icons, chat titles, group labels, credits), and 40px for a label after an icon (search, nav items, New chat). Content inside a full-width sidebar button starts on those edges, not centred.
 - Blocks in a reply (steps, text, cards) are 16px apart. The copy and model row sits 10px under the reply because it belongs to it.
 - Rows that share a list or panel share one pitch.

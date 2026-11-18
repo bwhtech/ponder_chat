@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { Alert, Badge, Button, Dropdown, TabButtons } from "frappe-ui";
-import { dialog } from "./dialogs";
+import { dialog } from "../dialogs";
 import { onMounted, ref } from "vue";
-import { canUndo, fetchMemory, forgetMemory, KIND_LABELS, undoSave, updateMemory, type Memory, type MemoryOverview, type MemorySave } from "./memory";
-import { when } from "./dates";
-import EmptyState from "./EmptyState.vue";
-import MemoryIntro from "./MemoryIntro.vue";
+import { canUndo, fetchMemory, forgetMemory, KIND_LABELS, undoSave, updateMemory, type Memory, type MemoryOverview, type MemorySave } from "../memory";
+import { when } from "../dates";
+import EmptyState from "../EmptyState.vue";
+import { useThreads } from "../threads";
 import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
-import { useThreads } from "./threads";
+import PanelBody from "./PanelBody.vue";
+import PanelHeader from "./PanelHeader.vue";
+import { MEMORY_INTRO, MEMORY_TABS } from "./state";
 
-/** What Ponder remembers about the person, the decisions behind it, and the prompt that decides. */
+/** Settings, Memory: what Ponder remembers about the person, the decisions behind it, and the prompt that decides. */
 const emit = defineEmits<{
 	/** Open the chat a memory or decision came from. */
 	openThread: [id: string];
@@ -20,11 +22,6 @@ const overview = ref<MemoryOverview>();
 /** The last load failed. Its error replaces the tabs and what loaded before, with Try again. */
 const loadError = ref("");
 const tab = ref<"memories" | "decisions" | "prompt">("memories");
-const tabs = [
-	{ value: "memories", label: "Memories" },
-	{ value: "decisions", label: "Decisions" },
-	{ value: "prompt", label: "How it decides" },
-];
 
 onMounted(load);
 
@@ -38,7 +35,7 @@ async function load() {
 		const next = await fetchMemory();
 		if (mine === asked) overview.value = next;
 	} catch (error) {
-		if (mine === asked) loadError.value = (error as Error).message;
+		if (mine === asked) loadError.value = error instanceof Error ? error.message : String(error);
 	}
 }
 
@@ -94,7 +91,7 @@ async function undo(save: MemorySave) {
 		await undoSave(save.id);
 		await load();
 	} catch (error) {
-		undoError.value = (error as Error).message;
+		undoError.value = error instanceof Error ? error.message : String(error);
 	} finally {
 		undoing.value.delete(save.id);
 	}
@@ -102,9 +99,9 @@ async function undo(save: MemorySave) {
 </script>
 
 <template>
-	<div data-slot="memory-view" class="scroll-fade-y scrollbar-thin [--scroll-fade-range:40px] [--scroll-fade-size:40px] min-h-0 flex-1 overflow-y-auto sm:[scrollbar-gutter:stable_both-edges]">
-		<div class="mx-auto w-full max-w-[720px] space-y-5 px-4 py-6 sm:px-5">
-			<MemoryIntro />
+	<PanelHeader title="Memory" :description="MEMORY_INTRO" />
+	<PanelBody>
+		<div data-slot="memory-view" class="space-y-5 pt-5">
 
 			<EmptyState v-if="loadError" icon="lucide-circle-alert" title="Your memory could not load" :body="loadError" alert>
 				<Button label="Try again" @click="load" />
@@ -115,7 +112,7 @@ async function undo(save: MemorySave) {
 				title="Memory is off"
 				description="The server runs with PONDER_MEMORY=off, so new chats neither use nor add memories."
 			/>
-			<TabButtons v-if="!loadError" v-model="tab" :options="tabs" />
+			<TabButtons v-if="!loadError" v-model="tab" :options="MEMORY_TABS" />
 
 			<MemoryRowsSkeleton v-if="!overview && !loadError" />
 
@@ -200,9 +197,9 @@ async function undo(save: MemorySave) {
 						After each reply, a decision model answers two questions, and only on a yes does a small model write the changes. Both live in
 						<code class="rounded-2 bg-surface-gray-2 px-1 text-ink-gray-8">server/memory/</code>. Search: {{ overview.adapter }}.
 					</p>
-					<pre class="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3 text-p-sm text-ink-gray-8">{{ overview.prompt }}</pre>
+					<pre class="overflow-x-auto whitespace-pre-wrap rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3 text-p-sm text-ink-gray-8">{{ overview.prompt }}</pre>
 				</div>
 			</template>
 		</div>
-	</div>
+	</PanelBody>
 </template>

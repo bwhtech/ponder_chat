@@ -85,7 +85,7 @@ Admins write skills in `/admin`, in a Markdown editor. Two switches set whether 
 
 ### Memory you can see
 
-After a reply, Ponder decides if you said something about yourself worth keeping. A note under the reply shows what it kept, with Undo. The Memory page lists every memory and the chat it came from. Ponder never keeps passwords, contact details, ID numbers, health details or what you say about other people.
+After a reply, Ponder decides if you said something about yourself worth keeping. A note under the reply shows what it kept, with Undo. Settings › Memory lists every memory and the chat it came from. Ponder never keeps passwords, contact details, ID numbers, health details or what you say about other people.
 
 ![The Memory page: seven memories, each with its kind (About you or Preference), the chat it came from and when.](docs/images/memory.webp)
 
@@ -489,7 +489,7 @@ What is left: a link in a reply can carry data when the person clicks it, and a 
 
 ### Connectors
 
-Settings, Connectors (from the account menu) lists the MCP servers the person connected. The code is in `server/mcp/` and `server/workflow/connectors.ts`; the page is in `web/connectors/` and `web/settings/`. The plan and its reasons are in `docs/connectors-plan.md`.
+Settings › Connectors (Settings is in the account menu) lists the MCP servers the person connected. The code is in `server/mcp/` and `server/workflow/connectors.ts`; the page is in `web/connectors/` and `web/settings/`. The plan and its reasons are in `docs/connectors-plan.md`.
 
 - Add connector takes the URL of a remote MCP server (Streamable HTTP, or SSE for old servers). While the person types, the server sends it an `initialize` request (`server/mcp/probe.ts`) and says whether it needs no sign-in, an API key, or an OAuth sign-in. No stdio: Ponder never runs a command that a person typed.
 - OAuth: `@ai-sdk/mcp` runs the flow the MCP spec asks for (discovery, dynamic client registration, PKCE, state and issuer checks). The sign-in opens in a popup and ends at `/oauth/mcp/callback`, which tells the page on a `BroadcastChannel` and closes. On a phone, the sign-in uses the same tab and comes back to `/?settings=connectors`. For a server that does not allow dynamic registration (GitHub), the person registers their own OAuth app and enters its client ID and secret under Advanced.

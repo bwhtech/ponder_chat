@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Skeleton } from "frappe-ui";
 
-/** Rows shaped like memories while they load: a line of text, then its kind and age (MemoryView.vue, MemoryPlaceholder.vue). */
+/** Rows shaped like memories while they load: a line of text, then its kind and age (MemoryPanel.vue, SettingsPlaceholder.vue). */
 </script>
 
 <template>

@@ -150,7 +150,7 @@ export function useWorkspaceThreads(workspaceId: () => string) {
 }
 
 async function open(id: string, { push = true } = {}) {
-	// Open already, behind a workspace page or Memory: only the URL goes back to it. Its chat
+	// Open already, behind a workspace page: only the URL goes back to it. Its chat
 	// mounts again, and the shell calls resume() for that.
 	if (id === current.value) return void (new URL(location.href).searchParams.get("t") !== id && setUrl(id, push));
 	const loaded = load(id);
@@ -159,7 +159,7 @@ async function open(id: string, { push = true } = {}) {
 }
 
 /**
- * The open thread's chat mounts again, back from Memory or a workspace page (Shell.vue).
+ * The open thread's chat mounts again, back from a workspace page (Shell.vue).
  * `messages` still holds the thread as it opened; the chat's own messages since then are in
  * the cache (remember), so it shows those, and asks the server. A new thread that has
  * sent nothing has no copy, and nothing to restore.

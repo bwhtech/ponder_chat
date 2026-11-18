@@ -25,7 +25,7 @@ export type WorkspaceInput = { kind?: "org" | "private"; name: string; instructi
 export const workspaces = ref<WorkspaceSummary[]>([]);
 /** The list came from the server: until then the sidebar shows skeleton rows. */
 export const workspacesLoaded = ref(false);
-/** The workspace open in the main area, from `?w=`: its slug, or its id in an older link. Empty when a chat or Memory is open. */
+/** The workspace open in the main area, from `?w=`: its slug, or its id in an older link. Empty when a chat is open. */
 export const openWorkspaceKey = ref(workspaceInUrl());
 export const openWorkspace = computed(() => workspaceByKey(openWorkspaceKey.value));
 
@@ -54,11 +54,11 @@ export function workspaceInUrl() {
 	return new URL(location.href).searchParams.get("w") ?? "";
 }
 
-/** Opens the workspace page: `?w=<slug>`, in place of the open chat or Memory. */
+/** Opens the workspace page: `?w=<slug>`, in place of the open chat. */
 export function showWorkspace(slug: string) {
 	openWorkspaceKey.value = slug;
 	const url = new URL(location.href);
-	for (const key of ["t", "view"]) url.searchParams.delete(key);
+	url.searchParams.delete("t");
 	url.searchParams.set("w", slug);
 	if (url.href !== location.href) history.pushState(null, "", url);
 }

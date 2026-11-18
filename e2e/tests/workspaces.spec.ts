@@ -286,24 +286,6 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 	});
 });
 
-test("a workspace made from the Memory page opens in its place", async ({ page, person }) => {
-	const name = `From memory ${person.id.slice(0, 6)}`;
-	await page.goto("/?view=memory");
-	await expect(page.getByRole("heading", { name: "Memory", exact: true, level: 1 })).toBeVisible();
-	await page.getByRole("button", { name: "New workspace" }).click();
-	const dialog = page.getByRole("dialog", { name: "New workspace" });
-	await dialog.getByLabel("Name").fill(name);
-	await dialog.getByRole("button", { name: "Create workspace" }).click();
-
-	await expect(page).toHaveURL(/[?&]w=/);
-	await expect(page).not.toHaveURL(/view=memory/);
-	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-	await expect(page.getByRole("heading", { name: "Memory", exact: true, level: 1 })).toHaveCount(0);
-	// Back goes to Memory again.
-	await page.goBack();
-	await expect(page.getByRole("heading", { name: "Memory", exact: true, level: 1 })).toBeVisible();
-});
-
 test("an older link by a workspace's id opens it, with the slug in its place", async ({ page, person }) => {
 	const name = `Old link ${person.id.slice(0, 6)}`;
 	const { id, slug } = await createWorkspace(page, name);
