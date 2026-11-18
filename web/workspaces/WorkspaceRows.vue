@@ -76,7 +76,7 @@ function prefetch(workspace: WorkspaceSummary) {
 				<template #prefix><span :class="[accessIcon(workspace), 'size-4 text-ink-gray-6']" aria-hidden="true" /></template>
 				<!-- The name gives way before the pin, so the pin stays in view; the row's name says "pinned" for screen readers. -->
 				<span class="truncate text-sm leading-tighter">{{ workspace.name }}</span>
-				<span v-if="workspace.pinned" class="lucide-pin ml-1.5 size-3.5 shrink-0 text-ink-gray-4" aria-hidden="true" data-slot="workspace-pin" />
+				<span v-if="workspace.pinned" class="lucide-pin ml-1.5 size-3.5 shrink-0 text-ink-gray-5" aria-hidden="true" data-slot="workspace-pin" />
 				<template #suffix>
 					<Dropdown :options="menu(workspace)" align="end">
 						<template #trigger>
