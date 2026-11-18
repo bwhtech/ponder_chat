@@ -19,7 +19,7 @@ import type { DocumentsHandle } from "./handles";
  * panel: WorkspaceAside.vue calls `upload` and sets `dropping`), delete, open its Details (the
  * indexing log) and "Try again" a document that failed. The file picker offers only the types
  * the server reads; a file it refuses gets the server's reason. The page polls while one is
- * Reading (WorkspacePage.vue); `changed` hands it the new list after each change here.
+ * Indexing (WorkspacePage.vue); `changed` hands it the new list after each change here.
  */
 const props = defineProps<{ workspaceId: string; documents?: WorkspaceDocument[]; editable: boolean; dropping: boolean }>();
 const emit = defineEmits<{ changed: [documents: WorkspaceDocument[]] }>();

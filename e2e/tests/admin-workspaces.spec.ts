@@ -97,7 +97,7 @@ test("the page follows a document while it is being read, and so does its open l
 	const orgId = await createWorkspace(page.request, "org", orgName);
 	await addDocument(page.request, orgId, orgDocument);
 
-	// The first answers say the document is still Reading; the later ones say what the server says (Ready).
+	// The first answers say the document is still Indexing; the later ones say what the server says (Ready).
 	let held = 2;
 	await page.route("**/api/admin/workspaces", async (route) => {
 		const response = await route.fetch();
@@ -111,10 +111,10 @@ test("the page follows a document while it is being read, and so does its open l
 
 	await page.goto("/admin/workspaces");
 	const row = page.getByRole("article", { name: orgName }).locator(`[data-document="${orgDocument}"]`);
-	await expect(row).toContainText("Reading");
+	await expect(row).toContainText("Indexing");
 	await row.click();
 	const log = page.getByRole("dialog");
-	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Reading");
+	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Indexing");
 	// No reload: the page reads the report again, and the row and the open log say Ready.
 	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Ready", { timeout: 15_000 });
 	await page.keyboard.press("Escape");

@@ -28,7 +28,7 @@ watch(
 	() => open.value && props.document && void load(),
 	{ immediate: true },
 );
-// The page reads the report again while a document is Reading (Workspaces.vue): when this
+// The page reads the report again while a document is Indexing (Workspaces.vue): when this
 // one's status or cost changes, its steps are read again, in place.
 watch(
 	() => [props.document?.status, props.document?.costUsd],

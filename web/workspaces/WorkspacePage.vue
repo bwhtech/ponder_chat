@@ -64,7 +64,7 @@ async function load() {
 }
 
 /**
- * While a document is Reading, the workspace is read again, a little less often each time
+ * While a document is Indexing, the workspace is read again, a little less often each time
  * (2 s up to 10 s), until none is. A failed poll changes nothing on the page; the next one
  * tries again, unless the workspace is gone. An answer asked for before a change in the
  * side panel is dropped: it may not have the new document yet. One chain of polls runs at a

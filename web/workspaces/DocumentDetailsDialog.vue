@@ -13,7 +13,7 @@ import { Poller } from "./poller";
  * A document's Details, for people who can edit the workspace: the indexing log in plain
  * steps (document-log.ts, plainSteps), such as the pages read from a picture, and what went
  * wrong. Models, times and costs are the admin's (/admin/workspaces). A failed document
- * offers "Try again". While it is Reading and the dialog is open, the log is read again
+ * offers "Try again". While it is Indexing and the dialog is open, the log is read again
  * every few seconds, and the side panel hears of each change. Closing the dialog keeps it
  * mounted for its transition, so the polls stop on close, not on unmount.
  */

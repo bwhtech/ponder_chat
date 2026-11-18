@@ -63,7 +63,7 @@ export function fileSize(bytes: number) {
 	return `${count(Math.round((bytes / (1024 * 1024)) * 10) / 10)} MB`;
 }
 
-export const STATUS_LABELS: Record<DocumentStatus, string> = { reading: "Reading…", ready: "Ready", failed: "Failed" };
+export const STATUS_LABELS: Record<DocumentStatus, string> = { reading: "Indexing…", ready: "Ready", failed: "Failed" };
 
 /**
  * Why a document failed, in a few words: the row's status ("2.3 MB · Could not read page 3")

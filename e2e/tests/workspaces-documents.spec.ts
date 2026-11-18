@@ -6,7 +6,7 @@ import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady, t
 
 /**
  * Workspace documents (docs/workspaces-plan.md, "Tests", 7 to 9): an editor uploads a document,
- * it goes from Reading to Ready, and answers use it, whole when it fits the model's window and
+ * it goes from Indexing to Ready, and answers use it, whole when it fits the model's window and
  * as searched passages when it does not; the indexing log in Details, for editors only; and a
  * document that fails, then reads on "Try again"; and a document opened in the side viewer.
  *
@@ -22,7 +22,7 @@ const row = (page: Page, name: string) => rows(page).filter({ has: page.locator(
 const picker = (page: Page) => page.locator('[data-slot="document-picker"]');
 const dropState = (page: Page) => page.locator('[data-slot="workspace-aside"] [data-slot="document-drop"]');
 
-test("7. an editor uploads documents; they go from Reading to Ready, and answers use them whole or searched", async ({ page, person, fake }) => {
+test("7. an editor uploads documents; they go from Indexing to Ready, and answers use them whole or searched", async ({ page, person, fake }) => {
 	test.setTimeout(120_000);
 	const tag = person.id.slice(0, 6);
 	const { id, slug } = await createWorkspace(page, `Office handbook ${tag}`);
@@ -38,15 +38,15 @@ test("7. an editor uploads documents; they go from Reading to Ready, and answers
 	});
 
 	const leave = `Staff get 27 days of paid leave a year, code LV-${tag}.`;
-	await test.step("a file dropped on the side panel goes from Reading to Ready", async () => {
+	await test.step("a file dropped on the side panel goes from Indexing to Ready", async () => {
 		await drag(page, "dragenter");
 		await expect(dropState(page)).toBeVisible();
 		await drag(page, "drop", { name: "leave-policy.md", text: `# Leave policy\n\n${leave}\n\nAsk your manager before you book a trip.` });
 		await expect(dropState(page)).toHaveCount(0);
 		const leaveRow = row(page, "leave-policy.md");
-		await expect(leaveRow).toContainText("Reading…");
+		await expect(leaveRow).toContainText("Indexing…");
 		await expect(leaveRow).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
-		await expect(leaveRow).not.toContainText("Reading…");
+		await expect(leaveRow).not.toContainText("Indexing…");
 		await expect(documents(page).getByRole("alert")).toHaveCount(0);
 		// One document: its row, and Upload in place of the empty area.
 		await expect(rows(page)).toHaveCount(1);
@@ -190,7 +190,7 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 	});
 });
 
-test("10. the page stops reading a Reading document again once Details close, the document is gone or the person leaves", async ({ page, person }) => {
+test("10. the page stops reading an Indexing document again once Details close, the document is gone or the person leaves", async ({ page, person }) => {
 	test.setTimeout(90_000);
 	const tag = person.id.slice(0, 6);
 	const { id, slug } = await createWorkspace(page, `Polls ${tag}`);
@@ -199,7 +199,7 @@ test("10. the page stops reading a Reading document again once Details close, th
 	const workspacePaths = [`/api/workspaces/${slug}`, `/api/workspaces/${id}`];
 	const logPath = `/api/workspaces/${id}/documents/${documentId}/log`;
 
-	// The document stays Reading for the page, so it keeps polling, and each workspace answer takes a moment.
+	// The document stays Indexing for the page, so it keeps polling, and each workspace answer takes a moment.
 	await page.route(
 		(url) => workspacePaths.includes(url.pathname),
 		async (route) => {

@@ -5,8 +5,8 @@ import { documentIcon, failureReason, fileSize, STATUS_LABELS, type WorkspaceDoc
 
 /**
  * One document in the side panel: its name, and its status while it is not Ready ("66 KB",
- * "66 KB · Reading…", "2.3 MB · Could not read page 3"). A person who can edit also sees its
- * size, "Try again" when it failed, and a menu with Details and Delete. Reading shows a turning
+ * "66 KB · Indexing…", "2.3 MB · Could not read page 3"). A person who can edit also sees its
+ * size, "Try again" when it failed, and a menu with Details and Delete. Indexing shows a turning
  * icon until the page's poll says Ready or Failed. The name opens the file, whatever its status.
  * The icon and the menu sit in the middle of the name and the line under it: one grid row, with
  * Try again in a row of its own under the text.

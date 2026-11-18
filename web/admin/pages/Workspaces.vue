@@ -38,7 +38,7 @@ async function load() {
 void load();
 
 /**
- * While an organisation document is Reading, the report is read again every few seconds, so
+ * While an organisation document is Indexing, the report is read again every few seconds, so
  * its status and cost, and the log open on it, follow the indexing. A failed read changes
  * nothing; the next one tries again. None runs once the page is left (poller.ts).
  */

@@ -117,7 +117,7 @@ function text(value: Detail[string] | undefined) {
 
 function reindexReason(detail: Detail) {
 	if (detail.reason === "model-changed") return join("The embedding model changed", text(detail.to));
-	if (detail.reason === "stalled") return "Reading had stopped, so it started again";
+	if (detail.reason === "stalled") return "Indexing had stopped, so it started again";
 	return "An editor asked to try again";
 }
 
