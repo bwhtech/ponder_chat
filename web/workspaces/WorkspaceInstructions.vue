@@ -34,9 +34,12 @@ watch(
 			<div v-for="width in ['w-full', 'w-11/12', 'w-2/3']" :key="width" class="flex h-[1lh] items-center text-p-sm"><Skeleton :class="['h-3 rounded-4', width]" /></div>
 		</div>
 		<WorkspaceEmptyArea v-else-if="!instructions" icon="lucide-plus" label="Add instructions" data-slot="workspace-add-instructions" @click="emit('edit')" />
-		<!-- The whole box is the Edit button; the text under it is for reading, so its links do not take the click. -->
+		<!-- The whole box is the Edit button. The text under it is inert: its links, copy buttons and tables take no
+		     focus and no click, so Tab and Enter reach only the button. A screen reader reads the text as the button's description. -->
 		<div v-else-if="editable" class="group relative">
 			<div
+				id="workspace-instructions-preview"
+				inert
 				data-slot="workspace-instructions"
 				class="line-clamp-3 break-words rounded-4 bg-surface-gray-2 px-3 py-2 text-p-sm text-ink-gray-8 transition-colors duration-150 ease-out-strong group-hover:bg-surface-gray-3 motion-reduce:transition-none"
 			>
@@ -46,6 +49,7 @@ watch(
 			<button
 				type="button"
 				aria-label="Edit instructions"
+				aria-describedby="workspace-instructions-preview"
 				data-slot="workspace-edit-instructions"
 				class="absolute inset-0 rounded-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-gray-3"
 				@click="emit('edit')"

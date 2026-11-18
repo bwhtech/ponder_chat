@@ -239,7 +239,7 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 		await editor.fill("x".repeat(20_001));
 		await expect(dialog.getByText("Make the instructions 20,000 characters or fewer.", { exact: false })).toBeVisible();
 		await expect(save).toBeDisabled();
-		await editor.fill(`## Rota rules\n\n${first} Use **bold** for names.`);
+		await editor.fill(`## Rota rules\n\n${first} Use **bold** for names. See [the rota](https://example.test/rota).`);
 		await expect(save).toBeEnabled();
 		await save.click();
 		await expect(dialog).toHaveCount(0);
@@ -256,12 +256,16 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 		await expect(editor).toBeFocused();
 		await expect(editor).toContainText(first);
 		await page.keyboard.type(" Added.");
-		await expect(editor).toContainText(`${first} Use **bold** for names. Added.`);
+		await expect(editor).toContainText(`${first} Use **bold** for names. See [the rota](https://example.test/rota). Added.`);
 		await dialog.getByRole("button", { name: "Cancel" }).click();
 		await expect(dialog).toHaveCount(0);
 		await expect(instructionsSection(page)).not.toContainText("Added.");
 
-		// The keyboard reaches the box, and Enter opens them too.
+		// The keyboard reaches the box, and Enter opens them too. The link in the text is for
+		// reading here: Shift+Tab from the box goes past it, not into it.
+		await box.focus();
+		await page.keyboard.press("Shift+Tab");
+		await expect(page.locator('[data-slot="workspace-instructions"] :focus')).toHaveCount(0);
 		await box.focus();
 		await page.keyboard.press("Enter");
 		await expect(editor).toContainText(first);

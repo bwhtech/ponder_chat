@@ -70,6 +70,20 @@ test("the note under a reply opens Settings on Memory, where the person can open
 	await page.getByRole("dialog", { name: "Forget this?" }).getByRole("button", { name: "Forget" }).click();
 	await expect(settings.getByText("Nothing remembered yet")).toBeVisible();
 	await expect(settings).toBeVisible();
+
+	// Back and Forward change the chat under Settings, so Settings closes with them.
+	await settings.getByRole("button", { name: "Close settings" }).click();
+	await page.getByRole("button", { name: "New chat" }).click();
+	await expect(page).not.toHaveURL(chatUrl);
+	const newChatUrl = page.url();
+	await page.goBack();
+	await expect(page).toHaveURL(chatUrl);
+	await note.click();
+	await expect(settings).toBeVisible();
+	await page.goForward();
+	await expect(page).toHaveURL(newChatUrl);
+	await expect(settings).toHaveCount(0);
+	await expect(chat.messages(page)).toHaveCount(0);
 });
 
 test("the account menu has Settings but no Memory or Connectors, which are tabs in Settings", async ({ page }) => {

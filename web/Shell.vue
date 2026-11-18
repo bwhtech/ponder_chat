@@ -98,7 +98,9 @@ watch(() => me.value?.credits.request?.status === "pending", (pending) => pendin
 // Files in the chat (attachments, images from Python) open in the side panel.
 provideFileViewer(viewInPanel);
 // The main area shows the open chat, or a workspace (?w=<slug>, workspaces/store.ts).
+// Back and Forward change the page under Settings, so Settings closes: it keeps no history of its own.
 addEventListener("popstate", () => {
+	settings.open = false;
 	openWorkspaceKey.value = workspaceInUrl();
 	openOldMemoryLink();
 });
