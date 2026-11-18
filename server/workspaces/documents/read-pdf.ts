@@ -27,15 +27,21 @@ import * as PrepareText from "./prepare-text.ts";
  *
  * Each page read is paid for. The indexer gives a checkpoint: the pages read so far in its
  * run are used again, each new one is kept as soon as it ends, and the read stops before
- * its next batch once a newer run took over or the document is gone.
+ * its next batch once a newer run took over or the document is gone. The checkpoint also
+ * hears when the PDF is parsed, before any page goes to a model, so the document can show
+ * its pages and how many are read while the model reads them.
  */
 // Pages are copied and read a few at a time, so a scanned book of 400 pages is never all
 // in memory at once, and a page with no text that fails stops the read early.
 const BATCH = 8;
 const CALLS_AT_ONCE = 4;
 
+/** What parsing found, before a model reads any page. `chars` and `ms` are the parser's own. */
+export type PdfParsed = { engine: DocumentText["engine"]; pageCount: number; modelPages: number; chars: number; ms: number };
+
 /** The pages read so far, how to keep each new one, and whether the run is still wanted. */
 export type PageCheckpoint = {
+	readonly parsed: (parsed: PdfParsed) => Effect.Effect<void, SqlError>;
 	readonly done: ReadonlyMap<number, PageReader.PageReadResult>;
 	readonly save: (result: PageReader.PageReadResult) => Effect.Effect<void, SqlError>;
 	/** False once a newer run took over, or the document is settled or gone. */
@@ -43,7 +49,7 @@ export type PageCheckpoint = {
 };
 
 /** For a read with nothing to keep: a test, the test questions. */
-export const NO_CHECKPOINT: PageCheckpoint = { done: new Map(), save: () => Effect.void, live: Effect.succeed(true) };
+export const NO_CHECKPOINT: PageCheckpoint = { parsed: () => Effect.void, done: new Map(), save: () => Effect.void, live: Effect.succeed(true) };
 
 /** A newer run took over, or the document is gone: no more pages are paid for. */
 export class ReadStopped extends Schema.TaggedError<ReadStopped>()("ReadStopped", {}) {
@@ -66,6 +72,9 @@ export const readPdf = Effect.fn("PdfReader.read")(function* (data: Uint8Array, 
 	const started = yield* Clock.currentTimeMillis;
 	yield* Tracing.annotate({ "ponder.bytes": data.length });
 	const parsed = yield* PrepareText.PrepareText.use((prepare) => prepare.parsePdf(data));
+	const modelPages = parsed.engine === "liteparse" ? parsed.pages.filter((page) => page.modelReason !== null).length : 0;
+	const parseMs = (yield* Clock.currentTimeMillis) - started;
+	yield* checkpoint.parsed({ engine: parsed.engine, pageCount: parsed.pageCount, modelPages, chars: totalChars(parsed.pages), ms: parseMs });
 	const read = parsed.engine === "liteparse" ? yield* withModelPages(data, parsed.pages, parsed.pageCount, checkpoint) : yield* withPdfText(parsed.pages);
 	const done: DocumentText = { ...read, chars: totalChars(read.pages), ms: (yield* Clock.currentTimeMillis) - started };
 	yield* Tracing.annotate({ "ponder.pages": done.pageCount, "ponder.chars": done.chars, "ponder.page_reads": done.pageReads.length });

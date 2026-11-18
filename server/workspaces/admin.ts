@@ -8,7 +8,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import * as ObjectStore from "../files/ObjectStore.ts";
 import { DOCUMENT_RUNS, indexLog, type LogEntry } from "./documents/log.ts";
-import { documentStore, type DocumentStatus, type DocumentSummary, summaryOf } from "./documents/store.ts";
+import { documentStore, PROGRESS_COLUMNS, ProgressFields, progressOf, type DocumentStatus, type DocumentSummary, summaryOf } from "./documents/store.ts";
 
 /**
  * Workspaces as /admin/workspaces sees them (docs/workspaces-plan.md, "Indexing log",
@@ -82,6 +82,7 @@ const OrgDocumentRow = Schema.Struct({
 	error: Schema.NullOr(Schema.String),
 	created_at: Schema.Date,
 	cost_usd: Schema.NullOr(Schema.Number),
+	...ProgressFields,
 });
 
 const CountRow = Schema.Struct({ count: Schema.Number });
@@ -122,7 +123,7 @@ const make = Effect.gen(function* () {
 		Result: OrgDocumentRow,
 		execute: () => sql`
 			select d.id, d.workspace_id, d.name, d.media_type, d.size, d.status, d.error, d.created_at,
-				${sql.literal(DOCUMENT_COST)}::float8 as cost_usd
+				${sql.literal(DOCUMENT_COST)}::float8 as cost_usd, ${sql.literal(PROGRESS_COLUMNS)}
 			from workspace_documents d join workspaces w on w.id = d.workspace_id
 			where w.kind = 'org' and w.deleted_at is null
 			order by d.created_at, d.id`,
@@ -205,6 +206,7 @@ function orgWorkspace(row: typeof OrgRow.Type, documents: ReadonlyArray<typeof O
 			status: document.status,
 			error: document.error,
 			createdAt: document.created_at.toISOString(),
+			progress: progressOf(document),
 			costUsd: document.cost_usd === null ? null : round(document.cost_usd),
 		})),
 		costUsd: costs.length ? round(costs.reduce((sum, cost) => sum + cost, 0)) : null,

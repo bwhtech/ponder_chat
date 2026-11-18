@@ -13,6 +13,9 @@ import * as Effect from "effect/Effect";
  *   meet those of an earlier run. `index_run_id` is the Workflow run of the latest
  *   generation, null until it started; `reading_since` is when that generation began. The
  *   sweep reads both to start again a run that never started or ended without settling.
+ *   `page_count` and `model_pages` are a PDF's pages and how many of them a model reads,
+ *   kept once the PDF is parsed, so the document's row can show its progress (store.ts,
+ *   progressOf). They are null until then, and again when a new run starts.
  * - `workspace_document_log`: what each indexing run did, as numbers only. Rows are only
  *   added, and go with their document.
  * - `workspace_page_reads`: the pages a model read in an indexing run, kept as each ends,
@@ -47,6 +50,8 @@ export const migrateDocuments = (sql: PgClient.PgClient) =>
 		// For a database made before they came.
 		yield* sql`alter table workspace_documents add column if not exists index_run_id text`;
 		yield* sql`alter table workspace_documents add column if not exists reading_since timestamptz not null default now()`;
+		yield* sql`alter table workspace_documents add column if not exists page_count integer`;
+		yield* sql`alter table workspace_documents add column if not exists model_pages integer`;
 		yield* sql`create index if not exists workspace_documents_workspace on workspace_documents (workspace_id, created_at)`;
 		yield* sql`create index if not exists workspace_documents_reading on workspace_documents (reading_since) where status = 'reading'`;
 		yield* sql`

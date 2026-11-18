@@ -9,6 +9,8 @@ import * as SqlSchema from "effect/sql/SqlSchema";
  * each step, with numbers, page numbers, model names and error messages, never a page's or
  * a passage's text. Rows are only added. A row's id names its document, its indexing run
  * (generation) and its step, so a step that Workflow runs again writes no second row.
+ * A PDF's `parsed` row is written once it is parsed, and each `page-read` row as soon as
+ * the model read that page (Indexer.ts), so Details show a long read as it goes.
  *
  * The cost of a row is read from `runs` when the log is read, so the two never disagree,
  * also after the sweep fills in a cost that came late. A row's cost is its run's and the
@@ -92,11 +94,13 @@ export function indexLog(sql: PgClient.PgClient): IndexLog {
 		Effect.all([findEntries(documentId), findCosts(documentId)]).pipe(
 			Effect.catchTags({ SchemaError: Effect.die }),
 			Effect.map(([rows, costs]) =>
-				rows.map((row): LogEntry => {
-					const entry = { generation: row.generation, step: row.step, at: row.created_at.toISOString(), detail: { ...row.detail } };
-					if (row.step === "ready" || row.step === "failed") return { ...entry, costUsd: total(costs.filter((cost) => generationOf(cost.id) === row.generation)) };
-					return { ...entry, costUsd: row.run_id ? total(costs.filter((cost) => cost.id === row.run_id || cost.id.startsWith(`${row.run_id}:`))) : null };
-				}),
+				inPageOrder(
+					rows.map((row): LogEntry => {
+						const entry = { generation: row.generation, step: row.step, at: row.created_at.toISOString(), detail: { ...row.detail } };
+						if (row.step === "ready" || row.step === "failed") return { ...entry, costUsd: total(costs.filter((cost) => generationOf(cost.id) === row.generation)) };
+						return { ...entry, costUsd: row.run_id ? total(costs.filter((cost) => cost.id === row.run_id || cost.id.startsWith(`${row.run_id}:`))) : null };
+					}),
+				),
 			),
 		);
 
@@ -114,6 +118,21 @@ export function indexLog(sql: PgClient.PgClient): IndexLog {
 		);
 
 	return { write, read, elapsedMs };
+}
+
+/**
+ * A run's page reads in page order, in the places they hold among its other rows. A model
+ * reads a few pages at once, and each row is written when its page ends, so page 3 can be
+ * written before page 2.
+ */
+function inPageOrder(entries: LogEntry[]): LogEntry[] {
+	const ordered = [...entries];
+	for (const generation of new Set(entries.map((entry) => entry.generation))) {
+		const places = entries.flatMap((entry, index) => (entry.step === "page-read" && entry.generation === generation ? [index] : []));
+		const pages = places.map((index) => entries[index]).sort((a, b) => Number(a.detail.page) - Number(b.detail.page));
+		places.forEach((place, index) => (ordered[place] = pages[index]));
+	}
+	return ordered;
 }
 
 function logId({ documentId, generation, step, part }: LogRow) {

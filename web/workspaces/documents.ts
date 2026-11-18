@@ -9,7 +9,22 @@ import { count } from "../numbers";
  * people who can edit it upload, delete, read the indexing log and ask for "Try again".
  */
 export type DocumentStatus = "reading" | "ready" | "failed";
-export type WorkspaceDocument = { id: string; name: string; mediaType: string; size: number; status: DocumentStatus; error: string | null; createdAt: string };
+/**
+ * How far an Indexing document is (server/workspaces/documents/store.ts, progressOf): the
+ * pages whose text is ready while a model reads a PDF's pictures, then the passages embedded.
+ */
+export type DocumentProgress = { phase: "pages" | "embedding"; done: number; total: number };
+export type WorkspaceDocument = {
+	id: string;
+	name: string;
+	mediaType: string;
+	size: number;
+	status: DocumentStatus;
+	error: string | null;
+	createdAt: string;
+	/** Null unless it is Indexing and there is something to count. */
+	progress: DocumentProgress | null;
+};
 
 export type LogStep = "uploaded" | "reindexed" | "parsed" | "page-read" | "chunked" | "embedded" | "ready" | "failed";
 /** One step of the indexing log: numbers, page numbers, model names and errors, never document text. */
@@ -107,6 +122,11 @@ function isWorkspaceDocument(value: unknown): value is WorkspaceDocument {
 		[value.id, value.name, value.mediaType, value.createdAt].every((field) => typeof field === "string") &&
 		typeof value.size === "number" &&
 		STATUSES.has(value.status) &&
-		(value.error === null || typeof value.error === "string")
+		(value.error === null || typeof value.error === "string") &&
+		(value.progress === null || isProgress(value.progress))
 	);
+}
+
+function isProgress(value: unknown): value is DocumentProgress {
+	return isRecord(value) && (value.phase === "pages" || value.phase === "embedding") && typeof value.done === "number" && typeof value.total === "number";
 }

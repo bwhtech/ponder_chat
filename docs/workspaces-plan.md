@@ -91,7 +91,7 @@ Ponder uses the same steps, with Postgres in place of MariaDB and SQLite. Memory
 
    A table header of more than 2,000 characters is not repeated: it is text of its own, and its rows follow as lines. Repeated, a header of 50,000 characters over 2,000 short rows made 100 million characters of passages from a file of 54 KB. Received whole on the server's thread, the largest answer within the limits held it up for about 20 ms.
    A document waits for its turn before its bytes or text are loaded, and keeps it until its passages are saved (`Indexer.ts`): one permit for each MB of its file, at least one, of 40 in all. So the Workflow queue's runs that wait hold only their ids, and the documents in preparation hold at most about 40 MB of files with their text and passages. A PDF keeps its permits while a model reads its picture pages, as each page is copied from its bytes. A run that waited checks again that it is still the document's latest before it loads anything.
-3. **Index.** A workflow run splits the text into passages (about 1,000 characters, split by structure: see below), embeds them in batches of 96, and saves them in one transaction. Each write of a step (the text, the passages, a batch's vectors, Ready or Failed) runs in a transaction that locks the document's row (`for no key update`) and checks that the run's generation is still the latest and the document is still Reading. Else the step does nothing: a model call can take minutes, and a newer run, "Try again" or a delete may come meanwhile. The `runs` rows of its model calls are kept all the same. The document shows "Indexing…" until the run ends, then "Ready" or "Failed". The document keeps its run's id. When it stays "Indexing…" for 5 minutes with no live run (a crash before the run started, or a run that ended without settling it), the sweep starts a new run, and "Try again" also accepts it.
+3. **Index.** A workflow run splits the text into passages (about 1,000 characters, split by structure: see below), embeds them in batches of 96, and saves them in one transaction. Each write of a step (the text, the passages, a batch's vectors, Ready or Failed) runs in a transaction that locks the document's row (`for no key update`) and checks that the run's generation is still the latest and the document is still Reading. Else the step does nothing: a model call can take minutes, and a newer run, "Try again" or a delete may come meanwhile. The `runs` rows of its model calls are kept all the same. The document shows "Indexing…" until the run ends, then "Ready" or "Failed". While it indexes, its row also shows how far it is (see "Progress"). The document keeps its run's id. When it stays "Indexing…" for 5 minutes with no live run (a crash before the run started, or a run that ended without settling it), the sweep starts a new run, and "Try again" also accepts it.
 4. **Choose inline or search, on each turn.** Use Flow's attachment rule. When the text of all ready documents fits in half of the model's context window, all of it goes into the system prompt as `<document name="…">` blocks. Otherwise, the largest documents move to search until the rest fit. The existing limit of 300,000 characters for files in one call also applies.
 5. **Search.** For documents in search, the 8 best passages for the person's message go into the latest message as a `<workspace_excerpts>` block, the way memory adds `<memory>`. The model also gets a `workspace_search(query)` tool for more searches. The server binds the tool to the chat's workspace, so the model cannot search another one.
 6. **Deadlines.** Each embedding call (the AI SDK's own tries included) has a timeout: 30 seconds for a memory or a search, 2 minutes for a batch of 96 passages. Then the request is aborted, and the call fails with `EmbeddingTimedOut`. The indexing step is tried again, as for `EmbeddingFailed`. A page that a model reads has its own timeout of 3 minutes for each try.
@@ -141,6 +141,21 @@ The pdf.js reader in `server/pdf-text.ts` reads only the text layer. It gets not
 
 The test scripts are not in the repo. Add a small test with one picture page to the documents pull request.
 
+### Progress
+
+A large PDF can take minutes while a model reads its picture pages. So the workspace's answer (`GET /api/workspaces/:id`), the Details log and the admin report give each document that is Indexing a `progress`:
+
+| Phase | `done` of `total` | Where the numbers come from |
+| --- | --- | --- |
+| `pages` | The pages whose text is ready, of all the pages | `workspace_documents.page_count` and `model_pages`, kept as soon as the PDF is parsed, before any page goes to a model. A text page is ready at once. A picture page is ready when its read is kept in `workspace_page_reads` for the run's generation. |
+| `embedding` | The passages embedded, of all the passages | The run's `chunked` log row, and its `embedded` rows, one for each batch of 96. |
+
+- `progress` is null for a Ready or Failed document, for a text document until its passages are split, and for a PDF until it is parsed or when no page goes to a model.
+- A new run ("Try again", a stall, a new model) sets `page_count` and `model_pages` back to null.
+- The numbers come in the same query as the list: a few small reads by index for each document that is Indexing, and none for the others. No text is read.
+- The row says "2.3 MB · Indexing… page 12 of 40" while pages are read, and "2.3 MB · Indexing… 45%" while passages are embedded. The workspace page reads the workspace again at most every 3 seconds while a document shows progress, and up to every 10 seconds otherwise. Details and the admin's log show the same line.
+- A PDF's `parsed` log row is written once it is parsed, with LiteParse's own characters and time. Each `page-read` row is written as soon as its page is read, in the same transaction as the page's checkpoint. So Details show each page as it is read. Pages read at once can end in any order, so the log lists a run's pages by page number.
+
 ### System spend
 
 Some model calls are made by the app, not for one person's reply. They cost no credits, but each one is kept in `runs`, so that admins can see and audit the spend.
@@ -169,8 +184,8 @@ Each document keeps a log of what was done to it, so a person can see why a docu
    | Step | What the row keeps |
    | --- | --- |
    | `uploaded` | Size, media type, who uploaded it |
-   | `parsed` | Engine (`liteparse` or `pdf-text`), page count, characters, time |
-   | `page-read` | Page number, why it was sent (`picture` or `scan`), model, time, cost, OK or failed and the error |
+   | `parsed` | Engine (`liteparse` or `pdf-text`), page count, characters, time. For a PDF, written once it is parsed, before a model reads any page |
+   | `page-read` | Page number, why it was sent (`picture` or `scan`), model, time, cost, OK or failed and the error. Written as soon as the page is read |
    | `chunked` | Number of passages |
    | `embedded` | One row for each batch: passages, model, time, cost |
    | `ready` or `failed` | Total time, total cost, and for `failed` the step and the error. A worker job that failed adds its reason (`timeout`, `memory`, `failed` or `stopped`) |
@@ -200,7 +215,8 @@ workspace_members (
 workspace_documents (
 	id, workspace_id → workspaces on delete cascade,
 	name, media_type, size, object_key, text,
-	status ('reading' | 'ready' | 'failed'), error, added_by, created_at
+	status ('reading' | 'ready' | 'failed'), error, added_by, created_at,
+	page_count, model_pages   -- a PDF's pages, and how many a model reads, for its progress
 )
 workspace_document_log (
 	id, document_id → workspace_documents on delete cascade, workspace_id,

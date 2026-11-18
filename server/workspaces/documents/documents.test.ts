@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../../auth.ts";
+import { scanPdf } from "../../../e2e/pdfs.ts";
 import { jsonBody } from "../../test-json.ts";
 import type { DocumentLog } from "../admin.ts";
 import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
@@ -89,6 +90,37 @@ function manual(sections: number, topic = "vancomycin dose") {
 }
 const file = (name: string, text: string | Uint8Array, type: string) => new File([text as BlobPart], name, { type });
 
+/** A document's progress, as the workspace's route gives it to someone who can only ask. */
+async function progress(documentId: string) {
+	const answer = await call<{ workspace: WorkspaceDetail }>("bob", "GET", `/api/workspaces/${ids.workspace}`);
+	return answer.body.workspace.documents.find((document) => document.id === documentId)!.progress;
+}
+
+/**
+ * Holds every call to the stand-in OpenRouter until the test lets it go, first come first
+ * out. `arrived(kind, n)` settles once n calls of that kind came: a call that comes after
+ * another ended shows that the run kept what the other one did. `stop` lets all go.
+ */
+function holdCalls() {
+	type Kind = "embedding" | "page";
+	const came: Record<Kind, number> = { embedding: 0, page: 0 };
+	const waiting: Record<Kind, (() => void)[]> = { embedding: [], page: [] };
+	const watchers: { kind: Kind; count: number; done: () => void }[] = [];
+	openRouter.gate = (kind) => {
+		came[kind]++;
+		for (const watcher of watchers.filter((one) => one.kind === kind && came[kind] >= one.count)) watcher.done();
+		return new Promise<void>((resolve) => waiting[kind].push(resolve));
+	};
+	return {
+		arrived: (kind: Kind, count: number) => new Promise<void>((done) => (came[kind] >= count ? done() : watchers.push({ kind, count, done }))),
+		release: (kind: Kind, count = 1) => waiting[kind].splice(0, count).forEach((resolve) => resolve()),
+		stop: () => {
+			openRouter.gate = undefined;
+			for (const kind of ["embedding", "page"] as const) waiting[kind].splice(0).forEach((resolve) => resolve());
+		},
+	};
+}
+
 const ids = { workspace: "", other: "", manual: "", pdf: "", failing: "" };
 
 describe.skipIf(!base)("workspace documents", () => {
@@ -147,7 +179,8 @@ describe.skipIf(!base)("workspace documents", () => {
 			answer.body.workspace.documents.map((document) => [document.id, document.status]),
 			[[uploaded.id, "ready"]],
 		);
-		assert.deepStrictEqual(Object.keys(answer.body.workspace.documents[0]).sort(), ["createdAt", "error", "id", "mediaType", "name", "size", "status"]);
+		assert.deepStrictEqual(Object.keys(answer.body.workspace.documents[0]).sort(), ["createdAt", "error", "id", "mediaType", "name", "progress", "size", "status"]);
+		assert.isNull(answer.body.workspace.documents[0].progress);
 	});
 
 	it("a run that is asked again skips what it did: no batch is embedded twice", async () => {
@@ -193,6 +226,62 @@ describe.skipIf(!base)("workspace documents", () => {
 		// Numbers, names and errors only: no page's text, the model's or the text layer's.
 		const rows = JSON.stringify(await database((sql) => sql`select detail from workspace_document_log where document_id = ${ids.pdf}`));
 		for (const text of ["Cefazolin", "Exit site", "Peritonitis is the main infection", "cloudy bag"]) assert.notInclude(rows, text);
+	});
+
+	it("reports a document's progress while a model reads its pages one at a time, then while it embeds, and none once it is ready", async () => {
+		// A line of text, then five scans. Four go to the model at once; the fifth goes once one of them is kept.
+		for (const page of [2, 3, 4, 5, 6]) openRouter.pages.set(page, SCAN);
+		const held = holdCalls();
+		try {
+			const pdf = await documents((service) => service.upload(actor("cy"), ids.workspace, file("scans.pdf", scanPdf("Ward forms", `KEY-${tag}`, 5), "application/pdf")));
+			// Nothing to count before the PDF is parsed.
+			assert.isNull(await progress(pdf.id));
+			const indexing = indexLatest();
+
+			await held.arrived("page", 4);
+			assert.deepStrictEqual(await progress(pdf.id), { phase: "pages", done: 1, total: 6 });
+			held.release("page");
+			await held.arrived("page", 5);
+			assert.deepStrictEqual(await progress(pdf.id), { phase: "pages", done: 2, total: 6 });
+			// Details have the same progress, and the page that was read: its log row is written as it is kept.
+			const log = await documents((service) => service.log(actor("cy"), ids.workspace, pdf.id));
+			assert.deepStrictEqual(log.document.progress, { phase: "pages", done: 2, total: 6 });
+			assert.deepStrictEqual(
+				log.steps.map((step) => step.step),
+				["uploaded", "parsed", "page-read"],
+			);
+			assert.deepStrictEqual([log.steps[1].detail.engine, log.steps[1].detail.pages], ["liteparse", 6]);
+
+			held.release("page", 4);
+			await held.arrived("embedding", 1);
+			const [passages] = await database((sql) => sql<{ count: number }>`select count(*)::int as count from workspace_passages where document_id = ${pdf.id}`);
+			assert.deepStrictEqual(await progress(pdf.id), { phase: "embedding", done: 0, total: passages.count });
+			held.release("embedding");
+			assert.strictEqual(await indexing, "ready");
+			assert.isNull(await progress(pdf.id));
+			// The pages were read at once, and end in any order: the log lists them by page.
+			const pages = (await documents((service) => service.log(actor("cy"), ids.workspace, pdf.id))).steps.filter((step) => step.step === "page-read");
+			assert.deepStrictEqual(
+				pages.map((step) => step.detail.page),
+				[2, 3, 4, 5, 6],
+			);
+
+			// A long text has nothing to count until it is split; then its passages, 96 at a time.
+			const text = await documents((service) => service.upload(actor("cy"), ids.workspace, file("long.md", manual(120, "exit site care"), "text/markdown")));
+			assert.isNull(await progress(text.id));
+			const embedding = indexLatest();
+			await held.arrived("embedding", 2);
+			assert.deepStrictEqual(await progress(text.id), { phase: "embedding", done: 0, total: 120 });
+			held.release("embedding");
+			await held.arrived("embedding", 3);
+			assert.deepStrictEqual(await progress(text.id), { phase: "embedding", done: 96, total: 120 });
+			held.release("embedding");
+			assert.strictEqual(await embedding, "ready");
+			assert.isNull(await progress(text.id));
+			for (const id of [pdf.id, text.id]) await documents((service) => service.remove(actor("cy"), ids.workspace, id));
+		} finally {
+			held.stop();
+		}
 	});
 
 	it("keeps each paid try of a page with its own generation id, so a cost that comes late is added to the page", async () => {

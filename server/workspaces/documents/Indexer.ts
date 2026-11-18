@@ -124,8 +124,10 @@ const make = Effect.gen(function* () {
 	});
 
 	/**
-	 * The text, and the page reads' log rows, together. The log lists rows in the order they
-	 * were written (log.ts), and a person reads "parsed" before its pages.
+	 * The text, and the page reads' log rows, together. A PDF's `parsed` row and most of its
+	 * page reads were written as they happened (checkpointOf): a row that is there already is
+	 * not written twice (log.ts), so these add only what is missing, such as a text
+	 * document's `parsed` row, or a page that could not be copied out of the PDF.
 	 */
 	const saveRead = (row: DocumentRow, text: string, read: Omit<DocumentText, "pages">) =>
 		fenced(row, (locked) =>
@@ -139,16 +141,28 @@ const make = Effect.gen(function* () {
 
 	/**
 	 * The pages this run read already, and how to keep each new one: its `runs` rows first, so
-	 * its spend is kept also for a run that a newer one overtook, then the page. The read stops
-	 * once this run is no longer the document's latest (a delete, "Try again").
+	 * its spend is kept also for a run that a newer one overtook, then the page and its log
+	 * row, while this run is still the latest. The read stops once this run is no longer the
+	 * document's latest (a delete, "Try again").
+	 *
+	 * Once the PDF is parsed, before any page goes to a model, its page count and how many
+	 * pages a model reads are kept with its `parsed` log row: the document's progress counts
+	 * them (store.ts, progressOf), and Details show the pages while they are read.
 	 */
 	const checkpointOf = Effect.fnUntraced(function* (row: DocumentRow) {
 		return {
+			parsed: (parsed) =>
+				fenced(row, (locked) =>
+					Effect.andThen(
+						store.savePages(locked.id, parsed.pageCount, parsed.modelPages),
+						logRow(locked, "parsed", { engine: parsed.engine, pages: parsed.pageCount, chars: parsed.chars, ms: parsed.ms }),
+					),
+				).pipe(Effect.asVoid),
 			done: yield* pageReads.done(row.id, row.generation),
 			save: (result) =>
 				Effect.andThen(
 					Effect.forEach(pageReadRuns(row, result.record), runs.insert, { discard: true }),
-					pageReads.save(row.id, row.generation, result),
+					fenced(row, (locked) => Effect.andThen(pageReads.save(locked.id, locked.generation, result), logPageReads(locked, [result.record]))).pipe(Effect.asVoid),
 				),
 			live: Effect.map(current({ documentId: row.id, generation: row.generation }), (found) => Option.isSome(found) && found.value.status === "reading"),
 		} satisfies PageCheckpoint;

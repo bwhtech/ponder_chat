@@ -44,12 +44,13 @@ export function slowPdf(depth = 12) {
 }
 
 /**
- * A PDF of two pages: a line of text, then a scan, a picture over the whole page with no
- * text, which a workspace document sends to the page model (server/workspaces/documents/read-pdf.ts).
- * The picture's bytes hold `key` as they are (deflate with no compression), so the one-page
- * PDF that reaches the fake model holds it too, and a PageScript can match it.
+ * A PDF of a line of text, then `scans` scans (one by default): pictures over the whole page
+ * with no text, which a workspace document sends to the page model
+ * (server/workspaces/documents/read-pdf.ts). The picture's bytes hold `key` as they are
+ * (deflate with no compression), so the one-page PDF that reaches the fake model holds it
+ * too, and a PageScript can match it. The scans share one picture.
  */
-export function scanPdf(line: string, key: string) {
+export function scanPdf(line: string, key: string, scans = 1) {
 	const width = 640;
 	const height = 832;
 	const bits = Buffer.alloc((width / 8) * height, 0xff);
@@ -57,11 +58,13 @@ export function scanPdf(line: string, key: string) {
 	const image = deflateSync(bits, { level: 0 });
 	const scan = "q 612 0 0 792 0 0 cm /Im1 Do Q";
 	const text = `BT /F1 12 Tf 72 720 Td (${line}) Tj ET`;
+	// 1 the catalog, 2 the page tree, 3 the text page, 4 the font, 5 its text, 6 the picture,
+	// 7 a scan's drawing, and the scan pages from 8.
+	const scanPages = Array.from({ length: scans }, (_, index) => 8 + index);
 	const objects = [
 		"<< /Type /Catalog /Pages 2 0 R >>",
-		"<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>",
-		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>",
-		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 7 0 R >> >> /Contents 8 0 R >>",
+		`<< /Type /Pages /Kids [${[3, ...scanPages].map((page) => `${page} 0 R`).join(" ")}] /Count ${scans + 1} >>`,
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
 		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
 		`<< /Length ${text.length} >>\nstream\n${text}\nendstream`,
 		Buffer.concat([
@@ -70,6 +73,7 @@ export function scanPdf(line: string, key: string) {
 			Buffer.from("\nendstream"),
 		]),
 		`<< /Length ${scan.length} >>\nstream\n${scan}\nendstream`,
+		...scanPages.map(() => "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /XObject << /Im1 6 0 R >> >> /Contents 7 0 R >>"),
 	];
 	return withXref(objects.map((body) => (typeof body === "string" ? Buffer.from(body, "latin1") : body)));
 }

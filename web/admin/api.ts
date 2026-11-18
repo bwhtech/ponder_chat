@@ -40,7 +40,19 @@ export type SystemSpend = { usd: number; calls: number; byFunction: { functionId
 
 /** GET /api/admin/workspaces (server/workspaces/admin.ts): organisation workspaces in full, private ones as totals. */
 export type DocumentStatus = "reading" | "ready" | "failed";
-export type OrgDocument = { id: string; name: string; mediaType: string; size: number; status: DocumentStatus; error: string | null; createdAt: string; costUsd: number | null };
+/** How far an Indexing document is: the same as a workspace's (web/workspaces/documents.ts). */
+export type DocumentProgress = { phase: "pages" | "embedding"; done: number; total: number };
+export type OrgDocument = {
+	id: string;
+	name: string;
+	mediaType: string;
+	size: number;
+	status: DocumentStatus;
+	error: string | null;
+	createdAt: string;
+	progress: DocumentProgress | null;
+	costUsd: number | null;
+};
 export type OrgWorkspace = {
 	id: string;
 	slug: string;
