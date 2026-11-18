@@ -24,7 +24,8 @@ export function useChatWorkspace(threadId: string, saved: () => string | undefin
 	const chosen = ref<string | null>(saved() ?? firstMessage?.workspaceId ?? null);
 	watch(saved, (id) => id && (chosen.value = id));
 
-	const locked = computed(() => Boolean(saved()) || started());
+	// A question from a workspace page brings its workspace: there is nothing to pick, even before it is sent.
+	const locked = computed(() => Boolean(saved() || firstMessage) || started());
 	return {
 		firstMessage,
 		chosen,

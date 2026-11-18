@@ -239,8 +239,10 @@ function turnStart(list: UIMessage[], index: number) {
 }
 
 // A new chat opens with the field in the middle of the page, under the greeting (on phones it
-// stays at the bottom, by the thumb and the keyboard). The first message sends it down.
-const landing = computed(() => messages.value.length === 0);
+// stays at the bottom, by the thumb and the keyboard). The first message sends it down. A
+// question asked on a workspace page is that first message: the chat opens as sent, with no
+// greeting and its field already at the bottom.
+const landing = computed(() => messages.value.length === 0 && !workspace.firstMessage);
 const area = ref<HTMLElement | null>(null);
 const footer = ref<HTMLElement | null>(null);
 let footerTop = 0;
