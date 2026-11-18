@@ -8,7 +8,7 @@ import { safeUrl, useCardSend } from "./actions";
  * with the OpenUI runtime and frappe-ui's charts and lists: a chat without cards never
  * loads it (ShowUiPart.vue). A button sends a message to Ponder or opens a page.
  */
-const props = defineProps<{ code: string; streaming?: boolean }>();
+const props = defineProps<{ code: string; title?: string; streaming?: boolean }>();
 const send = useCardSend();
 
 function onAction(event: ActionEvent) {
@@ -22,7 +22,7 @@ function onAction(event: ActionEvent) {
 </script>
 
 <template>
-	<div data-slot="genui-card" class="min-w-0">
+	<div data-slot="genui-card" class="min-w-0" role="group" :aria-label="props.title?.trim() || undefined" :aria-busy="props.streaming || undefined">
 		<Renderer :response="props.code" :library="genuiVueLibrary" :is-streaming="!!props.streaming" :on-action="onAction" />
 	</div>
 </template>

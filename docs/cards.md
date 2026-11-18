@@ -18,7 +18,7 @@ Cards use [OpenUI](https://www.openui.com) (MIT). OpenUI Lang is a short, line-b
    table = Table(plans, [Col("Plan", "plan"), Col("Price", "price", "currency")])
    ```
 
-3. The page draws the card from the tool input while it streams (`web/genui/ShowUiPart.vue`).
+3. The page draws the card from the tool input while it streams (`web/genui/ShowUiPart.vue`). Until the first statement is whole, a step line says **Drawing “{title}”**, or **Drawing a chart or table** before the title arrives. While the card's code loads, a box of a chart's height says the same, or **Loading “{title}”** in a chat opened again.
 4. The server parses the program (`server/genui/tool.ts`). One of two things then happens:
    - **Problems:** an unknown component, an argument of the wrong type, a required argument left out, a name that is used but never defined, a part that is never placed, or a `Query()` or `Mutation()`. The call fails with a list of what to fix. The page shows one line, "Could not draw …", with the list folded under it, and the model draws the card again.
    - **No problems:** the card is kept. The program is the tool call's input, so it is saved with the message and needs no table of its own. When the chat opens again, the card draws again from it.

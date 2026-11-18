@@ -68,3 +68,33 @@ test("a card draws again when the chat opens again", async ({ page, fake }) => {
 	await page.reload();
 	await expect(chat.reply(page).locator('[data-slot="genui-card"]').getByText("Phone plans compared")).toBeVisible();
 });
+
+test("says what is coming while a card is written and while its code loads", async ({ page, fake }, testInfo) => {
+	// Holds the card's chunk, so the box that stands in for it stays on screen.
+	test.setTimeout(90_000);
+	let release = () => {};
+	const held = new Promise<void>((resolve) => (release = resolve));
+	await page.route(/\/assets\/GenuiCard-[^/]+\.js$/, async (route) => {
+		await held;
+		await route.continue();
+	});
+	// Small pieces, slowly: the title arrives some time before the code does.
+	await fake.chat({
+		match: "slow card",
+		steps: [{ toolCalls: [{ name: "show_ui", input: { title: "Phone plans", code: CARD } }], toolInputPieces: 160, delayMs: 120 }, { text: "Done." }],
+	});
+
+	await chat.send(page, "Draw a slow card");
+	const reply = chat.reply(page);
+	await expect(reply.locator('[data-slot="tool-header"]').getByText("Drawing “Phone plans”")).toBeVisible();
+	await page.screenshot({ path: testInfo.outputPath("drawing-line.png") });
+
+	const placeholder = reply.locator('[data-slot="genui-placeholder"]');
+	await expect(placeholder).toHaveText("Drawing “Phone plans”");
+	await page.screenshot({ path: testInfo.outputPath("drawing-box.png") });
+
+	release();
+	await expect(reply.getByRole("group", { name: "Phone plans" })).toBeVisible();
+	// The rest of the code still streams in small pieces.
+	await expect(reply).toContainText("Done.", { timeout: 40_000 });
+});
