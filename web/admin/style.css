@@ -27,28 +27,6 @@
   }
 }
 
-/* The dashboard's labels (chart axes, legends, card titles) read at gray-6, not the faint gray-5,
-   in both themes. frappe-ui's charts read these variables from the plot's own element. */
-[data-slot='dashboard'] {
-  --ink-gray-4: var(--ink-gray-6);
-  --ink-gray-5: var(--ink-gray-6);
-}
-
-/* Dark cards sit on a dark page, so their labels need one more step of contrast. */
-[data-theme='dark'] [data-slot='dashboard'] {
-  --ink-gray-4: var(--ink-gray-7);
-  --ink-gray-5: var(--ink-gray-7);
-  /* Dark outline-gray-1 is the card's own colour, so card edges vanish; one step firmer, as frappe-ui's chart gridlines do. */
-  --outline-gray-1: var(--outline-gray-2);
-}
-
-/* Table column labels at gray-6, like the dashboard's labels. */
-[data-slot='list-header'],
-[data-slot='list-header'] button {
-  color: var(--ink-gray-6);
-  font-weight: 500;
-}
-
 /* In dark mode, sidebar labels that are not selected are one step brighter, as in the chat. */
 [data-theme='dark'] [data-slot='sidebar-item'][data-state='inactive'] {
   color: var(--ink-gray-7);

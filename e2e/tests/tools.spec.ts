@@ -63,5 +63,5 @@ test("offers the tools the chat has", async ({ page, fake }) => {
 	await chat.send(page, "Which tools, tools test?");
 	await chat.idle(page);
 	const [call] = await fake.calls("tools test");
-	expect(call.tools).toEqual(expect.arrayContaining(["web_search", "web_fetch", "write_artifact"]));
+	expect(call.tools).toEqual(expect.arrayContaining(["web_search", "web_fetch", "write_artifact", "show_ui"]));
 });
