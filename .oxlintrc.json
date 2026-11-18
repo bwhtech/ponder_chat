@@ -1,0 +1,74 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	// Only these rules: no `any` in our TypeScript, written or flowing in from untyped code
+	// (README.md, "Develop"). They need the types, which oxlint-tsgolint reads with each
+	// folder's tsconfig.json. Plus, in web/, no Node globals: the browser has none.
+	"categories": { "correctness": "off" },
+	"options": { "typeAware": true },
+	// sandbox/pyodide is a Deno program: the linter does not know Deno's globals or npm: imports.
+	"ignorePatterns": [".output/**", ".nitro/**", "dist/**", "node_modules/**", "sandbox/pyodide/**"],
+	"rules": {
+		"typescript/no-explicit-any": "error",
+		"typescript/no-unsafe-assignment": "error",
+		"typescript/no-unsafe-member-access": "error",
+		"typescript/no-unsafe-call": "error",
+		"typescript/no-unsafe-return": "error",
+		"typescript/no-unsafe-argument": "error"
+	},
+	"overrides": [
+		{
+			// Plain JavaScript has no types, so every value would count as `any`.
+			"files": ["**/*.js", "**/*.mjs", "**/*.cjs"],
+			"rules": {
+				"typescript/no-unsafe-assignment": "off",
+				"typescript/no-unsafe-member-access": "off",
+				"typescript/no-unsafe-call": "off",
+				"typescript/no-unsafe-return": "off",
+				"typescript/no-unsafe-argument": "off"
+			}
+		},
+		{
+			// The web app's types include the server's (web/api.ts), and with them Node's
+			// globals. The browser has none of them.
+			"files": ["web/**"],
+			"rules": {
+				"no-restricted-globals": [
+					"error",
+					{ "name": "process", "message": "The browser has no `process`. Use import.meta.env for build-time values." },
+					{ "name": "Buffer", "message": "The browser has no `Buffer`. Use Uint8Array, TextEncoder or btoa." },
+					{ "name": "global", "message": "The browser has no `global`. Use globalThis." },
+					{ "name": "require", "message": "The browser has no `require`. Use import." },
+					{ "name": "module", "message": "The browser has no `module`." },
+					{ "name": "exports", "message": "The browser has no `exports`. Use export." },
+					{ "name": "__dirname", "message": "The browser has no `__dirname`." },
+					{ "name": "__filename", "message": "The browser has no `__filename`." },
+					{ "name": "setImmediate", "message": "The browser has no `setImmediate`. Use setTimeout or queueMicrotask." },
+					{ "name": "clearImmediate", "message": "The browser has no `clearImmediate`." }
+				],
+				"no-restricted-imports": [
+					"error",
+					{
+						"patterns": [{ "group": ["node:*"], "message": "The browser has no Node modules." }],
+						"paths": [
+							{ "name": "fs", "message": "The browser has no Node modules." },
+							{ "name": "path", "message": "The browser has no Node modules." },
+							{ "name": "os", "message": "The browser has no Node modules." },
+							{ "name": "crypto", "message": "The browser has no Node modules. Use globalThis.crypto." },
+							{ "name": "buffer", "message": "The browser has no Node modules." }
+						]
+					}
+				],
+				"typescript/no-restricted-types": [
+					"error",
+					{
+						"types": {
+							"Buffer": "The browser has no `Buffer`. Use Uint8Array.",
+							"NodeJS.Timeout": "The browser's timers return a number: ReturnType<typeof setTimeout>.",
+							"NodeJS.ProcessEnv": "The browser has no `process`."
+						}
+					}
+				]
+			}
+		}
+	]
+}

@@ -153,9 +153,9 @@ Then, with the app's environment:
 
 Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL` (every OpenRouter call; default `https://openrouter.ai/api`) and `CLOUDFLARE_API_URL` (the email API). Production sets neither.
 
-Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts`, `server/tracing.check.ts`, `server/workflow/loop.check.ts` and `server/mcp.check.ts` on every pull request.
+Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, the lint, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts`, `server/tracing.check.ts`, `server/workflow/loop.check.ts` and `server/mcp.check.ts` on every pull request.
 
-Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npm run test` (the server's unit tests; set `TEST_DATABASE_URL` to a throwaway Postgres to include the database tests, [`docs/effect.md`](docs/effect.md)), `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, `npx tsx server/tracing.check.ts`, `npx tsx server/workflow/loop.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
+Checks: `npm run typecheck` (web), `npm run typecheck:server`, `npm run typecheck:e2e`, `npm run lint` (no `any`, see "Develop"), `npm run test` (the server's unit tests; set `TEST_DATABASE_URL` to a throwaway Postgres to include the database tests, [`docs/effect.md`](docs/effect.md)), `npx tsx server/context.check.ts`, `npx tsx server/connector-catalog.check.ts`, `npx tsx server/memory.check.ts`, `npx tsx server/search.check.ts [--live]`, `npx tsx server/trusted-pages.check.ts`, `npx tsx server/fetch-page.check.ts`, `npx tsx server/pdf-text.check.ts`, `npx tsx server/tracing.check.ts`, `npx tsx server/workflow/loop.check.ts`, and `npx tsx server/mcp.check.ts [--live]` (with the app's environment; it writes two test people to the database and deletes them).
 
 To try connectors locally, run `npx tsx server/mcp.check.ts --serve` (test MCP servers with no sign-in, an API key, and OAuth that signs in at once), and start Ponder with `MCP_ALLOW_PRIVATE_NETWORKS=1`.
 
@@ -196,6 +196,17 @@ Limits:
 - Vite does not send the Content Security Policy that `server/app.ts` adds to each page. To check the policy, use `npm run build` and `npm start`.
 - After a change to `nitro.config.ts` or `.env`, start `npm run dev` again.
 - Memory does not save. The workflow's development bundle does not copy `gate.json` and `extract.md` (`server/memory/`), so each save logs `ENOENT`. Replies are not affected.
+
+### No `any`
+
+Ponder's TypeScript has no `any`, in the web app, the server and the tests:
+
+- Do not write `any` (`: any`, `as any`, `any[]`). Do not use `@ts-ignore`, `@ts-expect-error` or `oxlint-disable`.
+- Do not let `any` in from untyped values: `response.json()`, `JSON.parse`, IndexedDB, raw SQL rows, a library's loose types. Give them the type `unknown` and narrow it. On the server, decode them with `Schema` ([`docs/effect.md`](docs/effect.md)).
+- Where a library gives `any`, wrap it once in a small typed function or declaration.
+- Tests read JSON answers with `jsonBody` and `parseJson` (`server/test-json.ts`) or `jsonOf` (`e2e/fixtures.ts`), typed as the shape the test expects.
+
+`npm run lint` checks this, with oxlint and its type-aware rules (`.oxlintrc.json`). It reads the types with each folder's `tsconfig.json`. It also stops code in `web/` from using Node's globals and modules, such as `process`, `Buffer` and `node:fs`: the browser has none. CI runs it on every pull request.
 
 ## How it works
 
