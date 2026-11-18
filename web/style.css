@@ -104,10 +104,12 @@
   }
 }
 
-/* A workspace's setup greets as its page first shows it (WorkspaceSetup.vue): the heading leads,
-   the cards follow 60, 110 and 150ms behind it. `backwards` holds each card hidden through its
-   delay and lets go at the end, so the cards' own leave and move transitions are not overridden.
-   With reduced motion they fade in together, without moving. */
+/* A workspace's setup greets the first time its page shows it (WorkspacePage.vue, WorkspaceSetup.vue):
+   the heading leads, the cards follow 60, 110 and 150ms behind it, and the sections under the setup
+   come with the last card, rising least. It is the column's one entrance: the column does not fade
+   as well. `backwards` holds each part hidden through its delay and lets go at the end, so the
+   cards' own leave and move transitions, and the sections' own, are not overridden. With reduced
+   motion they fade in together, without moving. */
 @keyframes setup-rise {
   from {
     opacity: 0;
@@ -122,9 +124,14 @@
   --rise: 6px;
   animation: setup-rise 260ms var(--ease-out-strong) var(--greet-delay, 0ms) backwards;
 }
+[data-greet] > [data-slot='workspace-about'] {
+  --rise: 4px;
+  animation: setup-rise 240ms var(--ease-out-strong) 180ms backwards;
+}
 @media (prefers-reduced-motion: reduce) {
   [data-greet] [data-slot='workspace-setup-intro'],
-  [data-greet] [data-slot='workspace-setup-step'] {
+  [data-greet] [data-slot='workspace-setup-step'],
+  [data-greet] > [data-slot='workspace-about'] {
     animation: fade-in 200ms var(--ease-out-strong) backwards;
   }
 }

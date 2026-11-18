@@ -23,6 +23,8 @@ type Entry = { workspace?: WorkspaceDetail; chats?: ThreadSummary[] };
 /** Workspaces kept, by id, the one used longest ago first. */
 const KEEP = 20;
 const entries = new Map<string, Entry>();
+/** Workspaces whose setup greeted the person on this page: it greets once (WorkspacePage.vue). */
+const greeted = new Set<string>();
 
 function keep(id: string, change: Entry) {
 	const entry = { ...entries.get(id), ...change };
@@ -61,4 +63,11 @@ export function forgetChat(chatId: string) {
 	for (const [id, entry] of entries) {
 		if (entry.chats?.some((chat) => chat.id === chatId)) entries.set(id, { ...entry, chats: entry.chats.filter((chat) => chat.id !== chatId) });
 	}
+}
+
+/** True the first time a workspace's setup shows on this page, false after. */
+export function firstGreeting(id: string) {
+	if (greeted.has(id)) return false;
+	greeted.add(id);
+	return true;
 }

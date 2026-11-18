@@ -21,8 +21,9 @@ import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
  * the column is too narrow for that (a phone, or a sidebar and side panel beside it), and when
  * one step is left: a lone card would leave a hole beside it.
  *
- * The cards rise into place one after another as the page first shows them (a new workspace
- * is seen once or twice, so it can greet); later they only fade and slide, as steps are done.
+ * The cards rise into place one after another the first time the page shows them (a new
+ * workspace is seen once or twice, so it can greet); later they only fade and slide, as steps
+ * are done.
  */
 /**
  * `dragging`: files are dragged somewhere over the page, and a drop there uploads them
@@ -54,16 +55,12 @@ onMounted(() => {
 onBeforeUnmount(() => widthObserver.disconnect());
 
 /**
- * The setup greets as the page first shows it (style.css, [data-greet]): the heading rises in,
- * and the cards follow it one after another, each gap shorter than the last, so the group reads
- * as one wave. Only on the first showing: a card that later becomes a row (a new element) just
- * fades, as steps are done. With reduced motion, everything fades in together.
+ * The setup greets the first time the page shows it (WorkspacePage.vue sets [data-greet] around
+ * it, style.css): the heading rises in, and the cards follow it one after another, each gap
+ * shorter than the last, so the group reads as one wave. A card that later becomes a row (a new
+ * element) just fades, as steps are done. With reduced motion, everything fades in together.
  */
 const GREET_DELAYS_MS = [60, 110, 150];
-const GREET_MS = 600;
-const greeting = ref(true);
-const greetTimer = setTimeout(() => (greeting.value = false), GREET_MS);
-onBeforeUnmount(() => clearTimeout(greetTimer));
 const narrow = computed(() => width.value < props.steps.length * CARD_MIN_PX + (props.steps.length - 1) * GAP_PX);
 const rows = computed(() => cards.value.length === 1 || narrow.value);
 
@@ -195,7 +192,7 @@ onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 </script>
 
 <template>
-	<section ref="section" aria-labelledby="workspace-setup-heading" data-slot="workspace-setup" :data-greet="greeting || undefined" v-on="drop.listeners">
+	<section ref="section" aria-labelledby="workspace-setup-heading" data-slot="workspace-setup" v-on="drop.listeners">
 		<div data-slot="workspace-setup-intro">
 			<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
 				<h2 id="workspace-setup-heading" class="text-lg-semibold text-ink-gray-9">Set up this workspace</h2>

@@ -5,7 +5,7 @@ import { dialog } from "../dialogs";
 import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
 import { useThreads, useWorkspaceThreads } from "../threads";
-import { forgetWorkspace, peekWorkspace, writeWorkspace } from "./cache";
+import { firstGreeting, forgetWorkspace, peekWorkspace, writeWorkspace } from "./cache";
 import { openWorkspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
@@ -68,6 +68,28 @@ const madeHere = ref("");
 const ready = computed(() => Boolean(detail.value && (chatsLoaded.value || madeHere.value === detail.value.id)));
 /** No chat of the person's here, for sure: the setup cards show for an editor, over the workspace's sections. */
 const onboarding = computed(() => ready.value && !chats.value.length);
+
+/**
+ * The first time the setup shows on this page, it is the column's entrance (style.css,
+ * [data-greet]): its heading rises in, its cards follow one after another, and the sections
+ * under it come with the last card. The column then does not fade as well. Later showings, and
+ * a workspace with no setup to do, are just there, or fade in as the page loads.
+ */
+const GREET_MS = 600;
+const greeting = ref(false);
+let greetTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+	ready,
+	(now) => {
+		const shown = detail.value;
+		if (!now || !shown || chats.value.length || !setupSteps(shown).some((step) => !step.done) || !firstGreeting(shown.id)) return;
+		greeting.value = true;
+		greetTimer = setTimeout(() => (greeting.value = false), GREET_MS);
+	},
+	// Before the column renders, so it never draws without the greeting first.
+	{ immediate: true, flush: "sync" },
+);
+onBeforeUnmount(() => clearTimeout(greetTimer));
 
 /**
  * What Tab reaches scrolls clear of the message box: the page keeps scroll padding at the
@@ -340,10 +362,10 @@ function askDelete() {
 			</div>
 			<!-- The column fills the page while it waits, so the box stays at the bottom. -->
 			<div class="mx-auto w-full max-w-[720px] flex-1 px-4 pb-10 pt-6 sm:px-5" :aria-busy="!ready || undefined">
-				<!-- Fades in when the workspace and the person's chats in it are here; a workspace made here, or opened
-				     before, shows at once. -->
-				<Transition enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
-					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8">
+				<!-- Fades in when the workspace and the person's chats in it are here, unless the setup greets; a workspace
+				     made here, or opened before, shows at once. -->
+				<Transition :css="!greeting" enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
+					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8" :data-greet="greeting || undefined">
 						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="isShared(detail)" @open="emit('openChat', $event)" />
 						<WorkspaceOnboarding v-else ref="onboardingUpload" :workspace="detail" :dragging="pageDragging" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
 						<WorkspaceAbout ref="aboutUpload" :workspace="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
