@@ -69,6 +69,8 @@ async function reset() {
 	const ids = users.map((user) => user.id);
 	if (ids.length) {
 		for (const table of ["threads", "files", "memories", "memory_saves"]) await sql`delete from ${sql(table)} where owner in ${sql(ids)}`;
+		// Their members, pins, documents and logs go with them.
+		await sql`delete from workspaces where owner_id in ${sql(ids)}`;
 		await sql`delete from runs where "user" in ${sql(ids)}`;
 		await sql`delete from mcp_connections where user_id in ${sql(ids)}`;
 		await sql`delete from credit_requests where user_id in ${sql(ids)}`;
@@ -639,6 +641,309 @@ async function addThreads(owner: string) {
 	}
 }
 
+// --- Workspaces -----------------------------------------------------------------
+
+/**
+ * A small PDF with one page for each entry of `pages`: a heading and a few lines of text.
+ * The pages are what a person who opens the file sees, and what the log says it read.
+ */
+function pdf(pages: string[][]) {
+	const escape = (line: string) => line.replace(/[\\()]/g, (char) => `\\${char}`);
+	const objects = ["<< /Type /Catalog /Pages 2 0 R >>", "", "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"];
+	const kids: string[] = [];
+	for (const lines of pages) {
+		const stream = lines.map((line, index) => `BT /F1 ${index === 0 ? 18 : 11} Tf 72 ${index === 0 ? 720 : 702 - index * 18} Td (${escape(line)}) Tj ET`).join("\n");
+		kids.push(`${objects.length + 1} 0 R`);
+		objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${objects.length + 2} 0 R >>`);
+		objects.push(`<< /Length ${Buffer.byteLength(stream)} >>\nstream\n${stream}\nendstream`);
+	}
+	objects[1] = `<< /Type /Pages /Kids [${kids.join(" ")}] /Count ${pages.length} >>`;
+	let body = "%PDF-1.4\n";
+	const offsets = objects.map((object, index) => {
+		const at = Buffer.byteLength(body);
+		body += `${index + 1} 0 obj\n${object}\nendobj\n`;
+		return at;
+	});
+	const xref = Buffer.byteLength(body);
+	body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((at) => `${String(at).padStart(10, "0")} 00000 n \n`).join("")}`;
+	body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+	return Buffer.from(body, "latin1");
+}
+
+/** A PDF's pages from its sections: one section to a page, under the document's title. */
+const pagesOf = (title: string, sections: [heading: string, ...lines: string[]][]) =>
+	sections.map(([heading, ...lines], index) => [heading, ...lines, "", `${title} - page ${index + 1}`]);
+
+/** The text that the indexing read, as a PDF's is kept: each page under "--- Page N ---". */
+const pdfText = (pages: string[][]) => pages.map((lines, index) => `--- Page ${index + 1} ---\n\n${lines.join("\n")}`).join("\n\n");
+
+const HANDBOOK_PAGES = pagesOf("Volunteer handbook 2026", [
+	["Welcome to Riverside Food Bank", "Thank you for giving your time. Every shift packs food for about 340 families.", "This handbook covers your first shift, safety, and who to ask."],
+	["Your first shift", "Arrive 10 minutes early and sign in at the front desk.", "Your shift lead gives you a role and a short tour.", "Wear closed shoes. We have gloves and aprons."],
+	["Signing in and out", "Sign in on the tablet by the door, and sign out when you leave.", "Your hours count towards school and court-ordered service."],
+	["Roles on the floor", "Sorting, packing, the pantry desk and the loading dock.", "Teens aged 14 to 17 can sort and pack with a parent or guardian on the same shift."],
+	["Lifting and carrying", "Lift with your legs. Ask for help with anything over 25 lb.", "Only trained staff use the pallet jack."],
+	["Food safety", "Milk, meat and eggs go into the cold room within 30 minutes.", "Throw away cans that are dented on the seam, bulging or leaking."],
+	["Working with families", "Greet each family by name if you know it. Never ask why they come.", "Questions about benefits go to the pantry desk."],
+	["If something goes wrong", "Tell your shift lead at once. The first aid kit is by the sink.", "For an injury, the lead fills in an incident form the same day."],
+]);
+const FOOD_SAFETY_PAGES = pagesOf("Food safety basics", [
+	["Cold food", "Keep milk, meat and eggs at 41 F or colder.", "Check the cold-room thermometer at the start of each shift and write it in the log."],
+	["Dates on food", "Best-by dates are about quality, not safety. Use-by dates on baby food are firm."],
+	["Cans and jars", "Throw away cans that bulge, leak or are dented on the seam.", "Jars with a lid that pops go in the bin."],
+	["Clean hands", "Wash your hands before each shift and after breaks.", "Change gloves when they tear or after you touch your face or phone."],
+]);
+const WAREHOUSE_PAGES = pagesOf("Warehouse safety rules", [
+	["Before you start", "Wear closed shoes. Leave bags in the lockers by the office."],
+	["The loading dock", "Stay behind the yellow line while a truck backs in.", "Only staff open the dock doors."],
+	["Pallets and shelves", "Heavy boxes go on the lower shelves. Never climb the racks."],
+]);
+const FUND_PAGES = pagesOf("Riverside Community Fund guidelines 2027", [
+	["Who can apply", "Nonprofits that serve people in Riverside County, with a budget under $2 million."],
+	["What we fund", "Equipment, vehicles and building repairs: up to $25,000 for each application.", "We do not fund salaries or events."],
+	["How to apply", "Answer the six questions below. Each answer is 300 words or less.", "Attach a budget and your latest annual report."],
+	["The six questions", "1. The need  2. The plan  3. The budget", "4. The impact  5. Partners  6. Reporting"],
+	["Dates", "Applications open on 6 January 2027 and close on 14 February 2027.", "We decide by 30 April 2027."],
+]);
+const ANNUAL_REPORT_PAGES = pagesOf(
+	"Annual report 2025",
+	Array.from({ length: 40 }, (_, index): [string, ...string[]] => [index === 0 ? "Riverside Food Bank: Annual report 2025" : `Annual report 2025: part ${index + 1}`, "Meals, volunteers and partners in 2025."]),
+);
+
+const ROLES_MD = `# Shift roles and duties
+
+## Sorting
+Check dates and packaging, and sort food into the bins by type. Ask the shift lead when you are not sure.
+
+## Packing
+Pack boxes from the list on the wall: one box for each family size. Heavy cans go at the bottom.
+
+## Pantry desk
+Greet families, check them in, and hand over their boxes. Two people at a time.
+
+## Loading dock
+Unload deliveries with a trained staff member. Closed shoes only.
+`;
+const SCHEDULE_CSV = `day,shift,start,end,lead,volunteers
+Mon,Morning,09:00,12:00,Jordan Ellis,8
+Tue,Evening,17:00,20:00,Fatima Rahman,10
+Wed,Morning,09:00,12:00,Jordan Ellis,8
+Thu,Evening,17:00,20:00,Fatima Rahman,10
+Fri,Morning,09:00,12:00,Noah Bennett,12
+Sat,Family,10:00,13:00,Aiko Tanaka,24
+`;
+const BUDGET_CSV = `item,cost,funded_by
+Refrigerated van (used 2023),54500,
+Insurance for the first year,3800,
+Signs on the van,2500,Local print shop (in kind)
+Driver training and food safety,1200,
+Raised already,-48000,Board and donors
+Asked of the fund,14000,
+`;
+const LAST_YEAR_MD = `# Application to the Riverside Community Fund, 2026
+
+## 1. The need
+We turned away about 900 lb of fresh food each week because we could not keep it cold.
+
+## 2. The plan
+A second walk-in cooler at the warehouse, run by our facilities volunteer.
+
+## 3. The budget
+Cooler and installation: $18,400. Asked of the fund: $15,000.
+
+## Outcome
+Funded in full in April 2026. The cooler has run since June.
+`;
+
+type DemoDocument = { id: string; name: string; mediaType: string; data: Buffer; text: string; pages?: string[][]; pictures?: number[]; added: number; reading?: { modelPages: number; read: number } };
+type DemoWorkspace = {
+	id: string;
+	slug: string;
+	name: string;
+	owner: string;
+	orgAccess: "none" | "ask";
+	instructions: string;
+	made: number;
+	members: [userId: string, access: "ask" | "edit"][];
+	pinned: boolean;
+	documents: DemoDocument[];
+	chats: { id: string; title: string; ago: number; model: string; ask: string; answer: string }[];
+};
+
+const PICTURE_MODEL = GEMINI;
+const EMBEDDING_MODEL = "openai/text-embedding-3-small";
+
+/**
+ * Alex's workspaces, and one that Jordan opened to everyone. Each shows a state of the workspace
+ * page: set up and in use, shared with people in roles, set up in part, and brand new (the setup
+ * cards). Documents are written Ready, with the log that indexing would have written, and with no
+ * passages: no model is called. One is still Indexing, a model on page 12 of 40.
+ */
+function workspaces(demo: string, others: string[]): DemoWorkspace[] {
+	const [jordan, sam, lena, diego, , , fatima] = others;
+	const handbook = pdf(HANDBOOK_PAGES);
+	const foodSafety = pdf(FOOD_SAFETY_PAGES);
+	const fund = pdf(FUND_PAGES);
+	const annualReport = pdf(ANNUAL_REPORT_PAGES);
+	return [
+		{
+			id: "demo-ws-handbook",
+			slug: "volunteer-handbook",
+			name: "Volunteer handbook",
+			owner: demo,
+			orgAccess: "ask",
+			made: DAY * 30,
+			members: [
+				[jordan!, "edit"],
+				[fatima!, "edit"],
+			],
+			pinned: true,
+			instructions: [
+				"Answer volunteers' questions from Sources, in a warm, plain voice: many of them are new.",
+				"",
+				"- Lead with the answer in one or two sentences, then name the section and page.",
+				"- If Sources don't cover it, say so, and suggest asking the shift lead.",
+			].join("\n"),
+			documents: [
+				{ id: "demo-doc-handbook", name: "Volunteer handbook 2026.pdf", mediaType: "application/pdf", data: handbook, text: pdfText(HANDBOOK_PAGES), pages: HANDBOOK_PAGES, pictures: [2, 5], added: DAY * 30 },
+				{ id: "demo-doc-roles", name: "Shift roles and duties.md", mediaType: "text/markdown", data: Buffer.from(ROLES_MD), text: ROLES_MD, added: DAY * 29 },
+				{ id: "demo-doc-food-safety", name: "Food safety basics.pdf", mediaType: "application/pdf", data: foodSafety, text: pdfText(FOOD_SAFETY_PAGES), pages: FOOD_SAFETY_PAGES, added: DAY * 29 },
+				{ id: "demo-doc-schedule", name: "Shift schedule.csv", mediaType: "text/csv", data: Buffer.from(SCHEDULE_CSV), text: SCHEDULE_CSV, added: DAY * 12 },
+			],
+			chats: [
+				{ id: "demo-ws-teens", title: "Can teens volunteer on Saturdays?", ago: DAY + hours(5), model: SONNET, ask: "A mum asked if her 15-year-old can come on Saturdays. Can she?", answer: "Yes, with her mum on the same shift. Teens aged 14 to 17 can sort and pack when a parent or guardian is there too (Roles on the floor, page 4)." },
+				{ id: "demo-ws-injury", title: "What to do if a volunteer gets hurt", ago: DAY * 3, model: SONNET, ask: "Someone cut their hand on a box. What do I do?", answer: "Get the first aid kit by the sink, and tell your shift lead at once. The lead fills in an incident form the same day (If something goes wrong, page 8)." },
+				{ id: "demo-ws-cans", title: "Dented cans: keep or throw away?", ago: DAY * 5, model: FLASH, ask: "Is a can with a small dent on the side okay to give out?", answer: "A small dent on the side is fine. Throw it away if the dent is on the seam, or if the can bulges or leaks (Food safety basics, page 3)." },
+			],
+		},
+		{
+			id: "demo-ws-grants",
+			slug: "grant-applications",
+			name: "Grant applications",
+			owner: demo,
+			orgAccess: "none",
+			made: DAY * 20,
+			members: [
+				[lena!, "edit"],
+				[sam!, "ask"],
+				[diego!, "ask"],
+			],
+			pinned: true,
+			instructions: [
+				"Help draft grant applications for Riverside Food Bank.",
+				"",
+				"- Use the funder's guidelines in Sources for the headings, the word limits and what they fund.",
+				"- Every number comes from our budget or the annual report. Mark anything else [check].",
+				"- Write \"we\", not \"the organization\".",
+			].join("\n"),
+			documents: [
+				{ id: "demo-doc-fund", name: "Riverside Community Fund guidelines.pdf", mediaType: "application/pdf", data: fund, text: pdfText(FUND_PAGES), pages: FUND_PAGES, added: DAY * 20 },
+				{ id: "demo-doc-budget", name: "Van budget 2027.csv", mediaType: "text/csv", data: Buffer.from(BUDGET_CSV), text: BUDGET_CSV, added: DAY * 19 },
+				{ id: "demo-doc-last-year", name: "Our 2026 application.md", mediaType: "text/markdown", data: Buffer.from(LAST_YEAR_MD), text: LAST_YEAR_MD, added: DAY * 19 },
+				{ id: "demo-doc-annual-report", name: "Annual report 2025.pdf", mediaType: "application/pdf", data: annualReport, text: "", pages: ANNUAL_REPORT_PAGES, added: minutes(2), reading: { modelPages: 30, read: 2 } },
+			],
+			chats: [
+				{ id: "demo-ws-capital", title: "Does the fund pay for a van?", ago: DAY * 2 + hours(2), model: OPUS, ask: "Can we ask the Riverside Community Fund for a van, or only for buildings?", answer: "Yes: the fund pays for equipment, vehicles and building repairs, up to $25,000 an application. It does not pay for salaries or events (What we fund, page 2)." },
+				{ id: "demo-ws-budget", title: "Budget table for the van", ago: DAY * 4, model: OPUS, ask: "Make the budget table for the van from our budget file.", answer: "Here is the table: the van $54,500, insurance $3,800, signs $2,500 and training $1,200, for a total of $62,000. With $48,000 raised, we ask for $14,000." },
+			],
+		},
+		{
+			id: "demo-ws-board",
+			slug: "board-meetings",
+			name: "Board meetings",
+			owner: demo,
+			orgAccess: "none",
+			made: DAY * 6,
+			members: [],
+			pinned: false,
+			instructions: "Prepare board papers and minutes. Minutes have the decisions, the actions with an owner and a date, and the open questions. Keep each paper to one page.",
+			documents: [],
+			chats: [],
+		},
+		{ id: "demo-ws-events", slug: "events-2027", name: "Events 2027", owner: demo, orgAccess: "none", made: minutes(6), members: [], pinned: false, instructions: "", documents: [], chats: [] },
+		{
+			id: "demo-ws-warehouse",
+			slug: "warehouse-safety",
+			name: "Warehouse safety",
+			owner: jordan!,
+			orgAccess: "ask",
+			made: DAY * 25,
+			members: [],
+			pinned: false,
+			instructions: "Answer questions about safety in the warehouse from the rules in Sources. If someone is hurt, the first answer is: tell the shift lead now.",
+			documents: [{ id: "demo-doc-warehouse", name: "Warehouse safety rules.pdf", mediaType: "application/pdf", data: pdf(WAREHOUSE_PAGES), text: pdfText(WAREHOUSE_PAGES), pages: WAREHOUSE_PAGES, added: DAY * 25 }],
+			chats: [],
+		},
+	];
+}
+
+/** The indexing log of a document, as the indexer writes it (server/workspaces/documents/log.ts): numbers only. */
+function logRows(document: DemoDocument, workspaceId: string) {
+	const rows: { id: string; step: string; detail: Record<string, string | number | boolean>; at: Date }[] = [];
+	let at = now - document.added;
+	const add = (step: string, detail: Record<string, string | number | boolean>, part?: number, seconds = 1) => {
+		at += seconds * 1000;
+		rows.push({ id: [document.id, 1, step, ...(part === undefined ? [] : [part])].join(":"), step, detail, at: new Date(at) });
+	};
+	add("uploaded", { size: document.data.length, mediaType: document.mediaType }, undefined, 0);
+	const chars = document.pages ? document.pages.flat().join("\n").length : document.text.length;
+	if (document.pages) add("parsed", { engine: "liteparse", pages: document.pages.length, chars, ms: 640 });
+	const pictures = document.reading ? [3, 4] : (document.pictures ?? []);
+	for (const page of pictures) {
+		add("page-read", { page, reason: "picture", model: PICTURE_MODEL, ms: 2_400, ok: true, attempts: 1, inputTokens: 1_850, outputTokens: 420 }, page, 3);
+	}
+	if (!document.reading) {
+		const passages = Math.max(2, Math.ceil(chars / 400));
+		add("chunked", { passages, batches: 1 });
+		add("embedded", { batch: 0, passages, model: EMBEDDING_MODEL, ms: 380 }, 0);
+		add("ready", { passages, ms: Math.round(at - (now - document.added)) + 400 });
+	}
+	return rows.map((row) => ({ ...row, workspaceId }));
+}
+
+async function addWorkspaces(demo: string, others: string[]) {
+	for (const workspace of workspaces(demo, others)) {
+		const made = ago(workspace.made);
+		await sql`
+			insert into workspaces (id, slug, org_access, owner_id, name, instructions, created_at, updated_at)
+			values (${workspace.id}, ${workspace.slug}, ${workspace.orgAccess}, ${workspace.owner}, ${workspace.name}, ${workspace.instructions}, ${made}, ${made})`;
+		for (const [userId, access] of workspace.members) {
+			await sql`insert into workspace_members (workspace_id, user_id, access, added_by, added_at) values (${workspace.id}, ${userId}, ${access}, ${workspace.owner}, ${made})`;
+		}
+		if (workspace.pinned) await sql`insert into workspace_pins (user_id, workspace_id, pinned_at) values (${demo}, ${workspace.id}, ${made})`;
+		for (const document of workspace.documents) await addDocument(workspace, document);
+		for (const chat of workspace.chats) {
+			const messages = [user(`${chat.id}-1`, chat.ask), reply(`${chat.id}-2`, chat.model, chat.answer)];
+			await sql`
+				insert into threads (id, owner, title, messages, updated_at, workspace_id)
+				values (${chat.id}, ${demo}, ${chat.title}, ${sql.json(messages as never)}, ${ago(chat.ago)}, ${workspace.id})`;
+		}
+	}
+}
+
+/**
+ * One document, Ready with its log; or Indexing, a model partway through its picture pages
+ * (store.ts, progressOf). The bytes are in the row, as when no bucket is set up. An Indexing
+ * document that waits more than 5 minutes is started again by the server's sweep, and fails
+ * on the demo key: run the seed again before its image.
+ */
+async function addDocument(workspace: DemoWorkspace, document: DemoDocument) {
+	const added = ago(document.added);
+	const reading = document.reading;
+	await sql`
+		insert into workspace_documents (id, workspace_id, name, media_type, size, data, text, status, added_by, created_at, reading_since, page_count, model_pages)
+		values (${document.id}, ${workspace.id}, ${document.name}, ${document.mediaType}, ${document.data.length}, ${document.data}, ${reading ? null : document.text},
+			${reading ? "reading" : "ready"}, ${workspace.owner}, ${added}, ${added}, ${document.pages?.length ?? null}, ${reading?.modelPages ?? document.pictures?.length ?? null})`;
+	for (const row of logRows(document, workspace.id)) {
+		await sql`
+			insert into workspace_document_log (id, document_id, workspace_id, generation, step, detail, created_at)
+			values (${row.id}, ${document.id}, ${row.workspaceId}, 1, ${row.step}, ${sql.json(row.detail)}, ${row.at})`;
+	}
+	for (let page = 1; page <= (reading?.read ?? 0); page += 1) {
+		await sql`insert into workspace_page_reads (document_id, generation, page, record) values (${document.id}, 1, ${page + 2}, ${sql.json({ page: page + 2, ok: true })})`;
+	}
+}
+
 // --- Memory -------------------------------------------------------------------
 
 async function addMemories(owner: string) {
@@ -746,6 +1051,7 @@ await reset();
 const { userId, cookies } = await signIn();
 const others = await addOthers();
 await addThreads(userId);
+await addWorkspaces(userId, others);
 await addMemories(userId);
 await addConnector(userId);
 await addSkills([userId, others[0]!, userId]);

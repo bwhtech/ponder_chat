@@ -14,7 +14,14 @@ These scripts fill a scratch database with made-up data and take the images in t
 
 Everything is made up. The web pages that the search chat cites are real public pages, with short excerpts in our own words.
 
-- Alex Rivera (`alex@example.com`), an admin, with 13 chats. Eight of them show a feature: web search with citations, a quote to cite, a slide deck, a Python chart, a CSV that opens as a table, a connector that waits for approval, a skill that Ponder picked, and a skill that Alex chose.
+- Alex Rivera (`alex@example.com`), an admin, with 13 chats in no workspace and 5 in workspaces. Eight of them show a feature: web search with citations, a quote to cite, a slide deck, a Python chart, a CSV that opens as a table, a connector that waits for approval, a skill that Ponder picked, and a skill that Alex chose.
+- Five workspaces. Alex owns four of them:
+  - Volunteer handbook: open to everyone in the organisation, with instructions, four sources, two people who can edit and three of Alex's chats. Pinned.
+  - Grant applications: private, with instructions, four sources, three people (Can ask and Can edit) and two of Alex's chats. Pinned. One source, a 40-page PDF, is still indexing: a model is on page 12 of 40.
+  - Board meetings: private, with instructions only.
+  - Events 2027: made a few minutes ago, with nothing set up, so its page shows the setup cards.
+
+  Jordan Ellis owns the fifth, Warehouse safety, which is open to everyone. The sources are small files that the seed writes: PDFs, Markdown and CSV. They are Ready, with the log that indexing writes, but with no passages, so no model is called and search finds nothing in them. The server's sweep starts the indexing PDF again after 5 minutes, and it fails on the demo key. Run the seed again before you take `workspace-sources`.
 - Seven memories, each with a note under the reply it came from.
 - Four skills that admins wrote, next to the two that come with Ponder. Two are automatic, and two run only when someone asks for them.
 - Two connectors: Linear (OAuth) and a docs server (API key). Neither one is called: their tool lists are written to the database.

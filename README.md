@@ -19,7 +19,7 @@
   <a href="scripts/demo/README.md">Demo data</a>
 </p>
 
-![Ponder Chat with a chat about heat pumps open. The sidebar lists recent chats and the credits left today. The reply cites its sources with small chips, and a note under it says what Ponder remembered.](docs/images/hero.webp)
+![Ponder Chat with a chat about heat pumps open. The sidebar lists workspaces, recent chats and the credits left today. The reply cites its sources with small chips, and a note under it says what Ponder remembered.](docs/images/hero.webp)
 
 Ponder is invite-only. An admin invites people by email, and each person signs in with a code or a link. Every call to a model asks for a Zero Data Retention endpoint, so no model provider keeps or trains on what people write. Replies are durable: a reload, a lost connection or a deploy does not stop a reply. The page reconnects, and the reply finishes.
 
@@ -89,17 +89,35 @@ Admins write skills in `/admin`, in a Markdown editor. Two switches set whether 
 
 ![The Grant writing skill in the admin editor: Markdown instructions on the left, and on the right its name, description, the switches "On for everyone" and "Ponder can use it on its own", and what Ponder sees first.](docs/images/skills-admin.webp)
 
+### Workspaces
+
+A workspace keeps the instructions and the files for one kind of work, such as a volunteer handbook or grant applications. A chat in a workspace follows its instructions and answers from its sources. The sidebar lists your workspaces. Pin the ones that you use most, and they stay at the top.
+
+![The Volunteer handbook workspace: Alex's three chats in it, its instructions, four sources (two PDFs, a Markdown file and a CSV file) and its people. Everyone in the organisation can ask, and two people can edit. The message box starts a new chat in the workspace. In the sidebar, Grant applications and Volunteer handbook are pinned.](docs/images/workspace.webp)
+
+A new workspace shows a card for each step: instructions, sources and people. You can ask at once, and do the steps later.
+
+![The new workspace Events 2027 under "Set up this workspace", with three cards: Instructions, Sources and People, each with an illustration and a button. 0 of 3 done.](docs/images/workspace-setup.webp)
+
+Share works as in Google Docs. Each person that you add can ask, or can also edit. General access opens a workspace to everyone in the organisation, and only an admin can do that. Chats stay private to the person who wrote them, also in a shared workspace.
+
+![Share for the Grant applications workspace: Alex is the owner, Diego Morales and Sam Okafor can ask, and Lena Fischer can edit. General access is "Only people added".](docs/images/workspace-share.webp)
+
+Sources are PDF, text, Markdown, CSV and JSON files. Ponder reads each file once and indexes it, and a model reads the pages that are pictures. A small source goes to the model whole. Ponder searches larger ones for each question. Details show how far a file is, and each step of its indexing.
+
+![The Details of Annual report 2025.pdf in the side panel: a PDF of 40 pages, indexing at page 12 of 40, with a progress bar. The log says that it was uploaded and that two pages were read from pictures. On the left, its row in Sources shows the same progress.](docs/images/workspace-sources.webp)
+
 ### Memory you can see
 
 After a reply, Ponder decides if you said something about yourself worth keeping. A note under the reply shows what it kept, with Undo. Settings › Memory lists every memory and the chat it came from. Ponder never keeps passwords, contact details, ID numbers, health details or what you say about other people.
 
-![The Memory page: seven memories, each with its kind (About you or Preference), the chat it came from and when.](docs/images/memory.webp)
+![Settings open on Memory: the memories Ponder kept, each with its kind (About you or Preference), the chat it came from and when.](docs/images/memory.webp)
 
 ### Pick the model for each chat
 
 Each new chat starts on Auto: for each message, OpenRouter's Auto Router picks one of Ponder's models and a reasoning effort. The model menu in the message box also lists a short set of models from DeepSeek, Anthropic, OpenAI, Google and others. Only models with a Zero Data Retention endpoint show. A reply names the model that wrote it, except under Auto. Bigger models use more of the day's credits.
 
-![The model menu opened from the message box, with DeepSeek V4.1 Flash selected and Claude Haiku, Sonnet and Opus listed below.](docs/images/models.webp)
+![The model menu opened from the message box, with Auto selected and DeepSeek V4.1 Flash and Claude Haiku 5.5 listed below. Beside the model, Workspace chooses a workspace for the new chat.](docs/images/models.webp)
 
 ### A queue
 
@@ -111,7 +129,7 @@ Messages that you send during a reply wait in a queue above the message box. The
 
 Each person has a daily credit limit, charged from what OpenRouter reports for each call. When the credits run out, a person can ask the admins for more. The admin pages show usage only, never chats: today's numbers, credits per day, active people and credits by model. Admins also invite people, set limits, answer requests and manage skills.
 
-![The admin overview: a notice of one request for more credits, today's numbers (7 active people, 29 replies, 302 credits, $0.30) and a bar chart of credits used per day.](docs/images/admin.webp)
+![The admin overview: a notice of one request for more credits, today's numbers (7 active people, 58 replies, 790 credits, $0.79) and a bar chart of credits used per day. The sidebar has Overview, Requests, People, Skills, Workspaces and Activity.](docs/images/admin.webp)
 
 Over time, the overview shows credits per day, active people per day, and which models used the credits.
 
