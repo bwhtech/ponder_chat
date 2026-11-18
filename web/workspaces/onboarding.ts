@@ -19,8 +19,8 @@ export type SetupStep = {
 
 /**
  * The steps this person can take: Instructions and Documents for whoever can edit, and People
- * only for whoever can share (the owner; an admin on an organisation workspace). Everyone in
- * the organisation uses an organisation workspace, so its People step is done from the start.
+ * for whoever can share a private workspace (its owner). Everyone in the organisation uses an
+ * organisation workspace already, so it has no People step.
  */
 export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 	if (!canEdit(workspace)) return [];
@@ -28,7 +28,7 @@ export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 		{
 			key: "instructions",
 			title: "Instructions",
-			description: "Tell Ponder how to answer in this workspace.",
+			description: "Tell Ponder how to answer here.",
 			// Any text: a code fence alone is instructions too.
 			done: workspace.instructions.trim() !== "",
 			action: "Add instructions",
@@ -36,17 +36,17 @@ export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 		{
 			key: "documents",
 			title: "Documents",
-			description: "Upload the files its answers come from.",
+			description: "Add the files Ponder answers from.",
 			done: workspace.documents.length > 0,
 			action: "Upload documents",
 		},
 	];
-	if (workspace.canShare) {
+	if (workspace.canShare && workspace.kind !== "org") {
 		steps.push({
 			key: "people",
 			title: "People",
-			description: "Share it, so others can ask in it too.",
-			done: workspace.kind === "org" || workspace.memberCount > 0,
+			description: "Choose who can ask in this workspace.",
+			done: workspace.memberCount > 0,
 			action: "Share workspace",
 		});
 	}

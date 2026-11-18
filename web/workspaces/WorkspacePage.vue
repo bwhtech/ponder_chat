@@ -9,6 +9,7 @@ import { useThreads, useWorkspaceThreads } from "../threads";
 import { openWorkspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
+import type { ComposerHandle } from "./handles";
 import { Poller } from "./poller";
 import WorkspaceAbout from "./WorkspaceAbout.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
@@ -63,6 +64,8 @@ watch(dock, (now, before) => {
 	if (now) dockObserver.observe(now);
 });
 onBeforeUnmount(() => dockObserver.disconnect());
+/** The setup is done, and focus was on it: asking is what is left to do. */
+const composer = ref<ComposerHandle>();
 
 // Each load takes a number: the answer for a workspace no longer open is dropped.
 let asked = 0;
@@ -232,7 +235,7 @@ function askDelete() {
 					<div class="pointer-events-auto relative min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 						<!-- The page's background behind the box, fading in over 40px above it, as a chat fades out above its box. -->
 						<div class="pointer-events-none absolute -inset-x-4 -top-10 bottom-0 -z-10 bg-surface-base [mask-image:linear-gradient(to_bottom,transparent,#000_40px)] sm:-inset-x-5" aria-hidden="true" />
-						<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
+						<WorkspaceComposer ref="composer" :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
 					</div>
 				</div>
 			</div>
@@ -242,7 +245,7 @@ function askDelete() {
 				<Transition enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
 					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8">
 						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="detail.kind === 'org' || detail.memberCount > 0" @open="emit('openChat', $event)" />
-						<WorkspaceOnboarding v-else :workspace="detail" @instructions="editInstructions" @share="share" @documents="documentsChanged" />
+						<WorkspaceOnboarding v-else :workspace="detail" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
 						<WorkspaceAbout :workspace="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
 					</div>
 				</Transition>

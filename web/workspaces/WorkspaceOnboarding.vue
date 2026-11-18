@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { count } from "../numbers";
 import type { WorkspaceDocument } from "./documents";
-import { setupSteps } from "./onboarding";
+import type { SetupHandle } from "./handles";
+import { setupSteps, type SetupStepKey } from "./onboarding";
 import type { WorkspaceDetail } from "./store";
 import { useDocumentUpload } from "./upload";
 import WorkspaceSetup from "./WorkspaceSetup.vue";
@@ -13,9 +15,14 @@ import WorkspaceSetup from "./WorkspaceSetup.vue";
  * and all the files picked on them are up. The uploads live here, not in the cards, so each
  * file that arrives reaches the page, and a file the server refused keeps its reason in view
  * after the last card left, until the next upload.
+ *
+ * A workspace with nothing set up sits a little lower on a wide screen. As the last card
+ * goes, the setup fades and folds up, so the sections under it rise with it rather than jump.
+ * The status line, for screen readers, stays after the cards: it says what each step added, and
+ * when the workspace is set up.
  */
 const props = defineProps<{ workspace: WorkspaceDetail }>();
-const emit = defineEmits<{ instructions: []; share: []; documents: [documents: WorkspaceDocument[]] }>();
+const emit = defineEmits<{ instructions: []; share: []; documents: [documents: WorkspaceDocument[]]; finished: [] }>();
 
 const steps = computed(() => setupSteps(props.workspace));
 const { uploading, errors, upload } = useDocumentUpload(
@@ -24,17 +31,70 @@ const { uploading, errors, upload } = useDocumentUpload(
 	(documents) => emit("documents", documents),
 );
 const toDo = computed(() => steps.value.some((step) => !step.done) || uploading.value > 0);
+const fresh = computed(() => steps.value.every((step) => !step.done));
+
+const ADDED: Record<SetupStepKey, string> = { instructions: "Instructions added.", documents: "Documents added.", people: "Workspace shared." };
+const doneKeys = computed(() => steps.value.filter((step) => step.done).map((step) => step.key));
+const announcement = ref("");
+watch([doneKeys, toDo], ([now, wanted], [before, wanted0]) => {
+	const parts = now.filter((key) => !before.includes(key)).map((key) => ADDED[key]);
+	if (wanted0 && !wanted) parts.push("Workspace set up.");
+	else if (parts.length) parts.push(`${count(now.length)} of ${count(steps.value.length)} done.`);
+	if (parts.length) announcement.value = parts.join(" ");
+});
+
+/**
+ * The last card takes its button with it, and the whole setup goes. If focus was there, or
+ * comes back there from the dialog or file picker that did the step, it falls to the page:
+ * the message box takes it (`finished`), since asking is what is left to do. Focus elsewhere stays.
+ */
+const REFOCUS_MS = 800;
+const setup = ref<SetupHandle>();
+let focusLeaves = false;
+let refocusFrame = 0;
+// Before the setup unmounts, while it can still say where focus is.
+watch(toDo, (now) => !now && (focusLeaves = setup.value?.holdsFocus() ?? false), { flush: "pre" });
+function refocusAfterLeave() {
+	cancelAnimationFrame(refocusFrame);
+	if (!focusLeaves) return;
+	focusLeaves = false;
+	const until = performance.now() + REFOCUS_MS;
+	const check = () => {
+		if (document.activeElement === document.body || document.activeElement === null) return emit("finished");
+		if (performance.now() < until) refocusFrame = requestAnimationFrame(check);
+	};
+	check();
+}
+onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 </script>
 
 <template>
-	<div v-if="steps.length" class="space-y-3 empty:hidden">
+	<!-- The page puts 32px between this and the sections; the setup and the errors carry it at their
+	     bottom instead (-mb-8), so it folds away with them. -->
+	<div v-if="steps.length" class="-mb-8 transition-[padding] duration-300 ease-out-strong motion-reduce:transition-none" :class="{ 'sm:pt-6': fresh }">
+		<p class="sr-only" role="status" data-slot="workspace-setup-status">{{ announcement }}</p>
 		<Transition
-			leave-to-class="opacity-0"
-			leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none"
+			leave-active-class="grid transition-[grid-template-rows,opacity] duration-[300ms,150ms] ease-out-strong motion-reduce:transition-[opacity] motion-reduce:duration-150 motion-reduce:ease-out-strong [&>*]:min-h-0 [&>*]:overflow-hidden"
+			leave-from-class="grid-rows-[1fr]"
+			leave-to-class="grid-rows-[0fr] opacity-0 motion-reduce:grid-rows-[1fr]"
+			@after-leave="refocusAfterLeave"
 		>
-			<WorkspaceSetup v-if="toDo" :name="workspace.name" :steps="steps" :uploading="uploading" @instructions="emit('instructions')" @share="emit('share')" @upload="upload" />
+			<!-- The padding is a level down from the folding row, which can then fold to nothing. -->
+			<div v-if="toDo">
+				<div>
+					<WorkspaceSetup
+						ref="setup"
+						:class="errors.length ? 'pb-3' : 'pb-8'"
+						:steps="steps"
+						:uploading="uploading"
+						@instructions="emit('instructions')"
+						@share="emit('share')"
+						@upload="upload"
+					/>
+				</div>
+			</div>
 		</Transition>
-		<ul v-if="errors.length" class="space-y-1" role="alert" data-slot="document-upload-errors">
+		<ul v-if="errors.length" class="space-y-1 pb-8" role="alert" data-slot="document-upload-errors">
 			<li v-for="error in errors" :key="error" class="break-words text-p-sm text-ink-red-6">{{ error }}</li>
 		</ul>
 	</div>

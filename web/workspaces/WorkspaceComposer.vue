@@ -10,6 +10,7 @@ import { SkillMenu, useSkillPicker } from "../skills/picker";
 import { loadSkills, withSkillsHint } from "../skills/skills";
 import { SkillChip } from "../transcript-parts";
 import type { FirstMessage } from "./first-message";
+import type { ComposerHandle } from "./handles";
 
 /**
  * The workspace page's message box: a question here starts a new chat in this workspace
@@ -33,6 +34,8 @@ const label = computed(() => (props.name ? `Ask in ${props.name}` : "Ask a quest
 const placeholder = computed(() => withSkillsHint(label.value));
 
 const composer = ref<HTMLElement | null>(null);
+const field = ref<ComposerHandle>();
+defineExpose<ComposerHandle>({ focus: () => field.value?.focus() });
 const skills = useSkillPicker(input, composer);
 const skillQuery = skills.typed;
 void loadSkills();
@@ -66,7 +69,7 @@ function ask({ text, files }: { text: string; files: File[] }) {
 					<SkillChip v-for="skill in skills.chosen.value" :key="skill" :name="skill" removable @remove="skills.remove(skill)" />
 				</div>
 				<!-- Keyed: the field sets its height from its text and placeholder when it mounts, and a rename changes the placeholder. -->
-				<PromptInputTextarea :key="placeholder" :placeholder="placeholder" :aria-label="label" />
+				<PromptInputTextarea ref="field" :key="placeholder" :placeholder="placeholder" :aria-label="label" />
 				<PromptInputFooter>
 					<PromptInputTools>
 						<PromptInputAttachButton />

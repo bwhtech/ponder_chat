@@ -170,11 +170,11 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	await dialog.getByRole("button", { name: "Create workspace" }).click();
 	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 	await expect(about(page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
-	// Everyone uses it already: its People step is done from the start, and the instructions from the dialog too.
-	// The one card left is Documents.
-	await expect(setup(page).getByRole("heading", { name: `Set up ${name}` })).toBeVisible();
-	await expect(setupCount(page)).toHaveText("2 of 3 done");
+	// Everyone uses it already: it has no People step. The instructions from the dialog are done, so the one card left is Documents.
+	await expect(setup(page).getByRole("heading", { name: "Set up this workspace" })).toBeVisible();
+	await expect(setupCount(page)).toHaveText("1 of 2 done");
 	await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Documents"]);
+	await expect(setup(page).getByRole("button", { name: "Share workspace" })).toHaveCount(0);
 	const workspaceUrl = page.url();
 
 	for (const title of ["first person", "second person"]) {
@@ -210,7 +210,7 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await dialog.getByLabel("Name").fill(name);
 		await dialog.getByRole("button", { name: "Create workspace" }).click();
 		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-		await expect(setup(page).getByRole("heading", { name: `Set up ${name}` })).toBeVisible();
+		await expect(setup(page).getByRole("heading", { name: "Set up this workspace" })).toBeVisible();
 		await expect(setupCount(page)).toHaveText("0 of 3 done");
 		await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Documents", "People"]);
 		await expect(setup(page).getByRole("button")).toHaveText(["Add instructions", "Upload documents", "Share workspace"]);
@@ -220,7 +220,7 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await expect(page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
 	});
 
-	await test.step("Add instructions, from its card with the keyboard: the card leaves, the instructions show below, and focus moves to the next card", async () => {
+	await test.step("Add instructions, from its card with the keyboard: the card leaves, the instructions show below, focus moves to the next card, and a screen reader hears what changed", async () => {
 		await setup(page).getByRole("button", { name: "Add instructions" }).focus();
 		await page.keyboard.press("Enter");
 		const dialog = page.getByRole("dialog", { name: "Instructions" });
@@ -231,6 +231,7 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await expect(setupCount(page)).toHaveText("1 of 3 done");
 		await expect(instructionsSection(page)).toContainText(marker);
 		await expect(setup(page).getByRole("button", { name: "Upload documents" })).toBeFocused();
+		await expect(setupStatus(page)).toHaveText("Instructions added. 1 of 3 done.");
 	});
 
 	await test.step("Upload documents, from its card: the card leaves, and the document shows below", async () => {
@@ -239,10 +240,11 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await (await chooser).setFiles(textFile("Leave policy.md", `# Leave policy\n\nStaff get 27 days of paid leave a year, ${tag}.`));
 		await expect(step(page, "documents")).toHaveCount(0);
 		await expect(setupCount(page)).toHaveText("2 of 3 done");
+		await expect(setupStatus(page)).toHaveText("Documents added. 2 of 3 done.");
 		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
 	});
 
-	await test.step("Share, from its card: the last card leaves with the setup, and the workspace's sections are the page", async () => {
+	await test.step("Share, from its card: the last card leaves with the setup, the workspace's sections are the page, and focus goes to the message box", async () => {
 		await setup(page).getByRole("button", { name: "Share workspace" }).click();
 		const share = page.getByRole("dialog", { name: `Share “${name}”` });
 		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(other.person.email);
@@ -250,6 +252,8 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await share.getByRole("button", { name: "Save" }).click();
 		await expect(share).toHaveCount(0);
 		await expect(setup(page)).toHaveCount(0);
+		await expect(setupStatus(page)).toHaveText("Workspace shared. Workspace set up.");
+		await expect(field).toBeFocused();
 		await expect(about(page).getByRole("region")).toHaveText([/^Instructions/, /^Documents/, /^People/]);
 		await expect(about(page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
 		// The instructions show once, in their own section.
@@ -347,6 +351,7 @@ test("a new workspace keeps what is set up while it still loads, and a refused f
 		const handover = { name: "Handover.md", type: "text/markdown", text: `# Handover\n\nHand over at seven, ${tag}.` };
 		await dropFiles(step(page, "documents"), "dragenter", [handover]);
 		await expect(step(page, "documents").locator('[data-slot="document-drop"]')).toBeVisible();
+		await expect(step(page, "documents").getByRole("button")).toHaveText("Drop to upload");
 		await dropFiles(step(page, "documents"), "drop", [handover, { name: "tool.exe", type: "application/x-msdownload", text: "MZ not a document" }]);
 		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveCount(1);
 		await expect(setup(page)).toHaveCount(0);
@@ -575,6 +580,7 @@ const about = (page: Page) => page.locator('[data-slot="workspace-about"]');
 const instructionsSection = (page: Page) => about(page).getByRole("region", { name: "Instructions" });
 const setup = (page: Page) => page.locator('[data-slot="workspace-setup"]');
 const setupCount = (page: Page) => page.locator('[data-slot="workspace-setup-count"]');
+const setupStatus = (page: Page) => page.locator('[data-slot="workspace-setup-status"]');
 const step = (page: Page, key: "instructions" | "documents" | "people") => page.locator(`[data-slot="workspace-setup-step"][data-step="${key}"]`);
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

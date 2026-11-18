@@ -59,13 +59,36 @@ test("on a phone, a new workspace's setup cards come first, over its sections, a
 	const setup = page.locator('[data-slot="workspace-setup"]');
 	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("2 of 3 done");
 	// One column: the setup card, then the workspace's sections that have something in them.
-	expect((await setup.boundingBox())!.y + (await setup.boundingBox())!.height).toBeLessThan((await about(page).boundingBox())!.y);
+	expect((await setup.boundingBox())!.y + (await setup.boundingBox())!.height).toBeLessThanOrEqual((await about(page).boundingBox())!.y);
 	await expect(about(page).locator('[data-slot="document-name"]')).toHaveCount(2);
 
 	await workspacePage.scrollToEnd(page);
 	expect(await workspacePage.reachable(about(page).locator('[data-slot="document-name"]').last())).toBe(true);
 	await setup.getByRole("button", { name: "Share workspace" }).click();
 	await expect(page.getByRole("dialog", { name: `Share “${name}”` })).toBeVisible();
+});
+
+test("on a phone, a new workspace's three setup steps are rows, all in view above the message box, with nothing to scroll sideways", async ({ page, person }) => {
+	const name = `Clinic rota ${person.id.slice(0, 6)}`;
+	const { slug } = await createWorkspace(page, name);
+	await page.goto(`/?w=${slug}`);
+	const setup = page.locator('[data-slot="workspace-setup"]');
+	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("0 of 3 done");
+	await expect(setup.getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Documents", "People"]);
+
+	const boxTop = (await workspacePage.box(page).boundingBox())!.y;
+	for (const action of ["Add instructions", "Upload documents", "Share workspace"]) {
+		const row = setup.getByRole("button", { name: action });
+		await expect(row).toBeInViewport({ ratio: 1 });
+		const { y, height } = (await row.boundingBox())!;
+		expect(y + height, `${action} is above the message box`).toBeLessThan(boxTop);
+	}
+	const sideways = await page.locator('[data-slot="workspace-view"]').evaluate((view) => view.scrollWidth - view.clientWidth);
+	expect(sideways).toBe(0);
+
+	// The whole row is the button.
+	await setup.getByRole("button", { name: "Add instructions" }).tap();
+	await expect(page.getByRole("dialog", { name: "Instructions" })).toBeVisible();
 });
 
 test("an admin on a phone reaches Workspaces, Activity and Settings under More", async ({ page, admin }) => {

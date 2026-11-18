@@ -50,9 +50,11 @@ describe("a new workspace's setup steps", () => {
 		expect(setupSteps(workspace({ instructions: "  \n " }))[0]?.done).toBe(false);
 	});
 
-	it("an organisation workspace is shared with everyone from the start", () => {
-		const [, , people] = setupSteps(workspace({ kind: "org", access: "edit" }));
-		expect(people).toMatchObject({ key: "people", done: true });
+	it("an organisation workspace has no People step: everyone in the organisation uses it already", () => {
+		expect(setupSteps(workspace({ kind: "org", access: "edit" })).map((step) => [step.key, step.done])).toEqual([
+			["instructions", false],
+			["documents", false],
+		]);
 	});
 
 	it("an editor who can't share has no People step, and a person who can only ask has none", () => {
