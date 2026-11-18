@@ -4,7 +4,7 @@
  */
 import { assert, describe, it } from "@effect/vitest";
 import * as Result from "effect/Result";
-import { chunkDocument, embeddingText, MAX, MAX_ROW, TARGET, type Passage } from "./chunk.ts";
+import { chunkDocument, chunkWithin, embeddingText, MAX, MAX_HEADER, MAX_ROW, TARGET, type Passage } from "./chunk.ts";
 import type { DocumentPage } from "./document.ts";
 import { readText } from "./read-document.ts";
 
@@ -12,6 +12,8 @@ const HEADER = "| Drug | Intermittent | Continuous |\n| --- | --- | --- |";
 const row = (index: number) => `| Drug ${index} | ${index} mg/kg daily | LD ${index * 10} mg/L, MD ${index * 2} mg/L, given in every exchange |`;
 const table = (rows: number) => [HEADER, ...Array.from({ length: rows }, (_, index) => row(index + 1))].join("\n");
 const paragraph = (words: number, seed = "dialysis") => Array.from({ length: words }, (_, index) => `${seed}${index % 7}`).join(" ") + ".";
+
+const manualSections = (sections: number) => Array.from({ length: sections }, (_, index) => `## Part ${index + 1}\n\n${paragraph(150, `part${index}`)}`).join("\n\n");
 
 const tableRows = (passage: Passage) => passage.content.split("\n").filter((line) => /^\| Drug \d/.test(line));
 
@@ -134,6 +136,29 @@ describe("chunkDocument", () => {
 		for (const passage of passages) assert.isTrue(passage.content.startsWith(`${HEADER}\n`), `part ${passage.ordinal} has no header`);
 		const pieces = passages.map((passage) => passage.content.slice(HEADER.length + 1));
 		assert.strictEqual(pieces.join(" "), long);
+	});
+
+	it("does not repeat a header past MAX_HEADER: it comes once, as text, and its rows follow as lines", () => {
+		const header = `| ${Array.from({ length: 400 }, (_, index) => `Column ${index}`).join(" | ")} |\n| ${Array.from({ length: 400 }, () => "---").join(" | ")} |`;
+		assert.isAbove(header.length, MAX_HEADER);
+		const rows = Array.from({ length: 300 }, (_, index) => `| ${index} |`);
+		const passages = chunkDocument({ name: "Wide", pages: [{ page: null, markdown: [header, ...rows].join("\n") }], headings: "levels" });
+		const all = passages.map((passage) => passage.content).join("\n");
+		assert.strictEqual(all.split("Column 399 |").length - 1, 1);
+		for (const passage of passages) assert.isAtMost(passage.content.length, MAX);
+		// Rows are lines of a passage, never cut.
+		assert.deepStrictEqual(all.split("\n").filter((line) => /^\| \d+ \|$/.test(line)), rows);
+	});
+
+	it("stops once the passages pass the budget, and gives what fits", () => {
+		const pages = [{ page: null, markdown: manualSections(30) }];
+		const all = chunkDocument({ name: "Manual", pages, headings: "levels" });
+		const chars = all.reduce((sum, passage) => sum + passage.location.length + passage.content.length, 0);
+		const longest = Math.max(...all.map((passage) => passage.content.length));
+		assert.deepStrictEqual(chunkWithin({ name: "Manual", pages, headings: "levels" }, { passages: all.length, passageChars: longest, chars }), all);
+		assert.isNull(chunkWithin({ name: "Manual", pages, headings: "levels" }, { passages: all.length - 1, passageChars: longest, chars }));
+		assert.isNull(chunkWithin({ name: "Manual", pages, headings: "levels" }, { passages: all.length, passageChars: longest - 1, chars }));
+		assert.isNull(chunkWithin({ name: "Manual", pages, headings: "levels" }, { passages: all.length, passageChars: longest, chars: chars - 1 }));
 	});
 
 	it("reads a pipe line with no separator line as text, and keeps a table that has only its header", () => {

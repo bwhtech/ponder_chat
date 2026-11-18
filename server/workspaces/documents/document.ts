@@ -66,6 +66,16 @@ export type DocumentText = {
 	pageReads: PageRead[];
 };
 
+/** LiteParse or pdf.js could not read the PDF, or it has no text at all (a scan, read without LiteParse). */
+export class PdfUnreadable extends Schema.TaggedError<PdfUnreadable>()("PdfUnreadable", {
+	reason: Schema.Literals(["failed", "no-text"]),
+	cause: Schema.optional(Schema.Defect()),
+}) {
+	override get message() {
+		return this.reason === "no-text" ? "The PDF has no text that could be read." : "The PDF could not be read.";
+	}
+}
+
 /** OpenRouter errors are cut to this length in the log, as elsewhere in Ponder. */
 export const MAX_ERROR = 300;
 

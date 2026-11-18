@@ -8,7 +8,6 @@ import * as Option from "effect/Option";
 import type { SqlError } from "effect/sql/SqlError";
 import * as ObjectStore from "../../files/ObjectStore.ts";
 import { makeEmbedder, type EmbeddingError } from "../../openrouter/embeddings.ts";
-import * as PdfText from "../../pdf-text.ts";
 import * as Runs from "../../telemetry/Runs.ts";
 import * as Tracing from "../../tracing/Tracing.ts";
 import { embeddingText } from "./chunk.ts";
@@ -18,15 +17,16 @@ import { pageReadStore } from "./page-reads.ts";
 import * as PageReader from "./page-reader.ts";
 import { BATCH_SIZE, passageStore } from "./passages.ts";
 import * as PrepareText from "./prepare-text.ts";
-import { PDF_TYPE, storedText } from "./read-document.ts";
+import { PDF_TYPE } from "./read-document.ts";
 import { readPdf, type PageCheckpoint } from "./read-pdf.ts";
 import { documentStore, type DocumentRow } from "./store.ts";
 
 /**
  * Indexes one document (docs/workspaces-plan.md, "Documents: what Ponder does"): read its
  * text once, split it into passages, embed them BATCH_SIZE at a time, and mark it Ready or
- * Failed. Reading a text document and splitting any text run in a worker thread
- * (prepare-text.ts): a text document in one job, a PDF's text after read-pdf.ts read it.
+ * Failed. Reading a document and splitting its text run in a worker thread
+ * (prepare-text.ts): a text document in one job; a PDF's pages in one, and its text and
+ * passages in another once a model read its picture pages (read-pdf.ts).
  * The workflow (index-workflow.ts) runs each part as a step, so a run that a crash cut
  * short goes on from the batch it was in: a large text is about 125 embedding calls.
  *
@@ -40,6 +40,7 @@ import { documentStore, type DocumentRow } from "./store.ts";
 export type IndexRequest = { documentId: string; generation: number };
 /** One embedding call of a batch of 96 passages at most; then the step fails, and Workflow tries it again. */
 const INDEX_TIMEOUT = "2 minutes";
+
 export type Prepared = { state: "gone" } | { state: "failed" } | { state: "chunked"; batches: number };
 export type IndexStage = "parse" | "page-read" | "chunk" | "embed" | "finish";
 export type IndexOutcome = "gone" | "ready" | "failed";
@@ -70,7 +71,7 @@ const make = Effect.gen(function* () {
 	const passages = passageStore(sql);
 	const pageReads = pageReadStore(sql);
 	const embedder = yield* makeEmbedder;
-	const readers = yield* Effect.context<PageReader.PageReader | PdfText.PdfText>();
+	const readers = yield* Effect.context<PageReader.PageReader | PrepareText.PrepareText>();
 	const prepareText = yield* PrepareText.PrepareText;
 
 	/** The document, while this run is its latest. A first look: each write checks again (fenced). */
@@ -150,28 +151,23 @@ const make = Effect.gen(function* () {
 	});
 
 	/**
-	 * The document's passages: a text document read now gives them with its text; else they
-	 * are split from the stored text. Or how the run ended: failed, or gone when a newer run
+	 * The document's passages: a document read now gives them with its text; else they are
+	 * split from the stored text. Or how the run ended: failed, or gone when a newer run
 	 * took over meanwhile.
 	 */
 	const passagesOf = Effect.fnUntraced(function* (row: DocumentRow) {
-		const parsed = row.has_text ? "parsed" : yield* parse(row);
-		if (parsed !== "parsed") return parsed;
+		if (!row.has_text) return yield* parse(row);
 		const text = Option.getOrElse(yield* store.text(row.id), () => "");
-		return yield* prepareText.chunk({ name: row.name, mediaType: row.media_type, text }).pipe(
-			Effect.catchTags({ PrepareTextError: (error) => failRow(row, "chunk", error.message, { reason: error.reason }) }),
-		);
+		const passages = yield* prepareText.chunk({ name: row.name, mediaType: row.media_type, text }).pipe(Effect.result);
+		return passages._tag === "Failure" ? yield* failPrepare(row, "chunk", passages.failure) : passages.success;
 	});
 
-	/**
-	 * "parsed" for a PDF; a text document's passages, as the worker job that reads it splits
-	 * it too; or how the run ended: failed, or gone when a newer run took over meanwhile.
-	 */
+	/** The passages of a document read now, or how the run ended: failed, or gone when a newer run took over meanwhile. */
 	const parse = Effect.fn("workspace.parse")(function* (row: DocumentRow) {
 		yield* Tracing.annotate({ "ponder.bytes": row.size });
 		const bytes = yield* store.bytes(row);
 		if (Option.isNone(bytes)) return yield* failRow(row, "parse", "The file is missing from storage. Upload it again.");
-		const data = new Uint8Array(bytes.value);
+		const data = new Uint8Array(bytes.value.buffer, bytes.value.byteOffset, bytes.value.byteLength);
 		return row.media_type === PDF_TYPE ? yield* parsePdf(row, data) : yield* parseText(row, data);
 	});
 
@@ -182,28 +178,31 @@ const make = Effect.gen(function* () {
 			const error = read.failure;
 			if (error._tag === "SqlError") return yield* error;
 			if (error._tag === "ReadStopped") return "gone" as const;
-			if (error._tag === "PdfUnreadable") return yield* failRow(row, "parse", error.message);
-			return yield* failRow(row, "page-read", error.message, { page: error.page }, error.pageReads);
+			if (error._tag === "PageUnreadable") return yield* failRow(row, "page-read", error.message, { page: error.page }, error.pageReads);
+			return yield* failPrepare(row, "parse", error);
 		}
-		return yield* saved(row, storedText(read.success.pages), read.success);
+		const { pages, ...summary } = read.success;
+		if (summary.chars === 0) return yield* failRow(row, "parse", "The document has no text.");
+		const prepared = yield* prepareText.preparePdf({ name: row.name, pages }).pipe(Effect.result);
+		if (prepared._tag === "Failure") return yield* failPrepare(row, "chunk", prepared.failure);
+		return yield* saved(row, prepared.success, summary);
 	});
 
 	const parseText = Effect.fnUntraced(function* (row: DocumentRow, data: Uint8Array) {
 		const read = yield* prepareText.read({ name: row.name, mediaType: row.media_type, data }).pipe(Effect.result);
-		if (read._tag === "Failure") {
-			const error = read.failure;
-			const extra: LogDetail = error._tag === "PrepareTextError" ? { reason: error.reason } : {};
-			return yield* failRow(row, "parse", error.message, extra);
-		}
-		const done = yield* saved(row, read.success.text, read.success.read);
-		return done === "parsed" ? read.success.passages : done;
+		if (read._tag === "Failure") return yield* failPrepare(row, "parse", read.failure);
+		return yield* saved(row, read.success, read.success.read);
 	});
 
-	/** "parsed" once the text is kept; failed when there is none. */
-	const saved = Effect.fnUntraced(function* (row: DocumentRow, text: string, read: Omit<DocumentText, "pages">) {
+	/** The passages once the text is kept; failed when there is none, gone when a newer run took over. */
+	const saved = Effect.fnUntraced(function* (row: DocumentRow, prepared: PrepareText.PreparedText, read: Omit<DocumentText, "pages">) {
 		if (read.chars === 0) return yield* failRow(row, "parse", "The document has no text.");
-		return Option.isSome(yield* saveRead(row, text, read)) ? ("parsed" as const) : ("gone" as const);
+		return Option.isSome(yield* saveRead(row, prepared.text, read)) ? prepared.passages : ("gone" as const);
 	});
+
+	/** Failed, with what the person reads, and the worker's reason when the worker failed. */
+	const failPrepare = (row: DocumentRow, stage: IndexStage, error: PrepareText.PrepareError) =>
+		failRow(row, stage, error.message, error._tag === "PrepareTextError" ? { reason: error.reason } : {});
 
 	const prepare = Effect.fn("Indexer.prepare")(function* (request: IndexRequest) {
 		const found = yield* current(request);

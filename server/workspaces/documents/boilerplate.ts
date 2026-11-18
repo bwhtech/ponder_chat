@@ -47,15 +47,15 @@ type EdgeLine = { page: number; index: number; pageNumber: number | null; text: 
 
 /** Finds, for each page, the indexes of its header and footer lines. */
 class Boilerplate {
+	private readonly pages: ReadonlyArray<Page>;
 	private readonly dropped: Set<number>[];
 	private readonly edges: EdgeLine[];
 	/** The pages that a line must be on to be a header or a footer. */
 	private readonly least: number;
 
-	constructor(
-		private readonly pages: ReadonlyArray<Page>,
-		lines: string[][],
-	) {
+	// No parameter properties: the worker of prepare-text.ts runs this file with Node's type stripping, which has none.
+	constructor(pages: ReadonlyArray<Page>, lines: string[][]) {
+		this.pages = pages;
 		this.dropped = pages.map(() => new Set());
 		this.edges = pages.flatMap((page, at) => edgeIndexes(lines[at]).map((index) => ({ page: at, index, pageNumber: page.page, text: lines[at][index].trim() })));
 		this.least = Math.max(3, Math.ceil(pages.length * SHARE));

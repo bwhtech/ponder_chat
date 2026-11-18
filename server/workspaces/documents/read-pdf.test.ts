@@ -7,7 +7,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as PdfText from "../../pdf-text.ts";
+import * as PrepareText from "./prepare-text.ts";
 import type { PageRead } from "./document.ts";
 import * as PageReader from "./page-reader.ts";
 import { NO_CHECKPOINT, readPdf } from "./read-pdf.ts";
@@ -42,7 +42,7 @@ function fakeModel(answers: Record<number, string | "fail">) {
 			};
 			return { record, text: ok ? Option.some(answer) : Option.none() };
 		});
-	const layer = Layer.mergeAll(Layer.succeed(PageReader.PageReader, PageReader.PageReader.of({ read })), PdfText.layer);
+	const layer = Layer.mergeAll(Layer.succeed(PageReader.PageReader, PageReader.PageReader.of({ read })), PrepareText.layer);
 	return { asked, layer };
 }
 

@@ -1,5 +1,5 @@
 import type { DocumentPage } from "./document.ts";
-import { blocksOf, type Block, type HeadingRule } from "./markdown-blocks.ts";
+import { blocksOf, type Block, type HeadingRule, type TableBlock } from "./markdown-blocks.ts";
 import { splitText } from "./split-text.ts";
 
 /**
@@ -13,6 +13,9 @@ import { splitText } from "./split-text.ts";
  *   rows, and each part starts with the header row and its separator line. A row that
  *   does not fit in MAX with its header is a passage of its own, past MAX: the embedding
  *   models take far more. Only a row past MAX_ROW is cut, and each piece has the header.
+ * - A header past MAX_HEADER is not repeated: it is text of its own, and its rows follow
+ *   it as lines. Repeated, a header of 50,000 characters over 2,000 short rows would make
+ *   100 million characters of passages from a file of 54 KB.
  * - Each passage has a location line, "<document> › <headings> (page N)", which is
  *   embedded with it, so a dose in a table part still says which table it is in.
  *
@@ -22,6 +25,8 @@ export const TARGET = 1_000;
 export const MAX = 2_000;
 /** A table row up to this length is never cut. */
 export const MAX_ROW = 8_000;
+/** A table's header (its header row and separator line) up to this length is repeated in each part. */
+export const MAX_HEADER = MAX;
 const MIN = 300;
 /** The location names at most this many headings, the nearest ones. */
 const MAX_PATH = 3;
@@ -39,10 +44,34 @@ export type Passage = {
 
 export type ChunkInput = { name: string; pages: ReadonlyArray<DocumentPage>; headings: HeadingRule };
 
-export function chunkDocument({ name, pages, headings }: ChunkInput): Passage[] {
+/** How many passages, how long one, and how many characters in all (location lines too). */
+export type ChunkBudget = { readonly passages: number; readonly passageChars: number; readonly chars: number };
+
+const UNBOUNDED: ChunkBudget = { passages: Infinity, passageChars: Infinity, chars: Infinity };
+
+export function chunkDocument(input: ChunkInput): Passage[] {
+	return chunkWithin(input, UNBOUNDED)!;
+}
+
+/**
+ * The passages, or null when they would pass the budget. It stops as soon as they do,
+ * before it makes the rest: the worker of prepare-text.ts must not run out of memory first.
+ */
+export function chunkWithin({ name, pages, headings }: ChunkInput, budget: ChunkBudget): Passage[] | null {
 	const packer = new Packer();
-	for (const unit of blocksOf(pages, headings).flatMap(unitsOf)) packer.add(unit);
-	return packer.finish().map((draft, ordinal) => ({ ordinal, page: draft.page, location: locationLine(name, draft.path ?? draft.headingPath, draft.page), content: draft.text }));
+	for (const [index, block] of blocksOf(pages, headings).entries()) {
+		for (const unit of unitsOf(block, index)) {
+			packer.add(unit);
+			if (packer.passages > budget.passages || packer.chars > budget.chars) return null;
+		}
+	}
+	const passages = packer.finish().map((draft, ordinal) => ({ ordinal, page: draft.page, location: locationLine(name, draft.path ?? draft.headingPath, draft.page), content: draft.text }));
+	let chars = 0;
+	for (const passage of passages) {
+		if (passage.content.length > budget.passageChars) return null;
+		chars += passage.location.length + passage.content.length;
+	}
+	return passages.length <= budget.passages && chars <= budget.chars ? passages : null;
 }
 
 /** What is embedded and searched for keywords: the location line, then the content. */
@@ -65,19 +94,27 @@ type Unit = {
 	page: number | null;
 	path: string[];
 	block: number;
-	/** For a row: its table's header and the length of the whole table. */
+	/** For a row: its table's header and the length of the whole table. None when the header is not repeated. */
 	table?: { header: string; length: number };
 };
 
-function unitsOf(block: Block, index: number): Unit[] {
+/** One at a time: a table of a million rows is not turned into a million units at once. */
+function* unitsOf(block: Block, index: number): Generator<Unit> {
 	const place = { page: block.page, path: block.path, block: index };
-	if (block.kind === "heading") return [{ ...place, kind: "heading", text: block.text }];
 	const asText = (text: string) => splitText(text, TARGET).map((piece): Unit => ({ ...place, kind: "text", text: piece }));
-	if (block.kind === "text") return asText(block.text);
-	if (block.rows.length === 0) return asText(block.header);
-	const table = { header: block.header, length: [block.header, ...block.rows].join("\n").length };
+	if (block.kind === "heading") yield { ...place, kind: "heading", text: block.text };
+	else if (block.kind === "text") yield* asText(block.text);
+	else if (block.rows.length === 0) yield* asText(block.header);
+	else yield* tableUnits(block, place, asText);
+}
+
+function* tableUnits(block: TableBlock, place: Pick<Unit, "page" | "path" | "block">, asText: (text: string) => Unit[]): Generator<Unit> {
+	// A header too long to repeat goes first, as text. Its rows are rows with no table, packed as lines.
+	const repeated = block.header.length <= MAX_HEADER;
+	if (!repeated) yield* asText(block.header);
+	const table = repeated ? { header: block.header, length: block.header.length + 1 + rowsLength(block.rows) } : undefined;
 	// Each piece of a cut row is longer than MAX, so it is a passage of its own, and gets the header.
-	return block.rows.flatMap((row) => (row.length <= MAX_ROW ? [row] : splitText(row, MAX_ROW)).map((text): Unit => ({ ...place, kind: "row", text, table })));
+	for (const row of block.rows) for (const text of row.length <= MAX_ROW ? [row] : splitText(row, MAX_ROW)) yield { ...place, kind: "row", text, table };
 }
 
 type Draft = {
@@ -98,6 +135,12 @@ type Draft = {
 class Packer {
 	private done: Draft[] = [];
 	private draft: Draft | null = null;
+	/** The characters of the passages done. */
+	chars = 0;
+
+	get passages() {
+		return this.done.length;
+	}
 
 	add(unit: Unit) {
 		if (this.draft && !this.fits(this.draft, unit)) this.flush();
@@ -136,7 +179,10 @@ class Packer {
 	}
 
 	private flush() {
-		if (this.draft) this.done.push(this.draft);
+		if (this.draft) {
+			this.done.push(this.draft);
+			this.chars += this.draft.text.length;
+		}
 		this.draft = null;
 	}
 
@@ -159,6 +205,13 @@ class Packer {
 		if (unit.table && !(sameBlock && draft?.tableHeader === unit.table.header)) return { joiner: draft === null ? "" : "\n\n", text: `${unit.table.header}\n${unit.text}` };
 		return { joiner, text: unit.text };
 	}
+}
+
+/** The length of the rows joined by line breaks, without joining them. */
+function rowsLength(rows: ReadonlyArray<string>) {
+	let length = rows.length - 1;
+	for (const row of rows) length += row.length;
+	return length;
 }
 
 function commonPrefix(a: string[], b: string[]) {

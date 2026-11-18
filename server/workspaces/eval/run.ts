@@ -28,7 +28,7 @@ import type { DocumentText } from "../documents/document.ts";
 import type * as PageReader from "../documents/page-reader.ts";
 import { PDF_TYPE, storedPages, storedText } from "../documents/read-document.ts";
 import { readPdf } from "../documents/read-pdf.ts";
-import type * as PdfText from "../../pdf-text.ts";
+import type * as PrepareText from "../documents/prepare-text.ts";
 import { liveLayer, recordedLayer } from "./layers.ts";
 import { searchAll, TOP, type EvalDocument } from "./search.ts";
 
@@ -113,7 +113,7 @@ if (passagesFile) {
 }
 
 /** The document's text, or why it could not be read. */
-async function readWith<R, E>(layer: Layer.Layer<R | PageReader.PageReader | PdfText.PdfText, E>, data: Uint8Array): Promise<DocumentText | string> {
+async function readWith<R, E>(layer: Layer.Layer<R | PageReader.PageReader | PrepareText.PrepareText, E>, data: Uint8Array): Promise<DocumentText | string> {
 	const runtime = ManagedRuntime.make(layer);
 	try {
 		const exit = await runtime.runPromiseExit(readPdf(data));

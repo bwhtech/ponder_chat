@@ -3,14 +3,12 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
-import * as PdfText from "../../pdf-text.ts";
 import * as Tracing from "../../tracing/Tracing.ts";
-import { dropRepeatedLines } from "./boilerplate.ts";
 import { PageRead, totalChars, type DocumentPage, type DocumentText, type PageReadReason } from "./document.ts";
-import { parseWithLiteParse, type LiteParsePage } from "./liteparse.ts";
+import type { LiteParsePage } from "./liteparse.ts";
 import * as PageReader from "./page-reader.ts";
 import { onePagePdfs } from "./pdf-pages.ts";
-import { pdfTextPages } from "./read-document.ts";
+import * as PrepareText from "./prepare-text.ts";
 
 /**
  * Reads a PDF into Markdown pages (docs/workspaces-plan.md, "PDF reading"):
@@ -22,8 +20,10 @@ import { pdfTextPages } from "./read-document.ts";
  *    number: a document is never "Ready" with pages missing. A picture page whose call
  *    fails keeps LiteParse's text, and its record says so.
  *
- * When LiteParse does not load here, the text layer is read with pdf-text.ts instead, and
- * no page goes to a model.
+ * When LiteParse does not load here, the text layer is read with pdf.js instead, and no
+ * page goes to a model. Both run in the worker of prepare-text.ts (parse-pdf.ts), which
+ * also drops the repeated header and footer lines: the server's own thread gets only the
+ * pages' Markdown, within the limits of limits.ts.
  *
  * Each page read is paid for. The indexer gives a checkpoint: the pages read so far in its
  * run are used again, each new one is kept as soon as it ends, and the read stops before
@@ -33,16 +33,6 @@ import { pdfTextPages } from "./read-document.ts";
 // in memory at once, and a page with no text that fails stops the read early.
 const BATCH = 8;
 const CALLS_AT_ONCE = 4;
-
-/** LiteParse or pdf.js could not read the PDF, or it has no text at all (a scan, read without LiteParse). */
-export class PdfUnreadable extends Schema.TaggedError<PdfUnreadable>()("PdfUnreadable", {
-	reason: Schema.Literals(["failed", "no-text"]),
-	cause: Schema.optional(Schema.Defect()),
-}) {
-	override get message() {
-		return this.reason === "no-text" ? "The PDF has no text that could be read." : "The PDF could not be read.";
-	}
-}
 
 /** The pages read so far, how to keep each new one, and whether the run is still wanted. */
 export type PageCheckpoint = {
@@ -75,8 +65,8 @@ export class PageUnreadable extends Schema.TaggedError<PageUnreadable>()("PageUn
 export const readPdf = Effect.fn("PdfReader.read")(function* (data: Uint8Array, checkpoint: PageCheckpoint = NO_CHECKPOINT) {
 	const started = yield* Clock.currentTimeMillis;
 	yield* Tracing.annotate({ "ponder.bytes": data.length });
-	const parsed = yield* parseWithLiteParse(data).pipe(Effect.catchTags({ LiteParseFailed: (error) => Effect.fail(new PdfUnreadable({ reason: "failed", cause: error.cause })) }));
-	const read = Option.isSome(parsed) ? yield* withModelPages(data, parsed.value.pages, parsed.value.pageCount, checkpoint) : yield* withPdfText(data);
+	const parsed = yield* PrepareText.PrepareText.use((prepare) => prepare.parsePdf(data));
+	const read = parsed.engine === "liteparse" ? yield* withModelPages(data, parsed.pages, parsed.pageCount, checkpoint) : yield* withPdfText(parsed.pages);
 	const done: DocumentText = { ...read, chars: totalChars(read.pages), ms: (yield* Clock.currentTimeMillis) - started };
 	yield* Tracing.annotate({ "ponder.pages": done.pageCount, "ponder.chars": done.chars, "ponder.page_reads": done.pageReads.length });
 	return done;
@@ -84,9 +74,8 @@ export const readPdf = Effect.fn("PdfReader.read")(function* (data: Uint8Array, 
 
 type Read = Omit<DocumentText, "chars" | "ms">;
 
-const withModelPages = Effect.fnUntraced(function* (data: Uint8Array, parsed: LiteParsePage[], pageCount: number, checkpoint: PageCheckpoint) {
-	const pages = dropRepeatedLines(parsed);
-	const toModel = pages.flatMap((page) => (Option.isSome(page.modelReason) ? [{ page: page.page, reason: page.modelReason.value, hasText: hasText(page.markdown) }] : []));
+const withModelPages = Effect.fnUntraced(function* (data: Uint8Array, pages: LiteParsePage[], pageCount: number, checkpoint: PageCheckpoint) {
+	const toModel = pages.flatMap((page) => (page.modelReason !== null ? [{ page: page.page, reason: page.modelReason, hasText: hasText(page.markdown) }] : []));
 	const texts = new Map<number, string>();
 	const pageReads: PageRead[] = [];
 	for (let start = 0; start < toModel.length; start += BATCH) {
@@ -122,13 +111,9 @@ const readBatch = Effect.fnUntraced(function* (data: Uint8Array, batch: Readonly
 	return batch.map((page) => checkpoint.done.get(page.page) ?? byPage.get(page.page)!);
 });
 
-const withPdfText = Effect.fnUntraced(function* (data: Uint8Array) {
-	yield* Effect.logWarning("workspace documents: LiteParse did not load; reading the PDF's text layer with pdf.js");
-	const text = yield* PdfText.PdfText.use((reader) => reader.extract(Buffer.from(data))).pipe(
-		Effect.catchTags({ PdfTextError: (error) => Effect.fail(new PdfUnreadable({ reason: "failed", cause: error })) }),
-	);
-	if (!text) return yield* new PdfUnreadable({ reason: "no-text" });
-	const pages = dropRepeatedLines(pdfTextPages(text));
+const withPdfText = Effect.fnUntraced(function* (parsed: LiteParsePage[]) {
+	yield* Effect.logWarning("workspace documents: LiteParse did not load; read the PDF's text layer with pdf.js");
+	const pages = parsed.map((page): DocumentPage => ({ page: page.page, markdown: page.markdown }));
 	return { engine: "pdf-text", pages, pageCount: pages.length, pageReads: [] } satisfies Read;
 });
 

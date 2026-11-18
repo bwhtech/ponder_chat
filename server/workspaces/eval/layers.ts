@@ -4,7 +4,7 @@ import * as Option from "effect/Option";
 import * as PonderConfig from "../../config.ts";
 import * as OpenRouter from "../../openrouter/OpenRouter.ts";
 import * as OpenRouterKey from "../../openrouter/OpenRouterKey.ts";
-import * as PdfText from "../../pdf-text.ts";
+import * as PrepareText from "../documents/prepare-text.ts";
 import * as Database from "../../runtime/Database.ts";
 import * as Http from "../../runtime/Http.ts";
 import * as Secrets from "../../secrets/Secrets.ts";
@@ -17,7 +17,7 @@ import * as PageReader from "../documents/page-reader.ts";
  */
 
 /** The real model, with the key the app uses: the one saved in /admin, else OPENROUTER_API_KEY. */
-export const liveLayer = Layer.mergeAll(PageReader.layer, PdfText.layer).pipe(
+export const liveLayer = Layer.mergeAll(PageReader.layer, PrepareText.layer).pipe(
 	Layer.provideMerge(OpenRouterKey.layer),
 	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer)),
 	Layer.provideMerge(Layer.mergeAll(Database.layer, Http.layer)),
@@ -29,7 +29,7 @@ export const liveLayer = Layer.mergeAll(PageReader.layer, PdfText.layer).pipe(
  * a picture page then keeps LiteParse's text, and a page with no text fails the read.
  */
 export const recordedLayer = (texts: ReadonlyMap<number, string>) =>
-	Layer.mergeAll(Layer.succeed(PageReader.PageReader, PageReader.PageReader.of({ read: (request) => Effect.succeed(recordedRead(request, texts.get(request.page))) })), PdfText.layer);
+	Layer.mergeAll(Layer.succeed(PageReader.PageReader, PageReader.PageReader.of({ read: (request) => Effect.succeed(recordedRead(request, texts.get(request.page))) })), PrepareText.layer);
 
 function recordedRead(request: PageReader.PageRequest, text: string | undefined): PageReader.PageReadResult {
 	const record: PageRead = {

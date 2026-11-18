@@ -28,16 +28,18 @@ const WORKER = new URL("./pdf-text-worker.ts", import.meta.url);
 
 /**
  * A read that did not give text: it took too long, pdf.js failed (out of memory comes
- * here too; the cause is pdf.js's error), or the worker stopped before it answered.
+ * here too; the cause is pdf.js's error), the text was too long to keep, or the worker
+ * stopped before it answered.
  */
 export class PdfTextError extends Schema.TaggedError<PdfTextError>()("PdfTextError", {
-	reason: Schema.Literals(["timeout", "failed", "stopped"]),
+	reason: Schema.Literals(["timeout", "failed", "too-large", "stopped"]),
 	seconds: Schema.optional(Schema.Number),
 	cause: Schema.optional(Schema.Defect()),
 }) {
 	override get message() {
 		if (this.reason === "timeout") return `reading took longer than ${this.seconds} seconds`;
 		if (this.reason === "stopped") return "the reader stopped before it answered";
+		if (this.reason === "too-large") return "the PDF has too much text to keep";
 		return "pdf.js could not read the PDF";
 	}
 }
@@ -93,7 +95,8 @@ function startWorker(data: Buffer) {
 		resourceLimits: { maxOldGenerationSizeMb: MAX_HEAP_MB, maxYoungGenerationSizeMb: 32 },
 	});
 	const answer = Deferred.makeUnsafe<string, PdfTextError>();
-	worker.once("message", (text: string) => Deferred.doneUnsafe(answer, Effect.succeed(text)));
+	// Null when the text was past the worker's limit (pdf-text-worker.ts).
+	worker.once("message", (text: string | null) => Deferred.doneUnsafe(answer, text === null ? Effect.fail(new PdfTextError({ reason: "too-large" })) : Effect.succeed(text)));
 	// Out of memory comes here too.
 	worker.once("error", (error) => Deferred.doneUnsafe(answer, Effect.fail(new PdfTextError({ reason: "failed", cause: error }))));
 	worker.once("exit", () => Deferred.doneUnsafe(answer, Effect.fail(new PdfTextError({ reason: "stopped" }))));
