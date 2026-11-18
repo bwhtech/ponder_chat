@@ -8,7 +8,7 @@
     "typecheck": "node scripts/vue-tsc.cjs --noEmit -p web/tsconfig.vue.json && npm run typecheck:browser",
     "typecheck:browser": "npm run api-types && tsx scripts/typecheck-browser.ts",
     "api-types": "tsc -p server/tsconfig.api-types.json",
-    "lint": "npm run lint:vue && oxlint",
+    "lint": "tsx scripts/no-suppressions.ts && npm run lint:vue && oxlint",
     "lint:vue": "npm run api-types && node --require ./scripts/typescript5.cjs node_modules/eslint/bin/eslint.js --concurrency auto \"web/**/*.vue\"",
     "dev": "tsx scripts/dev.ts",
     "test": "vitest run",

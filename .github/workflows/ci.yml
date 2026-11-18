@@ -41,7 +41,7 @@ jobs:
       - name: Check the tests' types
         run: npm run typecheck:e2e
 
-      # No `any` in our TypeScript, and no Node globals in web/ (.oxlintrc.json).
+      # No `any` in our TypeScript, and no comments that turn a check off (README.md, "No `any`").
       - name: Lint
         run: npm run lint -- --format github
 

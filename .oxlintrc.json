@@ -1,24 +1,37 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	// Only these rules: no `any` in our TypeScript, written or flowing in from untyped code
-	// (README.md, "Develop"). They need the types, which oxlint-tsgolint reads with each
-	// folder's tsconfig.json.
+	// Only these rules: no `any` in our TypeScript, written or flowing in from untyped code,
+	// and no comments that turn TypeScript's checks off (README.md, "No `any`"). The unsafe
+	// rules need the types, which oxlint-tsgolint reads with each folder's tsconfig.json.
+	// It cannot read .vue files: ESLint runs the same rules on those (eslint.config.js).
 	"categories": { "correctness": "off" },
 	"options": { "typeAware": true },
-	// sandbox/pyodide is a Deno program: the linter does not know Deno's globals or npm: imports.
-	"ignorePatterns": [".output/**", ".nitro/**", "dist/**", "node_modules/**", "sandbox/pyodide/**"],
+	"ignorePatterns": [
+		".output/**",
+		".nitro/**",
+		"dist/**",
+		"**/node_modules/**",
+		"sandbox/pyodide/vendor/**",
+		"sandbox/pyodide/.deno/**"
+	],
 	"rules": {
 		"typescript/no-explicit-any": "error",
 		"typescript/no-unsafe-assignment": "error",
 		"typescript/no-unsafe-member-access": "error",
 		"typescript/no-unsafe-call": "error",
 		"typescript/no-unsafe-return": "error",
-		"typescript/no-unsafe-argument": "error"
+		"typescript/no-unsafe-argument": "error",
+		"typescript/ban-ts-comment": [
+			"error",
+			{ "ts-expect-error": true, "ts-ignore": true, "ts-nocheck": true, "ts-check": true }
+		]
 	},
 	"overrides": [
 		{
-			// Plain JavaScript has no types, so every value would count as `any`.
-			"files": ["**/*.js", "**/*.mjs", "**/*.cjs"],
+			// Plain JavaScript has no types, so every value would count as `any`. And
+			// sandbox/pyodide is a Deno program: tsgolint knows neither Deno's globals nor
+			// npm: imports, so it would read them as `any`. A written `any` still fails there.
+			"files": ["**/*.js", "**/*.mjs", "**/*.cjs", "sandbox/pyodide/**"],
 			"rules": {
 				"typescript/no-unsafe-assignment": "off",
 				"typescript/no-unsafe-member-access": "off",
