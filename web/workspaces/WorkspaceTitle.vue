@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
+import type { TitleHandle } from "./handles";
 
 /**
  * The workspace page's name. For people who can edit, it is a "Rename" button that turns into
@@ -33,7 +34,7 @@ async function finish(save: boolean, refocus = false) {
 	trigger.value?.focus();
 }
 
-defineExpose({ start });
+defineExpose({ start } satisfies TitleHandle);
 
 function onEnter(event: KeyboardEvent) {
 	if (!event.isComposing) void finish(true, true);

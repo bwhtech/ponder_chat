@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 import type { WorkspaceDocument } from "./documents";
 import { useFileDrop } from "./file-drop";
+import type { DocumentsHandle } from "./handles";
 import { canEdit, type WorkspaceDetail, type WorkspaceSummary } from "./store";
 import WorkspaceDocuments from "./WorkspaceDocuments.vue";
 import WorkspaceInstructions from "./WorkspaceInstructions.vue";
@@ -28,7 +29,7 @@ const shared = computed(() => {
 	return !workspace || workspace.kind === "org" || workspace.memberCount > 0;
 });
 
-const documents = ref<InstanceType<typeof WorkspaceDocuments>>();
+const documents = ref<DocumentsHandle>();
 const drop = useFileDrop(
 	() => editable.value && Boolean(props.detail),
 	(files) => documents.value?.upload(files),

@@ -2,6 +2,7 @@
 import { Button, Dropdown } from "frappe-ui";
 import { computed, onBeforeUnmount, ref } from "vue";
 import { canEdit, canShare, kindIcon, type WorkspaceSummary } from "./store";
+import type { TitleHandle } from "./handles";
 import WorkspaceTitle from "./WorkspaceTitle.vue";
 
 /**
@@ -21,7 +22,7 @@ const onWidth = () => (wide.value = wideScreen.matches);
 wideScreen.addEventListener("change", onWidth);
 onBeforeUnmount(() => wideScreen.removeEventListener("change", onWidth));
 
-const title = ref<InstanceType<typeof WorkspaceTitle>>();
+const title = ref<TitleHandle>();
 const shares = computed(() => canShare(props.workspace));
 const edits = computed(() => canEdit(props.workspace));
 const menu = computed(() => [

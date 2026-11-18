@@ -2,10 +2,8 @@
 import { Button, Popover } from "frappe-ui";
 import { computed } from "vue";
 import { CITATION_MAX_COMMENT, citationLabel, type Citation } from "./citations";
+import type { CiteAnchor } from "./selection";
 import CommentEditor from "./CommentEditor.vue";
-
-/** Something the comment editor can sit against: the quoted text in the reply. */
-export type CiteAnchor = { getBoundingClientRect: () => DOMRect; contextElement?: Element };
 
 /**
  * A quote from an earlier reply. In the message box (`composer`) its label scrolls to

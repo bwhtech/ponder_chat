@@ -9,6 +9,7 @@ import DocumentRow from "./DocumentRow.vue";
 import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, uploadDocument, type WorkspaceDocument } from "./documents";
 import { openWorkspaceDialog } from "./dialogs";
 import WorkspaceEmptyArea from "./WorkspaceEmptyArea.vue";
+import type { DocumentsHandle } from "./handles";
 
 /**
  * The workspace's documents, in its side panel. Everyone who
@@ -29,7 +30,7 @@ const errors = ref<string[]>([]);
 const retrying = ref(new Set<string>());
 const viewFile = useFileViewer();
 
-defineExpose({ upload });
+defineExpose({ upload } satisfies DocumentsHandle);
 
 function current() {
 	return props.documents ?? [];

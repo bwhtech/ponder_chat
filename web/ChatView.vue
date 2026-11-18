@@ -12,8 +12,7 @@ import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from ".
 import { isAuto } from "../shared/auto-model";
 import { acceptedFiles, defaultModel, features, ModelSelector, modelName, models } from "./models";
 import { chosenCitations, citationLabel, citationPart, withComment, type Citation } from "./cite/citations";
-import type { CiteAnchor } from "./cite/CitationChip.vue";
-import type { PendingCite } from "./cite/selection";
+import type { CiteAnchor, PendingCite } from "./cite/selection";
 import { SkillMenu, useSkillPicker } from "./skills/picker";
 import { chosenSkills, loadSkills, skillPart, skillTitle, withSkillsHint } from "./skills/skills";
 import { summarizedThrough } from "./compaction";
@@ -21,6 +20,7 @@ import { THREAD_CHANGED } from "../shared/replies";
 import { useThreads } from "./threads";
 import { useLazyChat } from "./lazy-chat";
 import { once } from "./once";
+import { isRecord } from "./json";
 import { preloadChat } from "./preload";
 import { useChatWorkspace, WorkspacePicker } from "./workspaces/chat-workspace";
 // The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
@@ -482,8 +482,8 @@ async function upload(files: File[]): Promise<FileUIPart[] | null> {
 				const body = new FormData();
 				body.append("file", file);
 				const response = await fetch("/api/files", { method: "POST", body });
-				const result = await response.json().catch(() => ({ error: `"${file.name}" could not be uploaded.` }));
-				if (!response.ok) throw new Error(result.error ?? `"${file.name}" could not be uploaded.`);
+				const result: unknown = await response.json().catch(() => null);
+				if (!response.ok || !isUploaded(result)) throw new Error(refusalOf(result) ?? `"${file.name}" could not be uploaded.`);
 				return { type: "file" as const, mediaType: result.mediaType, filename: result.name, url: result.url };
 			}),
 		);
@@ -493,6 +493,16 @@ async function upload(files: File[]): Promise<FileUIPart[] | null> {
 	} finally {
 		uploading.value = false;
 	}
+}
+
+/** The stored file that POST /api/files answers (StoredFile in server/files.ts). */
+function isUploaded(value: unknown): value is { mediaType: string; name: string; url: string } {
+	return isRecord(value) && typeof value.mediaType === "string" && typeof value.name === "string" && typeof value.url === "string";
+}
+
+/** The server's reason for refusing an upload, such as a file too large. */
+function refusalOf(value: unknown) {
+	return isRecord(value) && typeof value.error === "string" ? value.error : undefined;
 }
 
 function isStreaming(message: UIMessage) {
