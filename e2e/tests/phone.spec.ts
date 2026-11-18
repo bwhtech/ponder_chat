@@ -91,6 +91,46 @@ test("on a phone, a new workspace's three setup steps are rows, all in view abov
 	await expect(page.getByRole("dialog", { name: "Instructions" })).toBeVisible();
 });
 
+test("on a phone whose keyboard covers the page, as Safari on iOS does, the workspace's message box and header stay in the part above it", async ({ page, person }) => {
+	const tag = person.id.slice(0, 6);
+	const { slug } = await createWorkspace(page, `Keyboard ${tag}`);
+	// Safari on iOS keeps the page full height under the keyboard, and reports what shows above it in
+	// window.visualViewport. Chromium's keyboard does not, so the page gets the same report from the test.
+	await page.addInitScript(() => {
+		const events = new EventTarget();
+		const state = { height: innerHeight, offsetTop: 0 };
+		Object.defineProperty(window, "visualViewport", {
+			configurable: true,
+			value: Object.defineProperties(events, {
+				height: { get: () => state.height },
+				offsetTop: { get: () => state.offsetTop },
+				scale: { value: 1 },
+			}),
+		});
+		Object.assign(window, {
+			showKeyboard: (height: number, offsetTop: number) => {
+				Object.assign(state, { height, offsetTop });
+				events.dispatchEvent(new Event("resize"));
+			},
+		});
+	});
+	await page.goto(`/?w=${slug}`);
+	const box = workspacePage.box(page);
+	await workspacePage.field(page).focus();
+	const viewport = page.viewportSize()!;
+	const visible = { top: 120, height: viewport.height - 120 - 330 };
+	await page.evaluate(({ top, height }) => (window as unknown as { showKeyboard: (height: number, top: number) => void }).showKeyboard(height, top), visible);
+
+	await expect.poll(async () => Math.round((await box.boundingBox())!.y + (await box.boundingBox())!.height)).toBeLessThanOrEqual(visible.top + visible.height);
+	const header = (await page.locator('[data-slot="chat-header"]').boundingBox())!;
+	expect(header.y).toBeGreaterThanOrEqual(visible.top);
+	await expect(page.getByRole("heading", { name: `Keyboard ${tag}`, level: 1 })).toBeVisible();
+
+	// The keyboard goes: the page fills the screen again.
+	await page.evaluate((height) => (window as unknown as { showKeyboard: (height: number, top: number) => void }).showKeyboard(height, 0), viewport.height);
+	await expect.poll(async () => Math.round((await page.locator('[data-slot="shell"]').boundingBox())!.height)).toBe(viewport.height);
+});
+
 test("an admin on a phone reaches Workspaces, Activity and Settings under More", async ({ page, admin }) => {
 	void admin;
 	await page.goto("/admin");

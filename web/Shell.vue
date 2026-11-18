@@ -11,6 +11,7 @@ import ChatView from "./ChatView.vue";
 import { pendingDialog } from "./dialogs";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
 import { modelMenuAsked } from "./models";
+import { useKeyboardFrame } from "./keyboard";
 import { once } from "./once";
 import SidebarPlaceholder from "./SidebarPlaceholder.vue";
 import { afterLoad, prefetchChat } from "./preload";
@@ -65,6 +66,13 @@ onBeforeUnmount(() => removeEventListener("keydown", settingsShortcut));
 // screen. It runs when typing a message or pointing at a chat (preload.ts).
 onMounted(() => afterLoad(prefetchChat));
 // Tailwind's md: the sidebar shows from here; below it, the bottom sheet.
+/**
+ * While a phone's keyboard is up on iOS Safari, the shell fills only the part of the screen
+ * above it (keyboard.ts), so the message box of a chat or a workspace sits on the keyboard and
+ * the header stays in view. Elsewhere it fills the screen (100dvh).
+ */
+const keyboard = useKeyboardFrame();
+const keyboardStyle = computed(() => (keyboard.value ? { height: `${keyboard.value.height}px`, transform: `translateY(${keyboard.value.top}px)` } : undefined));
 const wideScreen = matchMedia("(min-width: 768px)");
 const wide = ref(wideScreen.matches);
 const onWidth = () => (wide.value = wideScreen.matches);
@@ -220,7 +228,7 @@ function onSaved() {
 
 <template>
 	<div class="contents">
-		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8">
+		<div class="flex h-dvh bg-surface-base pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] pt-[env(safe-area-inset-top)] text-ink-gray-8" :style="keyboardStyle" data-slot="shell">
 			<!-- Phones get the chats in the bottom sheet, so there the sidebar is not drawn at all, not only hidden. -->
 			<ChatsPanel
 				v-if="wide"
