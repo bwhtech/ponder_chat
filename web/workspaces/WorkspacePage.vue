@@ -236,7 +236,7 @@ function askDelete() {
 	if (!workspace) return;
 	dialog.danger({
 		title: "Delete this workspace?",
-		message: `“${workspace.name}”, its instructions and its documents will be deleted. Chats in it are kept.`,
+		message: `“${workspace.name}”, its instructions and its sources will be deleted. Chats in it are kept.`,
 		onConfirm: async () => {
 			await deleteWorkspace(workspace.id);
 			void refreshThreads();
