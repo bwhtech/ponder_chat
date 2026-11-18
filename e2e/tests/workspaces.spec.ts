@@ -1,7 +1,7 @@
 import type { Page } from "@playwright/test";
 import { e2e } from "../env.ts";
 import { chat, expect, test } from "../fixtures.ts";
-import { createWorkspace, newPerson } from "../workspaces.ts";
+import { addChats, createSkill, createWorkspace, newPerson, textFile, uploadReady, workspacePage } from "../workspaces.ts";
 
 /**
  * Workspaces and sharing (docs/workspaces-plan.md, "Tests"): a person makes a workspace with
@@ -287,6 +287,69 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 		const [call] = await fake.calls(question);
 		expect(call.system).toContain(second);
 		expect(call.system).not.toContain(first);
+	});
+});
+
+test("the message box floats at the bottom of a workspace page, beside the side panel; a question there, with a skill, opens its chat", async ({ page, admin, db, fake }) => {
+	const tag = admin.id.slice(0, 6);
+	const name = `Renal ward ${tag}`;
+	const question = `How often is the exit site cleaned, ${tag}?`;
+	const marker = `Write a shift handover, ref ${tag}.`;
+	const { id, slug } = await createWorkspace(page, name);
+	await uploadReady(page, id, textFile("Exit-site care.md", "# Exit-site care\n\nClean the exit site every second day."));
+	const chats = await addChats(db, admin.id, id, 20);
+	const skill = `handover-${tag.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+	await createSkill(page, skill, "Turn ward notes into a shift handover.", marker);
+	await page.goto(`/?w=${slug}`);
+	const box = workspacePage.box(page);
+	await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(20);
+
+	await test.step("Scrolled to the end, the box is in view, clear of the side panel, and the last chat can be clicked", async () => {
+		await workspacePage.scrollToEnd(page);
+		await expect(box).toBeInViewport({ ratio: 1 });
+		const boxRect = (await box.boundingBox())!;
+		const asideRect = (await aside(page).boundingBox())!;
+		expect(boxRect.x + boxRect.width).toBeLessThanOrEqual(asideRect.x);
+		const last = page.locator('[data-slot="workspace-chats"] li button').last();
+		expect(await workspacePage.reachable(last)).toBe(true);
+	});
+
+	await test.step("$ opens the skills above the box, and one is chosen", async () => {
+		await workspacePage.field(page).click();
+		await page.keyboard.type(`$${skill}`);
+		const option = page.getByRole("listbox", { name: "Skills" }).getByRole("option").first();
+		await expect(option).toBeVisible();
+		expect((await option.boundingBox())!.y).toBeLessThan((await box.boundingBox())!.y);
+		await option.click();
+		await expect(box.locator('[data-slot="skill-chip"]')).toHaveCount(1);
+	});
+
+	await test.step("The question opens the chat as sent: no greeting, the question at once, then the reply", async () => {
+		// Whether the new chat's greeting ever shows, from now on.
+		await page.evaluate(() => {
+			const seen = { greeting: false };
+			Object.assign(window, { seen });
+			new MutationObserver(() => (seen.greeting ||= Boolean(document.querySelector('[data-slot="conversation-empty-state"]')))).observe(document.body, { childList: true, subtree: true });
+		});
+		await workspacePage.field(page).fill(question);
+		await workspacePage.field(page).press("Enter");
+		await expect(page).toHaveURL(/[?&]t=/);
+		await expect(page.locator('[data-slot="message"][data-role="user"]')).toContainText(question);
+		await expect(page.locator('[data-slot="message"][data-role="user"] [data-slot="skill-chip"]')).toHaveCount(1);
+		await expect(page.locator('[data-slot="chat-breadcrumb"]')).toContainText(name);
+		await expect(chat.reply(page)).toContainText(question);
+		await chat.idle(page);
+		expect(await page.evaluate(() => (window as unknown as { seen: { greeting: boolean } }).seen.greeting)).toBe(false);
+		const [call] = await fake.calls(question);
+		expect(JSON.stringify(call.messages)).toContain(marker);
+	});
+
+	await test.step("Back on the workspace, the last chat opens from the end of the list", async () => {
+		await page.goto(`/?w=${slug}`);
+		await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(21);
+		await workspacePage.scrollToEnd(page);
+		await page.locator('[data-slot="workspace-chats"] li button').last().click();
+		await expect(page).toHaveURL(new RegExp(`[?&]t=${chats.at(-1)}`));
 	});
 });
 

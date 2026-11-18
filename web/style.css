@@ -41,6 +41,17 @@
   }
 }
 
+/* The workspace page fades only under its header. Its message box floats at the bottom of the same scroller, and a
+   fade there would fade the box too; the box's own backdrop fades the page out above it (workspaces/WorkspacePage.vue). */
+@supports (animation-timeline: scroll()) {
+  [data-slot='chat-column'] [data-slot='workspace-view'] {
+    animation: ai-scroll-fade-t 1ms ease-in-out;
+    animation-timeline: scroll(self y);
+    animation-range: 0 40px;
+    animation-fill-mode: both;
+  }
+}
+
 /* From sm, the transcript and Memory reserve a scrollbar gutter on both sides. Their 720px column then starts one
    gutter further in once the chat area is narrower than the column (the side panel is open, or a small window).
    The header, the composer and the loading skeleton sit outside those scrollers, so they reserve the same width

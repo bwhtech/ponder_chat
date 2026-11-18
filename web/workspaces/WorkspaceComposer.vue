@@ -15,13 +15,16 @@ import type { FirstMessage } from "./first-message";
  * The workspace page's message box: a question here starts a new chat in this workspace
  * (Shell.vue hands it to the chat, first-message.ts). The same box as a chat's, with $ for
  * skills; the placeholder names the workspace. What was typed stays per workspace, as a
- * chat's draft does. The $ menu opens under the box, which sits near the top of the page.
+ * chat's draft does. The box floats at the bottom of the page, where the chat's own box is, so
+ * the $ menu opens above it, as in a chat.
  */
 const props = defineProps<{ workspaceId: string; name: string }>();
 const emit = defineEmits<{ ask: [message: FirstMessage] }>();
 
 const input = ref("");
 useDraft(`workspace:${props.workspaceId}`, input);
+// Typing a question: the chat's code loads now, as in a chat, so the chat it opens shows the question at once.
+watch(input, () => void preloadChat(), { once: true });
 const model = ref(defaultModel.value);
 // The page opened before the list of models came.
 watch(defaultModel, (fallback) => !model.value && (model.value = fallback));
@@ -48,7 +51,6 @@ function ask({ text, files }: { text: string; files: File[] }) {
 		<div ref="composer" class="relative" v-bind="skills.listeners">
 			<SkillMenu
 				v-if="skills.open.value && skillQuery"
-				below
 				:items="skills.matches.value"
 				:query="skillQuery.query"
 				:active="skills.active.value"

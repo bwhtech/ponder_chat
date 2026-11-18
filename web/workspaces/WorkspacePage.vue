@@ -18,9 +18,9 @@ import WorkspaceHeading from "./WorkspaceHeading.vue";
 import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
 
 /**
- * A workspace (`?w=<slug>`): its name, the composer, whose new chat is in
- * this workspace, the person's own chats in it, and a side panel with the instructions, the
- * documents and its people (under the chats on a phone). The sidebar's row draws the header
+ * A workspace (`?w=<slug>`): its name, the person's own chats in it, a side panel with the
+ * instructions, the documents and its people (under the chats on a phone), and the composer,
+ * whose new chat is in this workspace, at the bottom, where the chat's own box will be. The sidebar's row draws the header
  * at once; the rest fills in when the workspace loads. A workspace the person cannot use is
  * not found. An older link by the workspace's id opens it too, and the slug takes its place.
  *
@@ -37,6 +37,8 @@ const loadError = ref("");
 /** What the page shows before the workspace loads: the sidebar's row. */
 const summary = computed(() => detail.value ?? workspaceByKey(props.slugOrId));
 const workspaceId = computed(() => summary.value?.id ?? "");
+/** The chats beside the side panel, from Tailwind's lg; one column under them while the file viewer is open beside the page. */
+const columns = computed(() => (panelItem.value ? "" : "lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12"));
 
 // Each load takes a number: the answer for a workspace no longer open is dropped.
 let asked = 0;
@@ -177,18 +179,27 @@ function askDelete() {
 		</div>
 	</div>
 
-	<div
-		v-else
-		data-slot="workspace-view"
-		class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-range:40px] [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]"
-	>
-		<!-- The file viewer beside the page leaves too little width for two columns. -->
-		<div class="mx-auto grid w-full max-w-[1120px] gap-8 px-4 pb-10 pt-6 sm:px-5" :class="{ 'lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12': !panelItem }">
-			<div class="min-w-0 space-y-8">
-				<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
-				<WorkspaceChats :workspace-id="workspaceId" :shared="Boolean(summary && (summary.kind === 'org' || summary.memberCount))" @open="emit('openChat', $event)" />
+	<!-- The page scrolls under its message box, which floats at the bottom where a chat's box sits:
+	     in the chats' column beside the side panel, across the page on a phone. The box comes first,
+	     for the keyboard and screen readers, and shows last (order-last, sticky). It sits in the same
+	     scroller, so the wheel scrolls the page over it, and its own row is the room the page needs
+	     to scroll clear of it. -->
+	<div v-else data-slot="workspace-view" class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]">
+		<div class="flex min-h-full flex-col">
+			<div class="pointer-events-none sticky bottom-0 z-10 order-last" data-slot="workspace-dock">
+				<div class="mx-auto grid w-full max-w-[1120px] px-4 sm:px-5" :class="columns">
+					<div class="pointer-events-auto relative min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+						<!-- The page's background behind the box, fading in over 40px above it, as a chat fades out above its box. -->
+						<div class="pointer-events-none absolute -inset-x-4 -top-10 bottom-0 -z-10 bg-surface-base [mask-image:linear-gradient(to_bottom,transparent,#000_40px)] sm:-inset-x-5" aria-hidden="true" />
+						<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
+					</div>
+				</div>
 			</div>
-			<WorkspaceAside :workspace="summary" :detail="detail" @instructions="editInstructions" @documents="documentsChanged" />
+			<!-- The file viewer beside the page leaves too little width for two columns. -->
+			<div class="mx-auto grid w-full max-w-[1120px] flex-1 content-start gap-8 px-4 pb-10 pt-6 sm:px-5" :class="columns">
+				<WorkspaceChats class="min-w-0" :workspace-id="workspaceId" :shared="Boolean(summary && (summary.kind === 'org' || summary.memberCount))" @open="emit('openChat', $event)" />
+				<WorkspaceAside :class="{ 'lg:col-start-2 lg:row-start-1': !panelItem }" :workspace="summary" :detail="detail" @instructions="editInstructions" @documents="documentsChanged" />
+			</div>
 		</div>
 	</div>
 </template>

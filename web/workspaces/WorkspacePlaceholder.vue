@@ -5,7 +5,7 @@ import { kindIcon, workspaceByKey } from "./store";
 
 /**
  * The workspace page (WorkspacePage.vue) while its code arrives: its header with the name
- * from the sidebar's row, and bars where its parts go. Vue gives it the page's props and
+ * from the sidebar's row, and a bar where its message box goes, at the bottom. Vue gives it the page's props and
  * slots (Shell.vue), so the phone's buttons are already in the header.
  */
 defineOptions({ inheritAttrs: false });
@@ -27,10 +27,12 @@ const workspace = computed(() => workspaceByKey(props.slugOrId));
 			<slot name="end" />
 		</div>
 	</header>
-	<div class="min-h-0 flex-1 overflow-hidden sm:[scrollbar-gutter:stable_both-edges]" aria-busy="true">
-		<div class="mx-auto grid w-full max-w-[1120px] gap-8 px-4 pb-10 pt-6 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
-			<div class="min-w-0 space-y-8">
-				<Skeleton class="h-[7.5rem] w-full rounded-[1.25rem]" />
+	<!-- The page's frame (WorkspacePage.vue): its message box at the bottom of the chats' column. -->
+	<div class="flex min-h-0 flex-1 flex-col overflow-hidden sm:[scrollbar-gutter:stable_both-edges]" aria-busy="true">
+		<div class="mx-auto mt-auto grid w-full max-w-[1120px] px-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
+			<div class="min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+				<!-- The box's height with its placeholder on one line. -->
+				<Skeleton class="h-[5.625rem] w-full rounded-7" />
 			</div>
 		</div>
 	</div>
