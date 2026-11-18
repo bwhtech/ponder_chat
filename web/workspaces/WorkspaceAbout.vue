@@ -57,7 +57,7 @@ defineExpose<UploadHandle>({ upload: async (files) => documents.value?.upload(fi
 <template>
 	<section
 		v-if="showInstructions || showDocuments || shared"
-		class="flex flex-col gap-8"
+		class="flex flex-col gap-8 [container-type:inline-size]"
 		aria-label="About this workspace"
 		data-slot="workspace-about"
 		v-on="drop.listeners"
@@ -66,7 +66,9 @@ defineExpose<UploadHandle>({ upload: async (files) => documents.value?.upload(fi
 			<WorkspaceInstructions v-if="showInstructions" :instructions="instructions" :editable="editable" @edit="emit('instructions')" />
 		</Transition>
 
-		<div v-if="showDocuments || shared" class="grid gap-8" :class="{ 'sm:grid-cols-2': showDocuments && shared }">
+		<!-- Side by side only when the column itself is wide enough, not the window: with the side panel open, the
+		     column is narrow on a wide screen, and two columns would cut every name short. -->
+		<div v-if="showDocuments || shared" class="grid gap-8" :class="{ '[@container(min-width:600px)]:grid-cols-2': showDocuments && shared }">
 			<Transition :appear="opened" v-bind="COME_IN">
 				<WorkspaceDocuments
 					v-if="showDocuments"

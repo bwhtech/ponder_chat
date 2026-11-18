@@ -38,10 +38,14 @@ watch(
 				id="workspace-instructions-preview"
 				inert
 				data-slot="workspace-instructions"
-				class="line-clamp-3 break-words rounded-4 bg-surface-gray-2 px-3 py-2 text-p-sm text-ink-gray-8 transition-colors duration-150 ease-out-strong group-hover:bg-surface-gray-3 motion-reduce:transition-none"
+				class="break-words rounded-4 bg-surface-gray-2 px-3 py-2 text-p-sm text-ink-gray-8 transition-colors duration-150 ease-out-strong group-hover:bg-surface-gray-3 motion-reduce:transition-none"
 			>
-				<component :is="Markdown" v-if="Markdown" :content="instructions" size="sm" :parse-incomplete="false" />
-				<p v-else class="whitespace-pre-wrap">{{ instructions }}</p>
+				<!-- Clamped inside the padding: a clamp on the padded box clips at its outer edge, so a list item's
+				     wrapped line could show the start of a fourth line in the bottom padding. -->
+				<div class="line-clamp-3">
+					<component :is="Markdown" v-if="Markdown" :content="instructions" size="sm" :parse-incomplete="false" />
+					<p v-else class="whitespace-pre-wrap">{{ instructions }}</p>
+				</div>
 			</div>
 			<button
 				type="button"

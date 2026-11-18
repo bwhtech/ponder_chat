@@ -582,6 +582,24 @@ async function drag(page: Page, type: "dragenter" | "drop", file = { name: "note
 }
 
 /** About 100,000 characters in paragraphs, with `line` in the middle. No other paragraph shares its words. */
+test("Sources and People sit side by side on a wide page, and one under the other while Details narrow it", async ({ page, person, fake, db, browser }) => {
+	const tag = person.id.slice(0, 6);
+	const { id, slug } = await createWorkspace(page, `Food bank ${tag}`);
+	await uploadReady(page, id, textFile("Shift roles and duties.md", "# Shift roles\n\nThe lead opens the warehouse at 8."));
+	const member = await newPerson(browser, db, fake, "Lena Fischer");
+	await share(page, id, [{ userId: member.person.id, access: "ask" }]);
+	await page.goto(`/?w=${slug}`);
+	const people = page.locator('[data-slot="workspace-sharing"]');
+	await expect(people).toBeVisible();
+	const top = async (locator: Locator) => (await locator.boundingBox())!.y;
+	expect(Math.abs((await top(people)) - (await top(documents(page))))).toBeLessThan(2);
+
+	// Details take the right of the page: the column is too narrow for two, so People goes under Sources.
+	await openDetails(page, "Shift roles and duties.md");
+	await expect.poll(async () => (await top(people)) - (await documents(page).boundingBox())!.y - (await documents(page).boundingBox())!.height).toBeGreaterThan(0);
+	await member.context.close();
+});
+
 function handbook(line: string) {
 	const paragraphs = Array.from({ length: 900 }, (_, index) => `Section ${index + 1}. Shared desks are cleaned each evening, and kitchen supplies arrive every Monday morning.`);
 	paragraphs.splice(450, 0, line);
