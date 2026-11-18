@@ -49,12 +49,17 @@ const GENERAL = "\u0000general";
 type Choice<T> = { value: T; number: number };
 type Session = ReturnType<typeof createSession>;
 
-/** The queue of each workspace, while it has work to do. */
+/**
+ * The queue of each workspace that Share was opened on. It stays registered while its dialog is
+ * open, idle or not, so every change made there goes through it; only Share opened again with
+ * nothing on its way starts a new one in its place. An ended queue (the person lost access) goes.
+ */
 const sessions = new Map<string, Session>();
 
 /**
  * Share's state for this workspace. A queue that still has work is taken over: its answers go
- * to these callbacks from now on, and the dialog shows its choices still on their way.
+ * to these callbacks from now on, and the dialog shows its choices still on their way. Only one
+ * Share is open at a time, so an idle queue is the closed dialog's, and a fresh one replaces it.
  */
 export function useSharing(initial: WorkspaceDetail, api: SharingApi, events: SharingEvents, me: string) {
 	const existing = sessions.get(initial.id);
@@ -122,7 +127,6 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 		running = true;
 		while (queue.length && !stopped) await write(queue.shift()!);
 		running = false;
-		if (!busy() && sessions.get(saved.value.id) === session) sessions.delete(saved.value.id);
 	}
 
 	function savedAccess(userId: string) {

@@ -220,6 +220,23 @@ describe("Share applies each change at once", () => {
 		expect(again.answers).toHaveLength(2);
 	});
 
+	it("keeps one queue for the workspace after a quiet spell: Share opened again during a later change still joins it", async () => {
+		const first = setup();
+		first.sharing.add(bea, "ask");
+		await first.server.next();
+		// Nothing on its way now. Then Bea is given Can edit, and Share is opened again while that waits.
+		first.sharing.setRole("bea", "edit");
+		const again = openShare(first.workspace, first.server);
+		expect(again.shown()).toEqual(["bea:edit"]);
+		again.sharing.remove("bea");
+		expect(first.server.sent, "the removal waits for the grant").toEqual(["PUT bea ask", "PUT bea edit"]);
+		await first.server.next();
+		await first.server.next();
+		expect(first.server.sent).toEqual(["PUT bea ask", "PUT bea edit", "DELETE bea"]);
+		expect(first.server.saved()).toEqual([]);
+		expect(again.shown()).toEqual([]);
+	});
+
 	it("ends Share on a 404, even when a newer choice for the row waits", async () => {
 		const { sharing, server, said, ended } = setup(detail([{ ...bea, access: "ask" }]));
 		sharing.setRole("bea", "edit");
