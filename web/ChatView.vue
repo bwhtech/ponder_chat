@@ -241,23 +241,30 @@ function turnStart(list: UIMessage[], index: number) {
 // A new chat opens with the field in the middle of the page, under the greeting (on phones it
 // stays at the bottom, by the thumb and the keyboard). The first message sends it down. A
 // question asked on a workspace page is that first message: the chat opens as sent, with no
-// greeting and its field already at the bottom.
+// greeting, and its field slides in from where the page's box was.
 const landing = computed(() => messages.value.length === 0 && !workspace.firstMessage);
 const area = ref<HTMLElement | null>(null);
 const footer = ref<HTMLElement | null>(null);
 let footerTop = 0;
 // Before the page re-renders: where the field is now.
 watch(landing, () => (footerTop = footer.value?.getBoundingClientRect().top ?? 0), { flush: "pre" });
-watch(landing, (now) => !now && settleFooter(), { flush: "post" });
+watch(landing, (now) => !now && footer.value && settleFooter(0, footerTop - footer.value.getBoundingClientRect().top), { flush: "post" });
+onMounted(() => {
+	const from = workspace.firstMessage?.from;
+	const box = composer.value?.getBoundingClientRect();
+	if (from && box) settleFooter(from.left - box.left, from.bottom - box.bottom);
+});
 
-/** The field moves from where it was to its place at the bottom. The first message shows at once, like every message you send. */
-function settleFooter() {
+/**
+ * The field moves from where it was, `dx` and `dy` away, to its place at the bottom. The first
+ * message shows at once, like every message you send. Only the place animates: a field of
+ * another width takes its own at once.
+ */
+function settleFooter(dx: number, dy: number) {
 	const field = footer.value;
-	if (!field) return;
-	const shift = footerTop - field.getBoundingClientRect().top;
-	if (Math.abs(shift) <= 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+	if (!field || (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 	const easing = getComputedStyle(document.documentElement).getPropertyValue("--ease-out-strong").trim() || "ease-out";
-	field.animate([{ transform: `translateY(${shift}px)` }, { transform: "none" }], { duration: 300, easing });
+	field.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: 300, easing });
 }
 
 /** The greeting fades out where it stood, out of the layout, so it does not hold the field up. */

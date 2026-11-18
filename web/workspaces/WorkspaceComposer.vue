@@ -41,7 +41,10 @@ function ask({ text, files }: { text: string; files: File[] }) {
 	if (!text && !files.length && !skills.chosen.value.length) return;
 	// The chat's code loads as the page changes to it.
 	void preloadChat();
-	emit("ask", { text, files, skills: skills.take(), model: model.value || defaultModel.value, workspaceId: props.workspaceId });
+	// Where the box is now, before the page changes: the chat's box slides from here.
+	const box = composer.value?.getBoundingClientRect();
+	const from = box && { left: box.left, bottom: box.bottom };
+	emit("ask", { text, files, skills: skills.take(), model: model.value || defaultModel.value, workspaceId: props.workspaceId, from });
 }
 </script>
 
