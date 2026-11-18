@@ -2,6 +2,7 @@ import type { APIRequestContext } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import { e2e } from "../env.ts";
 import { expect, jsonOf, randomIp, signIn, test, uniqueEmail } from "../fixtures.ts";
+import { scanPdf } from "../pdfs.ts";
 
 /**
  * /admin/workspaces and the overview's System line (server/workspaces/admin.ts,
@@ -16,11 +17,11 @@ async function createWorkspace(request: APIRequestContext, kind: "org" | "privat
 	return (await jsonOf<{ workspace: { id: string } }>(created)).workspace.id;
 }
 
-/** Uploads a Markdown document and waits until it is ready. */
-async function addDocument(request: APIRequestContext, workspaceId: string, name: string) {
+/** Uploads a document, Markdown unless `file` says otherwise, and waits until it is ready. */
+async function addDocument(request: APIRequestContext, workspaceId: string, name: string, file?: { mimeType: string; buffer: Buffer }) {
 	const text = `# ${name}\n\nThe night shift hands over at seven. ${"Check each bed before you leave. ".repeat(20)}`;
 	const uploaded = await request.post(`/api/workspaces/${workspaceId}/documents`, {
-		multipart: { file: { name, mimeType: "text/markdown", buffer: Buffer.from(text) } },
+		multipart: { file: { name, ...(file ?? { mimeType: "text/markdown", buffer: Buffer.from(text) }) } },
 		headers,
 	});
 	expect(uploaded.status(), await uploaded.text()).toBe(201);
@@ -124,6 +125,37 @@ test("the page follows a document while it is being read, and so does its open l
 	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Ready", { timeout: 15_000 });
 	await page.keyboard.press("Escape");
 	await expect(row).toContainText("Ready");
+});
+
+test("an admin's log shows a PDF's page reads as one row, which opens to each page", async ({ page, admin, fake }) => {
+	void admin;
+	const mark = randomBytes(3).toString("hex");
+	const key = `PAGEKEY-admin-${mark}`;
+	await fake.page({ match: key, text: "Exit site care: clean the exit site every second day." });
+	const orgName = `Scanned ward ${mark}`;
+	const name = `forms-${mark}.pdf`;
+	const orgId = await createWorkspace(page.request, "org", orgName);
+	// A line of text, then three scans that the page model reads.
+	await addDocument(page.request, orgId, name, { mimeType: "application/pdf", buffer: scanPdf("Ward forms", key, 3) });
+
+	await page.goto("/admin/workspaces");
+	await page.getByRole("article", { name: orgName }).locator(`[data-document="${name}"]`).click();
+	const log = page.getByRole("dialog");
+	const group = log.locator('[data-step="page-reads"]');
+	const toggle = group.getByRole("button");
+	const pages = group.locator('[data-step="page-read"]');
+	await expect(toggle).toHaveText(/^3 pages read by \S+/);
+	await expect(group).toContainText("Pages 2–4");
+	await expect(toggle).toHaveAttribute("aria-expanded", "false");
+	await expect(pages).toHaveCount(0);
+
+	await toggle.click();
+	await expect(toggle).toHaveAttribute("aria-expanded", "true");
+	await expect(pages).toHaveCount(3);
+	await expect(pages.first()).toContainText("Page 2 read by a model");
+	await toggle.click();
+	await expect(pages).toHaveCount(0);
+	await expect(log.locator('[data-step="ready"]')).toContainText("Ready");
 });
 
 test("a person who is not an admin can't read workspaces through /api/admin", async ({ page, person }) => {
