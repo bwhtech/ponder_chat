@@ -31,7 +31,7 @@ const menu = computed(() => [
 <template>
 	<li
 		ref="row"
-		class="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] content-center items-center gap-x-2.5 rounded-4 px-2 py-1 transition-colors duration-150 ease-out-strong has-[[data-slot=document-name]:hover]:bg-surface-gray-2 has-[[data-slot=document-name]:active]:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:min-h-11"
+		class="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] content-center items-center gap-x-2.5 rounded-4 px-2 py-1 transition-colors duration-150 ease-out-strong can-hover:has-[[data-slot=document-name]:hover]:bg-surface-gray-2 has-[[data-slot=document-name]:active]:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:min-h-11"
 		:class="{ 'min-h-7': oneLine }"
 		data-slot="workspace-document"
 		:data-status="status"

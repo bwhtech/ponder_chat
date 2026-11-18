@@ -65,4 +65,11 @@ onMounted(() => {
 	--code-padding-x: 14px;
 	height: 100%;
 }
+/* Safari on iOS zooms into a field written smaller than 16px, and the editor is one (contenteditable),
+   which the 16px rule for inputs on touch screens does not reach. */
+@media (pointer: coarse) {
+	.markdown-editor {
+		--code-font-size: 16px;
+	}
+}
 </style>

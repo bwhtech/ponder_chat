@@ -39,9 +39,15 @@ const pose = plugin(({ addVariant }) =>
 	addVariant("pose", "@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) { .group:hover & }"),
 );
 
+/**
+ * `can-hover:`, for a hover style frappe-ui's `hover:` cannot write, such as an arbitrary
+ * `has-[…:hover]:`: only where a fine pointer can hover, so a tap does not leave it stuck.
+ */
+const canHover = plugin(({ addVariant }) => addVariant("can-hover", "@media (hover: hover) and (pointer: fine)"));
+
 /** @type {import('tailwindcss').Config} */
 export default {
 	presets: [preset],
 	content: chatOnly ? chatContent : [...content, ...aiElements, `${here}web/**/*.{html,vue,ts}`],
-	plugins: [pose],
+	plugins: [pose, canHover],
 };

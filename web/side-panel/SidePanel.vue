@@ -93,7 +93,7 @@ onBeforeUnmount(() => {
 			data-slot="side-panel"
 			:aria-label="header.label"
 			tabindex="-1"
-			class="outline-none fixed inset-0 z-30 flex flex-col bg-surface-base pt-[env(safe-area-inset-top)] lg:static lg:z-auto lg:w-[clamp(380px,46vw,880px)] lg:shrink-0 lg:border-l lg:border-outline-gray-1 lg:pt-0"
+			class="outline-none fixed inset-0 z-30 flex flex-col bg-surface-base pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] pt-[env(safe-area-inset-top,0px)] lg:static lg:z-auto lg:w-[clamp(380px,46vw,880px)] lg:shrink-0 lg:border-l lg:border-outline-gray-1 lg:p-0"
 		>
 			<header class="flex min-h-12 shrink-0 items-center gap-2 border-b border-outline-gray-1 pl-4 pr-2 sm:pl-5">
 				<span :class="[header.icon, header.ink, 'size-4 shrink-0']" aria-hidden="true" />
@@ -153,8 +153,11 @@ onBeforeUnmount(() => {
 	color: var(--ink-gray-7);
 	transition: background-color 150ms ease;
 }
-.panel-icon:hover {
-	background: var(--surface-gray-3);
+/* Only where a fine pointer can hover, as frappe-ui's hover:, so a tap does not leave it grey. */
+@media (hover: hover) and (pointer: fine) {
+	.panel-icon:hover {
+		background: var(--surface-gray-3);
+	}
 }
 .panel-icon:active {
 	background: var(--surface-gray-4);
