@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { Button, Dialog, ErrorMessage, FormControl } from "frappe-ui";
 import { computed, reactive, ref } from "vue";
-import { toast } from "../toasts";
 import { dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
 import { createWorkspace, isAdmin } from "./store";
 
@@ -24,8 +23,8 @@ async function save() {
 	error.value = "";
 	try {
 		const made = await createWorkspace({ name: form.name.trim(), instructions: form.instructions.trim(), kind: isAdmin.value ? form.kind : "private" });
+		// No toast: the new workspace's page opens, under its name, and that says it was made.
 		props.request.onMade(made.slug);
-		toast.success(`Created “${made.name}”`);
 		open.value = false;
 	} catch (failure) {
 		error.value = (failure as Error).message;
