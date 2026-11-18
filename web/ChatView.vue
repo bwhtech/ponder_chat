@@ -549,7 +549,7 @@ function replyModelId(message: UIMessage) {
 		</Transition>
 		<!-- Opened before the transcript's code loaded: the skeleton, not an empty chat. A new chat preloads it as its first message is typed. -->
 		<ThreadSkeleton v-if="!landing && !transcriptReady && initialMessages.length" :composer="false" />
-		<ToolContext v-else-if="!landing" :messages="messages">
+		<ToolContext v-else-if="!landing" :messages="messages" :send="send">
 			<Conversation>
 				<ConversationContent class="mx-auto w-full max-w-[720px] px-4 pb-8 pt-8 sm:px-5">
 					<ConversationItem v-if="firstShown > 0" class="flex justify-center pb-4">

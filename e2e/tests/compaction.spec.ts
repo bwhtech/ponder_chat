@@ -210,7 +210,7 @@ test("a reply that goes on after an approval is summarized when the approved cal
 	await chat.idle(page);
 
 	// The model writes a long note. Its first call did not read it, so only the run after the approval is over the trigger.
-	const note = `APPROVE-NOTE ${filler(28_000)}`;
+	const note = `APPROVE-NOTE ${filler(24_000)}`;
 	await fake.chat({
 		match: "APPROVE-ADD",
 		// In a few pieces: see toolInputPieces (fake/script.ts).
