@@ -15,6 +15,7 @@ import * as Runs from "../../telemetry/Runs.ts";
 import type { DocumentText } from "../documents/document.ts";
 import * as Indexer from "../documents/Indexer.ts";
 import { passageStore, type Excerpt } from "../documents/passages.ts";
+import * as PrepareText from "../documents/prepare-text.ts";
 import { PDF_TYPE, storedText } from "../documents/read-document.ts";
 import { migrateDocuments } from "../documents/tables.ts";
 import { recordedLayer } from "./layers.ts";
@@ -93,7 +94,7 @@ function layerFor(databaseUrl: string, schema: string) {
 		["OPENROUTER_API_KEY", "PONDER_EMBEDDING_MODEL", "OPENROUTER_BASE_URL"].flatMap((name) => (process.env[name] ? [[name, process.env[name]!]] : [])),
 	);
 	return Indexer.layer.pipe(
-		Layer.provideMerge(Layer.mergeAll(OpenRouterKey.layer, Runs.layer, ObjectStore.layer, recordedLayer(new Map()))),
+		Layer.provideMerge(Layer.mergeAll(OpenRouterKey.layer, Runs.layer, ObjectStore.layer, PrepareText.layer, recordedLayer(new Map()))),
 		Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer)),
 		Layer.provideMerge(Layer.mergeAll(Database.layer, Http.layer)),
 		Layer.provideMerge(PonderConfig.layerFromEnv({ ...env, DATABASE_URL: url })),

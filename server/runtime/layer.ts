@@ -39,6 +39,7 @@ import * as Documents from "../workspaces/documents/Documents.ts";
 import * as Indexer from "../workspaces/documents/Indexer.ts";
 import * as IndexRuns from "../workspaces/documents/IndexRuns.ts";
 import * as PageReader from "../workspaces/documents/page-reader.ts";
+import * as PrepareText from "../workspaces/documents/prepare-text.ts";
 import * as Workspaces from "../workspaces/Workspaces.ts";
 import * as Database from "./Database.ts";
 import * as Http from "./Http.ts";
@@ -75,7 +76,7 @@ export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer, Documents.l
 		),
 	),
 	Layer.provideMerge(Layer.mergeAll(Models.layer, OpenRouterKey.layer, Runs.layer)),
-	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer, Settings.layer, Branding.layer, NetGuard.layer, ObjectStore.layer, Mailer.layer, Notify.layer, PdfText.layer)),
+	Layer.provideMerge(Layer.mergeAll(OpenRouter.layer, Secrets.layer, Settings.layer, Branding.layer, NetGuard.layer, ObjectStore.layer, Mailer.layer, Notify.layer, PdfText.layer, PrepareText.layer)),
 	Layer.provideMerge(Layer.mergeAll(Database.layer, Http.layer)),
 	Layer.provideMerge(PonderConfig.layer),
 	Layer.provideMerge(Layer.mergeAll(Tracing.layer, Logger.layer)),

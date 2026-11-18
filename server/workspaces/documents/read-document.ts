@@ -1,29 +1,18 @@
-import * as Effect from "effect/Effect";
 import * as Predicate from "effect/Predicate";
 import * as Result from "effect/Result";
-import type { HeadingRule } from "./markdown-blocks.ts";
 import { delimitedToMarkdown, MAX_TABLE_CHARS, type TableTooLarge } from "./csv.ts";
 import { totalChars, type DocumentPage, type DocumentText } from "./document.ts";
-import type * as PdfText from "../../pdf-text.ts";
-import type * as PageReader from "./page-reader.ts";
-import type { SqlError } from "effect/sql/SqlError";
-import { NO_CHECKPOINT, type PageCheckpoint, type PageUnreadable, type PdfUnreadable, pdfTextPages, readPdf, type ReadStopped } from "./read-pdf.ts";
+import type { HeadingRule } from "./markdown-blocks.ts";
 
 /**
- * Reads a document of a workspace into Markdown pages: a PDF with read-pdf.ts, and the
- * text types that a chat attachment takes (TEXT_TYPES in files.ts) as one page with no
- * number. Another type is read as plain text.
+ * Reads a document of a workspace into Markdown pages: the text types that a chat
+ * attachment takes (TEXT_TYPES in files.ts) as one page with no number, and another type
+ * that is not a PDF as plain text. A PDF is read by read-pdf.ts.
+ *
+ * Pure, with no I/O and no server code: the worker of prepare-text.ts runs it, off the
+ * server's own thread.
  */
 export const PDF_TYPE = "application/pdf";
-
-export const readDocument = (
-	mediaType: string,
-	data: Uint8Array,
-	checkpoint: PageCheckpoint = NO_CHECKPOINT,
-): Effect.Effect<DocumentText, ReadFailure, PageReader.PageReader | PdfText.PdfText> =>
-	mediaType === PDF_TYPE ? readPdf(data, checkpoint) : Effect.fromResult(readText(mediaType, data));
-
-export type ReadFailure = PdfUnreadable | PageUnreadable | ReadStopped | TableTooLarge | SqlError;
 
 /**
  * How the chunker reads the headings of a document of this type: a PDF's heading levels
@@ -47,6 +36,14 @@ export function storedText(pages: ReadonlyArray<DocumentPage>) {
 export function storedPages(mediaType: string, text: string): DocumentPage[] {
 	if (mediaType === PDF_TYPE) return pdfTextPages(text);
 	return text ? [{ page: null, markdown: text }] : [];
+}
+
+/** pdf-text.ts marks each page with "--- Page N ---". */
+export function pdfTextPages(text: string): DocumentPage[] {
+	const parts = text.split(/^--- Page (\d+) ---$/m);
+	const pages: DocumentPage[] = [];
+	for (let index = 1; index < parts.length; index += 2) pages.push({ page: Number(parts[index]), markdown: parts[index + 1].trim() });
+	return pages;
 }
 
 /**

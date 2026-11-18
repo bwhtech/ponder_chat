@@ -5,8 +5,7 @@ import { assert, describe, it } from "@effect/vitest";
 import * as Result from "effect/Result";
 import { dropRepeatedLines } from "./boilerplate.ts";
 import { MAX_COLUMNS } from "./csv.ts";
-import { headingRule, readText as readTextResult } from "./read-document.ts";
-import { pdfTextPages } from "./read-pdf.ts";
+import { headingRule, pdfTextPages, readText as readTextResult } from "./read-document.ts";
 
 const bytes = (text: string) => new TextEncoder().encode(text);
 const readText = (mediaType: string, data: Uint8Array) => Result.getOrThrow(readTextResult(mediaType, data));

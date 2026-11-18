@@ -10,6 +10,7 @@ import { PageRead, totalChars, type DocumentPage, type DocumentText, type PageRe
 import { parseWithLiteParse, type LiteParsePage } from "./liteparse.ts";
 import * as PageReader from "./page-reader.ts";
 import { onePagePdfs } from "./pdf-pages.ts";
+import { pdfTextPages } from "./read-document.ts";
 
 /**
  * Reads a PDF into Markdown pages (docs/workspaces-plan.md, "PDF reading"):
@@ -130,14 +131,6 @@ const withPdfText = Effect.fnUntraced(function* (data: Uint8Array) {
 	const pages = dropRepeatedLines(pdfTextPages(text));
 	return { engine: "pdf-text", pages, pageCount: pages.length, pageReads: [] } satisfies Read;
 });
-
-/** pdf-text.ts marks each page with "--- Page N ---". */
-export function pdfTextPages(text: string): DocumentPage[] {
-	const parts = text.split(/^--- Page (\d+) ---$/m);
-	const pages: DocumentPage[] = [];
-	for (let index = 1; index < parts.length; index += 2) pages.push({ page: Number(parts[index]), markdown: parts[index + 1].trim() });
-	return pages;
-}
 
 function notCopied(page: number, reason: PageReadReason): PageReader.PageReadResult {
 	const record: PageRead = {

@@ -34,6 +34,7 @@ const AdminWorkspaces = await import("../admin.ts");
 const Workspaces = await import("../Workspaces.ts");
 const Documents = await import("./Documents.ts");
 const Indexer = await import("./Indexer.ts");
+const PrepareText = await import("./prepare-text.ts");
 const IndexRuns = await import("./IndexRuns.ts");
 const { workspacesApi } = await import("../routes.ts");
 const { searchWorkspace } = await import("./turn.ts");
@@ -241,6 +242,21 @@ describe.skipIf(!base)("workspace documents", () => {
 		const log = await documents((service) => service.log(actor("ana"), ids.workspace, uploaded.id));
 		assert.strictEqual(log.document.error, "This table is too wide. It can have at most 500 columns.");
 		assert.deepStrictEqual([log.steps.at(-1)!.step, log.steps.at(-1)!.detail.step], ["failed", "parse"]);
+		await documents((service) => service.remove(actor("ana"), ids.workspace, uploaded.id));
+	});
+
+	it("fails a document whose reading in the worker times out, for good, with the reason in the log; Try again makes it ready", async () => {
+		const uploaded = await documents((service) => service.upload(actor("ana"), ids.workspace, file("slow.md", manual(2), "text/markdown")));
+		// No worker answers in a millisecond.
+		const slowReader = Layer.fresh(Indexer.layer).pipe(Layer.provide(PrepareText.layerWith({ timeout: "1 millis", maxHeapMb: 512 })));
+		assert.strictEqual(await runPromise(Indexer.Indexer.use((indexer) => indexer.run(asked.at(-1)!)).pipe(Effect.provide(slowReader))), "failed");
+		const log = await documents((service) => service.log(actor("ana"), ids.workspace, uploaded.id));
+		assert.strictEqual(log.document.status, "failed");
+		assert.strictEqual(log.document.error, "Reading the document timed out after 0.001 seconds.");
+		assert.deepStrictEqual(log.steps.at(-1)!.detail, { step: "parse", error: "Reading the document timed out after 0.001 seconds.", reason: "timeout", ms: log.steps.at(-1)!.detail.ms });
+		assert.notInclude(log.steps.map((step) => step.step), "parsed");
+		await documents((service) => service.retry(actor("ana"), ids.workspace, uploaded.id));
+		assert.strictEqual(await indexLatest(), "ready");
 		await documents((service) => service.remove(actor("ana"), ids.workspace, uploaded.id));
 	});
 

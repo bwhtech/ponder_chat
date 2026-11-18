@@ -75,6 +75,7 @@ export function failureReason(error: string | null) {
 	if (page) return `Could not read page ${page[1]}`;
 	if (/\bno text\b/.test(error ?? "")) return "Found no text to read";
 	if (/^This table is too/.test(error ?? "")) return "The table is too large";
+	if (/too large or complex/.test(error ?? "")) return "Too large to read";
 	return "Could not read it";
 }
 
@@ -82,6 +83,8 @@ export function failureReason(error: string | null) {
 export function failureCause(error: string | null) {
 	if (/time(d)? ?out/i.test(error ?? "")) return "It took too long.";
 	if (/missing from storage/.test(error ?? "")) return "The file is missing. Upload it again.";
+	// The reader ran out of memory (server/workspaces/documents/prepare-text.ts).
+	if (/too large or complex/.test(error ?? "")) return "It is too large or complex to read. Split it into smaller files.";
 	// The server's own words (csv.ts): how wide it may be, or what to change.
 	if (/^This table is too/.test(error ?? "")) return error;
 	return null;
