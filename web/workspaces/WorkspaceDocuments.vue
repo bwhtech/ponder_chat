@@ -115,8 +115,9 @@ function askDelete(document: WorkspaceDocument) {
 		</div>
 
 		<ul v-if="!documents" class="space-y-1" aria-busy="true" aria-label="Loading documents">
-			<li v-for="width in ['w-40', 'w-32']" :key="width" class="flex gap-2.5 py-1 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:items-center">
-				<span class="flex size-5 shrink-0 items-center justify-center"><Skeleton class="size-4 rounded-4" /></span>
+			<!-- DocumentRow.vue's shape: the icon in the middle of the name and its line. -->
+			<li v-for="width in ['w-40', 'w-32']" :key="width" class="flex items-center gap-2.5 py-1 [@media(pointer:coarse)]:min-h-11">
+				<span class="flex w-5 shrink-0 items-center justify-center"><Skeleton class="size-4 rounded-4" /></span>
 				<div class="min-w-0 flex-1">
 					<div class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></div>
 					<div class="flex h-[1lh] items-center text-p-sm"><Skeleton class="h-2.5 w-16 rounded-4" /></div>

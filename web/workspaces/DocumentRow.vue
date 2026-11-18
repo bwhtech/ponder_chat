@@ -8,13 +8,15 @@ import { documentIcon, failureReason, fileSize, STATUS_LABELS, type WorkspaceDoc
  * "66 KB · Reading…", "2.3 MB · Could not read page 3"). A person who can edit also sees its
  * size, "Try again" when it failed, and a menu with Details and Delete. Reading shows a turning
  * icon until the page's poll says Ready or Failed. The name opens the file, whatever its status.
+ * The icon and the menu sit in the middle of the name and the line under it: one grid row, with
+ * Try again in a row of its own under the text.
  */
 const props = defineProps<{ document: WorkspaceDocument; editable: boolean; retrying: boolean }>();
 const emit = defineEmits<{ open: []; details: []; retry: []; delete: [] }>();
 
 const status = computed(() => props.document.status);
 const size = computed(() => (props.editable ? fileSize(props.document.size) : ""));
-/** Only the name (someone who can only ask, a Ready document): the row keeps 28px (44px on touch), its name centred. */
+/** Only the name (someone who can only ask, a Ready document): the row keeps 28px (44px on touch). */
 const oneLine = computed(() => !size.value && status.value === "ready");
 const statusText = computed(() => (status.value === "failed" ? failureReason(props.document.error) : STATUS_LABELS[status.value]));
 const menu = computed(() => [
@@ -25,14 +27,13 @@ const menu = computed(() => [
 
 <template>
 	<li
-		class="relative flex gap-2.5 rounded-4 px-2 py-1 transition-colors duration-150 ease-out-strong has-[[data-slot=document-name]:hover]:bg-surface-gray-2 has-[[data-slot=document-name]:active]:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:min-h-11"
-		:class="{ 'min-h-7 items-center': oneLine }"
+		class="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] content-center items-center gap-x-2.5 rounded-4 px-2 py-1 transition-colors duration-150 ease-out-strong has-[[data-slot=document-name]:hover]:bg-surface-gray-2 has-[[data-slot=document-name]:active]:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:min-h-11"
+		:class="{ 'min-h-7': oneLine }"
 		data-slot="workspace-document"
 		:data-status="status"
 		:aria-busy="status === 'reading' || undefined"
 	>
-		<!-- The icon and the menu sit on the name's line, however many lines the row has. -->
-		<span class="flex h-[1lh] w-5 shrink-0 items-center justify-center text-sm" aria-hidden="true">
+		<span class="flex w-5 items-center justify-center" aria-hidden="true">
 			<span
 				:class="[
 					status === 'reading' ? 'lucide-loader-circle animate-spin motion-reduce:animate-none' : documentIcon(document),
@@ -41,7 +42,7 @@ const menu = computed(() => [
 				]"
 			/>
 		</span>
-		<div class="min-w-0 flex-1">
+		<div class="min-w-0">
 			<!-- The name opens the file; its area covers the row, under Try again and the menu. -->
 			<button
 				type="button"
@@ -53,21 +54,20 @@ const menu = computed(() => [
 			<p v-if="size || status !== 'ready'" class="text-p-sm text-ink-gray-6" data-slot="document-status">
 				{{ size && status !== "ready" ? `${size} · ` : size }}<span v-if="status !== 'ready'" :class="{ 'text-ink-red-6': status === 'failed' }">{{ statusText }}</span>
 			</p>
-			<Button
-				v-if="editable && status === 'failed'"
-				variant="ghost"
-				size="sm"
-				icon-left="lucide-rotate-ccw"
-				label="Try again"
-				class="touch-target relative -ml-2 mt-0.5 !text-sm"
-				:loading="retrying"
-				@click="emit('retry')"
-			/>
 		</div>
-		<div v-if="editable" class="flex h-[1lh] shrink-0 items-center text-sm">
-			<Dropdown :options="menu" align="end">
-				<Button variant="ghost" icon="lucide-ellipsis" :aria-label="`Actions for “${document.name}”`" class="touch-target relative -mr-1 shrink-0" />
-			</Dropdown>
-		</div>
+		<Dropdown v-if="editable" :options="menu" align="end">
+			<Button variant="ghost" icon="lucide-ellipsis" :aria-label="`Actions for “${document.name}”`" class="touch-target relative -mr-1 shrink-0" />
+		</Dropdown>
+		<!-- Under the text, so the icon and the menu stay in the middle of the name and its line. -->
+		<Button
+			v-if="editable && status === 'failed'"
+			variant="ghost"
+			size="sm"
+			icon-left="lucide-rotate-ccw"
+			label="Try again"
+			class="touch-target relative col-start-2 -ml-2 mt-0.5 justify-self-start !text-sm"
+			:loading="retrying"
+			@click="emit('retry')"
+		/>
 	</li>
 </template>
