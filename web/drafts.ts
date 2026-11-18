@@ -29,9 +29,11 @@ export function useDraft(threadId: string, text: Ref<string>) {
 		timer = setTimeout(flush, SAVE_AFTER_MS);
 	});
 	window.addEventListener("pagehide", flush);
+	// Always saved as the box goes, not only with a save pending: sending clears the field just
+	// before a workspace page leaves for the new chat, and the page goes before its watch runs.
 	onBeforeUnmount(() => {
 		window.removeEventListener("pagehide", flush);
-		if (timer) flush();
+		flush();
 	});
 }
 
