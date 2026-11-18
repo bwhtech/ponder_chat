@@ -92,6 +92,19 @@ export const workspacesApi = new Hono<Env>()
 		}),
 	)
 
+	// The person's own pin, at the top of their list: anyone who can use the workspace. Nobody else sees it.
+	.put("/:id/pin", (c) =>
+		route(c, Effect.map(workspaces((service) => service.pin(actorOf(c).id, c.req.param("id"), true)), () => c.json({ pinned: true })), {
+			WorkspaceNotFound: notFound,
+		}),
+	)
+
+	.delete("/:id/pin", (c) =>
+		route(c, Effect.map(workspaces((service) => service.pin(actorOf(c).id, c.req.param("id"), false)), () => c.json({ pinned: false })), {
+			WorkspaceNotFound: notFound,
+		}),
+	)
+
 	.delete("/:id", (c) =>
 		route(c, Effect.map(workspaces((service) => service.remove(actorOf(c), c.req.param("id"))), () => c.json({ ok: true })), {
 			WorkspaceNotFound: notFound,

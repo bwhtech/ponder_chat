@@ -161,7 +161,7 @@ test("a chat keeps every message after a workspace page, and sends with all of t
 	await chat.idle(page);
 	await expect(chat.messages(page)).toHaveCount(4);
 
-	const workspaceRow = page.locator('[data-slot="workspace-rows"]').getByRole("button", { name });
+	const workspaceRow = page.locator('[data-slot="workspace-rows"]').getByRole("button", { name, exact: true });
 	const threadRow = page.getByRole("navigation", { name: "Threads" }).getByText("First question, return test");
 	const workspaceHeading = page.getByRole("heading", { name, level: 1 });
 	const openWorkspace = async () => {

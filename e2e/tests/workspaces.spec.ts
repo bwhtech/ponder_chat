@@ -47,7 +47,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(a.page).toHaveURL(/[?&]w=leave-policies-/);
 		workspaceUrl = a.page.url();
 		await expect(a.page.getByRole("heading", { name, level: 1 })).toBeVisible();
-		await expect(workspaceRows(a.page).getByRole("button", { name })).toBeVisible();
+		await expect(workspaceRows(a.page).getByRole("button", { name, exact: true })).toBeVisible();
 		await expect(about(a.page).getByText(marker)).toBeVisible();
 		// Only its owner uses it so far.
 		await expect(about(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
@@ -66,7 +66,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 
 	await test.step("2. B sees it in the sidebar and asks with its instructions", async () => {
 		await b.page.goto("/");
-		await workspaceRows(b.page).getByRole("button", { name }).click();
+		await workspaceRows(b.page).getByRole("button", { name, exact: true }).click();
 		await expect(b.page).toHaveURL(workspaceUrl);
 		await expect(b.page.getByRole("heading", { name, level: 1 })).toBeVisible();
 		await expect(about(b.page).getByText("Can ask", { exact: true })).toBeVisible();
@@ -111,7 +111,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await c.page.goto(workspaceUrl);
 		await expect(c.page.getByText("No workspace here")).toBeVisible();
 		await expect(c.page.getByText(marker)).toHaveCount(0);
-		await expect(workspaceRows(c.page).getByRole("button", { name })).toHaveCount(0);
+		await expect(workspaceRows(c.page).getByRole("button", { name, exact: true })).toHaveCount(0);
 		const slug = new URL(workspaceUrl).searchParams.get("w")!;
 		expect((await c.page.request.get(`/api/workspaces/${slug}`)).status()).toBe(404);
 		expect((await c.page.request.get("/api/workspaces/no-such-workspace")).status()).toBe(404);
@@ -144,7 +144,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(chat.reply(b.page)).toContainText(marker);
 		await expect(b.page.locator('[data-slot="workspace-access-lost"]')).toContainText("You no longer have access to this chat's workspace.");
 		await expect(chat.field(b.page)).toBeDisabled();
-		await expect(workspaceRows(b.page).getByRole("button", { name })).toHaveCount(0);
+		await expect(workspaceRows(b.page).getByRole("button", { name, exact: true })).toHaveCount(0);
 		// The server refuses the message too, with the words the page shows.
 		const sent = await b.page.request.post("/api/chat", {
 			data: { id: chatId, messages: [{ id: "lost-1", role: "user", parts: [{ type: "text", text: "One more question" }] }] },
@@ -214,7 +214,7 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	for (const title of ["first person", "second person"]) {
 		const other = await newPerson(browser, db, fake, title);
 		await other.page.goto("/");
-		await workspaceRows(other.page).getByRole("button", { name }).click();
+		await workspaceRows(other.page).getByRole("button", { name, exact: true }).click();
 		await expect(other.page).toHaveURL(workspaceUrl);
 		await expect(other.page.getByRole("heading", { name, level: 1 })).toBeVisible();
 		await expect(about(other.page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
@@ -520,8 +520,8 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 		await field.fill(renamed);
 		await field.press("Enter");
 		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
-		await expect(workspaceRows(page).getByRole("button", { name: renamed })).toBeVisible();
-		await expect(workspaceRows(page).getByRole("button", { name })).toHaveCount(0);
+		await expect(workspaceRows(page).getByRole("button", { name: renamed, exact: true })).toBeVisible();
+		await expect(workspaceRows(page).getByRole("button", { name, exact: true })).toHaveCount(0);
 		await expect(page).toHaveURL(new RegExp(`[?&]w=${escape(slug)}$`));
 		await page.reload();
 		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
@@ -717,6 +717,71 @@ test("an older link by a workspace's id opens it, with the slug in its place", a
 	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 	await expect(page).toHaveURL(new RegExp(`[?&]w=${escape(slug)}$`));
 	await expect(workspaceRows(page).locator('[data-state="active"]')).toHaveText(name);
+});
+
+test("the newest workspace is first in the sidebar; a person pins one from its row's menu to the top, where it stays, and unpins it back to its place", async ({ page, person }) => {
+	const tag = person.id.slice(0, 6);
+	const [oldest, middle, newest] = ["Pin rota", "Pin minutes", "Pin budget"].map((name) => `${name} ${tag}`);
+	for (const name of [oldest, middle, newest]) await createWorkspace(page, name);
+	// Workspaces for everyone, made by other tests at the same time, may sit between this person's own.
+	const names = () => workspaceRows(page).locator('[data-slot="sidebar-item"]').allInnerTexts();
+	const mine = async () => (await names()).filter((name) => name.endsWith(tag));
+	const row = (name: string) => workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ has: page.getByRole("button", { name, exact: true }) });
+	const menuButton = (name: string) => row(name).getByRole("button", { name: `Actions for “${name}”` });
+
+	await page.goto("/");
+	await expect.poll(mine).toEqual([newest, middle, oldest]);
+
+	await test.step("the row's menu shows on hover, and opening it does not open the workspace", async () => {
+		await expect(menuButton(oldest)).toHaveCSS("opacity", "0");
+		await row(oldest).hover();
+		await expect(menuButton(oldest)).toHaveCSS("opacity", "1");
+		await menuButton(oldest).click();
+		await expect(page.getByRole("menuitem")).toHaveText(["Pin"]);
+		await expect(page).not.toHaveURL(/[?&]w=/);
+	});
+
+	await test.step("Pin moves it to the top, above every workspace, and it stays there after a reload", async () => {
+		await page.getByRole("menuitem", { name: "Pin" }).click();
+		await expect.poll(async () => (await names())[0]).toBe(oldest);
+		await expect.poll(mine).toEqual([oldest, newest, middle]);
+		await page.reload();
+		await expect.poll(async () => (await names())[0]).toBe(oldest);
+		await expect.poll(mine).toEqual([oldest, newest, middle]);
+	});
+
+	await test.step("Unpin puts it back in the order the workspaces were made", async () => {
+		await row(oldest).hover();
+		await menuButton(oldest).click();
+		await expect(page.getByRole("menuitem")).toHaveText(["Unpin"]);
+		await page.getByRole("menuitem", { name: "Unpin" }).click();
+		await expect.poll(mine).toEqual([newest, middle, oldest]);
+		await page.reload();
+		await expect.poll(mine).toEqual([newest, middle, oldest]);
+	});
+
+	await test.step("a row's main click still opens the workspace", async () => {
+		await workspaceRows(page).getByRole("button", { name: middle, exact: true }).click();
+		await expect(page.getByRole("heading", { name: middle, level: 1 })).toBeVisible();
+		await expect(workspaceRows(page).locator('[data-state="active"]')).toHaveText(middle);
+	});
+});
+
+test("a failed pin puts the row back where it was, and says so", async ({ page, person }) => {
+	const tag = person.id.slice(0, 6);
+	const [older, newer] = [`Pin fails old ${tag}`, `Pin fails new ${tag}`];
+	await createWorkspace(page, older);
+	await createWorkspace(page, newer);
+	const mine = async () => (await workspaceRows(page).locator('[data-slot="sidebar-item"]').allInnerTexts()).filter((name) => name.endsWith(tag));
+	await page.route(/\/api\/workspaces\/[^/]+\/pin$/, (route) => route.fulfill({ status: 500, json: { error: "Down" } }));
+	await page.goto("/");
+	await expect.poll(mine).toEqual([newer, older]);
+	const row = workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ has: page.getByRole("button", { name: older, exact: true }) });
+	await row.hover();
+	await row.getByRole("button", { name: `Actions for “${older}”` }).click();
+	await page.getByRole("menuitem", { name: "Pin" }).click();
+	await expect(page.getByText("The workspace could not be pinned.")).toBeVisible();
+	await expect.poll(mine).toEqual([newer, older]);
 });
 
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');

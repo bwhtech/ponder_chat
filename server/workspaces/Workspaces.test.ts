@@ -194,16 +194,77 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.strictEqual((await call("admin2", "DELETE", `/api/workspaces/${priv}`)).status, 403);
 	});
 
-	it("lists what each person can use: organisation first, then shared, then their own", async () => {
+	it("lists what each person can use, the newest made first", async () => {
 		const ownOfBob = await create("bob", "private", "Bob's own");
 		const names = async (person: Who) => (await call<List>(person, "GET", "/api/workspaces")).body.workspaces.map((workspace) => workspace.name);
-		assert.deepStrictEqual(await names("bob"), ["Handbook", "Ana's notes", "Bob's own"]);
+		assert.deepStrictEqual(await names("bob"), ["Bob's own", "Ana's notes", "Handbook"]);
 		assert.deepStrictEqual(await names("dan"), ["Handbook"]);
 		const ana = (await call<List>("ana", "GET", "/api/workspaces")).body.workspaces;
 		const notes = ana.find((workspace) => workspace.id === priv);
 		assert.deepInclude(notes, { kind: "private", access: "owner", memberCount: 3 });
 		assert.notInclude(JSON.stringify(ana), "Answer as", "the list has no instructions");
 		await call("bob", "DELETE", `/api/workspaces/${ownOfBob}`);
+	});
+
+	it("pins a workspace at the top of the person's own list, newest first among the pinned; nobody else sees the pin", async () => {
+		const older = await create("ana", "private", "Pin older");
+		const newer = await create("ana", "private", "Pin newer");
+		await call("ana", "PUT", `/api/workspaces/${older}/sharing`, { kind: "private", members: [{ userId: who.bob, access: "ask" }] });
+		const listOf = async (person: Who) => (await call<List>(person, "GET", "/api/workspaces")).body.workspaces;
+		const order = async (person: Who) => (await listOf(person)).map((workspace) => workspace.id).filter((id) => id === older || id === newer);
+		assert.deepStrictEqual(await order("ana"), [newer, older]);
+
+		assert.deepStrictEqual(await call("ana", "PUT", `/api/workspaces/${older}/pin`), { status: 200, body: { pinned: true } });
+		assert.strictEqual((await call("ana", "PUT", `/api/workspaces/${older}/pin`)).status, 200, "pinning again changes nothing");
+		const ana = await listOf("ana");
+		assert.deepInclude(ana[0], { id: older, pinned: true }, "above every workspace that is not pinned");
+		assert.deepStrictEqual(await order("ana"), [older, newer]);
+		assert.isFalse(ana.find((workspace) => workspace.id === newer)?.pinned);
+		assert.isFalse((await listOf("bob")).find((workspace) => workspace.id === older)?.pinned, "a member does not see the owner's pin");
+
+		// A member who can only ask pins it for themselves.
+		assert.strictEqual((await call("bob", "PUT", `/api/workspaces/${older}/pin`)).status, 200);
+		assert.deepStrictEqual(await call("ana", "PUT", `/api/workspaces/${newer}/pin`), { status: 200, body: { pinned: true } });
+		assert.deepStrictEqual(await order("ana"), [newer, older], "among the pinned, the newest made first");
+		assert.deepInclude((await listOf("ana"))[1], { id: older, pinned: true });
+
+		assert.deepStrictEqual(await call("ana", "DELETE", `/api/workspaces/${newer}/pin`), { status: 200, body: { pinned: false } });
+		assert.deepStrictEqual(await call("ana", "DELETE", `/api/workspaces/${older}/pin`), { status: 200, body: { pinned: false } });
+		assert.deepStrictEqual(await order("ana"), [newer, older], "back in the order they were made");
+		assert.isTrue((await listOf("bob")).find((workspace) => workspace.id === older)?.pinned, "the member's own pin stays");
+		await call("ana", "DELETE", `/api/workspaces/${older}`);
+		await call("ana", "DELETE", `/api/workspaces/${newer}`);
+	});
+
+	it("refuses a pin on a workspace the person can't use, as if it did not exist", async () => {
+		const notFound = { status: 404, body: { error: "Not found" } };
+		const hidden = await create("ana", "private", "Pin hidden");
+		for (const method of ["PUT", "DELETE"]) {
+			assert.deepStrictEqual(await call("dan", method, `/api/workspaces/${hidden}/pin`), notFound);
+			assert.deepStrictEqual(await call("dan", method, `/api/workspaces/no-such-${tag}/pin`), notFound);
+		}
+		const pins = await database((sql) => sql`select 1 from workspace_pins where workspace_id = ${hidden}`);
+		assert.lengthOf(pins, 0);
+		await call("ana", "DELETE", `/api/workspaces/${hidden}`);
+	});
+
+	it("shows no workspace by a pin once the person lost it, and deleting a workspace takes its pins", async () => {
+		const workspace = await create("ana", "private", "Pin taken back");
+		await call("ana", "PUT", `/api/workspaces/${workspace}/sharing`, { kind: "private", members: [{ userId: who.cy, access: "edit" }] });
+		assert.strictEqual((await call("cy", "PUT", `/api/workspaces/${workspace}/pin`)).status, 200);
+		assert.strictEqual((await call("ana", "PUT", `/api/workspaces/${workspace}/pin`)).status, 200);
+		const ids = async (person: Who) => (await call<List>(person, "GET", "/api/workspaces")).body.workspaces.map((each) => each.id);
+		assert.strictEqual((await ids("cy"))[0], workspace);
+
+		await call("ana", "PUT", `/api/workspaces/${workspace}/sharing`, { kind: "private", members: [] });
+		assert.notInclude(await ids("cy"), workspace, "a pin does not bring back a workspace the person lost");
+		assert.strictEqual((await call("cy", "PUT", `/api/workspaces/${workspace}/pin`)).status, 404);
+
+		assert.strictEqual((await call("ana", "DELETE", `/api/workspaces/${workspace}`)).status, 200);
+		assert.notInclude(await ids("ana"), workspace);
+		const pins = await database((sql) => sql`select user_id from workspace_pins where workspace_id = ${workspace}`);
+		assert.lengthOf(pins, 0, "the owner's pin and the stale one are gone with it");
+		assert.strictEqual((await call("ana", "PUT", `/api/workspaces/${workspace}/pin`)).status, 404, "a deleted workspace can't be pinned");
 	});
 
 	it("shows members only to a person who can change them", async () => {

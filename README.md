@@ -271,12 +271,13 @@ Documents (`server/workspaces/documents/`):
 
 | Route | Who | Answer |
 | --- | --- | --- |
-| `GET /api/workspaces` | Anyone | `{ workspaces }`: the workspaces the person can use, organisation ones first, then shared, then their own. Also in the boot data. |
+| `GET /api/workspaces` | Anyone | `{ workspaces }`: the workspaces the person can use, the ones they pinned first, then the newest made first. Each has `pinned` and `createdAt`. Also in the boot data. |
 | `POST /api/workspaces` | Anyone for `private`, admins for `org` | `{ workspace }` (201) |
 | `GET /api/workspaces/:id` | `ask` and above | `{ workspace }`. `members` is null except for a person who can share it. `documents`: `{ id, name, mediaType, size, status, error, createdAt, progress }`, oldest first; `status` is `reading`, `ready` or `failed`. `progress` is how far a `reading` document is: `{ phase: "pages", done, total }` while a model reads a PDF's picture pages (the pages whose text is ready, of all the pages), then `{ phase: "embedding", done, total }` (passages). It is null for other statuses, and before there is anything to count. |
 | `PATCH /api/workspaces/:id` | `edit` and above | `{ workspace }`: name, description, instructions, icon |
 | `PUT /api/workspaces/:id/sharing` | The owner of a private workspace, an admin for an organisation one | `{ workspace }`: kind and members. Only an admin changes the kind. |
 | `DELETE /api/workspaces/:id` | The same as sharing | `{ ok: true }` |
+| `PUT /api/workspaces/:id/pin`, `DELETE /api/workspaces/:id/pin` | `ask` and above | `{ pinned }`. Pins the workspace at the top of the person's own list, or unpins it. Nobody else sees the pin. A deleted workspace takes its pins with it. |
 | `POST /api/workspaces/:id/documents` | `edit` and above | A form with `file`. `{ document }` (201), `reading`. 400 with `{ error }` for a file that is not a document, 413 over 10 MB. |
 | `DELETE /api/workspaces/:id/documents/:doc` | `edit` and above | `{ ok: true }`. Its passages and log go with it. |
 | `GET /api/workspaces/:id/documents/:doc/log` | `edit` and above | `{ document, steps }`, with `progress` on `document`. Each step: `{ generation, step, at, detail, costUsd }`. A PDF's `parsed` step comes once it is parsed, and each `page-read` step once its page is read. |

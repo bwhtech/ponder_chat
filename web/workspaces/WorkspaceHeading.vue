@@ -12,7 +12,7 @@ import WorkspaceTitle from "./WorkspaceTitle.vue";
  * moves into the menu. Everything here comes from the sidebar's row, so it draws at once; the
  * actions wait (`ready`) for the workspace itself.
  */
-const props = defineProps<{ workspace: WorkspaceSummary; ready: boolean }>();
+const props = defineProps<{ workspace: Omit<WorkspaceSummary, "pinned">; ready: boolean }>();
 const emit = defineEmits<{ rename: [name: string]; share: []; delete: [] }>();
 
 // Tailwind's sm: the Share button shows from here.

@@ -2,13 +2,14 @@ import { computed, ref } from "vue";
 import { me } from "../account";
 import { client, unwrap, type Answer } from "../api";
 import { fromBoot } from "../boot";
+import { toast } from "../toasts";
 import { canEdit, people } from "./access";
 
 /**
  * The workspaces the person can use (server/workspaces/), for the sidebar, the composer's
  * workspace chip and the workspace page. The first list comes with the page (boot.ts);
- * later ones ask the API. Organisation workspaces come first, then the ones shared with the
- * person, then their own, as the server orders them.
+ * later ones ask the API. The ones the person pinned come first, then the newest made first,
+ * as the server orders them (server/workspaces/rows.ts); a pin here sorts the same way at once.
  *
  * The open workspace lives in the URL by its slug (`?w=hr-policies`), as the open chat does
  * by its id (`?t=<id>`). Links from before slugs have its id there: the page opens them and
@@ -122,6 +123,32 @@ export async function shareWorkspace(id: string, kind: "org" | "private", member
 export async function deleteWorkspace(id: string) {
 	await unwrap(client.api.workspaces[":id"].$delete({ param: { id: encodeURIComponent(id) } }), "The workspace could not be deleted.");
 	await loadWorkspaces();
+}
+
+/** The server's order: pinned first, then the newest made first, then by id. */
+function listOrder(a: WorkspaceSummary, b: WorkspaceSummary) {
+	return Number(b.pinned) - Number(a.pinned) || b.createdAt.localeCompare(a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+}
+
+/** Sets the pin of the workspace in the list, in its sorted place. */
+function placePin(id: string, pinned: boolean) {
+	workspaces.value = workspaces.value.map((workspace) => (workspace.id === id ? { ...workspace, pinned } : workspace)).sort(listOrder);
+}
+
+/**
+ * Pins the workspace at the top of the person's own list, or unpins it: the row moves at
+ * once, and moves back with a toast when the server refuses. Nobody else sees the pin.
+ */
+export async function pinWorkspace(id: string, pinned: boolean) {
+	placePin(id, pinned);
+	const param = { id: encodeURIComponent(id) };
+	try {
+		if (pinned) await unwrap(client.api.workspaces[":id"].pin.$put({ param }));
+		else await unwrap(client.api.workspaces[":id"].pin.$delete({ param }));
+	} catch {
+		placePin(id, !pinned);
+		toast.error(pinned ? "The workspace could not be pinned." : "The workspace could not be unpinned.");
+	}
 }
 
 export async function searchPeople(q: string): Promise<readonly Person[]> {

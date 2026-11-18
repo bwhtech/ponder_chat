@@ -37,7 +37,10 @@ export type Actor = { id: string; email: string };
 export type Person = { id: string; name: string; email: string };
 export type Member = Person & { access: MemberAccess };
 
-/** A row of the sidebar (GET /api/workspaces, the boot page). `memberCount` is 0 for an organisation workspace: everyone uses it. */
+/**
+ * A row of the sidebar (GET /api/workspaces, the boot page). `memberCount` is 0 for an
+ * organisation workspace: everyone uses it. `pinned` is the person's own: nobody else sees it.
+ */
 export type WorkspaceSummary = {
 	id: string;
 	/** Its address on the page (slug.ts): made from the first name, and kept on a rename. */
@@ -49,15 +52,16 @@ export type WorkspaceSummary = {
 	/** Never none in the list. A detail can say none: after sharing, the person who changed it may no longer use it. */
 	access: Access;
 	memberCount: number;
+	pinned: boolean;
+	createdAt: string;
 	updatedAt: string;
 };
 
 /** One workspace (GET /api/workspaces/:id). `members` only for a person who can change them (`canShare`), else null. */
-export type WorkspaceDetail = WorkspaceSummary & {
+export type WorkspaceDetail = Omit<WorkspaceSummary, "pinned"> & {
 	instructions: string;
 	owner: Person;
 	canShare: boolean;
-	createdAt: string;
 	members: Member[] | null;
 	/** Oldest first, with their status, for everyone who can ask. */
 	documents: DocumentSummary[];
@@ -116,8 +120,10 @@ export class Workspaces extends Context.Service<
 		 * added to a workspace that a delete has let go. Keep the transaction short.
 		 */
 		readonly admit: (userId: string, workspaceId: string, needed: "ask" | "edit") => Effect.Effect<void, WorkspaceNotFound | WorkspaceRefused | SqlError>;
-		/** The workspaces the person can use: organisation ones first, then those shared with them, then their own; by name. */
+		/** The workspaces the person can use: the ones they pinned first, then the newest made first. */
 		readonly list: (userId: string) => Effect.Effect<WorkspaceSummary[], SqlError>;
+		/** Pins a workspace at the top of the person's own list, or unpins it: any access will do. Nobody else sees it. */
+		readonly pin: (userId: string, workspaceId: string, pinned: boolean) => Effect.Effect<void, WorkspaceNotFound | SqlError>;
 		/** By its id or its slug: the page's address has the slug, and older links the id. */
 		readonly get: (userId: string, idOrSlug: string) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | SqlError>;
 		/** Anyone makes a private workspace; only an admin an organisation one. The maker is its owner. */
@@ -165,6 +171,17 @@ const make = Effect.gen(function* () {
 				primary key (workspace_id, user_id)
 			)`;
 		yield* sql`create index if not exists workspace_members_user on workspace_members (user_id)`;
+		// The list's order (rows.ts): the newest made first, of the workspaces not deleted.
+		yield* sql`create index if not exists workspaces_created on workspaces (created_at desc, id desc) where deleted_at is null`;
+		// A person's pins: only theirs, and only the list reads them, by person.
+		yield* sql`
+			create table if not exists workspace_pins (
+				user_id text not null references users (id) on delete cascade,
+				workspace_id text not null references workspaces (id) on delete cascade,
+				pinned_at timestamptz not null default now(),
+				primary key (user_id, workspace_id)
+			)`;
+		yield* sql`create index if not exists workspace_pins_workspace on workspace_pins (workspace_id)`;
 		// Threads.migrate adds the column, since the chat list reads it; the key needs this table.
 		yield* sql.unsafe(`
 			do $$ begin
@@ -224,7 +241,21 @@ const make = Effect.gen(function* () {
 	const list = Effect.fn("Workspaces.list")(function* (userId: string) {
 		const admin = yield* accounts.isAdmin(userId);
 		const found = yield* rows.summaries(userId);
-		return found.map((row) => summaryFrom(row, accessFrom({ kind: row.kind, ownerId: row.owner_id, member: row.member }, userId, admin))).sort(sidebarOrder);
+		// In the order the query gives.
+		return found.map((row) => ({ ...summaryFrom(row, accessFrom({ kind: row.kind, ownerId: row.owner_id, member: row.member }, userId, admin)), pinned: row.pinned }));
+	});
+
+	const pin = Effect.fn("Workspaces.pin")(function* (userId: string, workspaceId: string, pinned: boolean) {
+		if ((yield* resolve(userId, workspaceId)).access === "none") return yield* new WorkspaceNotFound({ workspaceId });
+		if (!pinned) {
+			yield* sql`delete from workspace_pins where user_id = ${userId} and workspace_id = ${workspaceId}`;
+			return;
+		}
+		// Not on a workspace deleted since the check: its pins are gone with it (remove).
+		yield* sql`
+			insert into workspace_pins (user_id, workspace_id)
+			select ${userId}, id from workspaces where id = ${workspaceId} and deleted_at is null
+			on conflict (user_id, workspace_id) do nothing`;
 	});
 
 	const get = Effect.fn("Workspaces.get")(function* (userId: string, idOrSlug: string) {
@@ -317,6 +348,7 @@ const make = Effect.gen(function* () {
 				if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
 				yield* sql`update workspaces set deleted_at = now(), updated_at = now() where id = ${workspaceId}`;
 				yield* sql`delete from workspace_members where workspace_id = ${workspaceId}`;
+				yield* sql`delete from workspace_pins where workspace_id = ${workspaceId}`;
 				// The chats stay their writers', in no workspace.
 				yield* sql`update threads set workspace_id = null where workspace_id = ${workspaceId}`;
 				// With their passages and logs.
@@ -334,12 +366,12 @@ const make = Effect.gen(function* () {
 		return Option.map(yield* rows.detail(workspaceId), (row) => ({ name: row.name, instructions: row.instructions }));
 	});
 
-	return Workspaces.of({ migrate, accessOf, check, admit, list, get, create, update, share, remove, instructionsFor });
+	return Workspaces.of({ migrate, accessOf, check, admit, list, pin, get, create, update, share, remove, instructionsFor });
 });
 
 export const layer = Layer.effect(Workspaces, make);
 
-function summaryFrom(row: SummaryRow, access: Access): WorkspaceSummary {
+function summaryFrom(row: SummaryRow, access: Access): Omit<WorkspaceSummary, "pinned"> {
 	return {
 		id: row.id,
 		slug: row.slug,
@@ -349,6 +381,7 @@ function summaryFrom(row: SummaryRow, access: Access): WorkspaceSummary {
 		icon: row.icon,
 		access,
 		memberCount: row.kind === "org" ? 0 : row.member_count,
+		createdAt: row.created_at.toISOString(),
 		updatedAt: row.updated_at.toISOString(),
 	};
 }
@@ -359,20 +392,9 @@ function detailFrom(row: DetailRow, access: Access, canShare: boolean, members: 
 		instructions: row.instructions,
 		owner: { id: row.owner_id, name: row.owner_name, email: row.owner_email },
 		canShare,
-		createdAt: row.created_at.toISOString(),
 		members,
 		documents,
 	};
-}
-
-/** Organisation first, then shared with the person, then their own; by name within each. */
-function sidebarOrder(a: WorkspaceSummary, b: WorkspaceSummary) {
-	return group(a) - group(b) || a.name.localeCompare(b.name);
-}
-
-function group(workspace: WorkspaceSummary) {
-	if (workspace.kind === "org") return 0;
-	return workspace.access === "owner" ? 2 : 1;
 }
 
 /** One row for each person, the last one given winning; never the owner, who is no member. */

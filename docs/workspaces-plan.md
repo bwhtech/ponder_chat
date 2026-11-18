@@ -251,7 +251,8 @@ Only the owner changes the members of a private workspace. Only an admin changes
 
 | Route | Who |
 | --- | --- |
-| `GET /api/workspaces` | The workspaces the person can use, for the sidebar. Also in the boot data. |
+| `GET /api/workspaces` | The workspaces the person can use, for the sidebar: the ones they pinned first, then the newest made first. Also in the boot data. |
+| `PUT`, `DELETE /api/workspaces/:id/pin` | The person's own pin. |
 | `POST /api/workspaces` | Anyone for `private`. Admins only for `org`. |
 | `GET /api/workspaces/:id` | `ask` and above. Members are in the answer only for a person who can change them. |
 | `PATCH /api/workspaces/:id` | `edit` and above: name, description, instructions |

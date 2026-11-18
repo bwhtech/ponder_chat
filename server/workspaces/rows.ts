@@ -24,15 +24,18 @@ const SummaryRow = Schema.Struct({
 	name: Schema.String,
 	description: Schema.String,
 	icon: Schema.NullOr(Schema.String),
+	created_at: Schema.Date,
 	updated_at: Schema.Date,
 	member: Schema.NullOr(MemberAccessSchema),
 	member_count: Schema.Number,
 });
 
+/** A row of the person's list: a summary, and whether they pinned it. */
+const ListRow = Schema.Struct({ ...SummaryRow.fields, pinned: Schema.Boolean });
+
 const DetailRow = Schema.Struct({
 	...SummaryRow.fields,
 	instructions: Schema.String,
-	created_at: Schema.Date,
 	owner_name: Schema.String,
 	owner_email: Schema.String,
 });
@@ -41,11 +44,13 @@ const MemberRow = Schema.Struct({ id: Schema.String, name: Schema.String, email:
 const IdRow = Schema.Struct({ id: Schema.String });
 
 export type SummaryRow = typeof SummaryRow.Type;
+export type ListRow = typeof ListRow.Type;
 export type DetailRow = typeof DetailRow.Type;
 
 export type Rows = {
 	facts: (request: { userId: string; workspaceId: string }) => Effect.Effect<Option.Option<typeof FactsRow.Type>, SqlError>;
-	summaries: (userId: string) => Effect.Effect<ReadonlyArray<SummaryRow>, SqlError>;
+	/** The workspaces the person can use: the ones they pinned first, then the newest made first (the index workspaces_created). */
+	summaries: (userId: string) => Effect.Effect<ReadonlyArray<ListRow>, SqlError>;
 	detail: (workspaceId: string) => Effect.Effect<Option.Option<DetailRow>, SqlError>;
 	/** The id of the workspace with this id or slug, not deleted. */
 	idOf: (idOrSlug: string) => Effect.Effect<Option.Option<string>, SqlError>;
@@ -67,11 +72,17 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 	});
 	const summaries = SqlSchema.findAll({
 		Request: Schema.String,
-		Result: SummaryRow,
+		Result: ListRow,
+		// A pin only counts on a workspace the person can still use: the join adds to the rows
+		// the person can use, and never adds a row.
 		execute: (userId) => sql`
-			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.icon, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)}
-			from workspaces w left join workspace_members m on m.workspace_id = w.id and m.user_id = ${userId}
-			where w.deleted_at is null and (w.kind = 'org' or w.owner_id = ${userId} or m.user_id is not null)`,
+			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.icon, w.created_at, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)},
+				p.user_id is not null as pinned
+			from workspaces w
+				left join workspace_members m on m.workspace_id = w.id and m.user_id = ${userId}
+				left join workspace_pins p on p.workspace_id = w.id and p.user_id = ${userId}
+			where w.deleted_at is null and (w.kind = 'org' or w.owner_id = ${userId} or m.user_id is not null)
+			order by pinned desc, w.created_at desc, w.id desc`,
 	});
 	const detail = SqlSchema.findOneOption({
 		Request: Schema.String,
