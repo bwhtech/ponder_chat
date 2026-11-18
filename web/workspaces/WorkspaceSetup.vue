@@ -12,10 +12,10 @@ import { pickedFiles } from "./upload";
  * chats will be (WorkspaceOnboarding.vue). Each row is one button that opens what the side
  * panel opens: the instructions dialog, the file picker, Share. A step ticks itself once it is
  * done, and says what was done. Files picked or dropped on the steps go to `upload`, which
- * WorkspaceOnboarding.vue does, with `uploading` and `errors`. There is nothing to close: the
+ * WorkspaceOnboarding.vue does, with `uploading`; it shows the files the server refused. There is nothing to close: the
  * steps go once the person has a chat here.
  */
-const props = defineProps<{ workspace: WorkspaceDetail; steps: SetupStep[]; uploading: number; errors: string[] }>();
+const props = defineProps<{ workspace: WorkspaceDetail; steps: SetupStep[]; uploading: number }>();
 const emit = defineEmits<{ instructions: []; share: []; upload: [files: File[]] }>();
 
 const done = computed(() => props.steps.filter((step) => step.done).length);
@@ -96,9 +96,6 @@ function actionLabel(step: SetupStep) {
 		</ol>
 		<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" />
 
-		<ul v-if="errors.length" class="space-y-1" role="alert" data-slot="document-upload-errors">
-			<li v-for="error in errors" :key="error" class="break-words text-p-sm text-ink-red-6">{{ error }}</li>
-		</ul>
 		<p class="flex items-center gap-1.5 pt-1 text-sm text-ink-gray-6">
 			Or ask a question below to start.
 			<span class="lucide-arrow-down size-3.5 shrink-0" aria-hidden="true" />

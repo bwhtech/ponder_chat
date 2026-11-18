@@ -49,6 +49,14 @@ describe("a new workspace's setup steps", () => {
 		]);
 	});
 
+	it("instructions in a code fence are done too, summed up by their first line inside it", () => {
+		const [fenced] = setupSteps(workspace({ instructions: "```\nAnswer from the rota only.\n```" }));
+		expect(fenced).toMatchObject({ done: true, detail: "Answer from the rota only.", action: { label: "Edit" } });
+		const [empty] = setupSteps(workspace({ instructions: "```\n```" }));
+		expect(empty).toMatchObject({ done: true, detail: "Added" });
+		expect(setupSteps(workspace({ instructions: "  \n " }))[0]?.done).toBe(false);
+	});
+
 	it("an organisation workspace is shared with everyone from the start", () => {
 		const [, , people] = setupSteps(workspace({ kind: "org", access: "edit" }));
 		expect(people).toMatchObject({ done: true, detail: "Everyone in the organisation" });

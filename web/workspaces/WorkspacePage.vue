@@ -67,6 +67,8 @@ onBeforeUnmount(() => dockObserver.disconnect());
 
 // Each load takes a number: the answer for a workspace no longer open is dropped.
 let asked = 0;
+// Each change made on this page takes a number too: a load or poll asked for before it is older.
+let changes = 0;
 watch(() => props.slugOrId, (key) => (detail.value?.slug === key ? undefined : load()), { immediate: true });
 
 async function load() {
@@ -77,11 +79,15 @@ async function load() {
 	madeHere.value = made?.id ?? "";
 	missing.value = false;
 	loadError.value = "";
+	// A workspace made in this tab can be changed (an upload, its instructions) before this answer
+	// comes. Then the answer is older than the page: it is dropped, and the workspace read again.
+	const seen = changes;
 	try {
 		const found = await fetchWorkspace(props.slugOrId);
 		if (mine !== asked) return;
-		detail.value = found;
 		replaceWorkspaceKey(props.slugOrId, found.slug);
+		if (seen !== changes) return void poller.start(0);
+		detail.value = found;
 	} catch (error) {
 		if (mine !== asked) return;
 		if (error instanceof ApiError && error.status === 404) {
@@ -106,7 +112,6 @@ const POLL_MAX_MS = 10_000;
 const POLL_PROGRESS_MAX_MS = 3000;
 const poller = new Poller(poll);
 let pollDelay = POLL_FIRST_MS;
-let changes = 0;
 const reading = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading")));
 const counting = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading" && document.progress)));
 watch(reading, (now) => (now ? startPolling() : poller.stop()));
@@ -161,11 +166,17 @@ async function rename(name: string) {
 }
 
 function editInstructions() {
-	if (detail.value) openWorkspaceDialog({ kind: "instructions", workspace: detail.value, onSaved: (saved) => (detail.value = saved) });
+	if (detail.value) openWorkspaceDialog({ kind: "instructions", workspace: detail.value, onSaved: savedHere });
 }
 
 function share() {
-	if (detail.value) openWorkspaceDialog({ kind: "share", workspace: detail.value, onSaved: (saved) => (detail.value = saved) });
+	if (detail.value) openWorkspaceDialog({ kind: "share", workspace: detail.value, onSaved: savedHere });
+}
+
+/** A change saved on this page: a load or a poll asked for before it is older, and is dropped. */
+function savedHere(saved: WorkspaceDetail) {
+	changes++;
+	detail.value = saved;
 }
 
 function askDelete() {

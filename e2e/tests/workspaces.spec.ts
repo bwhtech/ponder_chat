@@ -280,6 +280,88 @@ test("a new workspace guides its owner: setup steps tick one by one, then first 
 	await other.context.close();
 });
 
+test("a new workspace keeps what is set up while it still loads, and a refused file's reason stays once first questions come", async ({ page, person, fake, db, browser }) => {
+	test.setTimeout(90_000);
+	const tag = person.id.slice(0, 6);
+	const name = `Rota rules ${tag}`;
+	const other = await newPerson(browser, db, fake, "joins rota");
+
+	await test.step("A document uploaded before the workspace's first answer comes stays when that older answer comes", async () => {
+		// The workspace's first read is answered with what the server had then, but only once the test lets it go.
+		let release = () => {};
+		const released = new Promise<void>((resolve) => (release = resolve));
+		let armed = true;
+		await page.route(
+			(url) => /^\/api\/workspaces\/[^/]+$/.test(url.pathname),
+			async (route) => {
+				if (!armed || route.request().method() !== "GET") return route.fallback();
+				armed = false;
+				const response = await route.fetch();
+				await released;
+				await route.fulfill({ response });
+			},
+		);
+		await page.goto("/");
+		await page.getByRole("button", { name: "New workspace", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "New workspace" });
+		await dialog.getByLabel("Name").fill(name);
+		await dialog.getByRole("button", { name: "Create workspace" }).click();
+		await expect(setupCount(page)).toHaveText("0 of 3");
+		await expect.poll(() => armed).toBe(false);
+
+		const chooser = page.waitForEvent("filechooser");
+		await setup(page).getByRole("button", { name: "Upload documents" }).click();
+		await (await chooser).setFiles(textFile("Rota.md", `# Rota\n\nNights rotate every four weeks, ${tag}.`));
+		await expect(step(page, "documents")).toHaveAttribute("data-done", "true");
+
+		release();
+		for (let elapsed = 0; elapsed < 2500; elapsed += 100) {
+			expect(await step(page, "documents").getAttribute("data-done"), "the documents step after the older answer").toBe("true");
+			await page.waitForTimeout(100);
+		}
+		await expect(aside(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
+		await page.unroute((url) => /^\/api\/workspaces\/[^/]+$/.test(url.pathname));
+	});
+
+	await test.step("With the last step done by an upload, a file the server refused still says why after first questions come", async () => {
+		await page.getByRole("button", { name: "New workspace", exact: true }).click();
+		const made = page.getByRole("dialog", { name: "New workspace" });
+		await made.getByLabel("Name").fill(`${name} b`);
+		await made.getByRole("button", { name: "Create workspace" }).click();
+		await expect(setupCount(page)).toHaveText("0 of 3");
+		await setup(page).getByRole("button", { name: "Add instructions" }).click();
+		const instructions = page.getByRole("dialog", { name: "Instructions" });
+		await instructions.getByRole("textbox", { name: "Instructions" }).fill("Answer from the rota only.");
+		await instructions.getByRole("button", { name: "Save" }).click();
+		await expect(instructions).toHaveCount(0);
+		await setup(page).getByRole("button", { name: "Share workspace" }).click();
+		const share = page.getByRole("dialog", { name: `Share “${name} b”` });
+		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(other.person.email);
+		await page.getByRole("option", { name: new RegExp(escape(other.person.email)) }).click();
+		await share.getByRole("button", { name: "Save" }).click();
+		await expect(share).toHaveCount(0);
+		await expect(setupCount(page)).toHaveText("2 of 3");
+
+		// One file the server takes, which ticks the last step, and one it refuses.
+		const chooser = page.waitForEvent("filechooser");
+		await setup(page).getByRole("button", { name: "Upload documents" }).click();
+		await (await chooser).setFiles([
+			textFile("Handover.md", `# Handover\n\nHand over at seven, ${tag}.`),
+			{ name: "tool.exe", mimeType: "application/x-msdownload", buffer: Buffer.from("MZ not a document") },
+		]);
+		// First questions, or the one line while the document is still Indexing.
+		await expect(page.locator('[data-slot="workspace-starters"]')).toBeVisible({ timeout: 30_000 });
+		await expect(setup(page)).toHaveCount(0);
+		const refused = page.locator('[data-slot="document-upload-errors"]');
+		await expect(refused).toBeVisible();
+		await page.waitForTimeout(1500);
+		await expect(refused).toBeVisible();
+		await expect(refused).not.toBeEmpty();
+	});
+
+	await other.context.close();
+});
+
 test("the owner renames a workspace by its title or its menu, and adds and edits its instructions on their own", async ({ page, person, fake }) => {
 	const tag = person.id.slice(0, 6);
 	const name = `Ward rota ${tag}`;

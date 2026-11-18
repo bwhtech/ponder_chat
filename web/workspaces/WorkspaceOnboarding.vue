@@ -13,7 +13,8 @@ import WorkspaceStarters from "./WorkspaceStarters.vue";
  * then, and from the start for a person who can only ask, first questions to start with.
  * Once the last step ticks, the steps stay a moment, so the tick is seen, and until all the
  * files picked there are up, before the questions take their place. The uploads live here,
- * not in the steps, so each file that arrives reaches the page.
+ * not in the steps, so each file that arrives reaches the page, and a file the server refused
+ * keeps its reason in view after the questions came, until the next upload.
  */
 const props = defineProps<{ workspace: WorkspaceDetail }>();
 const emit = defineEmits<{ instructions: []; share: []; documents: [documents: WorkspaceDocument[]]; pick: [question: string] }>();
@@ -39,23 +40,27 @@ const questions = computed(() => starterQuestions(props.workspace.name, props.wo
 </script>
 
 <template>
-	<Transition
-		mode="out-in"
-		enter-from-class="opacity-0"
-		leave-to-class="opacity-0"
-		enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none"
-		leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none"
-	>
-		<WorkspaceSetup
-			v-if="showSetup"
-			:workspace="workspace"
-			:steps="steps"
-			:uploading="uploading"
-			:errors="errors"
-			@instructions="emit('instructions')"
-			@share="emit('share')"
-			@upload="upload"
-		/>
-		<WorkspaceStarters v-else :name="workspace.name" :questions="questions" @pick="emit('pick', $event)" />
-	</Transition>
+	<div class="space-y-3">
+		<Transition
+			mode="out-in"
+			enter-from-class="opacity-0"
+			leave-to-class="opacity-0"
+			enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none"
+			leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none"
+		>
+			<WorkspaceSetup
+				v-if="showSetup"
+				:workspace="workspace"
+				:steps="steps"
+				:uploading="uploading"
+				@instructions="emit('instructions')"
+				@share="emit('share')"
+				@upload="upload"
+			/>
+			<WorkspaceStarters v-else :name="workspace.name" :questions="questions" @pick="emit('pick', $event)" />
+		</Transition>
+		<ul v-if="errors.length" class="space-y-1" role="alert" data-slot="document-upload-errors">
+			<li v-for="error in errors" :key="error" class="break-words text-p-sm text-ink-red-6">{{ error }}</li>
+		</ul>
+	</div>
 </template>

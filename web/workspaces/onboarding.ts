@@ -27,7 +27,9 @@ export type SetupStep = {
  */
 export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 	if (!canEdit(workspace)) return [];
-	const instructions = firstLine(workspace.instructions);
+	// Done when there is any text. The first line is only the summary: it can be empty, as for a code fence.
+	const hasInstructions = workspace.instructions.trim() !== "";
+	const instructions = firstLine(workspace.instructions) || (hasInstructions ? "Added" : "");
 	const documents = workspace.documents.length;
 	const shared = workspace.kind === "org" || workspace.memberCount > 0;
 	const steps: SetupStep[] = [
@@ -35,8 +37,8 @@ export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 			key: "instructions",
 			title: "Instructions",
 			detail: instructions || "How Ponder answers here",
-			done: Boolean(instructions),
-			action: instructions ? { name: "Edit instructions", label: "Edit" } : { name: "Add instructions", label: "Add" },
+			done: hasInstructions,
+			action: hasInstructions ?{ name: "Edit instructions", label: "Edit" } : { name: "Add instructions", label: "Add" },
 		},
 		{
 			key: "documents",
@@ -71,7 +73,8 @@ export function starterQuestions(workspaceName: string, documents: readonly Work
 
 /** The instructions' first line of text, without its Markdown marks: the done step's summary. */
 function firstLine(instructions: string) {
-	const line = instructions.split("\n").find((text) => text.trim()) ?? "";
+	// A code fence's own line ("```", "```python") says nothing: the text under it does.
+	const line = instructions.split("\n").find((text) => text.trim() && !/^\s*(```|~~~)/.test(text)) ?? "";
 	return line
 		.replace(/^\s*(#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)/, "")
 		.replace(/(\*\*|__|`|~~)/g, "")
