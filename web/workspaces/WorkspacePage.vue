@@ -6,16 +6,18 @@ import { dialog } from "../dialogs";
 import EmptyState from "../EmptyState.vue";
 import { panelItem } from "../side-panel/panel";
 import { toast } from "../toasts";
-import { useThreads } from "../threads";
+import { useThreads, useWorkspaceThreads } from "../threads";
 import { openWorkspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
+import type { ComposerHandle } from "./handles";
 import { Poller } from "./poller";
 import WorkspaceAside from "./WorkspaceAside.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
 import WorkspaceComposer from "./WorkspaceComposer.vue";
 import WorkspaceHeading from "./WorkspaceHeading.vue";
-import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
+import WorkspaceOnboarding from "./WorkspaceOnboarding.vue";
+import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, takeMadeWorkspace, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
 
 /**
  * A workspace (`?w=<slug>`): its name, the person's own chats in it, a side panel with the
@@ -23,6 +25,8 @@ import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, u
  * whose new chat is in this workspace, at the bottom, where the chat's own box will be. The sidebar's row draws the header
  * at once; the rest fills in when the workspace loads. A workspace the person cannot use is
  * not found. An older link by the workspace's id opens it too, and the slug takes its place.
+ * While the person has no chat here, setup steps or first questions take the chats' place
+ * (WorkspaceOnboarding.vue). A workspace just made in this tab shows at once, with them.
  *
  * It renders its own header, as the main area's first child, so the hairline under it follows
  * this page's scroller (style.css).
@@ -37,6 +41,12 @@ const loadError = ref("");
 /** What the page shows before the workspace loads: the sidebar's row. */
 const summary = computed(() => detail.value ?? workspaceByKey(props.slugOrId));
 const workspaceId = computed(() => summary.value?.id ?? "");
+const { chats, loaded: chatsLoaded } = useWorkspaceThreads(() => workspaceId.value);
+/** A workspace made in this tab has no chats: its page need not wait for the list to say so. */
+const madeHere = ref("");
+/** No chat of the person's here, for sure: the setup steps or first questions show in the chats' place. */
+const onboarding = computed(() => Boolean(detail.value && !chats.value.length && (chatsLoaded.value || madeHere.value === detail.value.id)));
+const composer = ref<ComposerHandle>();
 /** The chats beside the side panel, from Tailwind's lg; one column under them while the file viewer is open beside the page. */
 const columns = computed(() => (panelItem.value ? "" : "lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12"));
 
@@ -61,8 +71,10 @@ watch(() => props.slugOrId, (key) => (detail.value?.slug === key ? undefined : l
 
 async function load() {
 	const mine = ++asked;
-	// No document is Reading now, so the polls stop (below).
-	detail.value = undefined;
+	// No document is Reading now, so the polls stop (below). One made in this tab shows as it was made.
+	const made = takeMadeWorkspace(props.slugOrId);
+	detail.value = made;
+	madeHere.value = made?.id ?? "";
 	missing.value = false;
 	loadError.value = "";
 	try {
@@ -211,14 +223,27 @@ function askDelete() {
 					<div class="pointer-events-auto relative min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 						<!-- The page's background behind the box, fading in over 40px above it, as a chat fades out above its box. -->
 						<div class="pointer-events-none absolute -inset-x-4 -top-10 bottom-0 -z-10 bg-surface-base [mask-image:linear-gradient(to_bottom,transparent,#000_40px)] sm:-inset-x-5" aria-hidden="true" />
-						<WorkspaceComposer :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
+						<WorkspaceComposer :key="workspaceId" ref="composer" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
 					</div>
 				</div>
 			</div>
 			<!-- The file viewer beside the page leaves too little width for two columns. -->
 			<div class="mx-auto grid w-full max-w-[1120px] flex-1 content-start gap-8 px-4 pb-10 pt-6 sm:px-5" :class="columns">
-				<WorkspaceChats class="min-w-0" :workspace-id="workspaceId" :shared="Boolean(summary && (summary.kind === 'org' || summary.memberCount))" @open="emit('openChat', $event)" />
-				<WorkspaceAside :class="{ 'lg:col-start-2 lg:row-start-1': !panelItem }" :workspace="summary" :detail="detail" @instructions="editInstructions" @documents="documentsChanged" />
+				<WorkspaceChats v-if="chats.length" class="min-w-0" :chats="chats" :shared="Boolean(summary && (summary.kind === 'org' || summary.memberCount))" @open="emit('openChat', $event)" />
+				<!-- Fades in when the workspace and its chats arrive; a workspace made here shows it at once. -->
+				<Transition enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
+					<div v-if="onboarding && detail" class="min-w-0">
+						<WorkspaceOnboarding
+							:key="detail.id"
+							:workspace="detail"
+							@instructions="editInstructions"
+							@share="share"
+							@documents="documentsChanged"
+							@pick="composer?.fill($event)"
+						/>
+					</div>
+				</Transition>
+				<WorkspaceAside :class="{ 'lg:col-start-2 lg:row-start-1': !panelItem }" :workspace="summary" :detail="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
 			</div>
 		</div>
 	</div>

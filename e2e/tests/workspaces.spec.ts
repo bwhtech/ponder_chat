@@ -11,6 +11,11 @@ import { addChats, createSkill, createWorkspace, newPerson, textFile, uploadRead
  * a workspace by its title, and adds or edits its instructions, in Markdown, from their own
  * section. A person who can only ask sees no controls there, and no empty sections.
  *
+ * While the person has no chat in a workspace, its page guides them where the chats will be:
+ * setup steps for whoever can edit it, each opening the same dialog, file picker or Share as
+ * the side panel and the header, then first questions made from its documents, which fill
+ * the message box.
+ *
  * The fake model echoes the first line of a workspace's instructions (fake/server.ts), so a
  * reply shows that they reached the model.
  */
@@ -74,8 +79,10 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(instructionsSection(b.page).getByRole("button")).toHaveCount(0);
 		// No documents, and nothing to add them with: no Documents.
 		await expect(aside(b.page).locator('[data-slot="workspace-documents"]')).toHaveCount(0);
-		// No chat of B's in it yet: no "Your chats".
+		// No chat of B's in it yet: no "Your chats". B can only ask: no setup steps, and with no documents, no first questions either.
 		await expect(b.page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
+		await expect(b.page.locator('[data-slot="workspace-starters"]')).toHaveText(`Ask a question about ${name} below.`);
+		await expect(setup(b.page)).toHaveCount(0);
 
 		await chat.send(b.page, question);
 		await expect(b.page).toHaveURL(/[?&]t=/);
@@ -163,6 +170,12 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	await dialog.getByRole("button", { name: "Create workspace" }).click();
 	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 	await expect(aside(page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
+	// Everyone uses it already: its People step is done from the start, and the instructions from the dialog too.
+	await expect(setup(page).getByRole("heading", { name: `Set up ${name}` })).toBeVisible();
+	await expect(setupCount(page)).toHaveText("2 of 3");
+	await expect(step(page, "people")).toHaveAttribute("data-done", "true");
+	await expect(step(page, "people")).toContainText("Everyone in the organisation");
+	await expect(step(page, "documents")).not.toHaveAttribute("data-done");
 	const workspaceUrl = page.url();
 
 	for (const title of ["first person", "second person"]) {
@@ -175,8 +188,96 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 		// Everyone asks; only admins change it.
 		await expect(other.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
 		await expect(other.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
+		// Nor do they see its setup steps: one line points to the box.
+		await expect(other.page.locator('[data-slot="workspace-starters"]')).toHaveText(`Ask a question about ${name} below.`);
+		await expect(setup(other.page)).toHaveCount(0);
 		await other.context.close();
 	}
+});
+
+test("a new workspace guides its owner: setup steps tick one by one, then first questions fill the box, until the first chat", async ({ page, person, fake, db, browser }) => {
+	test.setTimeout(90_000);
+	const tag = person.id.slice(0, 6);
+	const name = `HR Policies ${tag}`;
+	const marker = `Answer from the HR handbook, ref ${tag}.`;
+	const other = await newPerson(browser, db, fake, "joins hr");
+	const field = workspacePage.field(page);
+
+	await test.step("A new private workspace shows its three steps, none done, where the chats will be", async () => {
+		await page.goto("/");
+		await page.getByRole("button", { name: "New workspace", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "New workspace" });
+		await dialog.getByLabel("Name").fill(name);
+		await dialog.getByRole("button", { name: "Create workspace" }).click();
+		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+		await expect(setup(page).getByRole("heading", { name: `Set up ${name}` })).toBeVisible();
+		await expect(setupCount(page)).toHaveText("0 of 3");
+		await expect(setup(page).getByRole("button")).toHaveText([/^Instructions/, /^Documents/, /^People/]);
+		// The steps add what the side panel's empty areas would, so the panel shows none of them.
+		await expect(aside(page).getByRole("button", { name: "Add instructions" })).toHaveCount(0);
+		await expect(aside(page).locator('[data-slot="document-upload-area"]')).toHaveCount(0);
+		await expect(page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
+	});
+
+	await test.step("Add instructions, from its step with the keyboard: the step ticks, and shows what was added", async () => {
+		await setup(page).getByRole("button", { name: "Add instructions" }).focus();
+		await page.keyboard.press("Enter");
+		const dialog = page.getByRole("dialog", { name: "Instructions" });
+		await dialog.getByRole("textbox", { name: "Instructions" }).fill(`${marker}\nKeep answers short.`);
+		await dialog.getByRole("button", { name: "Save" }).click();
+		await expect(dialog).toHaveCount(0);
+		await expect(step(page, "instructions")).toHaveAttribute("data-done", "true");
+		await expect(step(page, "instructions")).toContainText(marker);
+		await expect(setupCount(page)).toHaveText("1 of 3");
+		await expect(setup(page).getByRole("button", { name: "Edit instructions" })).toBeVisible();
+		await expect(instructionsSection(page)).toContainText(marker);
+	});
+
+	await test.step("Upload documents, from its step: the step ticks, and the document shows in the side panel", async () => {
+		const chooser = page.waitForEvent("filechooser");
+		await setup(page).getByRole("button", { name: "Upload documents" }).click();
+		await (await chooser).setFiles(textFile("Leave policy.md", `# Leave policy\n\nStaff get 27 days of paid leave a year, ${tag}.`));
+		await expect(step(page, "documents")).toHaveAttribute("data-done", "true");
+		await expect(step(page, "documents")).toContainText("1 document");
+		await expect(setupCount(page)).toHaveText("2 of 3");
+		await expect(aside(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
+	});
+
+	await test.step("Share, from its step: once shared, first questions made from the document take the steps' place", async () => {
+		await setup(page).getByRole("button", { name: "Share workspace" }).click();
+		const share = page.getByRole("dialog", { name: `Share “${name}”` });
+		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(other.person.email);
+		await page.getByRole("option", { name: new RegExp(escape(other.person.email)) }).click();
+		await share.getByRole("button", { name: "Save" }).click();
+		await expect(share).toHaveCount(0);
+		await expect(starters(page)).toHaveText(["Summarise “Leave policy.md”", `What can I ask about in ${name}?`]);
+		await expect(setup(page)).toHaveCount(0);
+	});
+
+	await test.step("A first question fills the box, and nothing is sent until the person sends it", async () => {
+		await starters(page).first().click();
+		await expect(field).toBeFocused();
+		await expect(field).toHaveValue("Summarise “Leave policy.md”");
+		expect(await field.evaluate((element: HTMLTextAreaElement) => element.selectionStart === element.value.length)).toBe(true);
+		await expect(page).not.toHaveURL(/[?&]t=/);
+		await field.press("Enter");
+		await expect(page).toHaveURL(/[?&]t=/);
+		await expect(chat.reply(page)).toContainText("Leave policy");
+		await chat.idle(page);
+		const [call] = await fake.calls("Summarise “Leave policy.md”");
+		expect(call.system).toContain(marker);
+	});
+
+	await test.step("Back on the workspace: its chats, no guide, and the side panel's own Upload and Instructions", async () => {
+		await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name }).click();
+		await expect(page.locator('[data-slot="workspace-chats"]')).toContainText("Leave policy");
+		await expect(setup(page)).toHaveCount(0);
+		await expect(page.locator('[data-slot="workspace-starters"]')).toHaveCount(0);
+		await expect(instructionsSection(page).getByRole("button", { name: "Edit instructions" })).toBeVisible();
+		await expect(aside(page).locator('[data-slot="workspace-documents"]').getByRole("button", { name: "Upload", exact: true })).toBeVisible();
+	});
+
+	await other.context.close();
 });
 
 test("the owner renames a workspace by its title or its menu, and adds and edits its instructions on their own", async ({ page, person, fake }) => {
@@ -228,7 +329,9 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 		const editor = dialog.getByRole("textbox", { name: "Instructions" });
 		const save = dialog.getByRole("button", { name: "Save" });
 		const box = instructionsSection(page).getByRole("button", { name: "Edit instructions" });
-		await instructionsSection(page).getByRole("button", { name: "Add instructions" }).click();
+		// No chat here yet: the side panel has no empty Instructions; the setup step adds them.
+		await expect(instructionsSection(page)).toHaveCount(0);
+		await setup(page).getByRole("button", { name: "Add instructions" }).click();
 		await expect(editor).toBeFocused();
 		await expect(dialog.getByLabel("Name")).toHaveCount(0);
 		// Save waits for a change; spaces alone are none.
@@ -384,4 +487,8 @@ test("an older link by a workspace's id opens it, with the slug in its place", a
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');
 const aside = (page: Page) => page.locator('[data-slot="workspace-aside"]');
 const instructionsSection = (page: Page) => aside(page).getByRole("region", { name: "Instructions" });
+const setup = (page: Page) => page.locator('[data-slot="workspace-setup"]');
+const setupCount = (page: Page) => page.locator('[data-slot="workspace-setup-count"]');
+const step = (page: Page, key: "instructions" | "documents" | "people") => page.locator(`[data-slot="workspace-setup-step"][data-step="${key}"]`);
+const starters = (page: Page) => page.locator('[data-slot="workspace-starter"]');
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

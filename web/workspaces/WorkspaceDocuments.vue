@@ -6,9 +6,10 @@ import { ref } from "vue";
 import { dialog } from "../dialogs";
 import { toast } from "../toasts";
 import DocumentRow from "./DocumentRow.vue";
-import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, uploadDocument, type WorkspaceDocument } from "./documents";
+import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, type WorkspaceDocument } from "./documents";
 import WorkspaceEmptyArea from "./WorkspaceEmptyArea.vue";
 import type { DocumentsHandle } from "./handles";
+import { pickedFiles, useDocumentUpload } from "./upload";
 
 /**
  * The workspace's documents, in its side panel. Everyone who
@@ -24,8 +25,12 @@ const props = defineProps<{ workspaceId: string; documents?: WorkspaceDocument[]
 const emit = defineEmits<{ changed: [documents: WorkspaceDocument[]] }>();
 
 const picker = ref<HTMLInputElement>();
-const uploading = ref(0);
-const errors = ref<string[]>([]);
+const { uploading, errors, upload } = useDocumentUpload(
+	() => props.workspaceId,
+	current,
+	(documents) => emit("changed", documents),
+);
+const picked = (event: Event) => void upload(pickedFiles(event));
 const retrying = ref(new Set<string>());
 const viewFile = useFileViewer();
 
@@ -33,29 +38,6 @@ defineExpose({ upload } satisfies DocumentsHandle);
 
 function current() {
 	return props.documents ?? [];
-}
-
-async function upload(files: File[]) {
-	if (!files.length) return;
-	errors.value = [];
-	uploading.value += files.length;
-	// One at a time, in order: each answer adds its row at once.
-	for (const file of files) {
-		try {
-			const document = await uploadDocument(props.workspaceId, file);
-			emit("changed", [...current(), document]);
-		} catch (error) {
-			errors.value = [...errors.value, (error as Error).message];
-		} finally {
-			uploading.value--;
-		}
-	}
-}
-
-function picked(event: Event) {
-	const input = event.target as HTMLInputElement;
-	void upload(Array.from(input.files ?? []));
-	input.value = "";
 }
 
 /** In the chat's side viewer (Shell.vue); a type it can't show opens in a new tab. */
@@ -110,7 +92,8 @@ function askDelete(document: WorkspaceDocument) {
 	<section class="space-y-3" aria-labelledby="workspace-documents-heading" data-slot="workspace-documents">
 		<div class="flex h-7 items-center justify-between">
 			<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
-			<template v-if="editable">
+			<!-- Once the list is here: while the workspace loads, the section may still give way to the setup steps (WorkspaceAside.vue). -->
+			<template v-if="editable && documents">
 				<Button v-if="documents?.length" variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" @click="picker?.click()" />
 				<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" />
 			</template>

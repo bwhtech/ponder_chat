@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { PromptInput, PromptInputAttachButton, PromptInputFooter, PromptInputHeader, PromptInputSubmit, PromptInputTextarea, PromptInputTools } from "frappe-ui-ai-elements";
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import { me } from "../account";
 import { useDraft } from "../drafts";
 import { OutOfCredits } from "../lazy-alert";
@@ -10,13 +10,14 @@ import { SkillMenu, useSkillPicker } from "../skills/picker";
 import { loadSkills, withSkillsHint } from "../skills/skills";
 import { SkillChip } from "../transcript-parts";
 import type { FirstMessage } from "./first-message";
+import type { ComposerHandle } from "./handles";
 
 /**
  * The workspace page's message box: a question here starts a new chat in this workspace
  * (Shell.vue hands it to the chat, first-message.ts). The same box as a chat's, with $ for
  * skills; the placeholder names the workspace. What was typed stays per workspace, as a
  * chat's draft does. The box floats at the bottom of the page, where the chat's own box is, so
- * the $ menu opens above it, as in a chat.
+ * the $ menu opens above it, as in a chat. A first question from the page fills it (`fill`).
  */
 const props = defineProps<{ workspaceId: string; name: string }>();
 const emit = defineEmits<{ ask: [message: FirstMessage] }>();
@@ -36,6 +37,19 @@ const composer = ref<HTMLElement | null>(null);
 const skills = useSkillPicker(input, composer);
 const skillQuery = skills.typed;
 void loadSkills();
+
+defineExpose({ fill } satisfies ComposerHandle);
+
+/** A first question from the page takes the place of what was typed, and the field takes focus with the caret at its end. Nothing is sent. */
+function fill(text: string) {
+	input.value = text;
+	void nextTick(() => {
+		const field = composer.value?.querySelector("textarea");
+		if (!field) return;
+		field.focus({ preventScroll: true });
+		field.setSelectionRange(text.length, text.length);
+	});
+}
 
 function ask({ text, files }: { text: string; files: File[] }) {
 	if (!text && !files.length && !skills.chosen.value.length) return;

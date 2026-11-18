@@ -49,6 +49,25 @@ test("on a phone, a workspace's message box sits where the chat's does: the page
 	expect(Math.abs((await page.locator('[data-slot="prompt-input"]').boundingBox())!.y - top)).toBeLessThanOrEqual(2);
 });
 
+test("on a phone, a new workspace's setup steps come first, over its side panel, and the box covers none of it", async ({ page, person }) => {
+	const tag = person.id.slice(0, 6);
+	const name = `Theatre lists ${tag}`;
+	const { id, slug } = await createWorkspace(page, name, "Answer from the theatre lists.");
+	await uploadReady(page, id, textFile("Monday list.md", "# Monday\n\nHip replacement at 09:00."));
+	await uploadReady(page, id, textFile("Tuesday list.md", "# Tuesday\n\nKnee arthroscopy at 10:30."));
+	await page.goto(`/?w=${slug}`);
+	const setup = page.locator('[data-slot="workspace-setup"]');
+	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("2 of 3");
+	// One column: the steps, then the side panel's sections that have something in them.
+	expect((await setup.boundingBox())!.y + (await setup.boundingBox())!.height).toBeLessThan((await aside(page).boundingBox())!.y);
+	await expect(aside(page).locator('[data-slot="document-name"]')).toHaveCount(2);
+
+	await workspacePage.scrollToEnd(page);
+	expect(await workspacePage.reachable(aside(page).locator('[data-slot="document-name"]').last())).toBe(true);
+	await setup.getByRole("button", { name: "Share workspace" }).click();
+	await expect(page.getByRole("dialog", { name: `Share “${name}”` })).toBeVisible();
+});
+
 test("an admin on a phone reaches Workspaces, Activity and Settings under More", async ({ page, admin }) => {
 	void admin;
 	await page.goto("/admin");

@@ -2,7 +2,7 @@ import { computed, ref } from "vue";
 import { me } from "../account";
 import { client, unwrap, type Answer } from "../api";
 import { fromBoot } from "../boot";
-import { count } from "../numbers";
+import { canEdit, people } from "./access";
 
 /**
  * The workspaces the person can use (server/workspaces/), for the sidebar, the composer's
@@ -85,9 +85,23 @@ export async function fetchWorkspace(idOrSlug: string): Promise<WorkspaceDetail>
 	return (await unwrap(client.api.workspaces[":id"].$get({ param: { id: encodeURIComponent(idOrSlug) } }), "The workspace could not load.")).workspace;
 }
 
+/**
+ * A workspace made in this tab, by its slug, until its page takes it: the page shows it at once,
+ * with no chats, and asks the server for it meanwhile (WorkspacePage.vue).
+ */
+const madeHere = new Map<string, WorkspaceDetail>();
+
 export async function createWorkspace(input: WorkspaceInput) {
 	const { workspace } = await unwrap(client.api.workspaces.$post({ json: { ...input, icon: null } }), "The workspace could not be made.");
+	madeHere.set(workspace.slug, workspace);
 	await loadWorkspaces();
+	return workspace;
+}
+
+/** The workspace just made in this tab with this slug, once. */
+export function takeMadeWorkspace(slug: string) {
+	const workspace = madeHere.get(slug);
+	madeHere.delete(slug);
 	return workspace;
 }
 
@@ -132,10 +146,4 @@ export function canShare(workspace: Pick<WorkspaceSummary, "kind" | "access">) {
 	return workspace.kind === "org" ? isAdmin.value : workspace.access === "owner";
 }
 
-export function canEdit(workspace: Pick<WorkspaceSummary, "access">) {
-	return workspace.access === "edit" || workspace.access === "owner";
-}
-
-export function people(total: number) {
-	return `${count(total)} ${total === 1 ? "person" : "people"}`;
-}
+export { canEdit, people };

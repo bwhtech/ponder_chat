@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import { when } from "../dates";
-import { useThreads, useWorkspaceThreads } from "../threads";
+import { useThreads, type ThreadSummary } from "../threads";
 
 /**
- * "Your chats": the person's own chats in this workspace, newest first, once there is one.
- * A chat stays its writer's own, also in a shared workspace, so nobody else's chats are
- * listed; where other people use the workspace (`shared`), the heading says so. The list is
- * the server's for this workspace, so older chats show however many newer ones are elsewhere.
+ * "Your chats": the person's own chats in this workspace, newest first (the page's
+ * useWorkspaceThreads), once there is one. A chat stays its writer's own, also in a shared
+ * workspace, so nobody else's chats are listed; where other people use the workspace
+ * (`shared`), the heading says so. The list is the server's for this workspace, so older chats
+ * show however many newer ones are elsewhere.
  */
-const props = defineProps<{ workspaceId: string; shared: boolean }>();
+defineProps<{ chats: readonly ThreadSummary[]; shared: boolean }>();
 const emit = defineEmits<{ open: [id: string] }>();
 
 const { prefetch } = useThreads();
-const { chats } = useWorkspaceThreads(() => props.workspaceId);
 </script>
 
 <template>

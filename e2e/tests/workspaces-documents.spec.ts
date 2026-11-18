@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test";
 import type { ReceivedCall } from "../fake/script.ts";
 import { chat, expect, jsonOf, test } from "../fixtures.ts";
 import { scanPdf, textPdf } from "../pdfs.ts";
-import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady, type Upload } from "../workspaces.ts";
+import { addChats, createWorkspace, documentOf, newPerson, share, textFile, uploadReady, type Upload } from "../workspaces.ts";
 
 /**
  * Workspace documents (docs/workspaces-plan.md, "Tests", 7 to 9): an editor uploads a document,
@@ -34,11 +34,14 @@ async function openDetails(page: Page, name: string) {
 	return { details, menu };
 }
 
-test("7. an editor uploads documents; they go from Indexing to Ready, and answers use them whole or searched", async ({ page, person, fake }) => {
+test("7. an editor uploads documents; they go from Indexing to Ready, and answers use them whole or searched", async ({ page, person, fake, db }) => {
 	test.setTimeout(120_000);
 	const tag = person.id.slice(0, 6);
 	const { id, slug } = await createWorkspace(page, `Office handbook ${tag}`);
+	// A chat here already: the page shows its chats, not the setup steps, so the side panel has its own empty areas.
+	await addChats(db, person.id, id, 1);
 	await page.goto(`/?w=${slug}`);
+	await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(1);
 	// No documents yet: the section is one "Upload documents" area.
 	await expect(documents(page).getByRole("button", { name: "Upload", exact: true })).toHaveCount(0);
 	await expect(rows(page)).toHaveCount(0);
@@ -146,6 +149,9 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 		// No instructions, and nothing to add them with: no Instructions.
 		await expect(asker.page.getByRole("region", { name: "Instructions" })).toHaveCount(0);
 		await expect(asker.page.locator('[data-slot="document-picker"]')).toHaveCount(0);
+		// No chat of theirs here yet: no setup steps, but first questions made from the Ready document.
+		await expect(asker.page.locator('[data-slot="workspace-setup"]')).toHaveCount(0);
+		await expect(asker.page.locator('[data-slot="workspace-starter"]')).toHaveText(["Summarise “manual.pdf”", `What can I ask about in Dialysis manual ${tag}?`]);
 
 		const document = (await documentOf(page, id, "manual.pdf"))!;
 		expect((await asker.page.request.get(`/api/workspaces/${id}/documents/${document.id}/log`)).status()).toBe(403);

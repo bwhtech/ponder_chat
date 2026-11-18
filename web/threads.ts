@@ -125,6 +125,8 @@ async function fetchList(): Promise<ThreadSummary[] | undefined> {
  */
 export function useWorkspaceThreads(workspaceId: () => string) {
 	const fetched = ref<ThreadSummary[]>([]);
+	/** The workspace whose list has been asked for once, answered or not: until then, no chats does not mean none. */
+	const askedFor = ref("");
 	// Each ask takes a number; a slower answer for another workspace, or an older one, is dropped.
 	let asking = 0;
 	async function ask() {
@@ -137,6 +139,7 @@ export function useWorkspaceThreads(workspaceId: () => string) {
 		} catch {
 			// Offline: the person's list still gives the chats it has.
 		}
+		if (token === asking) askedFor.value = id;
 	}
 	watch([workspaceId, threads], ask, { immediate: true });
 	const chats = computed(() => {
@@ -146,7 +149,8 @@ export function useWorkspaceThreads(workspaceId: () => string) {
 		if (listLoaded.value) for (const thread of threads.value) if (thread.workspaceId === id) byId.set(thread.id, thread);
 		return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	});
-	return { chats };
+	const loaded = computed(() => Boolean(workspaceId()) && askedFor.value === workspaceId());
+	return { chats, loaded };
 }
 
 async function open(id: string, { push = true } = {}) {

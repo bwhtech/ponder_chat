@@ -6,3 +6,6 @@ export type DocumentsHandle = { upload: (files: File[]) => Promise<void> };
 
 /** WorkspaceTitle.vue: starts a rename, from the heading's menu. */
 export type TitleHandle = { start: () => Promise<void> };
+
+/** WorkspaceComposer.vue: a first question put in the box (WorkspaceStarters.vue), to edit or send. */
+export type ComposerHandle = { fill: (text: string) => void };

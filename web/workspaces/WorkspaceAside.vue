@@ -16,9 +16,11 @@ import WorkspacePeople from "./WorkspacePeople.vue";
  * the documents while they are dragged over it. For people who can only ask, empty sections
  * are not shown, so their panel waits for the workspace: which sections it has is not known
  * before. For editors, while the workspace loads, the headings stay, and skeleton lines stand
- * in for the values.
+ * in for the values. While the setup steps show where the chats go (`setup`, WorkspaceSetup.vue),
+ * they add the instructions and the documents, so the panel shows only the sections that
+ * have something in them, as it does for people who can only ask.
  */
-const props = defineProps<{ workspace?: WorkspaceSummary; detail?: WorkspaceDetail }>();
+const props = defineProps<{ workspace?: WorkspaceSummary; detail?: WorkspaceDetail; setup?: boolean }>();
 const emit = defineEmits<{ instructions: []; documents: [documents: WorkspaceDocument[]] }>();
 
 const instructions = computed(() => props.detail?.instructions.trim());
@@ -29,19 +31,23 @@ const shared = computed(() => {
 	return !workspace || workspace.kind === "org" || workspace.memberCount > 0;
 });
 
+/** Empty sections show for editors, as the area that fills them, unless the setup steps show. */
+const showEmpty = computed(() => editable.value && !props.setup);
+const showDocuments = computed(() => !props.detail || props.detail.documents.length > 0 || showEmpty.value);
+
 const documents = ref<DocumentsHandle>();
 const drop = useFileDrop(
-	() => editable.value && Boolean(props.detail),
+	() => editable.value && Boolean(props.detail) && showDocuments.value,
 	(files) => documents.value?.upload(files),
 );
 </script>
 
 <template>
 	<aside v-if="detail || editable" class="min-w-0 space-y-8" aria-label="About this workspace" data-slot="workspace-aside" v-on="drop.listeners">
-		<WorkspaceInstructions v-if="!detail || instructions || editable" :instructions="instructions" :editable="editable" @edit="emit('instructions')" />
+		<WorkspaceInstructions v-if="!detail || instructions || showEmpty" :instructions="instructions" :editable="editable" @edit="emit('instructions')" />
 
 		<WorkspaceDocuments
-			v-if="!detail || detail.documents.length || editable"
+			v-if="showDocuments"
 			ref="documents"
 			:workspace-id="detail?.id ?? workspace?.id ?? ''"
 			:documents="detail?.documents"
