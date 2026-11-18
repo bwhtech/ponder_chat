@@ -178,18 +178,19 @@ export function withoutContent<T extends object>(integration: T): T {
 	const quiet = (event: unknown) =>
 		event && typeof event === "object"
 			? new Proxy(event, {
-					get: (target, key) => (key === "recordInputs" || key === "recordOutputs" ? false : Reflect.get(target, key, target)),
+					get: (target, key): unknown => (key === "recordInputs" || key === "recordOutputs" ? false : Reflect.get(target, key, target)),
 				})
 			: event;
 	return new Proxy(integration, {
 		get(target, key, receiver) {
-			const value = Reflect.get(target, key, receiver);
+			const value: unknown = Reflect.get(target, key, receiver);
 			if (key === "experimental_durable" && value) {
 				const durable = value as unknown as NonNullable<Telemetry["experimental_durable"]>;
 				return { captureContext: (event: Parameters<typeof durable.captureContext>[0]) => durable.captureContext(quiet(event) as typeof event) };
 			}
 			if (typeof value !== "function" || typeof key !== "string" || !/^(on|experimental_on)[A-Z]/.test(key)) return value;
-			return (event: unknown, ...rest: unknown[]) => value.call(target, quiet(event), ...rest);
+			const handler = value as (this: T, ...args: unknown[]) => unknown;
+			return (event: unknown, ...rest: unknown[]) => handler.call(target, quiet(event), ...rest);
 		},
 	});
 }

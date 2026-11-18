@@ -1,3 +1,4 @@
+/// <reference path="../../pdfjs-worker.d.ts" />
 import { parentPort, workerData } from "node:worker_threads";
 
 /**
@@ -29,7 +30,6 @@ async function onePagePdfs(bytes: Uint8Array, numbers: number[]) {
 /** pdf.js runs its own worker on this thread when it finds it on globalThis: no second worker file to locate after bundling. */
 async function loadPdfjs() {
 	const scope = globalThis as { pdfjsWorker?: unknown };
-	// @ts-expect-error The worker module has no types.
 	scope.pdfjsWorker ??= await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
 	return import("pdfjs-dist/legacy/build/pdf.mjs");
 }

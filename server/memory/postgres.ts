@@ -131,7 +131,7 @@ export const makeWith = Effect.fnUntraced(function* ({ extract, index, recallAll
 			limit ${limit}`,
 	});
 
-	const search = Effect.fnUntraced(function* (scope: MemoryScope, query: string, rows: ReadonlyArray<Row>, limit = topK) {
+	const search = Effect.fnUntraced(function* (scope: MemoryScope, query: string, rows: ReadonlyArray<Row>, limit: number = topK) {
 		const byId = new Map(rows.map((row) => [row.id, row]));
 		const known = (ids: ReadonlyArray<string>) => ids.map((id) => byId.get(id)).filter((row): row is Row => !!row);
 		if (index) {

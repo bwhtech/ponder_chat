@@ -2,6 +2,7 @@ import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as AdminEvents from "./admin/AdminEvents.ts";
 import * as Auth from "./auth/Auth.ts";
@@ -119,12 +120,15 @@ const migrateAll = Effect.gen(function* () {
  *
  * The connection is reserved from the pool for as long as the scope is open: one of its 10.
  */
+const LockRow = Schema.Struct({ locked: Schema.Boolean });
+
 const becomeTheOnlyWorker = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
 	const connection = yield* sql.reserve;
 	const key = 7_316_420_901;
-	const [first] = yield* connection.execute("select pg_try_advisory_lock($1) as locked", [key], undefined);
-	if (first?.locked) return;
+	const rows = yield* connection.execute("select pg_try_advisory_lock($1) as locked", [key], undefined);
+	const { locked } = yield* Schema.decodeUnknownEffect(LockRow)(rows[0]).pipe(Effect.orDie);
+	if (locked) return;
 	yield* Effect.log("workflow: waiting for the previous server to stop");
 	yield* connection.execute("select pg_advisory_lock($1)", [key], undefined);
 });

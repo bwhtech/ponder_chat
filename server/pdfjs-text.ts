@@ -1,3 +1,4 @@
+/// <reference path="./pdfjs-worker.d.ts" />
 /**
  * A PDF's text layer, page by page, with pdf.js. Only worker threads run it: the one of
  * pdf-text.ts, for a PDF attached to a chat, and the one of prepare-text.ts, for a
@@ -36,7 +37,6 @@ export async function readTextLayer(data: Uint8Array, limits: { readonly maxPage
 /** pdf.js runs its own worker on this thread when it finds it on globalThis: no second worker file to locate after bundling. */
 async function loadPdfjs() {
 	const scope = globalThis as { pdfjsWorker?: unknown };
-	// @ts-expect-error The worker module has no types.
 	scope.pdfjsWorker ??= await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
 	return import("pdfjs-dist/legacy/build/pdf.mjs");
 }

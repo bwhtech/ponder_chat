@@ -74,7 +74,7 @@ export class ToolCalls {
 		}
 	}
 
-	private async execute(call: ToolCallPart, messages: ModelMessage[]) {
+	private async execute(call: ToolCallPart, messages: ModelMessage[]): Promise<unknown> {
 		const tool = this.tools[call.toolName];
 		if (!tool?.execute) throw new Error(`There is no tool named ${call.toolName}.`);
 		const input = await this.validInput(call);

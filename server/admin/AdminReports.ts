@@ -336,9 +336,9 @@ const make = Effect.gen(function* () {
 	);
 
 	const people = Effect.gen(function* () {
-		const [rows, usageOf, limits] = yield* Effect.all([peopleRows(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die })), usage(7), limitsToday], {
-			concurrency: "unbounded",
-		});
+		// Its own const: inside Effect.all's array, catchTags's types are lost and the error type is `any`.
+		const everyone = peopleRows(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+		const [rows, usageOf, limits] = yield* Effect.all([everyone, usage(7), limitsToday], { concurrency: "unbounded" });
 		const now = new Date(yield* Clock.currentTimeMillis);
 		return rows.map((row) => toPerson(row, usageOf, limits, now));
 	}).pipe(Effect.withSpan("AdminReports.people"));

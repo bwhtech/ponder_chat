@@ -345,7 +345,7 @@ const make = Effect.gen(function* () {
 		return { runId: started.runId, followed: started.followed, stream } satisfies Started;
 	});
 
-	const follow = Effect.fn("Replies.follow")(function* (id: string, owner: string, uiStartIndex = 0) {
+	const follow = Effect.fn("Replies.follow")(function* (id: string, owner: string, uiStartIndex: number = 0) {
 		const run = Option.getOrUndefined(yield* runs.latest(id));
 		if (!run || !(yield* mayUse(run.threadId, owner))) return Option.none<Reply>();
 		const stream = yield* provided(replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled || run.failed, continued: run.continued })).pipe(inReplyTrace(run.runId));
@@ -384,7 +384,7 @@ const make = Effect.gen(function* () {
 		return deleted;
 	});
 
-	const whenFinished = Effect.fn("Replies.whenFinished")(function* (threadId: string, timeout = 10_000) {
+	const whenFinished = Effect.fn("Replies.whenFinished")(function* (threadId: string, timeout: number = 10_000) {
 		yield* runs.active(threadId).pipe(Effect.repeat({ while: Option.isSome, schedule: Schedule.spaced("250 millis") }), Effect.timeoutOption(timeout));
 	});
 

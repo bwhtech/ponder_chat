@@ -3,6 +3,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
+import { createMiddleware } from "hono/factory";
 import { etag } from "hono/etag";
 import type { hc } from "hono/client";
 import { HTTPException } from "hono/http-exception";
@@ -116,12 +117,16 @@ app.get("/api/brand/logo/:theme", async (c) => {
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
 app.on(["GET", "POST"], "/api/auth/*", (c) => route(c, Auth.Auth.use((auth) => auth.handler(c.req.raw))));
-app.use("/api/*", async (c, next) => {
-	const session = await route(c, Auth.Auth.use((auth) => auth.session(c.req.raw.headers)));
-	if (Option.isNone(session)) return c.json({ error: "Sign in first." }, 401);
-	c.set("user", session.value.user);
-	await next();
-});
+// createMiddleware: an inline handler here would type its input as `any`.
+app.use(
+	"/api/*",
+	createMiddleware<Env>(async (c, next) => {
+		const session = await route(c, Auth.Auth.use((auth) => auth.session(c.req.raw.headers)));
+		if (Option.isNone(session)) return c.json({ error: "Sign in first." }, 401);
+		c.set("user", session.value.user);
+		await next();
+	}),
+);
 const userOf = (c: Context<Env>) => c.get("user").id;
 /** At most so many uses per person (rate-limit.ts). */
 const perPerson = (limit: LimitName, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
@@ -344,7 +349,7 @@ const api = app
 
 /** The API's routes, for the typed client (web/api.ts). Import it as a type only, so no server code reaches the browser. */
 export type AppType = typeof api;
-/** The typed client itself. web/api.ts declares its client with it, so a check without the server can replace it (web/server-stub.d.ts). */
+/** The typed client itself. web/api.ts declares its client with it: the real one loads at the first request. */
 export type ApiClient = ReturnType<typeof hc<AppType>>;
 
 // The admin pages are their own app (web/admin.html) with its own routes under /admin/.
