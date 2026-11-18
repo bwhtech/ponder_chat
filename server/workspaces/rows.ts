@@ -24,7 +24,8 @@ const SummaryRow = Schema.Struct({
 	name: Schema.String,
 	description: Schema.String,
 	icon: Schema.NullOr(Schema.String),
-	created_at: Schema.Date,
+	/** To the microsecond, as the list is ordered (CREATED_AT). */
+	created_at: Schema.String,
 	updated_at: Schema.Date,
 	member: Schema.NullOr(MemberAccessSchema),
 	member_count: Schema.Number,
@@ -59,6 +60,12 @@ export type Rows = {
 	existing: (userIds: string[]) => Effect.Effect<ReadonlyArray<string>, SqlError>;
 };
 
+/**
+ * When it was made, to the microsecond, in UTC ISO 8601 text: the list's order (`created_at desc`),
+ * which the page sorts again after a pin. A Date would keep only the millisecond, and two
+ * workspaces made in the same one could swap.
+ */
+const CREATED_AT = `to_char(w.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') as created_at`;
 const MEMBER_COUNT = "(select count(*)::int from workspace_members c where c.workspace_id = w.id) as member_count";
 
 export function rowsOf(sql: PgClient.PgClient): Rows {
@@ -76,7 +83,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		// A pin only counts on a workspace the person can still use: the join adds to the rows
 		// the person can use, and never adds a row.
 		execute: (userId) => sql`
-			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.icon, w.created_at, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)},
+			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.icon, ${sql.literal(CREATED_AT)}, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)},
 				p.user_id is not null as pinned
 			from workspaces w
 				left join workspace_members m on m.workspace_id = w.id and m.user_id = ${userId}
@@ -88,7 +95,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		Request: Schema.String,
 		Result: DetailRow,
 		execute: (workspaceId) => sql`
-			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.instructions, w.icon, w.created_at, w.updated_at,
+			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.instructions, w.icon, ${sql.literal(CREATED_AT)}, w.updated_at,
 				null as member, ${sql.literal(MEMBER_COUNT)},
 				coalesce(u.name, '') as owner_name, coalesce(u.email, '') as owner_email
 			from workspaces w left join users u on u.id = w.owner_id

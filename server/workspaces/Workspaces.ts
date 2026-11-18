@@ -232,9 +232,13 @@ const make = Effect.gen(function* () {
 
 	// FOR KEY SHARE: admissions do not wait for each other or for a rename, only for a delete's FOR UPDATE.
 	// Read committed: after a delete commits, the row is read again and no longer matches.
-	const admit = Effect.fn("Workspaces.admit")(function* (userId: string, workspaceId: string, needed: "ask" | "edit") {
+	const lockLive = Effect.fnUntraced(function* (workspaceId: string) {
 		const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null for key share`;
 		if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
+	});
+
+	const admit = Effect.fn("Workspaces.admit")(function* (userId: string, workspaceId: string, needed: "ask" | "edit") {
+		yield* lockLive(workspaceId);
 		yield* withAccess(userId, workspaceId, needed);
 	});
 
@@ -245,17 +249,17 @@ const make = Effect.gen(function* () {
 		return found.map((row) => ({ ...summaryFrom(row, accessFrom({ kind: row.kind, ownerId: row.owner_id, member: row.member }, userId, admin)), pinned: row.pinned }));
 	});
 
+	// Admitted as a chat is (admit): a delete waits for the pin, and then takes it with the workspace;
+	// a pin that waited for a delete finds the workspace gone.
 	const pin = Effect.fn("Workspaces.pin")(function* (userId: string, workspaceId: string, pinned: boolean) {
-		if ((yield* resolve(userId, workspaceId)).access === "none") return yield* new WorkspaceNotFound({ workspaceId });
-		if (!pinned) {
-			yield* sql`delete from workspace_pins where user_id = ${userId} and workspace_id = ${workspaceId}`;
-			return;
-		}
-		// Not on a workspace deleted since the check: its pins are gone with it (remove).
-		yield* sql`
-			insert into workspace_pins (user_id, workspace_id)
-			select ${userId}, id from workspaces where id = ${workspaceId} and deleted_at is null
-			on conflict (user_id, workspace_id) do nothing`;
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* lockLive(workspaceId);
+				if ((yield* resolve(userId, workspaceId)).access === "none") return yield* new WorkspaceNotFound({ workspaceId });
+				if (pinned) yield* sql`insert into workspace_pins (user_id, workspace_id) values (${userId}, ${workspaceId}) on conflict (user_id, workspace_id) do nothing`;
+				else yield* sql`delete from workspace_pins where user_id = ${userId} and workspace_id = ${workspaceId}`;
+			}),
+		);
 	});
 
 	const get = Effect.fn("Workspaces.get")(function* (userId: string, idOrSlug: string) {
@@ -381,7 +385,7 @@ function summaryFrom(row: SummaryRow, access: Access): Omit<WorkspaceSummary, "p
 		icon: row.icon,
 		access,
 		memberCount: row.kind === "org" ? 0 : row.member_count,
-		createdAt: row.created_at.toISOString(),
+		createdAt: row.created_at,
 		updatedAt: row.updated_at.toISOString(),
 	};
 }

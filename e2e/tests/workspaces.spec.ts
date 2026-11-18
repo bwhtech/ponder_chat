@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { e2e } from "../env.ts";
-import { chat, expect, test } from "../fixtures.ts";
+import { chat, expect, jsonOf, test } from "../fixtures.ts";
 import { addChats, createSkill, createWorkspace, newPerson, textFile, uploadReady, workspacePage } from "../workspaces.ts";
 
 /**
@@ -783,6 +783,151 @@ test("a failed pin puts the row back where it was, and says so", async ({ page, 
 	await expect(page.getByText("The workspace could not be pinned.")).toBeVisible();
 	await expect.poll(mine).toEqual([newer, older]);
 });
+
+test.describe("pins that race", () => {
+	const PIN = /\/api\/workspaces\/[^/]+\/pin$/;
+	const pinAnswer = (page: Page, method: "PUT" | "DELETE") => page.waitForResponse((response) => PIN.test(response.url()) && response.request().method() === method);
+	/** A promise the test lets go of later. */
+	const gate = () => {
+		let open = () => {};
+		const closed = new Promise<void>((resolve) => (open = resolve));
+		return { closed, open };
+	};
+
+	test("Pin, then Unpin before the pin is saved: the server ends unpinned, as the row shows", async ({ page, person }) => {
+		const tag = person.id.slice(0, 6);
+		const [older, newer] = [`Pin twice old ${tag}`, `Pin twice new ${tag}`];
+		const { id } = await createWorkspace(page, older);
+		await createWorkspace(page, newer);
+		const put = gate();
+		// The pin is slow to reach the server; the unpin is not.
+		await page.route(PIN, async (route) => {
+			if (route.request().method() === "PUT") await put.closed;
+			await route.continue();
+		});
+		await page.goto("/");
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+		const pinned = pinAnswer(page, "PUT");
+		const unpinned = pinAnswer(page, "DELETE");
+		await chooseFromMenu(page, older, "Pin");
+		await expect.poll(() => mine(page, tag)).toEqual([older, newer]);
+		await chooseFromMenu(page, older, "Unpin");
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+		put.open();
+		await Promise.all([pinned, unpinned]);
+		const listed = await jsonOf<{ workspaces: { id: string; pinned: boolean }[] }>(await page.request.get("/api/workspaces"));
+		expect(listed.workspaces.find((workspace) => workspace.id === id)?.pinned).toBe(false);
+		await page.reload();
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+	});
+
+	test("Pin, then Unpin, and both refused in turn: the row stays where it was, with no toast for the older choice", async ({ page, person }) => {
+		const tag = person.id.slice(0, 6);
+		const [older, newer] = [`Pin refused old ${tag}`, `Pin refused new ${tag}`];
+		await createWorkspace(page, older);
+		await createWorkspace(page, newer);
+		const [put, remove] = [gate(), gate()];
+		await page.route(PIN, async (route) => {
+			await (route.request().method() === "PUT" ? put.closed : remove.closed);
+			await route.fulfill({ status: 500, json: { error: "Down" } });
+		});
+		await page.goto("/");
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+		const refused = pinAnswer(page, "PUT");
+		await chooseFromMenu(page, older, "Pin");
+		await chooseFromMenu(page, older, "Unpin");
+		put.open();
+		await refused;
+		remove.open();
+		// An unpin sent at once would be refused now; the one choice left is the person's last, which the row shows.
+		await page.waitForTimeout(300);
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+		await expect(page.getByText("The workspace could not be pinned.")).toHaveCount(0);
+	});
+
+	test("a list asked for before a pin, and answered after it, does not take the pin back", async ({ page, person }) => {
+		const tag = person.id.slice(0, 6);
+		const [older, newer] = [`Pin stale old ${tag}`, `Pin stale new ${tag}`];
+		await createWorkspace(page, older);
+		await createWorkspace(page, newer);
+		const list = gate();
+		let asked = () => {};
+		const listAsked = new Promise<void>((resolve) => (asked = resolve));
+		// The list the page asks for again is read from the server at once, and answered only later.
+		await page.route(
+			(url) => url.pathname === "/api/workspaces",
+			async (route) => {
+				if (route.request().method() !== "GET") return route.continue();
+				const response = await route.fetch();
+				asked();
+				await list.closed;
+				await route.fulfill({ response });
+			},
+		);
+		// A workspace that is not there: its page asks for the list again (WorkspacePage.vue).
+		await page.goto(`/?w=no-such-${tag}`);
+		await expect(page.getByText("No workspace here")).toBeVisible();
+		await listAsked;
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+		const saved = pinAnswer(page, "PUT");
+		await chooseFromMenu(page, older, "Pin");
+		expect((await saved).ok()).toBe(true);
+		const answered = page.waitForResponse((response) => new URL(response.url()).pathname === "/api/workspaces" && response.request().method() === "GET");
+		list.open();
+		await answered;
+		await page.waitForTimeout(300);
+		await expect.poll(() => mine(page, tag)).toEqual([older, newer]);
+	});
+
+	test("two workspaces made in the same millisecond keep the server's order when another is pinned", async ({ page, person, db }) => {
+		const tag = person.id.slice(0, 6);
+		const names = [`Pin tie a ${tag}`, `Pin tie b ${tag}`, `Pin tie other ${tag}`];
+		const made = [];
+		for (const name of names) made.push({ name, ...(await createWorkspace(page, name)) });
+		// The one with the smaller id is made later, in the same millisecond: by id alone it would come second.
+		const [first, second] = [made[0]!, made[1]!].sort((a, b) => (a.id < b.id ? -1 : 1));
+		await db`update workspaces set created_at = '2026-01-01T00:00:00.000200Z' where id = ${first.id}`;
+		await db`update workspaces set created_at = '2026-01-01T00:00:00.000100Z' where id = ${second.id}`;
+		await page.goto("/");
+		const ties = async () => (await mine(page, tag)).filter((name) => name !== names[2]);
+		await expect.poll(ties).toEqual([first.name, second.name]);
+		await chooseFromMenu(page, names[2]!, "Pin");
+		await expect.poll(() => mine(page, tag)).toEqual([names[2], first.name, second.name]);
+	});
+
+	test("a person pins a workspace with the keyboard alone", async ({ page, person }) => {
+		const tag = person.id.slice(0, 6);
+		const [older, newer] = [`Pin keys old ${tag}`, `Pin keys new ${tag}`];
+		await createWorkspace(page, older);
+		await createWorkspace(page, newer);
+		await page.goto("/");
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+		await workspaceRows(page).getByRole("button", { name: older, exact: true }).focus();
+		await page.keyboard.press("Tab");
+		const menuButton = page.getByRole("button", { name: `Actions for “${older}”` });
+		await expect(menuButton).toBeFocused();
+		await expect(menuButton).toHaveCSS("opacity", "1");
+		await page.keyboard.press("Enter");
+		await expect(page.getByRole("menuitem", { name: "Pin" })).toBeFocused();
+		await page.keyboard.press("Enter");
+		await expect.poll(() => mine(page, tag)).toEqual([older, newer]);
+		await page.reload();
+		await expect.poll(() => mine(page, tag)).toEqual([older, newer]);
+	});
+});
+
+/** This person's workspaces in the sidebar, by the tag their names end with: tests running at once add others. */
+async function mine(page: Page, tag: string) {
+	return (await workspaceRows(page).locator('[data-slot="sidebar-item"]').allInnerTexts()).filter((name) => name.endsWith(tag));
+}
+
+/** Opens a sidebar row's menu with the pointer, and chooses an item. */
+async function chooseFromMenu(page: Page, name: string, item: "Pin" | "Unpin") {
+	const row = workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ has: page.getByRole("button", { name, exact: true }) });
+	await row.hover();
+	await row.getByRole("button", { name: `Actions for “${name}”` }).click();
+	await page.getByRole("menuitem", { name: item }).click();
+}
 
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');
 const about = (page: Page) => page.locator('[data-slot="workspace-about"]');

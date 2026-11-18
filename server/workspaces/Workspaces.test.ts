@@ -7,12 +7,14 @@
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Result from "effect/Result";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../auth.ts";
 import { jsonBody } from "../test-json.ts";
 import { accessFrom, type Access } from "./access.ts";
 import { workspacePrompt } from "./prompt.ts";
-import { base, USERS_TABLE, useTestSchema } from "./test-env.ts";
+import { base, blockedBy, holdRows, USERS_TABLE, useTestSchema } from "./test-env.ts";
 import type { Person, WorkspaceDetail, WorkspaceSummary } from "./Workspaces.ts";
 
 const tag = Math.random().toString(36).slice(2, 10);
@@ -265,6 +267,30 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		const pins = await database((sql) => sql`select user_id from workspace_pins where workspace_id = ${workspace}`);
 		assert.lengthOf(pins, 0, "the owner's pin and the stale one are gone with it");
 		assert.strictEqual((await call("ana", "PUT", `/api/workspaces/${workspace}/pin`)).status, 404, "a deleted workspace can't be pinned");
+	});
+
+	it("a pin that races the workspace's delete waits for it, finds the workspace gone, and leaves no pin", async () => {
+		const workspace = await create("ana", "private", "Pin racing");
+		// A chat in it, whose row the test holds: the delete stops there, with the workspace taken and its pins gone.
+		const held = `chat-pin-held-${tag}`;
+		await runPromise(Threads.Threads.use((threads) => threads.save(held, who.ana, [{ id: "m1", role: "user", parts: [{ type: "text", text: "Hi" }] }], workspace)));
+		const pinned = await runPromise(
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const hold = yield* holdRows(sql, sql`select id from threads where id = ${held} for update`);
+				const deleting = yield* Effect.forkChild(Workspaces.Workspaces.use((workspaces) => workspaces.remove({ id: who.ana, email: "ana@example.invalid" }, workspace)));
+				const deleter = yield* blockedBy(sql, hold.pid);
+				const pinning = yield* Effect.forkChild(Effect.result(Workspaces.Workspaces.use((workspaces) => workspaces.pin(who.ana, workspace, true))));
+				// The pin waits for the delete; one that does not wait is done at once.
+				yield* Effect.raceFirst(Effect.asVoid(Fiber.await(pinning)), Effect.asVoid(blockedBy(sql, deleter)));
+				yield* hold.release;
+				yield* Fiber.join(deleting);
+				return yield* Fiber.join(pinning);
+			}),
+		);
+		assert.isTrue(Result.isFailure(pinned) && pinned.failure._tag === "WorkspaceNotFound", JSON.stringify(pinned));
+		const pins = await database((sql) => sql`select user_id from workspace_pins where workspace_id = ${workspace}`);
+		assert.lengthOf(pins, 0, "no pin on the deleted workspace");
 	});
 
 	it("shows members only to a person who can change them", async () => {

@@ -42,9 +42,10 @@ export function workspaceByKey(key: string | null | undefined) {
 }
 
 export async function loadWorkspaces() {
+	const asked = pinClock;
 	try {
 		const fresh = fromBoot("workspaces") ?? (await unwrap(client.api.workspaces.$get())).workspaces;
-		workspaces.value = fresh;
+		workspaces.value = withPinsMadeSince(fresh, asked);
 		workspacesLoaded.value = true;
 	} catch {
 		// Offline: keep the list the page has. The rows stay skeletons until one load works.
@@ -125,9 +126,17 @@ export async function deleteWorkspace(id: string) {
 	await loadWorkspaces();
 }
 
-/** The server's order: pinned first, then the newest made first, then by id. */
+/**
+ * The server's order: pinned first, then the newest made first, then by id. `createdAt` is to
+ * the microsecond, as the server orders it (server/workspaces/rows.ts), so rows made in the same
+ * millisecond keep their place. ISO text in UTC sorts as the time does.
+ */
 function listOrder(a: WorkspaceSummary, b: WorkspaceSummary) {
-	return Number(b.pinned) - Number(a.pinned) || b.createdAt.localeCompare(a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
+	return Number(b.pinned) - Number(a.pinned) || descending(a.createdAt, b.createdAt) || descending(a.id, b.id);
+}
+
+function descending(a: string, b: string) {
+	return a < b ? 1 : a > b ? -1 : 0;
 }
 
 /** Sets the pin of the workspace in the list, in its sorted place. */
@@ -136,19 +145,64 @@ function placePin(id: string, pinned: boolean) {
 }
 
 /**
+ * The pins changed in this tab: what the person wants (`wanted`), what the server has
+ * (`saved`), and whether a write runs. One write runs at a time for a workspace, so the server
+ * ends with the person's last choice, whatever order the requests would otherwise take.
+ * `changedAt` is the `pinClock` of the last choice or answer: a list asked for before it is
+ * older than the pin (loadWorkspaces).
+ */
+type PinState = { wanted: boolean; saved: boolean; writing: boolean; changedAt: number };
+const pinStates = new Map<string, PinState>();
+let pinClock = 0;
+
+/** The list, with each pin this tab changed after the list was asked for, or still writes, as the person chose it. */
+function withPinsMadeSince(list: WorkspaceSummary[], asked: number) {
+	const overlaid = list.map((workspace) => {
+		const state = pinStates.get(workspace.id);
+		const newer = state && (state.writing || state.changedAt > asked) && state.wanted !== workspace.pinned;
+		return newer ? { ...workspace, pinned: state.wanted } : workspace;
+	});
+	return overlaid.some((workspace, index) => workspace !== list[index]) ? overlaid.sort(listOrder) : list;
+}
+
+/**
  * Pins the workspace at the top of the person's own list, or unpins it: the row moves at
- * once, and moves back with a toast when the server refuses. Nobody else sees the pin.
+ * once. A write waits for the one before it on the same workspace. When the server refuses
+ * the person's last choice, the row moves back with a toast; a refusal of an older choice,
+ * which the person has changed since, changes nothing. Nobody else sees the pin.
  */
 export async function pinWorkspace(id: string, pinned: boolean) {
+	const workspace = workspaceById(id);
+	if (!workspace) return;
+	const state = pinStates.get(id) ?? { wanted: workspace.pinned, saved: workspace.pinned, writing: false, changedAt: 0 };
+	pinStates.set(id, state);
+	state.wanted = pinned;
+	state.changedAt = ++pinClock;
 	placePin(id, pinned);
-	const param = { id: encodeURIComponent(id) };
-	try {
-		if (pinned) await unwrap(client.api.workspaces[":id"].pin.$put({ param }));
-		else await unwrap(client.api.workspaces[":id"].pin.$delete({ param }));
-	} catch {
-		placePin(id, !pinned);
-		toast.error(pinned ? "The workspace could not be pinned." : "The workspace could not be unpinned.");
+	// The write that runs sends this choice once it is done.
+	if (state.writing) return;
+	state.writing = true;
+	while (state.wanted !== state.saved) {
+		const sending = state.wanted;
+		try {
+			await sendPin(id, sending);
+			state.saved = sending;
+		} catch {
+			if (state.wanted === sending) {
+				state.wanted = state.saved;
+				placePin(id, state.saved);
+				toast.error(sending ? "The workspace could not be pinned." : "The workspace could not be unpinned.");
+			}
+		}
+		state.changedAt = ++pinClock;
 	}
+	state.writing = false;
+}
+
+async function sendPin(id: string, pinned: boolean) {
+	const param = { id: encodeURIComponent(id) };
+	if (pinned) await unwrap(client.api.workspaces[":id"].pin.$put({ param }));
+	else await unwrap(client.api.workspaces[":id"].pin.$delete({ param }));
 }
 
 export async function searchPeople(q: string): Promise<readonly Person[]> {
