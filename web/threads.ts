@@ -141,15 +141,16 @@ export function useWorkspaceThreads(workspaceId: () => string) {
 			askedFor.value = id;
 		}
 		const fresh = await fetchWorkspaceChats(id);
-		if (token !== asking) return;
+		// Asked for before a chat changed: the ask that change started has the newer list.
+		if (token !== asking || fresh === "older") return;
 		if (fresh) fetched.value = fresh;
 		askedFor.value = id;
 	}
-	watch([workspaceId, threads], ask, { immediate: true });
+	watch([workspaceId, threads, chatsChanged], ask, { immediate: true });
 	const chats = computed(() => {
 		const id = workspaceId();
 		if (!id) return [];
-		const byId = new Map(fetched.value.filter((thread) => thread.workspaceId === id).map((thread) => [thread.id, thread]));
+		const byId = new Map(fetched.value.filter((thread) => thread.workspaceId === id && !deleted.value.has(thread.id)).map((thread) => [thread.id, thread]));
 		if (listLoaded.value) for (const thread of threads.value) if (thread.workspaceId === id) byId.set(thread.id, thread);
 		return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	});
@@ -157,30 +158,45 @@ export function useWorkspaceThreads(workspaceId: () => string) {
 	return { chats, loaded };
 }
 
-const chatsInflight = new Map<string, Promise<ThreadSummary[] | undefined>>();
+/**
+ * Goes up each time this page deletes, renames or starts a chat. A workspace's list asked for
+ * before then may not have the change: it is neither shared with a later ask nor kept, and
+ * the change asks again (useWorkspaceThreads). A deleted chat leaves every list at once.
+ */
+const chatsChanged = ref(0);
+const deleted = shallowRef<ReadonlySet<string>>(new Set());
+function chatChanged() {
+	chatsChanged.value++;
+}
+
+type WorkspaceChats = ThreadSummary[] | undefined | "older";
+const chatsInflight = new Map<string, { version: number; request: Promise<WorkspaceChats> }>();
 
 /**
  * The server's list of the person's chats in a workspace, kept for the next visit
  * (workspaces/cache.ts); undefined when it could not be reached (offline: the person's list
- * still gives the chats it has). A request on its way for the workspace is shared.
+ * still gives the chats it has), and "older" when a chat changed while it was on its way. A
+ * request on its way for the workspace, asked for since the last change, is shared.
  */
 function fetchWorkspaceChats(id: string) {
+	const version = chatsChanged.value;
 	const pending = chatsInflight.get(id);
-	if (pending) return pending;
-	const request = (async () => {
+	if (pending?.version === version) return pending.request;
+	const request = (async (): Promise<WorkspaceChats> => {
 		try {
 			const response = await client.api.threads.$get({ query: { workspace: id } });
 			if (!response.ok) return undefined;
 			const list = (await response.json()).threads;
+			if (version !== chatsChanged.value) return "older";
 			writeWorkspaceChats(id, list);
 			return list;
 		} catch {
 			return undefined;
 		} finally {
-			chatsInflight.delete(id);
+			if (chatsInflight.get(id)?.version === version) chatsInflight.delete(id);
 		}
 	})();
-	chatsInflight.set(id, request);
+	chatsInflight.set(id, { version, request });
 	return request;
 }
 
@@ -319,6 +335,7 @@ function added(id: string, text: string, workspaceId?: string) {
 	const thread = { id, title: nameFromFirstMessage(text), updatedAt: new Date().toISOString(), messages: 1, ...(workspaceId && { workspaceId }) };
 	pending.set(id, thread);
 	threads.value = [thread, ...threads.value];
+	chatChanged();
 	void waitForTitle(id, thread.title);
 }
 
@@ -335,6 +352,7 @@ async function waitForTitle(id: string, untitled: string) {
 
 async function rename(id: string, title: string) {
 	await unwrap(client.api.threads[":id"].$patch({ param: { id: encodeURIComponent(id) }, json: { title } }), "The thread could not be renamed.");
+	chatChanged();
 	await refresh();
 }
 
@@ -342,6 +360,8 @@ async function remove(id: string) {
 	await unwrap(client.api.threads[":id"].$delete({ param: { id: encodeURIComponent(id) } }), "The thread could not be deleted.");
 	forgetThread(id);
 	forgetChat(id);
+	deleted.value = new Set([...deleted.value, id]);
+	chatChanged();
 	pending.delete(id);
 	await refresh();
 	if (id === current.value) {

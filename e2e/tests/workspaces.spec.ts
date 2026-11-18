@@ -892,6 +892,55 @@ test.describe("switching workspaces", () => {
 		});
 	});
 
+	test("a chat deleted while an older list of the workspace's chats is on its way does not come back", async ({ page, person, db }) => {
+		const tag = person.id.slice(0, 6);
+		const a = await createWorkspace(page, `Stale chats ${tag}`);
+		await addChats(db, person.id, a.id, 2);
+		await page.goto(`/?w=${a.slug}`);
+		const chats = page.locator('[data-slot="workspace-chats"]');
+		await expect(chats).toContainText("Question 1");
+		await expect(chats).toContainText("Question 2");
+
+		// The next read of the workspace's chats is taken now, and answered only when the test lets go.
+		let release = () => {};
+		const released = new Promise<void>((resolve) => (release = resolve));
+		let held = false;
+		const isList = (url: URL) => url.pathname === "/api/threads" && url.searchParams.get("workspace") === a.id;
+		await page.route(isList, async (route) => {
+			if (held) return route.fallback();
+			held = true;
+			const response = await route.fetch();
+			await released;
+			await route.fulfill({ response });
+		});
+		const thread = (title: string) => page.locator('[data-slot="thread-list"] [data-slot="sidebar-item"]').filter({ hasText: title });
+		const menuOf = async (title: string, item: "Rename" | "Delete") => {
+			await thread(title).hover();
+			await thread(title).getByRole("button", { name: `Actions for ${title}` }).click();
+			await page.getByRole("menuitem", { name: item }).click();
+		};
+
+		// A rename reads the person's chats again, and so the workspace's: that read is held, with both chats in it.
+		await menuOf("Question 2", "Rename");
+		const rename = page.getByRole("dialog", { name: "Rename thread" });
+		await rename.getByRole("textbox", { name: /^Name/ }).fill(`Renamed ${tag}`);
+		await rename.getByRole("button", { name: "Rename" }).click();
+		await expect(chats).toContainText(`Renamed ${tag}`);
+		await expect.poll(() => held).toBe(true);
+
+		await menuOf("Question 1", "Delete");
+		await page.getByRole("dialog", { name: "Delete this thread?" }).getByRole("button", { name: "Delete" }).click();
+		await expect(chats).not.toContainText("Question 1");
+
+		const answered = page.waitForResponse((response) => isList(new URL(response.url())));
+		release();
+		await answered;
+		// The older answer has had its chance to land.
+		await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 300))));
+		await expect(chats).not.toContainText("Question 1");
+		await expect(chats).toContainText(`Renamed ${tag}`);
+	});
+
 	test("a workspace deleted elsewhere is not found when opened again, and does not show from memory after", async ({ page, person }) => {
 		const tag = person.id.slice(0, 6);
 		const [first, second] = [`Gone alpha ${tag}`, `Gone bravo ${tag}`];
