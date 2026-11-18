@@ -104,6 +104,31 @@
   }
 }
 
+/* A workspace's setup greets as its page first shows it (WorkspaceSetup.vue): the heading leads,
+   the cards follow 60, 110 and 150ms behind it. `backwards` holds each card hidden through its
+   delay and lets go at the end, so the cards' own leave and move transitions are not overridden.
+   With reduced motion they fade in together, without moving. */
+@keyframes setup-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise));
+  }
+}
+[data-greet] [data-slot='workspace-setup-intro'] {
+  --rise: 8px;
+  animation: setup-rise 300ms var(--ease-out-strong) backwards;
+}
+[data-greet] [data-slot='workspace-setup-step'] {
+  --rise: 6px;
+  animation: setup-rise 260ms var(--ease-out-strong) var(--greet-delay, 0ms) backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-greet] [data-slot='workspace-setup-intro'],
+  [data-greet] [data-slot='workspace-setup-step'] {
+    animation: fade-in 200ms var(--ease-out-strong) backwards;
+  }
+}
+
 /* A reply that arrives in this visit rises in; the ones already there on load do not, and your own
    message shows at once.
    A reply's copy and model row fades in when the reply ends. */

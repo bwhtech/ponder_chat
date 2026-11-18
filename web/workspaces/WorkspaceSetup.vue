@@ -20,6 +20,9 @@ import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
  * a reload as it did when a card left. The steps are rows instead, one under the other, when
  * the column is too narrow for that (a phone, or a sidebar and side panel beside it), and when
  * one step is left: a lone card would leave a hole beside it.
+ *
+ * The cards rise into place one after another as the page first shows them (a new workspace
+ * is seen once or twice, so it can greet); later they only fade and slide, as steps are done.
  */
 /**
  * `dragging`: files are dragged somewhere over the page, and a drop there uploads them
@@ -49,6 +52,18 @@ onMounted(() => {
 	widthObserver.observe(section.value);
 });
 onBeforeUnmount(() => widthObserver.disconnect());
+
+/**
+ * The setup greets as the page first shows it (style.css, [data-greet]): the heading rises in,
+ * and the cards follow it one after another, each gap shorter than the last, so the group reads
+ * as one wave. Only on the first showing: a card that later becomes a row (a new element) just
+ * fades, as steps are done. With reduced motion, everything fades in together.
+ */
+const GREET_DELAYS_MS = [60, 110, 150];
+const GREET_MS = 600;
+const greeting = ref(true);
+const greetTimer = setTimeout(() => (greeting.value = false), GREET_MS);
+onBeforeUnmount(() => clearTimeout(greetTimer));
 const narrow = computed(() => width.value < props.steps.length * CARD_MIN_PX + (props.steps.length - 1) * GAP_PX);
 const rows = computed(() => cards.value.length === 1 || narrow.value);
 
@@ -180,24 +195,26 @@ onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 </script>
 
 <template>
-	<section ref="section" aria-labelledby="workspace-setup-heading" data-slot="workspace-setup" v-on="drop.listeners">
-		<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-			<h2 id="workspace-setup-heading" class="text-lg-semibold text-ink-gray-9">Set up this workspace</h2>
-			<div class="flex shrink-0 items-center gap-2">
-				<!-- A segment for each step; as many as are done fill, from the left, whichever steps they were. -->
-				<div class="flex gap-1" aria-hidden="true" data-slot="workspace-setup-progress">
-					<span
-						v-for="(step, index) in steps"
-						:key="step.key"
-						class="h-1.5 w-5 rounded-full transition-colors duration-300 ease-out-strong motion-reduce:transition-none"
-						:class="filled(index) ? 'bg-surface-gray-7' : 'bg-surface-gray-3'"
-						:data-filled="filled(index) || undefined"
-					/>
+	<section ref="section" aria-labelledby="workspace-setup-heading" data-slot="workspace-setup" :data-greet="greeting || undefined" v-on="drop.listeners">
+		<div data-slot="workspace-setup-intro">
+			<div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+				<h2 id="workspace-setup-heading" class="text-lg-semibold text-ink-gray-9">Set up this workspace</h2>
+				<div class="flex shrink-0 items-center gap-2">
+					<!-- A segment for each step; as many as are done fill, from the left, whichever steps they were. -->
+					<div class="flex gap-1" aria-hidden="true" data-slot="workspace-setup-progress">
+						<span
+							v-for="(step, index) in steps"
+							:key="step.key"
+							class="h-1.5 w-5 rounded-full transition-colors duration-300 ease-out-strong motion-reduce:transition-none"
+							:class="filled(index) ? 'bg-surface-gray-7' : 'bg-surface-gray-3'"
+							:data-filled="filled(index) || undefined"
+						/>
+					</div>
+					<p class="text-sm tabular-nums text-ink-gray-6" data-slot="workspace-setup-count">{{ count(done) }} of {{ count(steps.length) }} done</p>
 				</div>
-				<p class="text-sm tabular-nums text-ink-gray-6" data-slot="workspace-setup-count">{{ count(done) }} of {{ count(steps.length) }} done</p>
 			</div>
+			<p class="mt-1 text-p-sm text-ink-gray-6">You can ask questions now and set these up any time.</p>
 		</div>
-		<p class="mt-1 text-p-sm text-ink-gray-6">You can ask questions now and set these up any time.</p>
 
 		<div
 			class="mt-4 transition-[height] duration-300 ease-out-strong motion-reduce:transition-none"
@@ -219,8 +236,9 @@ onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 					@after-leave="refocusAfterLeave"
 				>
 					<WorkspaceSetupCard
-						v-for="step in cards"
+						v-for="(step, index) in cards"
 						:key="`${step.key}:${rows ? 'row' : 'card'}`"
+						:style="{ '--greet-delay': `${GREET_DELAYS_MS[index] ?? 0}ms` }"
 						:step="step"
 						:compact="rows"
 						:busy="step.key === 'documents' && uploading > 0"
