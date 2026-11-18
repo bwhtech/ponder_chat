@@ -5,8 +5,7 @@ import { count } from "../numbers";
 /**
  * A workspace's documents (server/workspaces/documents/): the list comes with the workspace
  * (store.ts, fetchWorkspace), and everyone who can ask opens each file in the side viewer;
- * people who can edit it upload, delete, read the indexing log and ask for "Try again". Written out, so the check without the server (tsconfig.no-node.json)
- * still knows them.
+ * people who can edit it upload, delete, read the indexing log and ask for "Try again".
  */
 export type DocumentStatus = "reading" | "ready" | "failed";
 export type WorkspaceDocument = { id: string; name: string; mediaType: string; size: number; status: DocumentStatus; error: string | null; createdAt: string };

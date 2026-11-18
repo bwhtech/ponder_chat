@@ -16,7 +16,7 @@ import { count } from "../numbers";
  */
 export type WorkspaceSummary = Answer<typeof client.api.workspaces.$get>["workspaces"][number];
 export type WorkspaceDetail = Answer<(typeof client.api.workspaces)[":id"]["$get"]>["workspace"];
-/** A person in the people picker, and a member: written out, so the check without the server (tsconfig.no-node.json) still knows them. */
+/** A person in the people picker, and a member. */
 export type Person = { id: string; name: string; email: string };
 export type MemberAccess = "ask" | "edit";
 export type Member = Person & { access: MemberAccess };

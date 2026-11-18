@@ -3,7 +3,8 @@ import { computed, ref, shallowRef, watch } from "vue";
 import { nameFromFirstMessage } from "../shared/thread-name";
 import { client, unwrap, type Answer } from "./api";
 import { fromBoot } from "./boot";
-import { forgetThread, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
+import { isRecord } from "./json";
+import { forgetThread, peekThread, readThread, threadFrom, writeThread, type CachedThread } from "./thread-cache";
 import { openWorkspaceKey } from "./workspaces/store";
 
 /**
@@ -228,14 +229,8 @@ function fetchThread(id: string, etag: string | null) {
 			});
 			if (response.status === 304) return "same" as const;
 			if (!response.ok) return undefined;
-			const body = await response.json();
-			const thread: CachedThread = {
-				messages: body.messages,
-				running: !!body.running,
-				failed: !!body.failed,
-				...(body.workspaceId && { workspaceId: body.workspaceId }),
-				etag: response.headers.get("ETag"),
-			};
+			const thread = threadFrom(await response.json(), response.headers.get("ETag"));
+			if (!thread) return undefined;
 			// Not saved yet (a new thread in the URL): nothing to keep.
 			if (thread.etag) writeThread(id, thread);
 			return thread;
@@ -317,10 +312,22 @@ async function remove(id: string) {
 
 function storedList(): ThreadSummary[] {
 	try {
-		return JSON.parse(localStorage.getItem(LIST_KEY) ?? "[]");
+		const stored: unknown = JSON.parse(localStorage.getItem(LIST_KEY) ?? "[]");
+		return Array.isArray(stored) ? stored.filter(isThreadSummary) : [];
 	} catch {
 		return [];
 	}
+}
+
+function isThreadSummary(value: unknown): value is ThreadSummary {
+	return (
+		isRecord(value) &&
+		typeof value.id === "string" &&
+		typeof value.title === "string" &&
+		typeof value.updatedAt === "string" &&
+		typeof value.messages === "number" &&
+		(value.workspaceId === undefined || typeof value.workspaceId === "string")
+	);
 }
 
 function setUrl(id: string, push: boolean) {

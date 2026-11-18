@@ -19,9 +19,8 @@ export type Admin = SettingsData["admins"][number];
 export type Person = Answer<typeof admin.people.$get>["people"][number];
 export type PersonDetail = Answer<(typeof admin.people)[":id"]["$get"]>;
 
-// Written out, not read from the routes: the pages compute with their fields, which the
-// check without the server (tsconfig.no-node.json) would see as `any`. Where a page keeps
-// an answer in one of them, the full check confirms that the answer fits.
+// Written out, not read from the routes. Where a page keeps an answer in one of them, the
+// typecheck confirms that the answer fits.
 export type Status = "active" | "invited" | "banned";
 export type Day = { date: string; credits: number; replies: number };
 export type ModelShare = { model: string; credits: number };
