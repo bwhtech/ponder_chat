@@ -31,6 +31,7 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      # Also with the browser's types only, without Node's (npm run typecheck:browser).
       - name: Check the web app's types
         run: npm run typecheck
 

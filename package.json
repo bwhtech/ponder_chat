@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "build": "PONDER_PAGE=chat vite build && PONDER_PAGE=admin vite build && tsx scripts/compress-web.ts && nitro build",
-    "typecheck": "node scripts/vue-tsc.cjs --noEmit -p web/tsconfig.vue.json",
+    "typecheck": "node scripts/vue-tsc.cjs --noEmit -p web/tsconfig.vue.json && npm run typecheck:browser",
+    "typecheck:browser": "npm run api-types && tsx scripts/typecheck-browser.ts",
+    "api-types": "tsc -p server/tsconfig.api-types.json",
     "lint": "oxlint",
     "dev": "tsx scripts/dev.ts",
     "test": "vitest run",
