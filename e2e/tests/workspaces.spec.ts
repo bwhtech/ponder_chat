@@ -8,8 +8,8 @@ import { createWorkspace, newPerson } from "../workspaces.ts";
  * instructions and shares it; the people in it ask with those instructions; nobody else can
  * find it; chats stay their writers' own; and a person who is removed can read their chat
  * but not send in it. An admin's workspace for everyone shows for everyone. The owner renames
- * a workspace by its title, and adds or edits its instructions from their own section. A person
- * who can only ask sees no controls there, and no empty sections.
+ * a workspace by its title, and adds or edits its instructions, in Markdown, from their own
+ * section. A person who can only ask sees no controls there, and no empty sections.
  *
  * The fake model echoes the first line of a workspace's instructions (fake/server.ts), so a
  * reply shows that they reached the model.
@@ -217,35 +217,54 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
 	});
 
-	await test.step("Add instructions opens them on their own; Edit and their lines open them again", async () => {
+	await test.step("Add instructions opens the Markdown editor; the saved instructions show as Markdown, and their box opens them again", async () => {
 		const dialog = page.getByRole("dialog", { name: "Instructions" });
+		const editor = dialog.getByRole("textbox", { name: "Instructions" });
 		const save = dialog.getByRole("button", { name: "Save" });
+		const box = instructionsSection(page).getByRole("button", { name: "Edit instructions" });
 		await instructionsSection(page).getByRole("button", { name: "Add instructions" }).click();
-		await expect(dialog.getByLabel("Instructions")).toBeFocused();
+		await expect(editor).toBeFocused();
 		await expect(dialog.getByLabel("Name")).toHaveCount(0);
 		// Save waits for a change; spaces alone are none.
 		await expect(save).toBeDisabled();
-		await dialog.getByLabel("Instructions").fill("   ");
+		await editor.fill("   ");
 		await expect(save).toBeDisabled();
-		await dialog.getByLabel("Instructions").fill(first);
+		// Past the limit, Save waits too, and the dialog says why.
+		await editor.fill("x".repeat(20_001));
+		await expect(dialog.getByText("Make the instructions 20,000 characters or fewer.", { exact: false })).toBeVisible();
+		await expect(save).toBeDisabled();
+		await editor.fill(`## Rota rules\n\n${first} Use **bold** for names.`);
 		await expect(save).toBeEnabled();
-		await dialog.getByRole("button", { name: "Save" }).click();
+		await save.click();
 		await expect(dialog).toHaveCount(0);
-		await expect(aside(page).getByText(first)).toBeVisible();
+		// Drawn as Markdown: a heading and bold text, not their marks.
+		await expect(instructionsSection(page).getByRole("heading", { name: "Rota rules" })).toBeVisible();
+		await expect(instructionsSection(page).getByText(first)).toBeVisible();
+		await expect(instructionsSection(page).getByText("bold", { exact: true })).toBeVisible();
+		await expect(instructionsSection(page)).not.toContainText("**");
 		await expect(instructionsSection(page).getByRole("button", { name: "Add instructions" })).toHaveCount(0);
 
-		await aside(page).getByText(first).click();
-		await expect(dialog.getByLabel("Instructions")).toHaveValue(first);
+		// A click on the box opens them, with the caret at the end of the text.
+		await box.hover();
+		await box.click();
+		await expect(editor).toBeFocused();
+		await expect(editor).toContainText(first);
+		await page.keyboard.type(" Added.");
+		await expect(editor).toContainText(`${first} Use **bold** for names. Added.`);
 		await dialog.getByRole("button", { name: "Cancel" }).click();
 		await expect(dialog).toHaveCount(0);
+		await expect(instructionsSection(page)).not.toContainText("Added.");
 
-		await instructionsSection(page).getByRole("button", { name: "Edit", exact: true }).click();
-		await expect(dialog.getByLabel("Instructions")).toHaveValue(first);
+		// The keyboard reaches the box, and Enter opens them too.
+		await box.focus();
+		await page.keyboard.press("Enter");
+		await expect(editor).toContainText(first);
 		await expect(save).toBeDisabled();
-		await dialog.getByLabel("Instructions").fill(second);
-		await dialog.getByRole("button", { name: "Save" }).click();
+		await editor.fill(second);
+		await save.click();
 		await expect(dialog).toHaveCount(0);
-		await expect(aside(page).getByText(second)).toBeVisible();
+		await expect(instructionsSection(page).getByText(second)).toBeVisible();
+		await expect(instructionsSection(page).getByRole("heading", { name: "Rota rules" })).toHaveCount(0);
 		// The rename is kept.
 		await expect(page.getByRole("heading", { name: renamed, level: 1 })).toBeVisible();
 	});

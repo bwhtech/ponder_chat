@@ -4,8 +4,9 @@ import { displayName } from "../../shared/display-name";
 import { computed } from "vue";
 import { me } from "../account";
 import DialogFrame from "../DialogFrame.vue";
+import MarkdownEditorPlaceholder from "../MarkdownEditorPlaceholder.vue";
 import ShareRow from "./ShareRow.vue";
-import { closeWorkspaceDialog, dialogTitle, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
+import { closeWorkspaceDialog, dialogTitle, INSTRUCTIONS_DIALOG_WIDTH, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
 import { isAdmin, type Member, type Person } from "./store";
 
 /**
@@ -31,7 +32,7 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 </script>
 
 <template>
-	<DialogFrame v-if="workspaceDialog.open && request" :label="dialogTitle(request)" size="max-w-lg" @close="closeWorkspaceDialog">
+	<DialogFrame v-if="workspaceDialog.open && request" :label="dialogTitle(request)" :size="request.kind === 'instructions' ? INSTRUCTIONS_DIALOG_WIDTH : 'max-w-lg'" @close="closeWorkspaceDialog">
 		<div class="bg-surface-elevation-1 px-4 pb-6 pt-5 sm:px-6">
 			<div class="mb-6 flex items-center justify-between">
 				<header class="flex-1">
@@ -56,12 +57,10 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 						<div class="h-[calc(6lh+0.875rem)] overflow-hidden rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm text-ink-gray-4">{{ INSTRUCTIONS_PLACEHOLDER }}</div>
 					</div>
 				</template>
-				<!-- The Instructions dialog's one field: 10 rows. -->
-				<div
-					v-else-if="instructions !== null"
-					class="h-[calc(10lh+0.875rem)] overflow-hidden whitespace-pre-wrap break-words rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm"
-					:class="instructions ? 'text-ink-gray-8' : 'text-ink-gray-4'"
-				>{{ instructions || INSTRUCTIONS_PLACEHOLDER }}</div>
+				<!-- The Instructions dialog's one field, its Markdown editor. -->
+				<div v-else-if="instructions !== null" class="h-[min(22rem,55dvh)]">
+					<MarkdownEditorPlaceholder :text="instructions" :placeholder="INSTRUCTIONS_PLACEHOLDER" />
+				</div>
 				<template v-else-if="request.kind === 'document'">
 					<ol class="space-y-3" aria-busy="true">
 						<li v-for="width in ['w-36', 'w-44', 'w-20']" :key="width" class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></li>

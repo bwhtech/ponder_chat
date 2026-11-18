@@ -58,6 +58,10 @@ export const KIND_OPTIONS = [
 export const NAME_PLACEHOLDER = "e.g. HR policies";
 export const INSTRUCTIONS_PLACEHOLDER = "Additional instructions passed to the AI agent";
 
+/** The Instructions dialog is wider than the others, for its Markdown editor: frappe-ui's Dialog size, and its width in the stand-in. */
+export const INSTRUCTIONS_DIALOG_SIZE = "2xl";
+export const INSTRUCTIONS_DIALOG_WIDTH = "max-w-2xl";
+
 /** The dialog's title, in the dialog and in its stand-in. */
 export function dialogTitle(request: WorkspaceDialogRequest) {
 	if (request.kind === "new") return "New workspace";

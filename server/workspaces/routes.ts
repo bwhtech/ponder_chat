@@ -2,6 +2,7 @@ import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import * as Effect from "effect/Effect";
 import { z } from "zod";
+import { MAX_INSTRUCTIONS } from "../../shared/workspaces.ts";
 import type { SignedInEnv } from "../auth.ts";
 import { fileHeaders, MAX_FILE_BYTES } from "../files.ts";
 import * as Accounts from "../people/Accounts.ts";
@@ -38,7 +39,7 @@ const body = <Schema extends z.ZodType>(schema: Schema) => validate("json", sche
 
 const name = z.string().trim().min(1).max(80);
 const description = z.string().trim().max(500);
-const instructions = z.string().max(20_000);
+const instructions = z.string().max(MAX_INSTRUCTIONS);
 const icon = z.string().trim().max(40).nullable().transform((value) => value || null);
 
 const createBody = z.object({
