@@ -169,8 +169,27 @@ test("an admin shares a new private workspace with everyone from its setup, and 
 	await dialog.getByRole("button", { name: "Save" }).click();
 	// The People step goes rather than turns done, and no toast covers the setup: the status line says it.
 	await expect(setupCount(page)).toHaveText("0 of 2 done");
-	await expect(setupStatus(page)).toHaveText("Workspace shared with everyone in the organisation. 0 of 2 done.");
+	const said = "Workspace shared with everyone in the organisation. 0 of 2 done.";
+	await expect(setupStatus(page)).toHaveText(said);
 	await expect(page.getByText("Sharing saved")).toHaveCount(0);
+
+	// Back to only the people added, then everyone again: the same words are said again, not left standing unchanged.
+	await setupStatus(page).evaluate((status) => {
+		const heard: string[] = [];
+		Object.assign(window, { heard });
+		new MutationObserver(() => status.textContent && heard.push(status.textContent)).observe(status, { childList: true, characterData: true, subtree: true });
+	});
+	await page.locator('[data-slot="chat-header"]').getByRole("button", { name: "Share", exact: true }).click();
+	await dialog.getByLabel("Who can use it").click();
+	await page.getByRole("option", { name: "Only the people you add" }).click();
+	await dialog.getByRole("button", { name: "Save" }).click();
+	await expect(setupCount(page)).toHaveText("0 of 3 done");
+	await setup(page).getByRole("button", { name: "Share workspace" }).click();
+	await dialog.getByLabel("Who can use it").click();
+	await page.getByRole("option", { name: "Everyone in the organisation" }).click();
+	await dialog.getByRole("button", { name: "Save" }).click();
+	await expect(setupCount(page)).toHaveText("0 of 2 done");
+	await expect.poll(() => page.evaluate(() => (window as unknown as { heard: string[] }).heard)).toContain(said);
 });
 
 test("an admin makes a workspace for everyone, and every person sees it", async ({ page, admin, fake, db, browser }) => {

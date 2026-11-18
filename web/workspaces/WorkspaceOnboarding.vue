@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { count } from "../numbers";
 import type { WorkspaceDocument } from "./documents";
 import type { SetupHandle, UploadHandle } from "./handles";
@@ -43,8 +43,15 @@ watch([doneKeys, toDo, () => props.workspace.kind], ([now, wanted, kind], [befor
 	if (kind0 === "private" && kind === "org") parts.unshift("Workspace shared with everyone in the organisation.");
 	if (wanted0 && !wanted) parts.push("Workspace set up.");
 	else if (parts.length) parts.push(`${count(now.length)} of ${count(steps.value.length)} done.`);
-	if (parts.length) announcement.value = parts.join(" ");
+	if (parts.length) announce(parts.join(" "));
 });
+
+/** The same words again would change nothing in the status line, and nothing would be read: empty it first. */
+function announce(text: string) {
+	if (announcement.value !== text) return void (announcement.value = text);
+	announcement.value = "";
+	void nextTick(() => (announcement.value = text));
+}
 
 /**
  * The last card takes its button with it, and the whole setup goes. If focus was there, or
