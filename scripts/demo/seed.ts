@@ -832,7 +832,7 @@ function workspaces(demo: string, others: string[]): DemoWorkspace[] {
 			instructions: [
 				"Help draft grant applications for Riverside Food Bank.",
 				"",
-				"- Use the funder's guidelines in Sources for the headings, the word limits and what they fund.",
+				"- Use the funder's guidelines in Sources for the headings, the word limits and what they fund, and keep to their order.",
 				"- Every number comes from our budget or the annual report. Mark anything else [check].",
 				"- Write \"we\", not \"the organization\".",
 			].join("\n"),
