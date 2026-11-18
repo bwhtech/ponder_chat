@@ -1,7 +1,7 @@
 import type { APIRequestContext } from "@playwright/test";
 import { randomBytes } from "node:crypto";
 import { e2e } from "../env.ts";
-import { expect, randomIp, signIn, test, uniqueEmail } from "../fixtures.ts";
+import { expect, jsonOf, randomIp, signIn, test, uniqueEmail } from "../fixtures.ts";
 
 /**
  * /admin/workspaces and the overview's System line (server/workspaces/admin.ts,
@@ -13,7 +13,7 @@ const headers = { Origin: e2e.baseUrl };
 async function createWorkspace(request: APIRequestContext, kind: "org" | "private", name: string) {
 	const created = await request.post("/api/workspaces", { data: { kind, name, description: `About ${name}` }, headers });
 	expect(created.status(), await created.text()).toBe(201);
-	return ((await created.json()) as { workspace: { id: string } }).workspace.id;
+	return (await jsonOf<{ workspace: { id: string } }>(created)).workspace.id;
 }
 
 /** Uploads a Markdown document and waits until it is ready. */
@@ -24,10 +24,10 @@ async function addDocument(request: APIRequestContext, workspaceId: string, name
 		headers,
 	});
 	expect(uploaded.status(), await uploaded.text()).toBe(201);
-	const id = ((await uploaded.json()) as { document: { id: string } }).document.id;
+	const id = (await jsonOf<{ document: { id: string } }>(uploaded)).document.id;
 	await expect
 		.poll(async () => {
-			const { workspace } = (await (await request.get(`/api/workspaces/${workspaceId}`)).json()) as { workspace: { documents: { id: string; status: string }[] } };
+			const { workspace } = await jsonOf<{ workspace: { documents: { id: string; status: string }[] } }>(await request.get(`/api/workspaces/${workspaceId}`));
 			return workspace.documents.find((document) => document.id === id)?.status;
 		}, { timeout: 30_000 })
 		.toBe("ready");
@@ -56,7 +56,7 @@ test("an admin sees organisation workspaces with each document's log, and privat
 	expect(answer.ok()).toBe(true);
 	const text = await answer.text();
 	for (const hidden of [secret.workspace, secret.document, privateId]) expect(text).not.toContain(hidden);
-	expect(((await answer.json()) as { private: { workspaces: number } }).private.workspaces).toBeGreaterThanOrEqual(1);
+	expect((await jsonOf<{ private: { workspaces: number } }>(answer)).private.workspaces).toBeGreaterThanOrEqual(1);
 
 	await page.goto("/admin/workspaces");
 	await expect(page.getByRole("heading", { name: "Workspaces", exact: true })).toBeVisible();
@@ -101,7 +101,7 @@ test("the page follows a document while it is being read, and so does its open l
 	let held = 2;
 	await page.route("**/api/admin/workspaces", async (route) => {
 		const response = await route.fetch();
-		const body = (await response.json()) as { org: { id: string; documents: { status: string }[] }[] };
+		const body = await jsonOf<{ org: { id: string; documents: { status: string }[] }[] }>(response);
 		if (held > 0) {
 			held--;
 			for (const document of body.org.find((workspace) => workspace.id === orgId)?.documents ?? []) document.status = "reading";

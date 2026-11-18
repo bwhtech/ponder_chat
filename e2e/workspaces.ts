@@ -1,7 +1,7 @@
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import type postgres from "postgres";
 import { e2e } from "./env.ts";
-import { expect, randomIp, signIn, uniqueEmail, type Fake, type Person } from "./fixtures.ts";
+import { expect, jsonOf, randomIp, signIn, uniqueEmail, type Fake, type Person } from "./fixtures.ts";
 
 /**
  * What the workspace tests share (workspaces.spec.ts, workspaces-documents.spec.ts,
@@ -24,7 +24,7 @@ export async function newPerson(browser: Browser, db: postgres.Sql, fake: Fake, 
 export async function createWorkspace(page: Page, name: string, instructions = "") {
 	const response = await page.request.post("/api/workspaces", { data: { name, instructions } });
 	expect(response.status(), await response.text()).toBe(201);
-	return ((await response.json()) as { workspace: { id: string; slug: string } }).workspace;
+	return (await jsonOf<{ workspace: { id: string; slug: string } }>(response)).workspace;
 }
 
 export async function share(page: Page, workspaceId: string, members: { userId: string; access: "ask" | "edit" }[]) {
@@ -36,14 +36,14 @@ export async function share(page: Page, workspaceId: string, members: { userId: 
 export async function uploadReady(page: Page, workspaceId: string, file: Upload) {
 	const response = await page.request.post(`/api/workspaces/${workspaceId}/documents`, { multipart: { file } });
 	expect(response.status(), await response.text()).toBe(201);
-	const { document } = (await response.json()) as { document: DocumentStatus };
+	const { document } = await jsonOf<{ document: DocumentStatus }>(response);
 	await expect.poll(async () => (await documentOf(page, workspaceId, document.id))?.status, { timeout: 30_000 }).toBe("ready");
 	return document.id;
 }
 
 /** The document as the workspace lists it, for the page's person, by its id or its name. */
 export async function documentOf(page: Page, workspaceId: string, idOrName: string) {
-	const { workspace } = (await (await page.request.get(`/api/workspaces/${workspaceId}`)).json()) as { workspace: { documents: DocumentStatus[] } };
+	const { workspace } = await jsonOf<{ workspace: { documents: DocumentStatus[] } }>(await page.request.get(`/api/workspaces/${workspaceId}`));
 	return workspace.documents.find((document) => document.id === idOrName || document.name === idOrName);
 }
 

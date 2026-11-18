@@ -4,6 +4,7 @@ import type { UIMessage } from "ai";
 import postgres from "postgres";
 import { e2e } from "./env.ts";
 import type { ChatScript, MemoryScript, PageScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
+import { jsonBody } from "../server/test-json.ts";
 
 /**
  * What the tests share:
@@ -120,12 +121,10 @@ export { expect };
 export type Thread = { messages: UIMessage[]; running: boolean; failed?: boolean; workspaceId?: string };
 
 /**
- * A JSON answer's body, typed as the shape the test expects. Playwright types it as `any`;
- * the test's assertions check it, and a body of another shape fails them.
+ * A JSON answer's body, typed as the shape the test expects (server/test-json.ts). Playwright
+ * types it as `any`: read it with this, not with an assertion, which `npm run lint` refuses.
  */
-export async function jsonOf<T>(response: { json(): Promise<unknown> }): Promise<T> {
-	return (await response.json()) as T;
-}
+export const jsonOf = jsonBody;
 
 export function randomIp() {
 	return [10, ...randomBytes(3)].join(".");
@@ -154,7 +153,7 @@ export async function signIn(page: Page, db: postgres.Sql, fake: Fake, email: st
 	const otp = await fake.signInCode(email);
 	const signed = await page.request.post("/api/auth/sign-in/email-otp", { data: { email, otp }, headers });
 	expect(signed.ok(), await signed.text()).toBe(true);
-	const { user } = (await signed.json()) as { user: { id: string } };
+	const { user } = await jsonOf<{ user: { id: string } }>(signed);
 	return { id: user.id, email };
 }
 

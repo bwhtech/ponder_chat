@@ -13,5 +13,7 @@ import { readTextLayer } from "./pdfjs-text.ts";
 /** Twice the upload limit of 10 MB: a PDF whose text is longer is made to be. */
 const MAX_CHARS = 20_000_000;
 
-const layer = await readTextLayer(workerData as Uint8Array, { maxPages: Infinity, maxChars: MAX_CHARS });
+const pdf: unknown = workerData;
+if (!(pdf instanceof Uint8Array)) throw new TypeError("The worker needs the PDF's bytes.");
+const layer = await readTextLayer(pdf, { maxPages: Infinity, maxChars: MAX_CHARS });
 parentPort?.postMessage("tooLarge" in layer ? null : layer.pages.map((text, index) => `--- Page ${index + 1} ---\n${text}`).join("\n\n"));

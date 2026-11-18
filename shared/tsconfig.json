@@ -3,5 +3,5 @@
 	// The linter (npm run lint, .oxlintrc.json) reads these settings.
 	"extends": "../server/tsconfig.json",
 	"compilerOptions": { "lib": ["es2022"], "types": [] },
-	"include": ["*.ts"]
+	"include": ["*.ts", "../types/json.d.ts", "../types/array.d.ts"]
 }

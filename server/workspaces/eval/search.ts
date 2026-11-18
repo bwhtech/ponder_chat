@@ -32,7 +32,7 @@ export const TOP = 8;
 export type EvalDocument = { file: string; name: string; text: DocumentText };
 export type SearchRun = { found: Map<string, Excerpt[]>; documentIds: Map<string, string>; model: string; costUsd: number; passages: number };
 
-export async function searchAll(databaseUrl: string, documents: EvalDocument[], questions: { id: string; question: string }[]): Promise<SearchRun> {
+export async function searchAll(databaseUrl: string, documents: EvalDocument[], questions: ReadonlyArray<{ id: string; question: string }>): Promise<SearchRun> {
 	const schema = `eval_${randomUUID().slice(0, 8)}`;
 	const runtime = ManagedRuntime.make(layerFor(databaseUrl, schema));
 	try {

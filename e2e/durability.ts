@@ -81,7 +81,7 @@ export function durableServer(slot: number, name: string) {
 		const thread = new URL(page.url()).searchParams.get("t")!;
 		await expect
 			.poll(async () => {
-				const body = (await (await page.request.get(`/api/threads/${thread}`)).json()) as { running?: boolean; messages: unknown[] };
+				const body = await jsonOf<{ running?: boolean; messages: unknown[] }>(await page.request.get(`/api/threads/${thread}`));
 				return !body.running && body.messages.length;
 			})
 			.toBe(2);

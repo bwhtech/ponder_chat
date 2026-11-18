@@ -9,7 +9,7 @@ import { parentPort, workerData } from "node:worker_threads";
  * This file imports only pdf.js. The build makes it a file of its own (nitro.config.ts),
  * and a shared module would run the server's code in this thread.
  */
-const { data, pages } = workerData as { data: Uint8Array; pages: number[] };
+const { data, pages } = jobOf(workerData);
 const copies = await onePagePdfs(data, pages);
 parentPort?.postMessage(copies, copies.map((copy) => copy.buffer as ArrayBuffer));
 
@@ -25,6 +25,16 @@ async function onePagePdfs(bytes: Uint8Array, numbers: number[]) {
 	} finally {
 		await task.destroy();
 	}
+}
+
+/** The PDF's bytes and the page numbers, as pdf-pages.ts sends them. */
+function jobOf(value: unknown) {
+	const data: unknown = typeof value === "object" && value !== null && "data" in value ? value.data : undefined;
+	const pages: unknown = typeof value === "object" && value !== null && "pages" in value ? value.pages : undefined;
+	if (!(data instanceof Uint8Array) || !Array.isArray(pages) || !pages.every((page) => typeof page === "number")) {
+		throw new TypeError("The worker needs the PDF's bytes and its page numbers.");
+	}
+	return { data, pages };
 }
 
 /** pdf.js runs its own worker on this thread when it finds it on globalThis: no second worker file to locate after bundling. */

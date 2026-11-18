@@ -13,6 +13,7 @@ import { TableTooLarge } from "./csv.ts";
 import { PdfUnreadable, type DocumentPage, type DocumentText } from "./document.ts";
 import { DocumentTooLarge } from "./limits.ts";
 import type { ParsedPdf } from "./parse-pdf.ts";
+import type { PrepareJob } from "./prepare-job.ts";
 
 /**
  * Reads documents and splits their text into passages in a worker thread
@@ -65,17 +66,6 @@ export type PrepareError = PrepareTextError | TableTooLarge | DocumentTooLarge |
 export type PreparedText = { readonly text: string; readonly passages: Passage[] };
 /** A text document, read: what the log keeps, the text to store, and its passages. */
 export type TextRead = PreparedText & { readonly read: Omit<DocumentText, "pages"> };
-
-/** What a worker gets. */
-export type PrepareJob =
-	/** A text document's bytes: its stored text and passages. */
-	| { readonly kind: "read"; readonly name: string; readonly mediaType: string; readonly data: Uint8Array }
-	/** A stored text: its passages. */
-	| { readonly kind: "chunk"; readonly name: string; readonly mediaType: string; readonly text: string }
-	/** A PDF's bytes: its pages (parse-pdf.ts). */
-	| { readonly kind: "parse-pdf"; readonly data: Uint8Array }
-	/** A PDF's pages, with the model's text: its stored text and passages. */
-	| { readonly kind: "pdf"; readonly name: string; readonly pages: ReadonlyArray<DocumentPage> };
 
 /** Why a job gave no answer, as plain data: errors are classes, which a worker can't post. */
 export type JobFailure =
@@ -180,7 +170,8 @@ function startWorker<A>(job: PrepareJob, maxHeapMb: number) {
 	});
 	// Structured clone: plain data of the shape the worker posts (prepare-text-worker.ts).
 	const answer = Deferred.makeUnsafe<JobAnswer<A>, PrepareTextError>();
-	worker.once("message", (value: JobAnswer<A>) => Deferred.doneUnsafe(answer, Effect.succeed(value)));
+	// The worker's own answer to this job: the job's kind decides its type (prepare-text-worker.ts).
+	worker.once("message", (value: unknown) => Deferred.doneUnsafe(answer, Effect.succeed(value as JobAnswer<A>)));
 	worker.once("error", (error) => Deferred.doneUnsafe(answer, Effect.fail(new PrepareTextError({ reason: outOfMemory(error) ? "memory" : "failed", cause: error }))));
 	worker.once("exit", () => Deferred.doneUnsafe(answer, Effect.fail(new PrepareTextError({ reason: "stopped" }))));
 	return { worker, answer };

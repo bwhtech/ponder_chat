@@ -96,7 +96,7 @@ function startWorker(data: Buffer) {
 	});
 	const answer = Deferred.makeUnsafe<string, PdfTextError>();
 	// Null when the text was past the worker's limit (pdf-text-worker.ts).
-	worker.once("message", (text: string | null) => Deferred.doneUnsafe(answer, text === null ? Effect.fail(new PdfTextError({ reason: "too-large" })) : Effect.succeed(text)));
+	worker.once("message", (text: unknown) => Deferred.doneUnsafe(answer, typeof text === "string" ? Effect.succeed(text) : Effect.fail(new PdfTextError({ reason: "too-large" }))));
 	// Out of memory comes here too.
 	worker.once("error", (error) => Deferred.doneUnsafe(answer, Effect.fail(new PdfTextError({ reason: "failed", cause: error }))));
 	worker.once("exit", () => Deferred.doneUnsafe(answer, Effect.fail(new PdfTextError({ reason: "stopped" }))));

@@ -51,7 +51,12 @@ function startWorker(data: Uint8Array, pages: number[]) {
 		resourceLimits: { maxOldGenerationSizeMb: MAX_HEAP_MB, maxYoungGenerationSizeMb: 32 },
 	});
 	const answer = Deferred.makeUnsafe<Uint8Array[], PdfPagesFailed>();
-	worker.once("message", (copies: Uint8Array[]) => Deferred.doneUnsafe(answer, Effect.succeed(copies)));
+	worker.once("message", (copies: unknown) =>
+		Deferred.doneUnsafe(
+			answer,
+			Array.isArray(copies) && copies.every((copy) => copy instanceof Uint8Array) ? Effect.succeed(copies) : Effect.fail(new PdfPagesFailed({ reason: "failed" })),
+		),
+	);
 	// Out of memory comes here too.
 	worker.once("error", (error) => Deferred.doneUnsafe(answer, Effect.fail(new PdfPagesFailed({ reason: "failed", cause: error }))));
 	worker.once("exit", () => Deferred.doneUnsafe(answer, Effect.fail(new PdfPagesFailed({ reason: "stopped" }))));

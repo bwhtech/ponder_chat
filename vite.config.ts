@@ -13,7 +13,10 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const fromFrappeUI = createRequire(new URL("node_modules/frappe-ui/package.json", import.meta.url));
 // `require` answers `any`: the module is the TypeScript API that the compiler asks for.
 type TypeScriptApi = ReturnType<Parameters<typeof compiler.registerTS>[0]>;
-compiler.registerTS(() => fromFrappeUI("typescript") as TypeScriptApi);
+compiler.registerTS(() => {
+	const typescript: unknown = fromFrappeUI("typescript");
+	return typescript as TypeScriptApi;
+});
 
 /**
  * Two pages, built one at a time (npm run build): the chat (index.html, PONDER_PAGE=chat),

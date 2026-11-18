@@ -23,6 +23,7 @@ import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
 import type * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Schema from "effect/Schema";
 import { chunkDocument, TARGET, type Passage } from "../documents/chunk.ts";
 import type { DocumentText } from "../documents/document.ts";
 import type * as PageReader from "../documents/page-reader.ts";
@@ -32,8 +33,17 @@ import type * as PrepareText from "../documents/prepare-text.ts";
 import { liveLayer, recordedLayer } from "./layers.ts";
 import { searchAll, TOP, type EvalDocument } from "./search.ts";
 
-type Question = { id: string; document: string; question: string; pages: number[]; answer: string; source: "text" | "table" | "picture" };
-type Questions = { documents: { file: string; name: string }[]; questions: Question[] };
+const Question = Schema.Struct({
+	id: Schema.String,
+	document: Schema.String,
+	question: Schema.String,
+	pages: Schema.Array(Schema.Number),
+	answer: Schema.String,
+	source: Schema.Literals(["text", "table", "picture"]),
+});
+type Question = typeof Question.Type;
+const Questions = Schema.Struct({ documents: Schema.Array(Schema.Struct({ file: Schema.String, name: Schema.String })), questions: Schema.Array(Question) });
+const ModelPages = Schema.Record(Schema.String, Schema.Struct({ text: Schema.String }));
 type ModelPages = Record<string, { text: string }>;
 
 const dir = process.env.WORKSPACE_EVAL_DIR;
@@ -47,7 +57,7 @@ const live = args.includes("--live");
 const modelPagesFile = join(dir, "model-pages.json");
 const recorded = loadModelPages(option("--recorded") ?? modelPagesFile);
 const passagesFile = option("--passages");
-const { documents, questions } = JSON.parse(readFileSync(new URL("./questions.json", import.meta.url), "utf8")) as Questions;
+const { documents, questions } = Schema.decodeUnknownSync(Questions)(JSON.parse(readFileSync(new URL("./questions.json", import.meta.url), "utf8")));
 
 const passagesOf = new Map<string, Passage[]>();
 const read: EvalDocument[] = [];
@@ -128,9 +138,9 @@ async function readWith<R, E>(layer: Layer.Layer<R | PageReader.PageReader | Pre
 /** Model text by "<file stem>-<page>". The scratch runs kept one object for each model, which is opened. */
 function loadModelPages(file: string): ModelPages {
 	if (!existsSync(file)) return {};
-	const all = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+	const all = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Unknown))(JSON.parse(readFileSync(file, "utf8")));
 	const keys = Object.keys(all);
-	return (keys.length === 1 && !/-\d+$/.test(keys[0]) ? all[keys[0]] : all) as ModelPages;
+	return Schema.decodeUnknownSync(ModelPages)(keys.length === 1 && !/-\d+$/.test(keys[0]) ? all[keys[0]] : all);
 }
 
 function pagesOf(pages: ModelPages, stem: string) {

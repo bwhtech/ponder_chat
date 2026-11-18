@@ -3,5 +3,5 @@
 	// (npm run lint, .oxlintrc.json).
 	"extends": "../server/tsconfig.json",
 	"compilerOptions": { "target": "es2023", "types": ["node"] },
-	"include": ["**/*.ts", "../playwright.config.ts"]
+	"include": ["**/*.ts", "../playwright.config.ts", "../types/*.d.ts"]
 }

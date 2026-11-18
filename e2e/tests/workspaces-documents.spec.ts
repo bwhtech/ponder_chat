@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import type { ReceivedCall } from "../fake/script.ts";
-import { chat, expect, test } from "../fixtures.ts";
+import { chat, expect, jsonOf, test } from "../fixtures.ts";
 import { scanPdf, textPdf } from "../pdfs.ts";
 import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady, type Upload } from "../workspaces.ts";
 
@@ -205,7 +205,7 @@ test("10. the page stops reading a Reading document again once Details close, th
 		async (route) => {
 			if (route.request().method() !== "GET") return route.fallback();
 			const response = await route.fetch();
-			const body = (await response.json()) as { workspace: { documents: { status: string }[] } };
+			const body = await jsonOf<{ workspace: { documents: { status: string }[] } }>(response);
 			for (const document of body.workspace.documents) document.status = "reading";
 			await new Promise((resolve) => setTimeout(resolve, 1500));
 			await route.fulfill({ response, json: body });
@@ -216,7 +216,7 @@ test("10. the page stops reading a Reading document again once Details close, th
 		async (route) => {
 			const response = await route.fetch();
 			if (!response.ok()) return route.fulfill({ response });
-			const body = (await response.json()) as { document: { status: string } };
+			const body = await jsonOf<{ document: { status: string } }>(response);
 			body.document.status = "reading";
 			await route.fulfill({ response, json: body });
 		},

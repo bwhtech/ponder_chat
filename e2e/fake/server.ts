@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MODELS } from "../../server/models/Models.ts";
+import { jsonBody, parseJson } from "../../server/test-json.ts";
 import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type PageScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
 
 /**
@@ -46,11 +47,11 @@ export function fakeApp() {
 
 	// --- Control, for the tests. The newest script wins, so a test can replace one.
 	app.get("/__fake/health", (c) => c.text("ok"));
-	app.post("/__fake/chat", async (c) => (chats.unshift(await c.req.json()), c.json({ ok: true })));
-	app.post("/__fake/search", async (c) => (searches.unshift(await c.req.json()), c.json({ ok: true })));
-	app.post("/__fake/memory", async (c) => (memories.unshift(await c.req.json()), c.json({ ok: true })));
-	app.post("/__fake/summary", async (c) => (summaryScripts.unshift(await c.req.json()), c.json({ ok: true })));
-	app.post("/__fake/page", async (c) => (pageScripts.unshift(await c.req.json()), c.json({ ok: true })));
+	app.post("/__fake/chat", async (c) => (chats.unshift(await jsonBody<ChatScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/search", async (c) => (searches.unshift(await jsonBody<SearchScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/memory", async (c) => (memories.unshift(await jsonBody<MemoryScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/summary", async (c) => (summaryScripts.unshift(await jsonBody<SummaryScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/page", async (c) => (pageScripts.unshift(await jsonBody<PageScript>(c.req)), c.json({ ok: true })));
 	const since = (query: string | undefined) => Number(query ?? 0);
 	app.get("/__fake/emails", (c) => c.json(emails.filter((email) => email.to === c.req.query("to") && email.at >= since(c.req.query("since")))));
 	app.get("/__fake/spans", (c) => c.json({ spans, exports }));
@@ -73,7 +74,7 @@ export function fakeApp() {
 	app.get("/api/v1/key", (c) => c.json({ data: { label: "fake" } }));
 
 	app.post("/api/v1/chat/completions", async (c) => {
-		const body = (await c.req.json()) as Completion;
+		const body = await jsonBody<Completion>(c.req);
 		const messages = body.messages ?? [];
 		const pdf = pagePdf(messages);
 		if (pdf) {
@@ -122,7 +123,7 @@ export function fakeApp() {
 	});
 
 	app.post("/api/v1/embeddings", async (c) => {
-		const body = (await c.req.json()) as { model: string; input: string | string[] };
+		const body = await jsonBody<{ model: string; input: string | string[] }>(c.req);
 		const inputs = Array.isArray(body.input) ? body.input : [body.input];
 		return c.json({
 			object: "list",
@@ -133,14 +134,14 @@ export function fakeApp() {
 	});
 
 	app.post("/api/alpha/decisions", async (c) => {
-		const body = (await c.req.json()) as { state?: { person_said?: string } };
+		const body = await jsonBody<{ state?: { person_said?: string } }>(c.req);
 		const script = memories.find((memory) => (body.state?.person_said ?? "").includes(memory.match));
 		return c.json({ answers: { save: { noul: script?.save ?? 0.05 }, refuse: { noul: 0.01 } }, usage: { cost: 0, input_tokens: 100, output_tokens: 0 } });
 	});
 
 	// --- Cloudflare Email Service.
 	app.post("/client/v4/accounts/:account/email/sending/send", async (c) => {
-		emails.push({ ...((await c.req.json()) as Omit<SentEmail, "at">), at: Date.now() });
+		emails.push({ ...(await jsonBody<Omit<SentEmail, "at">>(c.req)), at: Date.now() });
 		return c.json({ success: true });
 	});
 
@@ -148,7 +149,7 @@ export function fakeApp() {
 	app.post("/v1/traces", async (c) => {
 		const body = await c.req.text();
 		exports.push(body);
-		spans.push(...spansIn(JSON.parse(body) as OtlpRequest));
+		spans.push(...spansIn(parseJson<OtlpRequest>(body)));
 		return c.json({});
 	});
 

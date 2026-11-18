@@ -15,6 +15,7 @@ import * as Option from "effect/Option";
 import { Hono } from "hono";
 import type { WorkflowReadableStream } from "workflow/api";
 import type { ChatTurn } from "../workflow/chat.ts";
+import { jsonBody } from "../test-json.ts";
 import { base, blockedBy, holdRows, USERS_TABLE, useTestSchema } from "./test-env.ts";
 
 const tag = Math.random().toString(36).slice(2, 10);
@@ -69,7 +70,7 @@ type ThreadAnswer = { messages: UIMessage[]; workspaceId?: string };
 const read = (owner: string, threadId: string) =>
 	Effect.promise(async (): Promise<ThreadAnswer> => {
 		const response = await reader.request(`/${owner}/${threadId}`);
-		return (await response.json()) as ThreadAnswer;
+		return jsonBody<ThreadAnswer>(response);
 	});
 
 /** Ana's private workspace, shared with Bob, and an organisation workspace. */

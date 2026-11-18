@@ -1,8 +1,10 @@
 import { parentPort, workerData } from "node:worker_threads";
+import * as Schema from "effect/Schema";
 import { chunkWithin, type Passage } from "./chunk.ts";
 import { MAX_TEXT_CHARS, PASSAGE_BUDGET } from "./limits.ts";
 import { parsePdf } from "./parse-pdf.ts";
-import type { JobAnswer, PrepareJob, PreparedText, TextRead } from "./prepare-text.ts";
+import { PrepareJob } from "./prepare-job.ts";
+import type { JobAnswer, PreparedText, TextRead } from "./prepare-text.ts";
 import { headingRule, PDF_TYPE, readText, storedPages, storedText } from "./read-document.ts";
 
 /**
@@ -12,10 +14,10 @@ import { headingRule, PDF_TYPE, readText, storedPages, storedText } from "./read
  * thread copies what it posts before it can look at it.
  *
  * It imports only the pure modules of reading and chunking, LiteParse and pdf.js, and
- * Effect's data types. The build makes it a file of its own (nitro.config.ts), and a
- * module of the server would run the server's code in this thread.
+ * Effect's data types and Schema (prepare-job.ts). The build makes it a file of its own
+ * (nitro.config.ts), and a module of the server would run the server's code in this thread.
  */
-const job = workerData as PrepareJob;
+const job = Schema.decodeUnknownSync(PrepareJob)(workerData);
 parentPort?.postMessage(await answer(job));
 
 function answer(job: PrepareJob): JobAnswer<unknown> | Promise<JobAnswer<unknown>> {

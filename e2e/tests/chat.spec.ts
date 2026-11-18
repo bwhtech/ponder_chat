@@ -1,4 +1,4 @@
-import { chat, expect, test } from "../fixtures.ts";
+import { chat, expect, jsonOf, test } from "../fixtures.ts";
 import { createWorkspace } from "../workspaces.ts";
 
 test.beforeEach(async ({ person, page }) => {
@@ -192,6 +192,6 @@ test("a chat keeps every message after Memory or a workspace page, and sends wit
 	await chat.send(page, "Third question, return test");
 	await expect(chat.reply(page)).toContainText("You said: Third question");
 	await chat.idle(page);
-	const saved = async () => ((await (await page.request.get(`/api/threads/${id}`)).json()) as { messages: unknown[] }).messages.length;
+	const saved = async () => (await jsonOf<{ messages: unknown[] }>(await page.request.get(`/api/threads/${id}`))).messages.length;
 	await expect.poll(saved).toBe(6);
 });

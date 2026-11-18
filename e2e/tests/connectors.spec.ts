@@ -4,6 +4,7 @@ import { e2e } from "../env.ts";
 import type { ConnectorView } from "../../shared/connectors.ts";
 import type { McpCall } from "../mcp/calls.ts";
 import { SHOP_KEY } from "../mcp/server.ts";
+import { parseJson } from "../../server/test-json.ts";
 import type { Step } from "../fake/script.ts";
 import { chat, expect, jsonOf, randomIp, signIn, test, uniqueEmail, type Fake } from "../fixtures.ts";
 
@@ -53,7 +54,7 @@ function chatPosts(page: Page) {
 }
 
 async function savedMessages(page: Page, thread: string): Promise<unknown[]> {
-	return ((await (await page.request.get(`/api/threads/${thread}`)).json()) as { messages: unknown[] }).messages;
+	return (await jsonOf<{ messages: unknown[] }>(await page.request.get(`/api/threads/${thread}`))).messages;
 }
 
 /** Waits until the chat's reply is saved and its run finished: the page goes idle a moment before. The chat's id. */
@@ -61,7 +62,7 @@ async function replySaved(page: Page) {
 	const thread = new URL(page.url()).searchParams.get("t")!;
 	await expect
 		.poll(async () => {
-			const body = (await (await page.request.get(`/api/threads/${thread}`)).json()) as { running?: boolean };
+			const body = await jsonOf<{ running?: boolean }>(await page.request.get(`/api/threads/${thread}`));
 			return body.running;
 		})
 		.toBe(false);
@@ -294,7 +295,7 @@ test("an approved chat sent again after its reply finished runs nothing again", 
 	expect(await again.text()).toContain(`"type":"tool-output-available"`);
 	expect(await again.text()).toContain(`Added the note to order ${order}.`);
 	expect(await serverCalls(page, order)).toHaveLength(1);
-	const saved = (await (await page.request.get(`/api/threads/${thread}`)).json()) as { messages: { role: string }[]; running: boolean };
+	const saved = await jsonOf<{ messages: { role: string }[]; running: boolean }>(await page.request.get(`/api/threads/${thread}`));
 	expect(saved.running).toBe(false);
 	expect(saved.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
 	expect(JSON.stringify(saved.messages)).toContain("I added the note.");
@@ -387,7 +388,7 @@ test("an approval sent again under another message id runs nothing", async ({ pa
 	await chat.send(page, `Add a gift-wrap note to order ${order}`);
 	const answer = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/chat");
 	await page.getByRole("button", { name: "Allow once" }).click();
-	const approved = (await answer).postDataJSON() as { messages: { id: string }[] };
+	const approved = parseJson<{ messages: { id: string }[] }>((await answer).postData() ?? "");
 	await expect(chat.reply(page)).toContainText("I added the note.");
 	await replySaved(page);
 
