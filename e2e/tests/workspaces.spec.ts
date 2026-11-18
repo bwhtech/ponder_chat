@@ -314,6 +314,25 @@ test("the message box floats at the bottom of a workspace page, beside the side 
 		expect(await workspacePage.reachable(last)).toBe(true);
 	});
 
+	await test.step("Tab through the chats from the top: each one shows clear of the box", async () => {
+		const chatButtons = page.locator('[data-slot="workspace-chats"] li button');
+		await page.locator('[data-slot="workspace-view"]').evaluate((view) => view.scrollTo({ top: 0 }));
+		await chatButtons.first().focus();
+		const last = await chatButtons.last().elementHandle();
+		for (let presses = 0; presses < 80; presses++) {
+			const focused = await page.evaluate(() => {
+				const active = document.activeElement;
+				if (!active?.closest('[data-slot="workspace-chats"]')) return null;
+				const { top, bottom } = active.getBoundingClientRect();
+				return { top, bottom, label: active.textContent?.trim() ?? "" };
+			});
+			if (focused) expect(focused.bottom, `“${focused.label}” is under the box`).toBeLessThanOrEqual((await box.boundingBox())!.y);
+			if (await page.evaluate((end) => document.activeElement === end, last)) break;
+			await page.keyboard.press("Tab");
+		}
+		expect(await page.evaluate((end) => document.activeElement === end, last)).toBe(true);
+	});
+
 	await test.step("$ opens the skills above the box, and one is chosen", async () => {
 		await workspacePage.field(page).click();
 		await page.keyboard.type(`$${skill}`);

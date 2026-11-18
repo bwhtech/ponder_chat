@@ -40,6 +40,21 @@ const workspaceId = computed(() => summary.value?.id ?? "");
 /** The chats beside the side panel, from Tailwind's lg; one column under them while the file viewer is open beside the page. */
 const columns = computed(() => (panelItem.value ? "" : "lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12"));
 
+/**
+ * What Tab reaches scrolls clear of the message box: the page keeps scroll padding at the
+ * bottom as tall as the box's row and its fade (40px). The box grows with its text, files and
+ * the credits alert, so the padding follows its height.
+ */
+const FADE_PX = 40;
+const dock = ref<HTMLElement | null>(null);
+const dockHeight = ref(0);
+const dockObserver = new ResizeObserver(([entry]) => (dockHeight.value = entry ? Math.ceil(entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height) : 0));
+watch(dock, (now, before) => {
+	if (before) dockObserver.unobserve(before);
+	if (now) dockObserver.observe(now);
+});
+onBeforeUnmount(() => dockObserver.disconnect());
+
 // Each load takes a number: the answer for a workspace no longer open is dropped.
 let asked = 0;
 watch(() => props.slugOrId, (key) => (detail.value?.slug === key ? undefined : load()), { immediate: true });
@@ -184,9 +199,14 @@ function askDelete() {
 	     for the keyboard and screen readers, and shows last (order-last, sticky). It sits in the same
 	     scroller, so the wheel scrolls the page over it, and its own row is the room the page needs
 	     to scroll clear of it. -->
-	<div v-else data-slot="workspace-view" class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]">
+	<div
+		v-else
+		data-slot="workspace-view"
+		class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]"
+		:style="{ scrollPaddingBottom: `${dockHeight + FADE_PX}px` }"
+	>
 		<div class="flex min-h-full flex-col">
-			<div class="pointer-events-none sticky bottom-0 z-10 order-last" data-slot="workspace-dock">
+			<div ref="dock" class="pointer-events-none sticky bottom-0 z-10 order-last" data-slot="workspace-dock">
 				<div class="mx-auto grid w-full max-w-[1120px] px-4 sm:px-5" :class="columns">
 					<div class="pointer-events-auto relative min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 						<!-- The page's background behind the box, fading in over 40px above it, as a chat fades out above its box. -->
