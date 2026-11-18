@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button } from "frappe-ui";
 import { computed } from "vue";
-import { kindIcon, workspaceById, type WorkspaceSummary } from "./store";
+import { accessIcon, workspaceById, type WorkspaceSummary } from "./store";
 
 /**
  * The button of a new chat's workspace menu (WorkspacePicker.vue), beside the model menu and
@@ -18,7 +18,7 @@ const shown = computed(() => props.workspace ?? workspaceById(props.modelValue))
 	<Button
 		variant="ghost"
 		size="sm"
-		:icon-left="shown ? kindIcon(shown) : 'lucide-layers'"
+		:icon-left="shown ? accessIcon(shown) : 'lucide-layers'"
 		icon-right="lucide-chevron-down"
 		:aria-label="`Workspace: ${shown?.name ?? 'none'}`"
 		class="relative min-w-0 max-w-48 !text-ink-gray-6 after:absolute after:inset-0 after:content-[''] hover:!text-ink-gray-8 [@media(pointer:coarse)]:after:-inset-y-2"

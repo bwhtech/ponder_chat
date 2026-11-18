@@ -8,15 +8,17 @@ import type { WorkspaceDetail } from "./store";
  * the dialog can play its closing transition. A document's Details open in the side panel
  * (DocumentDetails.vue).
  *
- * `quiet`: no "saved" toast. The page asks for it when the save does a setup step still to do:
- * the step's card leaves, its progress fills and the status line says so, where a toast would
- * cover them (WorkspacePage.vue).
+ * `quiet`: no "saved" toast for the instructions. The page asks for it when the save does a
+ * setup step still to do: the step's card leaves, its progress fills and the status line says
+ * so, where a toast would cover them (WorkspacePage.vue). Share saves each change at once, and
+ * shows it in the dialog, with no toast: `onSaved` gets each answer, and `onGone` runs when the
+ * person can no longer use the workspace, or it was deleted.
  */
 export type WorkspaceDialogRequest =
 	/** `onMade` opens the new workspace as the sidebar does. */
 	| { kind: "new"; onMade: (slug: string) => void }
 	| { kind: "instructions"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void; quiet?: boolean }
-	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void; quiet?: boolean };
+	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void; onGone: () => void };
 
 /** `serial` goes up with each request, so a dialog opened again starts from its workspace, not from what was typed before. */
 export const workspaceDialog = reactive({ open: false, serial: 0, request: null as WorkspaceDialogRequest | null });
@@ -51,11 +53,19 @@ export function useFrameFocus() {
 	);
 }
 
-/** Who can use a workspace, as the dialogs offer it to an admin. */
-export const KIND_OPTIONS = [
-	{ label: "Only the people you add", value: "private" },
-	{ label: "Everyone in the organisation", value: "org" },
-];
+/** Share's words, in the dialog and in its stand-in. */
+export const ROLE_LABELS = { ask: "Can ask", edit: "Can edit" } as const;
+export const GENERAL_ACCESS = {
+	none: { label: "Only people added", icon: "lucide-lock" },
+	ask: { label: "Everyone in the organisation", icon: "lucide-building-2" },
+} as const;
+export const ADD_PEOPLE = "Add people by name or email";
+
+/** The line under General access: what it means, or, for a person who can't change it, who can. */
+export function generalAccessNote(orgAccess: "none" | "ask", canChange: boolean) {
+	if (!canChange) return orgAccess === "none" ? "Only an admin can open a workspace to everyone." : "Only an admin can change this.";
+	return orgAccess === "none" ? "Only the people above can open it." : "Everyone can find it and ask. People above with Can edit can also change it.";
+}
 
 /** The placeholders of New workspace and Instructions, in the dialogs and in their stand-in. */
 export const NAME_PLACEHOLDER = "e.g. HR policies";

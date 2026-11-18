@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Skeleton } from "frappe-ui";
 import { computed } from "vue";
-import { kindIcon, workspaceByKey } from "./store";
+import { accessIcon, workspaceByKey } from "./store";
 
 /**
  * The workspace page (WorkspacePage.vue) while its code arrives: its header with the name
@@ -19,7 +19,7 @@ const workspace = computed(() => workspaceByKey(props.slugOrId));
 			<slot name="start" />
 			<template v-if="workspace">
 				<span class="flex size-6 shrink-0 items-center justify-center rounded-4 bg-surface-gray-2 text-ink-gray-7" aria-hidden="true">
-					<span :class="[kindIcon(workspace), 'size-3.5']" />
+					<span :class="[accessIcon(workspace), 'size-3.5']" />
 				</span>
 				<h1 class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9">{{ workspace.name }}</h1>
 			</template>

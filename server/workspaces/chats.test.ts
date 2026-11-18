@@ -100,9 +100,10 @@ describe.skipIf(!base)("chats in a workspace", () => {
 				yield* PythonState.PythonState.use((states) => states.migrate);
 				yield* Sandbox.Sandbox.use((sandbox) => sandbox.turnOff);
 				const workspaces = yield* Workspaces.Workspaces;
-				ids.notes = (yield* workspaces.create(actor(ana), { kind: "private", name: "Notes", description: "", instructions: "Answer in French.", icon: null })).id;
-				ids.handbook = (yield* workspaces.create(actor(ana), { kind: "org", name: "Handbook", description: "", instructions: "", icon: null })).id;
-				yield* workspaces.share(actor(ana), ids.notes, { kind: "private", members: [{ userId: bob, access: "ask" }] });
+				ids.notes = (yield* workspaces.create(actor(ana), { name: "Notes", description: "", instructions: "Answer in French.", icon: null })).id;
+				ids.handbook = (yield* workspaces.create(actor(ana), { name: "Handbook", description: "", instructions: "", icon: null })).id;
+				yield* workspaces.setOrgAccess(actor(ana), ids.handbook, "ask");
+				yield* workspaces.setMember(actor(ana), ids.notes, bob, "ask");
 			}),
 		);
 
@@ -192,7 +193,7 @@ describe.skipIf(!base)("chats in a workspace", () => {
 		it.effect("a member who was removed can read their chat, but not send in it", () =>
 			Effect.gen(function* () {
 				const threadId = `chat-a-${tag}`;
-				yield* Workspaces.Workspaces.use((workspaces) => workspaces.share(actor(ana), ids.notes, { kind: "private", members: [] }));
+				yield* Workspaces.Workspaces.use((workspaces) => workspaces.removeMember(actor(ana), ids.notes, bob));
 				const started = turns.length;
 				const refused = yield* Effect.flip(Replies.Replies.use((replies) => replies.start({ threadId, owner: bob, messages: [message("m1", "Bonjour"), message("m3", "Still here?")] })));
 				assert.strictEqual(refused._tag, "WorkspaceAccessLost");
@@ -216,7 +217,8 @@ describe.skipIf(!base)("chats in a workspace", () => {
 				const sql = yield* PgClient.PgClient;
 				const workspaces = yield* Workspaces.Workspaces;
 				const replies = yield* Replies.Replies;
-				const racing = (yield* workspaces.create(actor(ana), { kind: "org", name: "Racing", description: "", instructions: "", icon: null })).id;
+				const racing = (yield* workspaces.create(actor(ana), { name: "Racing", description: "", instructions: "", icon: null })).id;
+				yield* workspaces.setOrgAccess(actor(ana), racing, "ask");
 				// A chat already in it, whose row the test holds: the delete stops there, with the workspace taken.
 				const held = `chat-held-${tag}`;
 				yield* replies.start({ threadId: held, owner: bob, messages: [message("m1", "Hi")], workspaceId: racing });

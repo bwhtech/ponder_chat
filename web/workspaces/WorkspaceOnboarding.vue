@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { count } from "../numbers";
+import { workspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { SetupHandle, UploadHandle } from "./handles";
 import { setupSteps, type SetupStepKey } from "./onboarding";
@@ -19,7 +20,8 @@ import WorkspaceSetup from "./WorkspaceSetup.vue";
  * A workspace with nothing set up sits a little lower on a wide screen. As the last card
  * goes, the setup fades and folds up, so the sections under it rise with it rather than jump.
  * The status line, for screen readers, stays after the cards: it says what each step added, and
- * when the workspace is set up.
+ * when the workspace is set up. Share saves each change while it is open, so what it did is
+ * said once it closes: the status line is outside the dialog, which screen readers keep to.
  */
 /** `dragging`: files are dragged over the page, and a drop anywhere on it comes here (WorkspacePage.vue). */
 const props = defineProps<{ workspace: WorkspaceDetail; dragging?: boolean }>();
@@ -34,20 +36,34 @@ const { uploading, errors, upload } = useDocumentUpload(
 const toDo = computed(() => steps.value.some((step) => !step.done) || uploading.value > 0);
 const fresh = computed(() => steps.value.every((step) => !step.done));
 
-const ADDED: Record<SetupStepKey, string> = { instructions: "Instructions added.", documents: "Sources added.", people: "Workspace shared." };
+const ADDED: Record<SetupStepKey, string> = { instructions: "Instructions added.", documents: "Sources added.", people: "People added." };
 const doneKeys = computed(() => steps.value.filter((step) => step.done).map((step) => step.key));
 const announcement = ref("");
-watch([doneKeys, toDo, () => props.workspace.kind], ([now, wanted, kind], [before, wanted0, kind0]) => {
-	const parts = now.filter((key) => !before.includes(key)).map((key) => ADDED[key]);
-	// Shared with the whole organisation: its People step goes rather than turns done, and no toast says so.
-	if (kind0 === "private" && kind === "org") parts.unshift("Workspace shared with everyone in the organisation.");
+watch([doneKeys, toDo], ([now, wanted], [before, wanted0]) => {
+	const parts = now.filter((key) => !before.includes(key)).map((key) => (key === "people" && props.workspace.orgAccess !== "none" ? "Shared with everyone in the organisation." : ADDED[key]));
 	if (wanted0 && !wanted) parts.push("Workspace set up.");
 	else if (parts.length) parts.push(`${count(now.length)} of ${count(steps.value.length)} done.`);
 	if (parts.length) announce(parts.join(" "));
 });
 
-/** The same words again would change nothing in the status line, and nothing would be read: empty it first. */
+/** Words to say once the dialog that made the change closes. */
+let held = "";
+watch(
+	() => workspaceDialog.open,
+	(open) => {
+		if (open || !held) return;
+		say(held);
+		held = "";
+	},
+);
+
 function announce(text: string) {
+	if (workspaceDialog.open) held = text;
+	else say(text);
+}
+
+/** The same words again would change nothing in the status line, and nothing would be read: empty it first. */
+function say(text: string) {
 	if (announcement.value !== text) return void (announcement.value = text);
 	announcement.value = "";
 	void nextTick(() => (announcement.value = text));
@@ -56,7 +72,8 @@ function announce(text: string) {
 /**
  * The last card takes its button with it, and the whole setup goes. If focus was there, or
  * comes back there from the dialog or file picker that did the step, it falls to the page:
- * the message box takes it (`finished`), since asking is what is left to do. Focus elsewhere stays.
+ * the message box takes it (`finished`), since asking is what is left to do. Focus elsewhere
+ * stays. Share is still open when its step is done: the wait starts once it closes.
  */
 const REFOCUS_MS = 800;
 const setup = ref<SetupHandle>();
@@ -64,9 +81,22 @@ let focusLeaves = false;
 let refocusFrame = 0;
 // Before the setup unmounts, while it can still say where focus is.
 watch(toDo, (now) => !now && (focusLeaves = setup.value?.holdsFocus() ?? false), { flush: "pre" });
+let stopWaiting: (() => void) | undefined;
 function refocusAfterLeave() {
 	cancelAnimationFrame(refocusFrame);
+	stopWaiting?.();
 	if (!focusLeaves) return;
+	if (workspaceDialog.open) {
+		stopWaiting = watch(
+			() => workspaceDialog.open,
+			(open) => {
+				if (open) return;
+				stopWaiting?.();
+				refocusAfterLeave();
+			},
+		);
+		return;
+	}
 	focusLeaves = false;
 	const until = performance.now() + REFOCUS_MS;
 	const check = () => {
@@ -75,7 +105,10 @@ function refocusAfterLeave() {
 	};
 	check();
 }
-onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
+onBeforeUnmount(() => {
+	cancelAnimationFrame(refocusFrame);
+	stopWaiting?.();
+});
 
 /** Files dropped on the page around the setup (WorkspacePage.vue) go up here too, so the Sources step counts them. */
 defineExpose<UploadHandle>({ upload });

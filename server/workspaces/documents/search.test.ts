@@ -116,9 +116,9 @@ describe.skipIf(!base)("workspace search", () => {
 				yield* Settings.Settings.use((settings) => settings.migrate);
 				yield* Credits.Credits.use((credits) => credits.migrate);
 				const workspaces = yield* Workspaces.Workspaces;
-				ids.ward = (yield* workspaces.create({ id: ana, email: "ana@example.invalid" }, { kind: "private", name: "Ward", description: "", instructions: "Be brief.", icon: null })).id;
-				ids.other = (yield* workspaces.create({ id: ana, email: "ana@example.invalid" }, { kind: "private", name: "Other", description: "", instructions: "", icon: null })).id;
-				yield* workspaces.share({ id: ana, email: "ana@example.invalid" }, ids.ward, { kind: "private", members: [{ userId: bob, access: "ask" }] });
+				ids.ward = (yield* workspaces.create({ id: ana, email: "ana@example.invalid" }, { name: "Ward", description: "", instructions: "Be brief.", icon: null })).id;
+				ids.other = (yield* workspaces.create({ id: ana, email: "ana@example.invalid" }, { name: "Other", description: "", instructions: "", icon: null })).id;
+				yield* workspaces.setMember({ id: ana, email: "ana@example.invalid" }, ids.ward, bob, "ask");
 			}),
 		);
 		docs.ward = await seed(ids.ward, "dosing", [

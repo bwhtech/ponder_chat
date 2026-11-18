@@ -69,14 +69,14 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"enable-skill": (_, after) => ({ text: `Turned on the skill ${skillName(after)}`, details: [] }),
 	"disable-skill": (_, after) => ({ text: `Turned off the skill ${skillName(after)}`, details: [] }),
 	"delete-skill": (before) => ({ text: `Deleted the skill ${skillName(before)}`, details: [] }),
-	// Organisation workspaces only (server/workspaces/Workspaces.ts). The server sends the instructions' length, not their text.
-	"create-workspace": (_, after) => ({ text: `Made ${theWorkspace(after)} for everyone`, details: [instructionsLength(after)].filter(Boolean) }),
+	// Workspaces open to everyone only (server/workspaces/Workspaces.ts). The server sends the instructions' length, not their text.
+	"create-workspace": (_, after) => ({ text: `Made ${theWorkspace(after)}`, details: [instructionsLength(after)].filter(Boolean) }),
 	"update-workspace": (before, after) => ({ text: `Edited ${theWorkspace(after)}`, details: workspaceChanges(before, after) }),
 	"share-workspace": (before, after) => ({ text: sharingText(before, after), details: sharingChanges(before, after) }),
 	"delete-workspace": (before) => ({ text: `Deleted ${theWorkspace(before)}`, details: [] }),
 };
 
-/** “the workspace “Handbook””, or “a workspace”: the server names a workspace only while it is for everyone (server/admin/activity.ts). */
+/** “the workspace “Handbook””, or “a workspace”: the server names a workspace only while it is open to everyone (server/admin/activity.ts). */
 function theWorkspace(fields: Fields) {
 	return typeof fields.name === "string" ? `the workspace “${fields.name}”` : "a workspace";
 }
@@ -95,16 +95,23 @@ function instructionsLength(fields: Fields) {
 	return length ? `Instructions: ${count(length)} characters` : "";
 }
 
+/** Opened to everyone, closed to everyone, or a change of its people. */
 function sharingText(before: Fields, after: Fields) {
-	if (before.kind !== "org" && after.kind === "org") return `Made ${theWorkspace(after)} for everyone`;
-	if (before.kind === "org" && after.kind !== "org") return "Made a workspace private";
+	const opened = (fields: Fields) => fields.orgAccess === "ask";
+	if (!opened(before) && opened(after)) return `Opened ${theWorkspace(after)} to everyone`;
+	if (opened(before) && !opened(after)) return `Closed ${theWorkspace(after)} to everyone`;
 	return `Changed who can use ${theWorkspace(after)}`;
 }
 
 function sharingChanges(before: Fields, after: Fields) {
 	const members = (fields: Fields) => (Array.isArray(fields.members) ? fields.members.length : 0);
-	const kind = (fields: Fields) => (fields.kind === "org" ? "For everyone" : "Private");
-	return [changed("Kind", kind(before), kind(after)), members(before) === members(after) ? "" : `Members: ${count(members(before))} → ${count(members(after))}`].filter(Boolean);
+	const general = (fields: Fields) => (fields.orgAccess === "ask" ? "Everyone (can ask)" : "Only people added");
+	const roles = (fields: Fields) => JSON.stringify(fields.members ?? []);
+	return [
+		changed("General access", general(before), general(after)),
+		members(before) === members(after) ? "" : `Members: ${count(members(before))} → ${count(members(after))}`,
+		members(before) === members(after) && roles(before) !== roles(after) ? "A member's role changed" : "",
+	].filter(Boolean);
 }
 
 /** The logo's theme (server/branding/Branding.ts). */

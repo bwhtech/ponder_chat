@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { chat, expect, test } from "../fixtures.ts";
-import { addChats, createWorkspace, textFile, uploadReady, workspacePage } from "../workspaces.ts";
+import { addChats, createWorkspace, newPerson, share, textFile, uploadReady, workspacePage } from "../workspaces.ts";
 
 const about = (page: Page) => page.locator('[data-slot="workspace-about"]');
 
@@ -100,4 +100,29 @@ test("an admin on a phone reaches Workspaces, Activity and Settings under More",
 		await page.getByRole("menuitem", { name }).click();
 		await expect(page).toHaveURL(new RegExp(`${path}$`));
 	}
+});
+
+test("on a phone, Share puts each role on its own line under the name, every control can be tapped, and nothing scrolls sideways", async ({ page, person, fake, db, browser }) => {
+	const member = await newPerson(browser, db, fake, "phone share member");
+	const name = `Phone share ${person.id.slice(0, 6)}`;
+	const { id, slug } = await createWorkspace(page, name);
+	await share(page, id, [{ userId: member.person.id, access: "edit" }]);
+	await page.goto(`/?w=${slug}`);
+	// On a phone Share is in the header's menu.
+	await page.getByRole("button", { name: "Workspace actions" }).tap();
+	await page.getByRole("menuitem", { name: "Share" }).tap();
+	const dialog = page.getByRole("dialog", { name: `Share “${name}”` });
+	const row = dialog.locator('[data-slot="workspace-member"]');
+	const role = row.getByRole("button", { name: /^What / });
+	await expect(role).toHaveText("Can edit");
+	const email = row.getByText(member.person.email);
+	expect((await role.boundingBox())!.y, "the role is under the name and email").toBeGreaterThan((await email.boundingBox())!.y);
+	expect(await dialog.evaluate((box) => box.scrollWidth - box.clientWidth)).toBe(0);
+	// A tap 18px above the role button's middle, outside its 28px box, still reaches it (touch-target).
+	const { x, y, width, height } = (await role.boundingBox())!;
+	expect(height).toBeLessThan(44);
+	await page.touchscreen.tap(x + width / 2, y + height / 2 - 18);
+	await page.getByRole("menuitem", { name: /^Can ask/ }).tap();
+	await expect(role).toHaveText("Can ask");
+	await member.context.close();
 });

@@ -11,7 +11,7 @@ import * as AdminEvents from "../admin/AdminEvents.ts";
 import * as ObjectStore from "../files/ObjectStore.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { roleFrom } from "../people/Accounts.ts";
-import { type Access, accessFrom, atLeast, canManage, type Kind, type MemberAccess } from "./access.ts";
+import { type Access, accessFrom, atLeast, canChangeOrgAccess, canDelete, canShare, type MemberAccess, type OrgAccess } from "./access.ts";
 import { documentStore, type DocumentSummary } from "./documents/store.ts";
 import { migrateDocuments } from "./documents/tables.ts";
 import { type DetailRow, type Rows, rowsOf, type SummaryRow } from "./rows.ts";
@@ -24,13 +24,17 @@ import { claimSlug, migrateSlugs } from "./slug.ts";
  *
  * Every read and write goes through the access of the person who asks (access.ts). A
  * workspace that the person cannot use, or that was deleted, is WorkspaceNotFound, so an
- * answer never shows that it exists. Changes to organisation workspaces go to the admin
- * activity log (AdminEvents.ts).
+ * answer never shows that it exists. Changes to a workspace while it is open to everyone go
+ * to the admin activity log (AdminEvents.ts).
+ *
+ * Sharing is one change at a time: a person added or given a role, a person removed, or
+ * General access opened or closed. Two people who change different people at once both
+ * keep their change.
  *
  * A chat stays its writer's own: nothing here reads or lists chats. A chat only points to
  * its workspace (`threads.workspace_id`), and a deleted workspace lets its chats go.
  */
-export type { Access, Kind, MemberAccess } from "./access.ts";
+export type { Access, MemberAccess, OrgAccess } from "./access.ts";
 
 /** Who asks for a change: their id, and their email for the activity log. */
 export type Actor = { id: string; email: string };
@@ -38,38 +42,47 @@ export type Person = { id: string; name: string; email: string };
 export type Member = Person & { access: MemberAccess };
 
 /**
- * A row of the sidebar (GET /api/workspaces, the boot page). `memberCount` is 0 for an
- * organisation workspace: everyone uses it. `pinned` is the person's own: nobody else sees it.
+ * A row of the sidebar (GET /api/workspaces, the boot page). `pinned` is the person's own:
+ * nobody else sees it.
  */
 export type WorkspaceSummary = {
 	id: string;
 	/** Its address on the page (slug.ts): made from the first name, and kept on a rename. */
 	slug: string;
-	kind: Kind;
+	/** General access: "ask" when everyone in the organisation can ask in it. */
+	orgAccess: OrgAccess;
 	name: string;
 	description: string;
 	icon: string | null;
 	/** Never none in the list. A detail can say none: after sharing, the person who changed it may no longer use it. */
 	access: Access;
+	/** The people added, without the owner. */
 	memberCount: number;
 	pinned: boolean;
+	/** To the microsecond, in UTC ISO 8601: the list's order. */
 	createdAt: string;
 	updatedAt: string;
 };
 
-/** One workspace (GET /api/workspaces/:id). `members` only for a person who can change them (`canShare`), else null. */
+/**
+ * One workspace (GET /api/workspaces/:id), as the person who asks may use it. `members` only
+ * for a person who can change them (`canShare`), else null.
+ */
 export type WorkspaceDetail = Omit<WorkspaceSummary, "pinned"> & {
 	instructions: string;
 	owner: Person;
 	canShare: boolean;
+	canDelete: boolean;
+	/** Opens it to everyone, or closes it: admins only (access.ts). */
+	canChangeOrgAccess: boolean;
 	members: Member[] | null;
 	/** Oldest first, with their status, for everyone who can ask. */
 	documents: DocumentSummary[];
 };
 
-export type NewWorkspace = { kind: Kind; name: string; description: string; instructions: string; icon: string | null };
-export type WorkspaceChanges = Partial<Omit<NewWorkspace, "kind">>;
-export type Sharing = { kind: Kind; members: ReadonlyArray<{ userId: string; access: MemberAccess }> };
+/** Every workspace starts private: an admin opens it to everyone from Share. */
+export type NewWorkspace = { name: string; description: string; instructions: string; icon: string | null };
+export type WorkspaceChanges = Partial<NewWorkspace>;
 
 /** No such workspace, or not one the person can use. Routes answer 404. */
 export class WorkspaceNotFound extends Schema.TaggedError<WorkspaceNotFound>()("WorkspaceNotFound", {
@@ -81,26 +94,29 @@ export class WorkspaceNotFound extends Schema.TaggedError<WorkspaceNotFound>()("
 }
 
 const REFUSALS = {
-	"org-needs-admin": "Only an admin can make a workspace for everyone.",
+	"org-needs-admin": "Only an admin can open a workspace to everyone, or close it.",
+	"org-needs-owner": "Only its owner can open this workspace to everyone.",
 	"needs-edit": "You can ask in this workspace, but not change it.",
-	"needs-manage": "Only the owner can share or delete this workspace. For a workspace for everyone, only an admin can.",
+	"needs-share": "Only the owner and people who can edit can share this workspace.",
+	"needs-delete": "Only the owner can delete this workspace. While it is open to everyone, admins can too.",
+	"owner-fixed": "The owner always has full access.",
 } as const;
 
 /** The person can use the workspace, but not for this. Routes answer 403 with the message. */
 export class WorkspaceRefused extends Schema.TaggedError<WorkspaceRefused>()("WorkspaceRefused", {
-	reason: Schema.Literals(["org-needs-admin", "needs-edit", "needs-manage"]),
+	reason: Schema.Literals(["org-needs-admin", "org-needs-owner", "needs-edit", "needs-share", "needs-delete", "owner-fixed"]),
 }) {
 	override get message() {
 		return REFUSALS[this.reason];
 	}
 }
 
-/** A member to add has no account. */
-export class UnknownPeople extends Schema.TaggedError<UnknownPeople>()("UnknownPeople", {
-	count: Schema.Number,
+/** The person to add has no account. */
+export class UnknownPerson extends Schema.TaggedError<UnknownPerson>()("UnknownPerson", {
+	userId: Schema.String,
 }) {
 	override get message() {
-		return "Someone in the list has no account.";
+		return "That person has no account.";
 	}
 }
 
@@ -126,18 +142,30 @@ export class Workspaces extends Context.Service<
 		readonly pin: (userId: string, workspaceId: string, pinned: boolean) => Effect.Effect<void, WorkspaceNotFound | SqlError>;
 		/** By its id or its slug: the page's address has the slug, and older links the id. */
 		readonly get: (userId: string, idOrSlug: string) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | SqlError>;
-		/** Anyone makes a private workspace; only an admin an organisation one. The maker is its owner. */
-		readonly create: (actor: Actor, input: NewWorkspace) => Effect.Effect<WorkspaceDetail, WorkspaceRefused | SqlError>;
+		/** Anyone makes a workspace, private. The maker is its owner. */
+		readonly create: (actor: Actor, input: NewWorkspace) => Effect.Effect<WorkspaceDetail, SqlError>;
 		/** Name, description, instructions and icon: `edit` and above. */
 		readonly update: (actor: Actor, workspaceId: string, changes: WorkspaceChanges) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | SqlError>;
-		/** Kind and members, in place of the ones before. An organisation workspace keeps no members. */
-		readonly share: (actor: Actor, workspaceId: string, sharing: Sharing) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | UnknownPeople | SqlError>;
+		/** Adds a person with this role, or gives a member this role: whoever can share (access.ts). Never the owner. */
+		readonly setMember: (
+			actor: Actor,
+			workspaceId: string,
+			userId: string,
+			access: MemberAccess,
+		) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | UnknownPerson | SqlError>;
+		/** Removes a person: whoever can share, themselves too. Never the owner. Removing someone who is no member changes nothing. */
+		readonly removeMember: (actor: Actor, workspaceId: string, userId: string) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | SqlError>;
+		/** Opens it to everyone in the organisation, or closes it: admins only. Its people keep their roles either way. */
+		readonly setOrgAccess: (actor: Actor, workspaceId: string, orgAccess: OrgAccess) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | SqlError>;
 		/** Marks it deleted, deletes its documents, and lets its chats go: they stay their writers', in no workspace. */
 		readonly remove: (actor: Actor, workspaceId: string) => Effect.Effect<void, WorkspaceNotFound | WorkspaceRefused | SqlError>;
 		/** The name and instructions for a chat turn (workflow/steps.ts), when the person can still ask in it. */
 		readonly instructionsFor: (userId: string, workspaceId: string) => Effect.Effect<Option.Option<{ name: string; instructions: string }>, SqlError>;
 	}
 >()("ponder/workspaces/Workspaces") {}
+
+/** What a person's access was decided from, for the checks after it. */
+type Resolved = { access: Access; admin: boolean; orgAccess: OrgAccess; ownerId: string };
 
 const make = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
@@ -150,7 +178,7 @@ const make = Effect.gen(function* () {
 		yield* sql`
 			create table if not exists workspaces (
 				id text primary key,
-				kind text not null check (kind in ('org', 'private')),
+				org_access text not null default 'none' check (org_access in ('none', 'ask')),
 				owner_id text not null references users (id),
 				name text not null,
 				description text not null default '',
@@ -160,6 +188,7 @@ const make = Effect.gen(function* () {
 				updated_at timestamptz not null default now(),
 				deleted_at timestamptz
 			)`;
+		yield* migrateOrgAccess;
 		yield* migrateSlugs(sql);
 		yield* sql`
 			create table if not exists workspace_members (
@@ -192,35 +221,59 @@ const make = Effect.gen(function* () {
 		yield* migrateDocuments(sql);
 	});
 
+	/**
+	 * Workspaces made before General access had a `kind`: an organisation workspace ('org',
+	 * which kept no members) is open to everyone; a private one keeps its people. Once
+	 * `kind` is gone, this changes nothing.
+	 */
+	const migrateOrgAccess = Effect.gen(function* () {
+		yield* sql`alter table workspaces add column if not exists org_access text not null default 'none' check (org_access in ('none', 'ask'))`;
+		yield* sql.unsafe(`
+			do $$ begin
+				if exists (select 1 from information_schema.columns where table_schema = current_schema() and table_name = 'workspaces' and column_name = 'kind') then
+					update workspaces set org_access = 'ask' where kind = 'org';
+					alter table workspaces drop column kind;
+				end if;
+			end $$`);
+	});
+
 	/** The person's access, and whether they are an admin; none for a deleted or unknown workspace. */
 	const resolve = Effect.fnUntraced(function* (userId: string, workspaceId: string) {
 		const found = yield* rows.facts({ userId, workspaceId });
-		if (Option.isNone(found)) return { access: "none" as Access, admin: false, kind: "private" as Kind };
-		const admin = roleFrom(found.value.role) === "admin";
-		const facts = { kind: found.value.kind, ownerId: found.value.owner_id, member: found.value.member };
-		return { access: accessFrom(facts, userId, admin), admin, kind: found.value.kind };
+		const resolved: Resolved = { access: "none", admin: false, orgAccess: "none", ownerId: "" };
+		if (Option.isNone(found)) return resolved;
+		resolved.admin = roleFrom(found.value.role) === "admin";
+		resolved.orgAccess = found.value.org_access;
+		resolved.ownerId = found.value.owner_id;
+		resolved.access = accessFrom({ orgAccess: resolved.orgAccess, ownerId: resolved.ownerId, member: found.value.member }, userId, resolved.admin);
+		return resolved;
 	});
 
-	/** The workspace for a person who can use it at `needed` or above; not found when they can't use it at all. */
-	const withAccess = Effect.fnUntraced(function* (userId: string, workspaceId: string, needed: "ask" | "edit" | "manage") {
+	/** The workspace for a person who can use it for `needed`; not found when they can't use it at all. */
+	const withAccess = Effect.fnUntraced(function* (userId: string, workspaceId: string, needed: "ask" | "edit" | "share" | "delete") {
 		const found = yield* resolve(userId, workspaceId);
 		if (found.access === "none") return yield* new WorkspaceNotFound({ workspaceId });
 		if (needed === "edit" && !atLeast(found.access, "edit")) return yield* new WorkspaceRefused({ reason: "needs-edit" });
-		if (needed === "manage" && !canManage(found.kind, found.access, found.admin)) return yield* new WorkspaceRefused({ reason: "needs-manage" });
+		if (needed === "share" && !canShare(found.access)) return yield* new WorkspaceRefused({ reason: "needs-share" });
+		if (needed === "delete" && !canDelete(found.orgAccess, found.access, found.admin)) return yield* new WorkspaceRefused({ reason: "needs-delete" });
 		return found;
 	});
 
 	/** The detail as this person sees it. */
 	const detail = Effect.fnUntraced(function* (workspaceId: string, access: Access, admin: boolean) {
 		const row = Option.getOrThrow(yield* rows.detail(workspaceId));
-		const canShare = canManage(row.kind, access, admin);
-		const members = canShare ? yield* rows.members(workspaceId) : null;
-		return detailFrom(row, access, canShare, members, yield* documents.list(workspaceId));
+		const rights = {
+			canShare: canShare(access),
+			canDelete: canDelete(row.org_access, access, admin),
+			canChangeOrgAccess: canChangeOrgAccess(row.org_access, access, admin),
+		};
+		const members = rights.canShare ? yield* rows.members(workspaceId) : null;
+		return detailFrom(row, access, rights, members, yield* documents.list(workspaceId));
 	});
 
-	/** Organisation workspaces are org-wide content, so their changes go to the activity log. */
-	const audit = (actor: Actor, action: string, kinds: Kind[], before: Record<string, unknown> | null, after: Record<string, unknown> | null) =>
-		kinds.includes("org") ? events.record({ actor, action, before, after }) : Effect.void;
+	/** A workspace open to everyone is organisation content, so its changes go to the activity log: open before or after. */
+	const audit = (actor: Actor, action: string, open: boolean, before: Record<string, unknown> | null, after: Record<string, unknown> | null) =>
+		open ? events.record({ actor, action, before, after }) : Effect.void;
 
 	const accessOf = Effect.fn("Workspaces.accessOf")(function* (userId: string, workspaceId: string) {
 		return (yield* resolve(userId, workspaceId)).access;
@@ -246,7 +299,7 @@ const make = Effect.gen(function* () {
 		const admin = yield* accounts.isAdmin(userId);
 		const found = yield* rows.summaries(userId);
 		// In the order the query gives.
-		return found.map((row) => ({ ...summaryFrom(row, accessFrom({ kind: row.kind, ownerId: row.owner_id, member: row.member }, userId, admin)), pinned: row.pinned }));
+		return found.map((row) => ({ ...summaryFrom(row, accessFrom({ orgAccess: row.org_access, ownerId: row.owner_id, member: row.member }, userId, admin)), pinned: row.pinned }));
 	});
 
 	// Admitted as a chat is (admit): a delete waits for the pin, and then takes it with the workspace;
@@ -270,20 +323,18 @@ const make = Effect.gen(function* () {
 		return yield* detail(workspaceId, found.access, found.admin);
 	});
 
+	// A new workspace is private, so it is not logged: the log has it once it is opened to everyone.
 	const create = Effect.fn("Workspaces.create")(function* (actor: Actor, input: NewWorkspace) {
 		const admin = yield* accounts.isAdmin(actor.id);
-		if (input.kind === "org" && !admin) return yield* new WorkspaceRefused({ reason: "org-needs-admin" });
 		const id = randomUUID();
 		yield* claimSlug(input.name, (slug) =>
 			sql`
-				insert into workspaces (id, slug, kind, owner_id, name, description, instructions, icon)
-				values (${id}, ${slug}, ${input.kind}, ${actor.id}, ${input.name}, ${input.description}, ${input.instructions}, ${input.icon})
+				insert into workspaces (id, slug, owner_id, name, description, instructions, icon)
+				values (${id}, ${slug}, ${actor.id}, ${input.name}, ${input.description}, ${input.instructions}, ${input.icon})
 				on conflict (slug) do nothing
 				returning id`.pipe(Effect.map((rows) => rows.length > 0)),
 		);
-		const created = yield* detail(id, "owner", admin);
-		yield* audit(actor, "create-workspace", [created.kind], null, auditView(created));
-		return created;
+		return yield* detail(id, "owner", admin);
 	});
 
 	const update = Effect.fn("Workspaces.update")(function* (actor: Actor, workspaceId: string, changes: WorkspaceChanges) {
@@ -292,7 +343,7 @@ const make = Effect.gen(function* () {
 		// Deleted since the access check.
 		if (Option.isNone(changed)) return yield* new WorkspaceNotFound({ workspaceId });
 		const { before, after } = changed.value;
-		yield* audit(actor, "update-workspace", [before.kind, after.kind], before, after);
+		yield* audit(actor, "update-workspace", before.orgAccess !== "none" || after.orgAccess !== "none", before, after);
 		return yield* detail(workspaceId, found.access, found.admin);
 	});
 
@@ -314,36 +365,78 @@ const make = Effect.gen(function* () {
 
 	/** auditView's fields, from a row of `workspaces` under this alias. */
 	const auditJson = (alias: "old" | "w") =>
-		sql.literal(`jsonb_build_object('workspace', ${alias}.id, 'kind', ${alias}.kind, 'name', ${alias}.name, 'description', ${alias}.description, 'instructions', ${alias}.instructions, 'icon', ${alias}.icon)`);
+		sql.literal(
+			`jsonb_build_object('workspace', ${alias}.id, 'orgAccess', ${alias}.org_access, 'name', ${alias}.name, 'description', ${alias}.description, 'instructions', ${alias}.instructions, 'icon', ${alias}.icon)`,
+		);
 
-	const share = Effect.fn("Workspaces.share")(function* (actor: Actor, workspaceId: string, sharing: Sharing) {
-		const found = yield* withAccess(actor.id, workspaceId, "manage");
-		// Making a workspace for everyone, or taking it back, is an admin's: the same rule as making one.
-		if (sharing.kind !== found.kind && !found.admin) return yield* new WorkspaceRefused({ reason: "org-needs-admin" });
-		const ownerId = Option.getOrThrow(yield* rows.detail(workspaceId)).owner_id;
-		const members = sharing.kind === "org" ? [] : membersToKeep(sharing.members, ownerId);
-		const known = yield* rows.existing(members.map((member) => member.userId));
-		if (known.length < members.length) return yield* new UnknownPeople({ count: members.length - known.length });
-		const before = { workspace: workspaceId, kind: found.kind, members: memberIds(yield* rows.members(workspaceId)) };
-		yield* sql.withTransaction(
+	/** Who can use the workspace, for the activity log. */
+	const sharingView = Effect.fnUntraced(function* (workspaceId: string) {
+		const [found] = yield* sql<{ org_access: OrgAccess }>`select org_access from workspaces where id = ${workspaceId}`;
+		return { workspace: workspaceId, orgAccess: found?.org_access ?? "none", members: memberIds(yield* rows.members(workspaceId)) };
+	});
+
+	/**
+	 * One change to who can use the workspace, by a person who can share it, in a transaction
+	 * of its own. The workspace's row is locked FOR NO KEY UPDATE: sharing changes to it take
+	 * turns, so each one reads the people as the one before left them, and each is logged
+	 * with exactly what it changed. A delete waits for it, or it finds the workspace gone.
+	 * Chats and pins are not held up (they lock FOR KEY SHARE). Answers the workspace as the
+	 * person sees it after the change: they may have removed themselves.
+	 */
+	const changeSharing = <E>(actor: Actor, workspaceId: string, change: (found: Resolved) => Effect.Effect<void, E | SqlError>) =>
+		Effect.gen(function* () {
+			yield* sql.withTransaction(
+				Effect.gen(function* () {
+					const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null for no key update`;
+					if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
+					const found = yield* withAccess(actor.id, workspaceId, "share");
+					const before = yield* sharingView(workspaceId);
+					yield* change(found);
+					const after = yield* sharingView(workspaceId);
+					if (JSON.stringify(before) === JSON.stringify(after)) return;
+					yield* sql`update workspaces set updated_at = now() where id = ${workspaceId}`;
+					yield* audit(actor, "share-workspace", before.orgAccess !== "none" || after.orgAccess !== "none", before, after);
+				}),
+			);
+			const now = yield* resolve(actor.id, workspaceId);
+			return yield* detail(workspaceId, now.access, now.admin);
+		});
+
+	const setMember = Effect.fn("Workspaces.setMember")(function* (actor: Actor, workspaceId: string, userId: string, access: MemberAccess) {
+		return yield* changeSharing(actor, workspaceId, (found) =>
 			Effect.gen(function* () {
-				yield* sql`update workspaces set kind = ${sharing.kind}, updated_at = now() where id = ${workspaceId}`;
-				const ids = members.map((member) => member.userId);
-				yield* sql`delete from workspace_members where workspace_id = ${workspaceId} and not (user_id = any(${ids}))`;
-				const added = members.map((member) => ({ workspace_id: workspaceId, user_id: member.userId, access: member.access, added_by: actor.id }));
-				if (!Arr.isArrayNonEmpty(added)) return;
+				if (userId === found.ownerId) return yield* new WorkspaceRefused({ reason: "owner-fixed" });
+				if ((yield* rows.existing([userId])).length === 0) return yield* new UnknownPerson({ userId });
 				// A member who stays keeps when and by whom they were added.
-				yield* sql`insert into workspace_members ${sql.insert(added)} on conflict (workspace_id, user_id) do update set access = excluded.access`;
+				yield* sql`
+					insert into workspace_members (workspace_id, user_id, access, added_by) values (${workspaceId}, ${userId}, ${access}, ${actor.id})
+					on conflict (workspace_id, user_id) do update set access = excluded.access`;
 			}),
 		);
-		// Read again: an admin who makes an organisation workspace private, and is not its owner, may no longer use it.
-		const after = yield* detail(workspaceId, yield* accessOf(actor.id, workspaceId), found.admin);
-		yield* audit(actor, "share-workspace", [found.kind, after.kind], before, { workspace: workspaceId, kind: after.kind, members: memberIds(yield* rows.members(workspaceId)) });
-		return after;
+	});
+
+	const removeMember = Effect.fn("Workspaces.removeMember")(function* (actor: Actor, workspaceId: string, userId: string) {
+		return yield* changeSharing(actor, workspaceId, (found) =>
+			Effect.gen(function* () {
+				if (userId === found.ownerId) return yield* new WorkspaceRefused({ reason: "owner-fixed" });
+				yield* sql`delete from workspace_members where workspace_id = ${workspaceId} and user_id = ${userId}`;
+			}),
+		);
+	});
+
+	const setOrgAccess = Effect.fn("Workspaces.setOrgAccess")(function* (actor: Actor, workspaceId: string, orgAccess: OrgAccess) {
+		return yield* changeSharing(actor, workspaceId, (found) =>
+			Effect.gen(function* () {
+				if (orgAccess === found.orgAccess) return;
+				if (!found.admin) return yield* new WorkspaceRefused({ reason: "org-needs-admin" });
+				if (!canChangeOrgAccess(found.orgAccess, found.access, found.admin)) return yield* new WorkspaceRefused({ reason: "org-needs-owner" });
+				yield* sql`update workspaces set org_access = ${orgAccess} where id = ${workspaceId}`;
+			}),
+		);
 	});
 
 	const remove = Effect.fn("Workspaces.remove")(function* (actor: Actor, workspaceId: string) {
-		const found = yield* withAccess(actor.id, workspaceId, "manage");
+		const found = yield* withAccess(actor.id, workspaceId, "delete");
 		const before = yield* detail(workspaceId, found.access, found.admin);
 		const keys = yield* sql.withTransaction(
 			Effect.gen(function* () {
@@ -361,7 +454,7 @@ const make = Effect.gen(function* () {
 		);
 		// The bytes in the bucket only once the rows are gone for good: no bucket call holds the transaction open.
 		yield* documents.removeObjects(keys);
-		yield* audit(actor, "delete-workspace", [before.kind], auditView(before), null);
+		yield* audit(actor, "delete-workspace", before.orgAccess !== "none", auditView(before), null);
 	});
 
 	const instructionsFor = Effect.fn("Workspaces.instructionsFor")(function* (userId: string, workspaceId: string) {
@@ -370,7 +463,7 @@ const make = Effect.gen(function* () {
 		return Option.map(yield* rows.detail(workspaceId), (row) => ({ name: row.name, instructions: row.instructions }));
 	});
 
-	return Workspaces.of({ migrate, accessOf, check, admit, list, pin, get, create, update, share, remove, instructionsFor });
+	return Workspaces.of({ migrate, accessOf, check, admit, list, pin, get, create, update, setMember, removeMember, setOrgAccess, remove, instructionsFor });
 });
 
 export const layer = Layer.effect(Workspaces, make);
@@ -379,40 +472,36 @@ function summaryFrom(row: SummaryRow, access: Access): Omit<WorkspaceSummary, "p
 	return {
 		id: row.id,
 		slug: row.slug,
-		kind: row.kind,
+		orgAccess: row.org_access,
 		name: row.name,
 		description: row.description,
 		icon: row.icon,
 		access,
-		memberCount: row.kind === "org" ? 0 : row.member_count,
+		memberCount: row.member_count,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at.toISOString(),
 	};
 }
 
-function detailFrom(row: DetailRow, access: Access, canShare: boolean, members: Member[] | null, documents: DocumentSummary[]): WorkspaceDetail {
+type Rights = Pick<WorkspaceDetail, "canShare" | "canDelete" | "canChangeOrgAccess">;
+
+function detailFrom(row: DetailRow, access: Access, rights: Rights, members: Member[] | null, documents: DocumentSummary[]): WorkspaceDetail {
 	return {
 		...summaryFrom(row, access),
 		instructions: row.instructions,
 		owner: { id: row.owner_id, name: row.owner_name, email: row.owner_email },
-		canShare,
+		...rights,
 		members,
 		documents,
 	};
-}
-
-/** One row for each person, the last one given winning; never the owner, who is no member. */
-function membersToKeep(members: Sharing["members"], ownerId: string) {
-	const byId = new Map(members.filter((member) => member.userId !== ownerId).map((member) => [member.userId, member]));
-	return [...byId.values()];
 }
 
 /** What the activity log keeps of a workspace. */
 type AuditView = ReturnType<typeof auditView>;
 
 function auditView(workspace: WorkspaceDetail) {
-	const { id, kind, name, description, instructions, icon } = workspace;
-	return { workspace: id, kind, name, description, instructions, icon };
+	const { id, orgAccess, name, description, instructions, icon } = workspace;
+	return { workspace: id, orgAccess, name, description, instructions, icon };
 }
 
 function memberIds(members: Member[]) {

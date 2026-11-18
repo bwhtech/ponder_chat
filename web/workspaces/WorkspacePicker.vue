@@ -2,7 +2,7 @@
 import { Dropdown, type DropdownOptions } from "frappe-ui";
 import { computed, h } from "vue";
 import WorkspaceChip from "./WorkspaceChip.vue";
-import { kindIcon, workspaceById, workspaces } from "./store";
+import { accessIcon, workspaceById, workspaces } from "./store";
 
 /**
  * The workspace of a new chat, chosen in the composer: none, or one of the person's
@@ -24,7 +24,7 @@ const options = computed<DropdownOptions>(() => [
 	{
 		group: "Workspaces",
 		hideLabel: true,
-		options: workspaces.value.map((each) => ({ label: each.name, icon: kindIcon(each), onClick: () => (chosen.value = each.id), slots: check(chosen.value === each.id) })),
+		options: workspaces.value.map((each) => ({ label: each.name, icon: accessIcon(each), onClick: () => (chosen.value = each.id), slots: check(chosen.value === each.id) })),
 	},
 ]);
 </script>

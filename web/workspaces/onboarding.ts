@@ -1,4 +1,4 @@
-import { canEdit } from "./access";
+import { canEdit, isShared } from "./access";
 import type { WorkspaceDetail } from "./store";
 
 /**
@@ -19,8 +19,8 @@ export type SetupStep = {
 
 /**
  * The steps this person can take: Instructions and Sources for whoever can edit, and People
- * for whoever can share a private workspace (its owner). Everyone in the organisation uses an
- * organisation workspace already, so it has no People step.
+ * for whoever can share it (everyone who can edit, server/workspaces/access.ts). People is
+ * done once someone is added, or the workspace is open to everyone.
  */
 export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 	if (!canEdit(workspace)) return [];
@@ -41,12 +41,12 @@ export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 			action: "Upload files",
 		},
 	];
-	if (workspace.canShare && workspace.kind !== "org") {
+	if (workspace.canShare) {
 		steps.push({
 			key: "people",
 			title: "People",
 			description: "Choose who can ask here.",
-			done: workspace.memberCount > 0,
+			done: isShared(workspace),
 			action: "Share workspace",
 		});
 	}

@@ -12,12 +12,13 @@ import PrivacyNote from "../components/PrivacyNote.vue";
 import EmptyState from "../../EmptyState.vue";
 import { count } from "../../numbers";
 import { fileSize, progressText, STATUS_LABELS, statusLabel } from "../../workspaces/documents";
+import { people } from "../../workspaces/access";
 import { Poller } from "../../workspaces/poller";
 import { money } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 
 /**
- * Workspaces (server/workspaces/admin.ts). Organisation workspaces in full: owner,
+ * Workspaces (server/workspaces/admin.ts). Workspaces open to everyone in full: owner,
  * documents, their status and indexing cost, and each document's log. Private workspaces
  * as totals only: the server sends no name, document or owner of one.
  */
@@ -70,6 +71,9 @@ function openLog(workspace: OrgWorkspace, document: OrgDocument) {
 
 const ownerName = (workspace: OrgWorkspace) => (workspace.owner.email ? displayName(workspace.owner.name, workspace.owner.email) : workspace.owner.name) || "Removed account";
 const documentCount = (n: number) => (n === 1 ? "1 document" : `${count(n)} documents`);
+/** Its owner, its documents, and the people added to it, who keep their roles if it is closed again. */
+const aboutLine = (workspace: OrgWorkspace) =>
+	[ownerName(workspace), documentCount(workspace.documents.length), workspace.memberCount ? `${people(workspace.memberCount)} added` : ""].filter(Boolean).join(" · ");
 const cost = (usd: number | null) => (usd === null ? "—" : money(usd));
 const statusTone = (document: OrgDocument) => (document.status === "failed" ? "text-ink-red-6" : document.status === "reading" ? "text-ink-gray-6" : "text-ink-gray-8");
 </script>
@@ -90,14 +94,14 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 		</EmptyState>
 
 		<template v-else>
-			<section aria-label="Organisation workspaces" class="space-y-3" data-slot="org-workspaces">
-				<h2 class="text-base-semibold text-ink-gray-9">Organisation workspaces</h2>
+			<section aria-label="Open to everyone" class="space-y-3" data-slot="org-workspaces">
+				<h2 class="text-base-semibold text-ink-gray-9">Open to everyone</h2>
 				<ListSkeleton v-if="loading" :rows="4" :avatar="false" two-lines label="Loading workspaces" />
 				<EmptyState
 					v-else-if="!report?.org.length"
 					icon="lucide-building-2"
-					title="No organisation workspaces yet"
-					body="Make one in the chat with New workspace."
+					title="No workspaces open to everyone yet"
+					body="Open one to everyone from its Share, in the chat."
 				/>
 				<div v-else class="space-y-8">
 					<article v-for="workspace in report.org" :key="workspace.id" class="space-y-2" data-slot="org-workspace" :aria-label="workspace.name">
@@ -105,7 +109,7 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 							<div class="min-w-0 space-y-0.5">
 								<h3 class="truncate text-base-medium text-ink-gray-8">{{ workspace.name }}</h3>
 								<p class="text-sm text-ink-gray-6">
-									{{ ownerName(workspace) }} · {{ documentCount(workspace.documents.length) }}
+									{{ aboutLine(workspace) }}
 								</p>
 							</div>
 							<Button class="shrink-0" label="Open" icon-right="lucide-arrow-up-right" :link="`/?w=${encodeURIComponent(workspace.slug)}`" />
@@ -162,8 +166,8 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 				</div>
 			</section>
 
-			<section aria-label="Private workspaces" class="space-y-3" data-slot="private-workspaces">
-				<h2 class="text-base-semibold text-ink-gray-9">Private workspaces</h2>
+			<section aria-label="Private" class="space-y-3" data-slot="private-workspaces">
+				<h2 class="text-base-semibold text-ink-gray-9">Private</h2>
 				<div data-slot="dashboard" class="grid grid-cols-2 gap-4 lg:grid-cols-4">
 					<NumberCard title="Workspaces" :loading="loading" :value="privateTotals?.workspaces ?? null" :format="count" />
 					<NumberCard title="Documents ready" :loading="loading" :value="privateTotals?.documents.ready ?? null" :format="count" />

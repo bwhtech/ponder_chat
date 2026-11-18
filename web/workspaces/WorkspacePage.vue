@@ -17,7 +17,7 @@ import WorkspaceChats from "./WorkspaceChats.vue";
 import WorkspaceComposer from "./WorkspaceComposer.vue";
 import WorkspaceHeading from "./WorkspaceHeading.vue";
 import WorkspaceOnboarding from "./WorkspaceOnboarding.vue";
-import { canEdit, deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, takeMadeWorkspace, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
+import { canEdit, deleteWorkspace, fetchWorkspace, isShared, loadWorkspaces, replaceWorkspaceKey, takeMadeWorkspace, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
 
 /**
  * A workspace (`?w=<slug>`), in one column, the chat's: its name, the person's own chats in
@@ -216,8 +216,20 @@ function editInstructions() {
 	if (detail.value) openWorkspaceDialog({ kind: "instructions", workspace: detail.value, onSaved: savedHere, quiet: stepToDo("instructions") });
 }
 
+/**
+ * Share saves each change at once, and the page follows each answer: its People, the setup's
+ * People step, the header's icon. A person who removed themselves leaves the page; one who
+ * gave themselves Can ask stays, as a person who asks. A workspace gone meanwhile is loaded
+ * again, which says so.
+ */
 function share() {
-	if (detail.value) openWorkspaceDialog({ kind: "share", workspace: detail.value, onSaved: savedHere, quiet: stepToDo("people") });
+	if (detail.value) openWorkspaceDialog({ kind: "share", workspace: detail.value, onSaved: sharedHere, onGone: () => void load() });
+}
+
+function sharedHere(saved: WorkspaceDetail) {
+	if (saved.access !== "none") return savedHere(saved);
+	toast.success(`You left “${saved.name}”`);
+	emit("deleted");
 }
 
 /** The setup shows this step still to do: saving it is confirmed there, with no toast over the setup. */
@@ -298,7 +310,7 @@ function askDelete() {
 				<!-- Fades in when the workspace and the person's chats in it are here; a workspace made here shows at once. -->
 				<Transition enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
 					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8">
-						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="detail.kind === 'org' || detail.memberCount > 0" @open="emit('openChat', $event)" />
+						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="isShared(detail)" @open="emit('openChat', $event)" />
 						<WorkspaceOnboarding v-else ref="onboardingUpload" :workspace="detail" :dragging="pageDragging" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
 						<WorkspaceAbout ref="aboutUpload" :workspace="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
 					</div>

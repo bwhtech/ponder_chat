@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Button, Dropdown, SidebarItem, SidebarLabel } from "frappe-ui";
-import { kindIcon, openWorkspace, pinWorkspace, sharedWith, workspaces, workspacesLoaded, type WorkspaceSummary } from "./store";
+import { accessIcon, openWorkspace, pinWorkspace, sharedWith, workspaces, workspacesLoaded, type WorkspaceSummary } from "./store";
 import WorkspaceRowsSkeleton from "./WorkspaceRowsSkeleton.vue";
 
 /**
@@ -60,7 +60,7 @@ const isOpen = (workspace: WorkspaceSummary) => props.highlight && workspace.id 
 				:title="`${workspace.name} · ${sharedWith(workspace)}`"
 				@click="emit('select', workspace.slug)"
 			>
-				<template #prefix><span :class="[kindIcon(workspace), 'size-4 text-ink-gray-6']" aria-hidden="true" /></template>
+				<template #prefix><span :class="[accessIcon(workspace), 'size-4 text-ink-gray-6']" aria-hidden="true" /></template>
 				<template #suffix>
 					<Dropdown :options="menu(workspace)" align="end">
 						<template #trigger>

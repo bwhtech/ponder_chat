@@ -11,10 +11,16 @@ import { scanPdf } from "../pdfs.ts";
  */
 const headers = { Origin: e2e.baseUrl };
 
-async function createWorkspace(request: APIRequestContext, kind: "org" | "private", name: string) {
-	const created = await request.post("/api/workspaces", { data: { kind, name, description: `About ${name}` }, headers });
+/** A new workspace, private as every workspace starts; "open" opens it to everyone, as an admin does from Share. */
+async function createWorkspace(request: APIRequestContext, access: "open" | "private", name: string) {
+	const created = await request.post("/api/workspaces", { data: { name, description: `About ${name}` }, headers });
 	expect(created.status(), await created.text()).toBe(201);
-	return (await jsonOf<{ workspace: { id: string } }>(created)).workspace.id;
+	const id = (await jsonOf<{ workspace: { id: string } }>(created)).workspace.id;
+	if (access === "open") {
+		const opened = await request.put(`/api/workspaces/${id}/access`, { data: { orgAccess: "ask" }, headers });
+		expect(opened.status(), await opened.text()).toBe(200);
+	}
+	return id;
 }
 
 /** Uploads a document, Markdown unless `file` says otherwise, and waits until it is ready. */
@@ -35,14 +41,14 @@ async function addDocument(request: APIRequestContext, workspaceId: string, name
 	return id;
 }
 
-test("an admin sees organisation workspaces with each document's log, and private ones only as totals", async ({ page, admin, browser, db, fake }) => {
+test("an admin sees workspaces open to everyone with each document's log, and private ones only as totals", async ({ page, admin, browser, db, fake }) => {
 	void admin;
 	const mark = randomBytes(3).toString("hex");
 	const orgName = `Ward handbook ${mark}`;
 	const orgDocument = `handover-${mark}.md`;
 	const secret = { workspace: `Saffron diary ${mark}`, document: `tangerine-letters-${mark}.md` };
 
-	const orgId = await createWorkspace(page.request, "org", orgName);
+	const orgId = await createWorkspace(page.request, "open", orgName);
 	await addDocument(page.request, orgId, orgDocument);
 
 	// Someone else's private workspace, with a document the admin must never see named.
@@ -78,16 +84,18 @@ test("an admin sees organisation workspaces with each document's log, and privat
 	await expect(log).toHaveCount(0);
 
 	const totals = page.locator('[data-slot="private-workspaces"]');
-	await expect(totals.getByText("Private workspaces", { exact: true }).first()).toBeVisible();
+	await expect(totals.getByRole("heading", { name: "Private", exact: true })).toBeVisible();
 	await expect(totals.getByText("Documents ready", { exact: true })).toBeVisible();
 	for (const hidden of [secret.workspace, secret.document]) await expect(page.getByText(hidden)).toHaveCount(0);
 
 	// An admin is no one special in a private workspace.
 	expect((await page.request.get(`/api/workspaces/${privateId}`)).status()).toBe(404);
 
-	// Making the organisation workspace is in the activity log, by name.
+	// Opening it to everyone is in the activity log, by name, with what changed.
 	await page.goto("/admin/activity");
-	await expect(page.getByText(`Made the workspace “${orgName}” for everyone`).first()).toBeVisible();
+	const opened = page.getByText(`Opened the workspace “${orgName}” to everyone`).first();
+	await expect(opened).toBeVisible();
+	await expect(page.getByText("General access: Only people added → Everyone (can ask)").first()).toBeVisible();
 });
 
 test("the page follows a document while it is being read, and so does its open log", async ({ page, admin }) => {
@@ -95,7 +103,7 @@ test("the page follows a document while it is being read, and so does its open l
 	const mark = randomBytes(3).toString("hex");
 	const orgName = `Reading ward ${mark}`;
 	const orgDocument = `rota-${mark}.md`;
-	const orgId = await createWorkspace(page.request, "org", orgName);
+	const orgId = await createWorkspace(page.request, "open", orgName);
 	await addDocument(page.request, orgId, orgDocument);
 
 	// The first answers say the document is still Indexing, with a model on its second page of five; the later ones
@@ -134,7 +142,7 @@ test("an admin's log shows a PDF's page reads as one row, which opens to each pa
 	await fake.page({ match: key, text: "Exit site care: clean the exit site every second day." });
 	const orgName = `Scanned ward ${mark}`;
 	const name = `forms-${mark}.pdf`;
-	const orgId = await createWorkspace(page.request, "org", orgName);
+	const orgId = await createWorkspace(page.request, "open", orgName);
 	// A line of text, then three scans that the page model reads.
 	await addDocument(page.request, orgId, name, { mimeType: "application/pdf", buffer: scanPdf("Ward forms", key, 3) });
 

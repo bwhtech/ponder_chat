@@ -316,12 +316,12 @@ const make = Effect.gen(function* () {
 			select id, name, email from users where id = ${person} or lower(email) = ${person.toLowerCase()} limit 1`,
 	});
 
-	// Organisation workspaces only: an admin sees no private workspace's name, also one they made private.
-	// Deleted ones too: a workspace deleted while for everyone keeps its name; one deleted while private stays private.
+	// Workspaces open to everyone only: an admin sees no private workspace's name, also one they closed to everyone.
+	// Deleted ones too: a workspace deleted while open to everyone keeps its name; one deleted while private stays private.
 	const findOrgNames = SqlSchema.findAll({
 		Request: Schema.Array(Schema.String),
 		Result: Schema.Struct({ id: Schema.String, name: Schema.String }),
-		execute: (ids) => sql`select id, name from workspaces where id in ${sql.in(ids)} and kind = 'org'`,
+		execute: (ids) => sql`select id, name from workspaces where id in ${sql.in(ids)} and org_access <> 'none'`,
 	});
 	const orgWorkspaceNames = (ids: ReadonlyArray<string>) =>
 		ids.length

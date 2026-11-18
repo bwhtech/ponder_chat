@@ -10,16 +10,16 @@ import type { Member } from "./Workspaces.ts";
  * The SQL that Workspaces.ts reads with. Rows that do not decode are bugs: defects.
  * A deleted workspace is never read here.
  */
-const KindSchema = Schema.Literals(["org", "private"]);
+const OrgAccessSchema = Schema.Literals(["none", "ask"]);
 const MemberAccessSchema = Schema.Literals(["ask", "edit"]);
 
 /** What access is decided from (access.ts), with the person's role. */
-const FactsRow = Schema.Struct({ kind: KindSchema, owner_id: Schema.String, member: Schema.NullOr(MemberAccessSchema), role: Schema.NullOr(Schema.String) });
+const FactsRow = Schema.Struct({ org_access: OrgAccessSchema, owner_id: Schema.String, member: Schema.NullOr(MemberAccessSchema), role: Schema.NullOr(Schema.String) });
 
 const SummaryRow = Schema.Struct({
 	id: Schema.String,
 	slug: Schema.String,
-	kind: KindSchema,
+	org_access: OrgAccessSchema,
 	owner_id: Schema.String,
 	name: Schema.String,
 	description: Schema.String,
@@ -73,7 +73,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		Request: Schema.Struct({ userId: Schema.String, workspaceId: Schema.String }),
 		Result: FactsRow,
 		execute: ({ userId, workspaceId }) => sql`
-			select w.kind, w.owner_id, m.access as member, (select role from users where id = ${userId}) as role
+			select w.org_access, w.owner_id, m.access as member, (select role from users where id = ${userId}) as role
 			from workspaces w left join workspace_members m on m.workspace_id = w.id and m.user_id = ${userId}
 			where w.id = ${workspaceId} and w.deleted_at is null`,
 	});
@@ -83,19 +83,19 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		// A pin only counts on a workspace the person can still use: the join adds to the rows
 		// the person can use, and never adds a row.
 		execute: (userId) => sql`
-			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.icon, ${sql.literal(CREATED_AT)}, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)},
+			select w.id, w.slug, w.org_access, w.owner_id, w.name, w.description, w.icon, ${sql.literal(CREATED_AT)}, w.updated_at, m.access as member, ${sql.literal(MEMBER_COUNT)},
 				p.user_id is not null as pinned
 			from workspaces w
 				left join workspace_members m on m.workspace_id = w.id and m.user_id = ${userId}
 				left join workspace_pins p on p.workspace_id = w.id and p.user_id = ${userId}
-			where w.deleted_at is null and (w.kind = 'org' or w.owner_id = ${userId} or m.user_id is not null)
+			where w.deleted_at is null and (w.org_access <> 'none' or w.owner_id = ${userId} or m.user_id is not null)
 			order by pinned desc, w.created_at desc, w.id desc`,
 	});
 	const detail = SqlSchema.findOneOption({
 		Request: Schema.String,
 		Result: DetailRow,
 		execute: (workspaceId) => sql`
-			select w.id, w.slug, w.kind, w.owner_id, w.name, w.description, w.instructions, w.icon, ${sql.literal(CREATED_AT)}, w.updated_at,
+			select w.id, w.slug, w.org_access, w.owner_id, w.name, w.description, w.instructions, w.icon, ${sql.literal(CREATED_AT)}, w.updated_at,
 				null as member, ${sql.literal(MEMBER_COUNT)},
 				coalesce(u.name, '') as owner_name, coalesce(u.email, '') as owner_email
 			from workspaces w left join users u on u.id = w.owner_id

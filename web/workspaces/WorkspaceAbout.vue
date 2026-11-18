@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import type { WorkspaceDocument } from "./documents";
 import { useFileDrop } from "./file-drop";
 import type { DocumentsHandle, UploadHandle } from "./handles";
-import { canEdit, type WorkspaceDetail } from "./store";
+import { canEdit, isShared, type WorkspaceDetail } from "./store";
 import WorkspaceDocuments from "./WorkspaceDocuments.vue";
 import WorkspaceInstructions from "./WorkspaceInstructions.vue";
 import WorkspacePeople from "./WorkspacePeople.vue";
@@ -27,7 +27,7 @@ const emit = defineEmits<{ instructions: []; documents: [documents: WorkspaceDoc
 const instructions = computed(() => props.workspace.instructions.trim());
 const editable = computed(() => canEdit(props.workspace));
 /** A private workspace with only its owner has no People to show until someone is added. */
-const shared = computed(() => props.workspace.kind === "org" || props.workspace.memberCount > 0);
+const shared = computed(() => isShared(props.workspace));
 
 /** Empty sections show for editors, as the area that fills them, unless the setup cards show. */
 const showEmpty = computed(() => editable.value && !props.setup);

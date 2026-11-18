@@ -23,7 +23,7 @@ import * as AdminWorkspaces from "../workspaces/admin.ts";
 /**
  * The API behind /admin, mounted at /api/admin. Every route needs an admin (requireAdmin).
  * It returns usage numbers only: no route reads messages or thread titles. Workspaces
- * show in full only when they are for everyone; private ones as totals (workspaces/admin.ts).
+ * show in full only while they are open to everyone; private ones as totals (workspaces/admin.ts).
  *
  * What a route reads is in AdminReports.ts, and what it changes in AdminActions.ts, which
  * also records each change in the admin activity log (AdminEvents.ts). Role, ban and

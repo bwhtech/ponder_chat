@@ -70,7 +70,7 @@ const database = <A>(work: (sql: PgClient.PgClient) => Effect.Effect<A, unknown>
 const FIXTURE = readFileSync(new URL("./fixtures/picture-pages.pdf", import.meta.url));
 const file = (name: string, text: string | Uint8Array, type = "text/markdown") => new File([text as BlobPart], name, { type });
 const manual = (topic: string) => `## Part 1\n\nThe ${topic}. ${"Read the whole procedure before you start. ".repeat(20)}`;
-const newWorkspace = (name: string) => run(Workspaces.Workspaces.use((workspaces) => workspaces.create(ana, { kind: "private", name, description: "", instructions: "", icon: null }))).then((created) => created.id);
+const newWorkspace = (name: string) => run(Workspaces.Workspaces.use((workspaces) => workspaces.create(ana, { name, description: "", instructions: "", icon: null }))).then((created) => created.id);
 const upload = (workspaceId: string, name: string, topic = "vancomycin dose") => run(Documents.Documents.use((documents) => documents.upload(ana, workspaceId, file(name, manual(topic)))));
 const indexer = <A, E>(use: (service: IndexerTag["Service"]) => Effect.Effect<A, E>) => run(Indexer.Indexer.use(use));
 

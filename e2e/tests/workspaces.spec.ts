@@ -7,7 +7,9 @@ import { addChats, createSkill, createWorkspace, newPerson, textFile, uploadRead
  * Workspaces and sharing (docs/workspaces-plan.md, "Tests"): a person makes a workspace with
  * instructions and shares it; the people in it ask with those instructions; nobody else can
  * find it; chats stay their writers' own; and a person who is removed can read their chat
- * but not send in it. An admin's workspace for everyone shows for everyone. The owner renames
+ * but not send in it. Share applies each change at once. An admin opens a workspace to
+ * everyone, which keeps its people and their roles; everyone else can then ask, not edit.
+ * Editors share too, but only admins open or close General access. The owner renames
  * a workspace by its title, and adds or edits its instructions, in Markdown, from their own
  * section. A person who can only ask sees no controls there, and no empty sections.
  *
@@ -39,7 +41,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		// No description to ask for.
 		await expect(dialog.getByLabel(/Description/)).toHaveCount(0);
 		await dialog.getByLabel("Instructions").fill(`${marker}\nKeep answers short.`);
-		// Not an admin: no choice of who can use it.
+		// Every workspace starts private: no choice of who can use it here.
 		await expect(dialog.getByLabel("Who can use it")).toHaveCount(0);
 		await dialog.getByRole("button", { name: "Create workspace" }).click();
 
@@ -54,14 +56,32 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 
 		await a.page.getByRole("button", { name: "Share", exact: true }).click();
 		const share = a.page.getByRole("dialog", { name: `Share “${name}”` });
-		// Nothing to save until someone is added.
-		await expect(share.getByRole("button", { name: "Save" })).toBeDisabled();
-		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(b.person.email);
-		await a.page.getByRole("option", { name: new RegExp(escape(b.person.email)) }).click();
+		// The owner, and General access as text: A is no admin.
+		await expect(share.locator("li").first()).toContainText("You");
+		await expect(share.locator("li").first()).toContainText("Owner");
+		await expect(share.getByText("Only people added", { exact: true })).toBeVisible();
+		await expect(share.getByText("Only an admin can open a workspace to everyone.")).toBeVisible();
+		await expect(share.getByRole("button", { name: /^General access/ })).toHaveCount(0);
+		await expect(share.getByRole("button", { name: "Save" })).toHaveCount(0);
+
+		// B is added at once, with Can ask, and saved with no Save.
+		const saved = a.page.waitForResponse((response) => response.url().includes("/members/") && response.request().method() === "PUT");
+		await addPerson(share, b.person.email);
 		await expect(share.locator('[data-slot="workspace-member"]')).toContainText(b.person.email);
-		await share.getByRole("button", { name: "Save" }).click();
-		await expect(share).toHaveCount(0);
+		await expect(roleButton(share, b.person.email)).toHaveText("Can ask");
+		expect((await saved).ok()).toBe(true);
 		await expect(about(a.page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
+		await expect(a.page.getByText("Sharing saved")).toHaveCount(0);
+
+		// Copy link puts the page's address on the clipboard, and says so for 2 s.
+		await a.page.context().grantPermissions(["clipboard-read", "clipboard-write"]);
+		await share.getByRole("button", { name: "Copy link" }).click();
+		await expect(share.getByRole("button", { name: "Link copied" })).toBeVisible();
+		await expect(share.locator('[aria-live="polite"]').filter({ hasText: "Link copied" })).toHaveCount(1);
+		expect(await a.page.evaluate(() => navigator.clipboard.readText())).toBe(workspaceUrl);
+		await expect(share.getByRole("button", { name: "Copy link" })).toBeVisible({ timeout: 4000 });
+		await share.getByRole("button", { name: "Done" }).click();
+		await expect(share).toHaveCount(0);
 	});
 
 	await test.step("2. B sees it in the sidebar and asks with its instructions", async () => {
@@ -70,7 +90,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(b.page).toHaveURL(workspaceUrl);
 		await expect(b.page.getByRole("heading", { name, level: 1 })).toBeVisible();
 		await expect(about(b.page).getByText("Can ask", { exact: true })).toBeVisible();
-		// Only the owner shares or deletes; B can only ask, so B changes nothing.
+		// B can only ask, so B shares and changes nothing.
 		await expect(b.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
 		await expect(b.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
 		// The title is plain text, and the instructions have no editor.
@@ -132,12 +152,14 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await a.page.goto(workspaceUrl);
 		await a.page.getByRole("button", { name: "Share", exact: true }).click();
 		const share = a.page.getByRole("dialog", { name: `Share “${name}”` });
-		await expect(share.getByRole("button", { name: "Save" })).toBeDisabled();
-		await share.locator('[data-slot="workspace-member"]').getByRole("button", { name: /^Remove / }).click();
+		// Remove is the last item of B's role menu, and asks nothing: it is done at once.
+		await roleButton(share, b.person.email).click();
+		await expect(a.page.getByRole("menuitem")).toHaveText([/^Can ask/, /^Can edit/, "Remove"]);
+		await a.page.getByRole("menuitem", { name: "Remove" }).click();
 		await expect(share.locator('[data-slot="workspace-member"]')).toHaveCount(0);
-		await share.getByRole("button", { name: "Save" }).click();
-		await expect(share).toHaveCount(0);
 		await expect(about(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
+		await share.getByRole("button", { name: "Done" }).click();
+		await expect(share).toHaveCount(0);
 
 		await b.page.goto(`/?t=${chatId}`);
 		await expect(b.page.locator('[data-slot="message"][data-role="user"]')).toHaveText(question);
@@ -158,18 +180,28 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 	await c.context.close();
 });
 
-test("an admin shares a new private workspace with everyone from its setup, and a screen reader hears it", async ({ page, admin }) => {
+test("an admin opens a new workspace to everyone from its setup after a confirmation, and a screen reader hears it once Share closes", async ({ page, admin }) => {
 	const workspace = await createWorkspace(page, `Rota ${admin.id.slice(0, 6)}`);
 	await page.goto(`/?w=${workspace.slug}`);
 	await expect(setupCount(page)).toHaveText("0 of 3 done");
 	await setup(page).getByRole("button", { name: "Share workspace" }).click();
 	const dialog = page.getByRole("dialog", { name: /Share/ });
-	await dialog.getByLabel("Who can use it").click();
-	await page.getByRole("option", { name: "Everyone in the organisation" }).click();
-	await dialog.getByRole("button", { name: "Save" }).click();
-	// The People step goes rather than turns done, and no toast covers the setup: the status line says it.
-	await expect(setupCount(page)).toHaveText("0 of 2 done");
-	const said = "Workspace shared with everyone in the organisation. 0 of 2 done.";
+	await expect(dialog.getByText("Only the people above can open it.")).toBeVisible();
+
+	// Opening asks first, in place; Cancel leaves it as it was.
+	await setGeneral(dialog, "Everyone in the organisation");
+	await expect(dialog.getByText("Everyone in the organisation sees it in their sidebar and can ask from its sources.")).toBeVisible();
+	await dialog.getByRole("button", { name: "Cancel" }).click();
+	await expect(dialog.getByRole("button", { name: "General access: Only people added" })).toBeVisible();
+	await setGeneral(dialog, "Everyone in the organisation");
+	await dialog.getByRole("button", { name: "Open to everyone" }).click();
+	await expect(dialog.getByRole("button", { name: "General access: Everyone in the organisation" })).toBeVisible();
+	await expect(dialog.getByText("Everyone can find it and ask. People above with Can edit can also change it.")).toBeVisible();
+	// The People step is done under the dialog; the status line waits until it closes.
+	await expect(setupCount(page)).toHaveText("1 of 3 done");
+	const said = "Shared with everyone in the organisation. 1 of 3 done.";
+	await expect(setupStatus(page)).not.toHaveText(said);
+	await dialog.getByRole("button", { name: "Done" }).click();
 	await expect(setupStatus(page)).toHaveText(said);
 	await expect(page.getByText("Sharing saved")).toHaveCount(0);
 
@@ -180,52 +212,146 @@ test("an admin shares a new private workspace with everyone from its setup, and 
 		new MutationObserver(() => status.textContent && heard.push(status.textContent)).observe(status, { childList: true, characterData: true, subtree: true });
 	});
 	await page.locator('[data-slot="chat-header"]').getByRole("button", { name: "Share", exact: true }).click();
-	await dialog.getByLabel("Who can use it").click();
-	await page.getByRole("option", { name: "Only the people you add" }).click();
-	await dialog.getByRole("button", { name: "Save" }).click();
+	await setGeneral(dialog, "Only people added");
+	await expect(dialog.getByText("Everyone not listed above loses access. Their chats stay theirs.")).toBeVisible();
+	await dialog.getByRole("button", { name: "Remove their access" }).click();
+	await expect(dialog.getByText("Only the people above can open it.")).toBeVisible();
+	await dialog.getByRole("button", { name: "Done" }).click();
 	await expect(setupCount(page)).toHaveText("0 of 3 done");
 	await setup(page).getByRole("button", { name: "Share workspace" }).click();
-	await dialog.getByLabel("Who can use it").click();
-	await page.getByRole("option", { name: "Everyone in the organisation" }).click();
-	await dialog.getByRole("button", { name: "Save" }).click();
-	await expect(setupCount(page)).toHaveText("0 of 2 done");
+	await setGeneral(dialog, "Everyone in the organisation");
+	await dialog.getByRole("button", { name: "Open to everyone" }).click();
+	await expect(setupCount(page)).toHaveText("1 of 3 done");
+	await dialog.getByRole("button", { name: "Done" }).click();
 	await expect.poll(() => page.evaluate(() => (window as unknown as { heard: string[] }).heard)).toContain(said);
 });
 
-test("an admin makes a workspace for everyone, and every person sees it", async ({ page, admin, fake, db, browser }) => {
+test("an admin opens a workspace to everyone and it keeps its editor: everyone else can ask, not edit; the editor shares but can't close it; closing it takes the others out", async ({
+	page,
+	admin,
+	fake,
+	db,
+	browser,
+}) => {
+	test.setTimeout(90_000);
 	const name = `Company handbook ${admin.id.slice(0, 6)}`;
-	await page.goto("/");
-	await page.getByRole("button", { name: "New workspace" }).click();
-	const dialog = page.getByRole("dialog", { name: "New workspace" });
-	await dialog.getByLabel("Name").fill(name);
-	await dialog.getByLabel("Instructions").fill("Answer from the handbook.");
-	await dialog.getByLabel("Who can use it").click();
-	await page.getByRole("option", { name: "Everyone in the organisation" }).click();
-	await dialog.getByRole("button", { name: "Create workspace" }).click();
-	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-	await expect(about(page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
-	// Everyone uses it already: it has no People step. The instructions from the dialog are done, so the one card left is Documents.
-	await expect(setup(page).getByRole("heading", { name: "Set up this workspace" })).toBeVisible();
-	await expect(setupCount(page)).toHaveText("1 of 2 done");
-	await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Sources"]);
-	await expect(setup(page).getByRole("button", { name: "Share workspace" })).toHaveCount(0);
-	const workspaceUrl = page.url();
+	const editor = await newPerson(browser, db, fake, "handbook editor");
+	const reader = await newPerson(browser, db, fake, "handbook reader");
+	const late = await newPerson(browser, db, fake, "handbook late");
+	let workspaceUrl = "";
 
-	for (const title of ["first person", "second person"]) {
-		const other = await newPerson(browser, db, fake, title);
-		await other.page.goto("/");
-		await workspaceRows(other.page).getByRole("button", { name, exact: true }).click();
-		await expect(other.page).toHaveURL(workspaceUrl);
-		await expect(other.page.getByRole("heading", { name, level: 1 })).toBeVisible();
-		await expect(about(other.page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
-		// Everyone asks; only admins change it.
-		await expect(other.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
-		await expect(other.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
-		// Nor do they see its setup cards: its instructions and people are the page.
-		await expect(setup(other.page)).toHaveCount(0);
-		await expect(instructionsSection(other.page)).toContainText("Answer from the handbook.");
-		await other.context.close();
-	}
+	await test.step("the admin makes it, adds an editor, and opens it to everyone", async () => {
+		await page.goto("/");
+		await page.getByRole("button", { name: "New workspace" }).click();
+		const made = page.getByRole("dialog", { name: "New workspace" });
+		await made.getByLabel("Name").fill(name);
+		await made.getByLabel("Instructions").fill("Answer from the handbook.");
+		// Every workspace starts private, an admin's too: it is opened from Share.
+		await expect(made.getByLabel("Who can use it")).toHaveCount(0);
+		await made.getByRole("button", { name: "Create workspace" }).click();
+		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
+		workspaceUrl = page.url();
+
+		await page.getByRole("button", { name: "Share", exact: true }).click();
+		const share = page.getByRole("dialog", { name: `Share “${name}”` });
+		await addPerson(share, editor.person.email);
+		// Private: a person added starts at Can ask.
+		await expect(roleButton(share, editor.person.email)).toHaveText("Can ask");
+		await roleButton(share, editor.person.email).click();
+		await page.getByRole("menuitem", { name: /^Can edit/ }).click();
+		await expect(roleButton(share, editor.person.email)).toHaveText("Can edit");
+		await setGeneral(share, "Everyone in the organisation");
+		await share.getByRole("button", { name: "Open to everyone" }).click();
+		await expect(share.locator('[data-slot="general-access"]')).toContainText("Can ask");
+		await share.getByRole("button", { name: "Done" }).click();
+		await expect(share).toHaveCount(0);
+
+		// The page's People: everyone first, then the owner, then the editor.
+		await expect(about(page).getByRole("region", { name: "People" }).locator("li")).toHaveText([/Everyone in the organisation\s*Can ask/, /You\s*Owner/, /Can edit$/]);
+		await expect(workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ hasText: name }).locator(".lucide-building-2")).toHaveCount(1);
+	});
+
+	await test.step("a third person sees it in the sidebar with the building, can ask, and cannot edit or share", async () => {
+		await reader.page.goto("/");
+		const row = workspaceRows(reader.page).locator('[data-slot="sidebar-item"]').filter({ hasText: name });
+		await expect(row.locator(".lucide-building-2")).toHaveCount(1);
+		await row.getByRole("button", { name, exact: true }).click();
+		await expect(reader.page).toHaveURL(workspaceUrl);
+		await expect(about(reader.page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
+		await expect(reader.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
+		await expect(reader.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
+		await expect(setup(reader.page)).toHaveCount(0);
+		await expect(instructionsSection(reader.page)).toContainText("Answer from the handbook.");
+		const id = (await jsonOf<{ workspace: { id: string } }>(await reader.page.request.get(`/api/workspaces/${new URL(workspaceUrl).searchParams.get("w")}`))).workspace.id;
+		expect((await reader.page.request.patch(`/api/workspaces/${id}`, { data: { name: "Mine" } })).status()).toBe(403);
+	});
+
+	await test.step("the editor edits it and shares it: a person added while it is open starts at Can edit; General access is text", async () => {
+		await editor.page.goto(workspaceUrl);
+		await expect(editor.page.getByRole("button", { name: "Share", exact: true })).toBeVisible();
+		await editor.page.getByRole("button", { name: "Share", exact: true }).click();
+		const share = editor.page.getByRole("dialog", { name: `Share “${name}”` });
+		await expect(share.getByRole("button", { name: /^General access/ })).toHaveCount(0);
+		await expect(share.getByText("Only an admin can change this.")).toBeVisible();
+		await addPerson(share, late.person.email);
+		await expect(roleButton(share, late.person.email)).toHaveText("Can edit");
+		await roleButton(share, late.person.email).click();
+		await editor.page.getByRole("menuitem", { name: /^Can ask/ }).click();
+		await expect(roleButton(share, late.person.email)).toHaveText("Can ask");
+		await share.getByRole("button", { name: "Done" }).click();
+		await expect(about(editor.page).locator('[data-slot="workspace-member"]')).toHaveCount(2);
+	});
+
+	await test.step("the admin closes it to everyone after a confirmation: its people stay, the third person loses it", async () => {
+		await page.reload();
+		await page.getByRole("button", { name: "Share", exact: true }).click();
+		const share = page.getByRole("dialog", { name: `Share “${name}”` });
+		await expect(share.locator('[data-slot="workspace-member"]')).toHaveCount(2);
+		await setGeneral(share, "Only people added");
+		await expect(share.getByText("Everyone not listed above loses access. Their chats stay theirs.")).toBeVisible();
+		await share.getByRole("button", { name: "Remove their access" }).click();
+		await expect(share.getByText("Only the people above can open it.")).toBeVisible();
+		await share.getByRole("button", { name: "Done" }).click();
+		await expect(about(page).getByText("Everyone in the organisation", { exact: true })).toHaveCount(0);
+
+		await reader.page.reload();
+		await expect(reader.page.getByText("No workspace here")).toBeVisible();
+		await expect(workspaceRows(reader.page).getByRole("button", { name, exact: true })).toHaveCount(0);
+		await editor.page.reload();
+		await expect(editor.page.getByRole("heading", { name, level: 1 })).toBeVisible();
+		await expect(workspaceRows(editor.page).locator('[data-slot="sidebar-item"]').filter({ hasText: name }).locator(".lucide-users")).toHaveCount(1);
+	});
+
+	await test.step("the editor removes themself after a confirmation: Share closes, and they leave the page", async () => {
+		await editor.page.getByRole("button", { name: "Share", exact: true }).click();
+		const share = editor.page.getByRole("dialog", { name: `Share “${name}”` });
+		await share.getByRole("button", { name: /^What you can do/ }).click();
+		await editor.page.getByRole("menuitem", { name: "Remove" }).click();
+		const confirm = editor.page.getByRole("dialog", { name: "Remove yourself?" });
+		await expect(confirm).toContainText("You will no longer see");
+		await confirm.getByRole("button", { name: "Remove" }).click();
+		await expect(share).toHaveCount(0);
+		await expect(editor.page.getByText(`You left “${name}”`)).toBeVisible();
+		await expect(editor.page).not.toHaveURL(/[?&]w=/);
+		await expect(workspaceRows(editor.page).getByRole("button", { name, exact: true })).toHaveCount(0);
+	});
+
+	for (const other of [editor, reader, late]) await other.context.close();
+});
+
+test("a failed change in Share is taken back, and the dialog says why", async ({ page, person, fake, db, browser }) => {
+	const other = await newPerson(browser, db, fake, "refused member");
+	const name = `Refused ${person.id.slice(0, 6)}`;
+	const { slug } = await createWorkspace(page, name);
+	await page.route(/\/api\/workspaces\/[^/]+\/members\//, (route) => route.fulfill({ status: 500, json: { error: "Down" } }));
+	await page.goto(`/?w=${slug}`);
+	await page.getByRole("button", { name: "Share", exact: true }).click();
+	const share = page.getByRole("dialog", { name: `Share “${name}”` });
+	await addPerson(share, other.person.email);
+	await expect(share.locator('[data-slot="share-error"]')).toHaveText(new RegExp(`could not be added\\. Try again\\.$`));
+	await expect(share.locator('[data-slot="workspace-member"]')).toHaveCount(0);
+	await expect(page.getByText("Sharing saved")).toHaveCount(0);
+	await other.context.close();
 });
 
 test("a new workspace guides its owner: a card for each setup step leaves once it is done, then its sections are the page, until the first chat", async ({ page, person, fake, db, browser }) => {
@@ -289,12 +415,12 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 	await test.step("Share, from its card: the last card leaves with the setup, the workspace's sections are the page, and focus goes to the message box", async () => {
 		await setup(page).getByRole("button", { name: "Share workspace" }).click();
 		const share = page.getByRole("dialog", { name: `Share “${name}”` });
-		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(other.person.email);
-		await page.getByRole("option", { name: new RegExp(escape(other.person.email)) }).click();
-		await share.getByRole("button", { name: "Save" }).click();
-		await expect(share).toHaveCount(0);
+		await addPerson(share, other.person.email);
+		// Done under the dialog; said, and focus moved on, once it closes.
 		await expect(setup(page)).toHaveCount(0);
-		await expect(setupStatus(page)).toHaveText("Workspace shared. Workspace set up.");
+		await share.getByRole("button", { name: "Done" }).click();
+		await expect(share).toHaveCount(0);
+		await expect(setupStatus(page)).toHaveText("People added. Workspace set up.");
 		await expect(field).toBeFocused();
 		await expect(about(page).getByRole("region")).toHaveText([/^Instructions/, /^Sources/, /^People/]);
 		await expect(about(page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
@@ -458,9 +584,8 @@ test("a new workspace keeps what is set up while it still loads, and a refused f
 		await expect(instructions).toHaveCount(0);
 		await setup(page).getByRole("button", { name: "Share workspace" }).click();
 		const share = page.getByRole("dialog", { name: `Share “${name} b”` });
-		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(other.person.email);
-		await page.getByRole("option", { name: new RegExp(escape(other.person.email)) }).click();
-		await share.getByRole("button", { name: "Save" }).click();
+		await addPerson(share, other.person.email);
+		await share.getByRole("button", { name: "Done" }).click();
 		await expect(share).toHaveCount(0);
 		await expect(setupCount(page)).toHaveText("2 of 3 done");
 
@@ -723,7 +848,7 @@ test("the newest workspace is first in the sidebar; a person pins one from its r
 	const tag = person.id.slice(0, 6);
 	const [oldest, middle, newest] = ["Pin rota", "Pin minutes", "Pin budget"].map((name) => `${name} ${tag}`);
 	for (const name of [oldest, middle, newest]) await createWorkspace(page, name);
-	// Workspaces for everyone, made by other tests at the same time, may sit between this person's own.
+	// Workspaces open to everyone, made by other tests at the same time, may sit between this person's own.
 	const names = () => workspaceRows(page).locator('[data-slot="sidebar-item"]').allInnerTexts();
 	const mine = async () => (await names()).filter((name) => name.endsWith(tag));
 	const row = (name: string) => workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ has: page.getByRole("button", { name, exact: true }) });
@@ -927,6 +1052,21 @@ async function chooseFromMenu(page: Page, name: string, item: "Pin" | "Unpin") {
 	await row.hover();
 	await row.getByRole("button", { name: `Actions for “${name}”` }).click();
 	await page.getByRole("menuitem", { name: item }).click();
+}
+
+/** Adds a person in Share by their email: they are added at once. */
+async function addPerson(share: Locator, email: string) {
+	await share.getByRole("combobox", { name: "Add people by name or email" }).fill(email);
+	await share.page().getByRole("option", { name: new RegExp(escape(email)) }).click();
+}
+
+/** A member's role menu in Share, by their email. */
+const roleButton = (share: Locator, email: string) => share.locator('[data-slot="workspace-member"]').filter({ hasText: email }).getByRole("button", { name: /^What / });
+
+/** Chooses General access in Share; opening or closing it then asks to confirm. */
+async function setGeneral(share: Locator, label: "Only people added" | "Everyone in the organisation") {
+	await share.getByRole("button", { name: /^General access/ }).click();
+	await share.page().getByRole("menuitem", { name: label }).click();
 }
 
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');

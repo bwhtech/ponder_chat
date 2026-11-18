@@ -12,7 +12,7 @@ import { documentStore, PROGRESS_COLUMNS, ProgressFields, progressOf, type Docum
 
 /**
  * Workspaces as /admin/workspaces sees them (docs/workspaces-plan.md, "Indexing log",
- * point 4). Organisation workspaces in full: their owner, documents, statuses, errors,
+ * point 4). Workspaces open to everyone in full: their owner, documents, statuses, errors,
  * indexing cost and each document's log. Private workspaces only as totals: how many,
  * their documents by status, what indexing them cost, and the errors of the failed ones.
  *
@@ -33,6 +33,8 @@ export type OrgWorkspace = {
 	description: string;
 	icon: string | null;
 	owner: { id: string; name: string; email: string };
+	/** The people added to it, who keep their roles if it is closed to everyone again. */
+	memberCount: number;
 	createdAt: string;
 	updatedAt: string;
 	/** Oldest first. */
@@ -70,6 +72,7 @@ const OrgRow = Schema.Struct({
 	owner_id: Schema.String,
 	owner_name: Schema.String,
 	owner_email: Schema.String,
+	member_count: Schema.Number,
 });
 
 const OrgDocumentRow = Schema.Struct({
@@ -98,7 +101,7 @@ export class AdminWorkspaces extends Context.Service<
 	{
 		/** GET /api/admin/workspaces. */
 		readonly report: Effect.Effect<WorkspacesReport, SqlError>;
-		/** One document's indexing log, in an organisation workspace only: none for a private, deleted or unknown one. */
+		/** One document's indexing log, in a workspace open to everyone only: none for a private, deleted or unknown one. */
 		readonly documentLog: (workspaceId: string, documentId: string) => Effect.Effect<Option.Option<DocumentLog>, SqlError>;
 	}
 >()("ponder/workspaces/AdminWorkspaces") {}
@@ -113,9 +116,10 @@ const make = Effect.gen(function* () {
 		Result: OrgRow,
 		execute: () => sql`
 			select w.id, w.slug, w.name, w.description, w.icon, w.created_at, w.updated_at, w.owner_id,
-				coalesce(u.name, '') as owner_name, coalesce(u.email, '') as owner_email
+				coalesce(u.name, '') as owner_name, coalesce(u.email, '') as owner_email,
+				(select count(*)::int from workspace_members m where m.workspace_id = w.id) as member_count
 			from workspaces w left join users u on u.id = w.owner_id
-			where w.kind = 'org' and w.deleted_at is null
+			where w.org_access <> 'none' and w.deleted_at is null
 			order by lower(w.name), w.id`,
 	});
 	const findOrgDocuments = SqlSchema.findAll({
@@ -125,13 +129,13 @@ const make = Effect.gen(function* () {
 			select d.id, d.workspace_id, d.name, d.media_type, d.size, d.status, d.error, d.created_at,
 				${sql.literal(DOCUMENT_COST)}::float8 as cost_usd, ${sql.literal(PROGRESS_COLUMNS)}
 			from workspace_documents d join workspaces w on w.id = d.workspace_id
-			where w.kind = 'org' and w.deleted_at is null
+			where w.org_access <> 'none' and w.deleted_at is null
 			order by d.created_at, d.id`,
 	});
 	const countPrivate = SqlSchema.findOne({
 		Request: Schema.Void,
 		Result: CountRow,
-		execute: () => sql`select count(*)::int as count from workspaces where kind = 'private' and deleted_at is null`,
+		execute: () => sql`select count(*)::int as count from workspaces where org_access = 'none' and deleted_at is null`,
 	});
 	const findPrivateStatuses = SqlSchema.findAll({
 		Request: Schema.Void,
@@ -139,7 +143,7 @@ const make = Effect.gen(function* () {
 		execute: () => sql`
 			select d.status, count(*)::int as documents, coalesce(sum(${sql.literal(DOCUMENT_COST)}), 0)::float8 as cost_usd
 			from workspace_documents d join workspaces w on w.id = d.workspace_id
-			where w.kind = 'private' and w.deleted_at is null
+			where w.org_access = 'none' and w.deleted_at is null
 			group by d.status`,
 	});
 	const findPrivateFailures = SqlSchema.findAll({
@@ -148,12 +152,12 @@ const make = Effect.gen(function* () {
 		execute: () => sql`
 			select d.error, array[d.name, w.name, u.name, u.email] as names
 			from workspace_documents d join workspaces w on w.id = d.workspace_id left join users u on u.id = w.owner_id
-			where w.kind = 'private' and w.deleted_at is null and d.status = 'failed'`,
+			where w.org_access = 'none' and w.deleted_at is null and d.status = 'failed'`,
 	});
 	const isOrgWorkspace = SqlSchema.findOneOption({
 		Request: Schema.String,
 		Result: CountRow,
-		execute: (workspaceId) => sql`select 1 as count from workspaces where id = ${workspaceId} and kind = 'org' and deleted_at is null`,
+		execute: (workspaceId) => sql`select 1 as count from workspaces where id = ${workspaceId} and org_access <> 'none' and deleted_at is null`,
 	});
 
 	const decoded = <A, E, R>(effect: Effect.Effect<A, E | Schema.SchemaError, R>) => effect.pipe(Effect.catchTags({ SchemaError: Effect.die }));
@@ -196,6 +200,7 @@ function orgWorkspace(row: typeof OrgRow.Type, documents: ReadonlyArray<typeof O
 		description: row.description,
 		icon: row.icon,
 		owner: { id: row.owner_id, name: row.owner_name, email: row.owner_email },
+		memberCount: row.member_count,
 		createdAt: row.created_at.toISOString(),
 		updatedAt: row.updated_at.toISOString(),
 		documents: documents.map((document) => ({

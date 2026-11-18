@@ -12,7 +12,7 @@ import * as Result from "effect/Result";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../auth.ts";
 import { jsonBody } from "../test-json.ts";
-import { accessFrom, type Access } from "./access.ts";
+import { accessFrom, canChangeOrgAccess, canDelete, canShare, type Access } from "./access.ts";
 import { workspacePrompt } from "./prompt.ts";
 import { base, blockedBy, holdRows, USERS_TABLE, useTestSchema } from "./test-env.ts";
 import type { Person, WorkspaceDetail, WorkspaceSummary } from "./Workspaces.ts";
@@ -58,28 +58,50 @@ const auditedActions = (workspaceId: string) =>
 		rows.map((row) => row.action),
 	);
 
-async function create(person: Who, kind: "org" | "private", name: string) {
-	const answer = await call<One>(person, "POST", "/api/workspaces", { kind, name, instructions: `Answer as ${name}.` });
+async function create(person: Who, name: string) {
+	const answer = await call<One>(person, "POST", "/api/workspaces", { name, instructions: `Answer as ${name}.` });
 	assert.strictEqual(answer.status, 201, JSON.stringify(answer.body));
 	return answer.body.workspace.id;
 }
 
+/** Adds a person, or gives them another role: PUT /api/workspaces/:id/members/:userId. */
+const setMember = (by: Who, workspaceId: string, person: Who | string, access: "ask" | "edit") =>
+	call<One>(by, "PUT", `/api/workspaces/${workspaceId}/members/${person in who ? who[person as Who] : person}`, { access });
+const removeMember = (by: Who, workspaceId: string, person: Who) => call<One>(by, "DELETE", `/api/workspaces/${workspaceId}/members/${who[person]}`);
+const setOrgAccess = (by: Who, workspaceId: string, orgAccess: string) => call<One & Refusal>(by, "PUT", `/api/workspaces/${workspaceId}/access`, { orgAccess });
+const roles = (workspace: WorkspaceDetail): string[][] => workspace.members?.map((member) => [member.id, member.access]) ?? [];
+
 describe("the access table, as a pure function", () => {
-	it("gives each cell", () => {
-		const org = { kind: "org" as const, ownerId: "o", member: null };
-		const priv = { kind: "private" as const, ownerId: "o", member: null };
+	it("gives each cell: a person's own role, or what General access gives them, whichever is higher", () => {
+		const open = { orgAccess: "ask" as const, ownerId: "o", member: null };
+		const closed = { orgAccess: "none" as const, ownerId: "o", member: null };
 		const cells: [string, Access, Access][] = [
-			["org owner", accessFrom(org, "o", false), "owner"],
-			["org admin", accessFrom(org, "a", true), "edit"],
-			["org anyone", accessFrom(org, "x", false), "ask"],
-			["private owner", accessFrom(priv, "o", false), "owner"],
-			["private member ask", accessFrom({ ...priv, member: "ask" }, "m", false), "ask"],
-			["private member edit", accessFrom({ ...priv, member: "edit" }, "m", false), "edit"],
-			["private admin not added", accessFrom(priv, "a", true), "none"],
-			["private admin added", accessFrom({ ...priv, member: "ask" }, "a", true), "ask"],
-			["private anyone", accessFrom(priv, "x", false), "none"],
+			["closed owner", accessFrom(closed, "o", false), "owner"],
+			["closed ask member", accessFrom({ ...closed, member: "ask" }, "m", false), "ask"],
+			["closed edit member", accessFrom({ ...closed, member: "edit" }, "m", false), "edit"],
+			["closed admin not added", accessFrom(closed, "a", true), "none"],
+			["closed admin added to ask", accessFrom({ ...closed, member: "ask" }, "a", true), "ask"],
+			["closed anyone", accessFrom(closed, "x", false), "none"],
+			["open owner", accessFrom(open, "o", false), "owner"],
+			["open ask member", accessFrom({ ...open, member: "ask" }, "m", false), "ask"],
+			["open edit member", accessFrom({ ...open, member: "edit" }, "m", false), "edit"],
+			["open admin not added", accessFrom(open, "a", true), "edit"],
+			["open admin added to ask", accessFrom({ ...open, member: "ask" }, "a", true), "edit"],
+			["open anyone", accessFrom(open, "x", false), "ask"],
 		];
 		for (const [cell, got, expected] of cells) assert.strictEqual(got, expected, cell);
+	});
+
+	it("lets everyone who edits share; only owners, and admins while it is open, delete; only admins open or close it", () => {
+		assert.deepStrictEqual((["owner", "edit", "ask", "none"] as const).map(canShare), [true, true, false, false]);
+		assert.isTrue(canDelete("none", "owner", false));
+		assert.isFalse(canDelete("none", "edit", true), "an admin added to a private workspace");
+		assert.isTrue(canDelete("ask", "edit", true));
+		assert.isFalse(canDelete("ask", "edit", false), "an editor of an open workspace");
+		assert.isFalse(canChangeOrgAccess("none", "owner", false), "an owner who is no admin");
+		assert.isTrue(canChangeOrgAccess("none", "owner", true));
+		assert.isFalse(canChangeOrgAccess("none", "edit", true), "an admin added to someone's private workspace");
+		assert.isTrue(canChangeOrgAccess("ask", "edit", true));
 	});
 });
 
@@ -125,38 +147,65 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		await dispose();
 	});
 
-	it("lets only admins make an organisation workspace, and logs it", async () => {
-		const refused = await call<Refusal>("ana", "POST", "/api/workspaces", { kind: "org", name: "Everyone" });
+	it("starts every workspace private; only an admin opens one to everyone, and that is logged", async () => {
+		const made = await call<One>("ana", "POST", "/api/workspaces", { kind: "org", name: "Everyone?" });
+		assert.strictEqual(made.status, 201);
+		assert.deepInclude(made.body.workspace, { orgAccess: "none", access: "owner", canShare: true, canDelete: true, canChangeOrgAccess: false, members: [] });
+		await call("ana", "DELETE", `/api/workspaces/${made.body.workspace.id}`);
+		org = await create("admin", "Handbook");
+		priv = await create("ana", "Ana's notes");
+		assert.deepStrictEqual(await auditedActions(org), [], "a private workspace is not logged");
+
+		const refused = await setOrgAccess("ana", priv, "ask");
 		assert.strictEqual(refused.status, 403);
-		assert.strictEqual(refused.body.error, "Only an admin can make a workspace for everyone.");
-		org = await create("admin", "org", "Handbook");
-		priv = await create("ana", "private", "Ana's notes");
-		assert.deepStrictEqual(await auditedActions(org), ["create-workspace"]);
-		assert.deepStrictEqual(await auditedActions(priv), [], "a private workspace is not logged");
-		assert.strictEqual((await call("ana", "POST", "/api/workspaces", { name: "  " })).status, 400);
+		assert.strictEqual(refused.body.error, "Only an admin can open a workspace to everyone, or close it.");
+		assert.strictEqual(await access("dan", priv), "none", "nothing changed");
+		assert.strictEqual((await setOrgAccess("admin", org, "edit")).status, 400);
+
+		const opened = await setOrgAccess("admin", org, "ask");
+		assert.strictEqual(opened.status, 200);
+		assert.deepInclude(opened.body.workspace, { orgAccess: "ask", canChangeOrgAccess: true, memberCount: 0 });
+		assert.strictEqual((await setOrgAccess("admin", org, "ask")).status, 200, "the same setting again");
+		assert.deepStrictEqual(await auditedActions(org), ["share-workspace"], "one event, for the one change");
 	});
 
-	it("shares a private workspace by its owner only, with people who have accounts", async () => {
-		const members = [
-			{ userId: who.bob, access: "ask" },
-			{ userId: who.cy, access: "edit" },
-			{ userId: who.ana, access: "ask" },
-		];
-		assert.strictEqual((await call("cy", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members })).status, 404, "not a member yet");
-		assert.strictEqual((await call("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members: [{ userId: "nobody", access: "ask" }] })).status, 400);
-		const shared = await call<One>("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members });
+	it("lets the owner add people one at a time, people who have accounts, and never change the owner", async () => {
+		assert.strictEqual((await setMember("cy", priv, "bob", "ask")).status, 404, "not a member yet");
+		const unknown = await setMember("ana", priv, "nobody", "ask");
+		assert.deepStrictEqual([unknown.status, unknown.body], [400, { error: "That person has no account." }] as unknown[]);
+		assert.strictEqual((await setMember("ana", priv, "bob", "ask")).status, 200);
+		const shared = await setMember("ana", priv, "cy", "edit");
 		assert.strictEqual(shared.status, 200);
-		// The owner is no member of their own workspace.
-		assert.deepStrictEqual(
-			shared.body.workspace.members?.map((member) => [member.id, member.access]),
-			[
-				[who.bob, "ask"],
-				[who.cy, "edit"],
-			],
-		);
-		assert.strictEqual((await call("cy", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members })).status, 403, "an editor can't share");
-		const toOrg = await call("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "org", members: [] });
-		assert.strictEqual(toOrg.status, 403, "only an admin makes a workspace for everyone");
+		assert.deepStrictEqual(roles(shared.body.workspace), [
+			[who.bob, "ask"],
+			[who.cy, "edit"],
+		]);
+		assert.strictEqual(shared.body.workspace.memberCount, 2);
+		const owner = await setMember("ana", priv, "ana", "ask");
+		assert.deepStrictEqual([owner.status, owner.body], [403, { error: "The owner always has full access." }] as unknown[]);
+		assert.deepStrictEqual(await auditedActions(priv), [], "a private workspace is not logged");
+	});
+
+	it("lets an editor add people, change their roles and remove them, but not General access, the owner, or the workspace", async () => {
+		const added = await setMember("cy", priv, "dan", "ask");
+		assert.strictEqual(added.status, 200);
+		assert.deepInclude(added.body.workspace, { access: "edit", canShare: true, canDelete: false, canChangeOrgAccess: false });
+		assert.deepInclude(roles(added.body.workspace), [who.dan, "ask"]);
+		assert.strictEqual((await setMember("cy", priv, "dan", "edit")).status, 200);
+		assert.strictEqual(await access("dan", priv), "edit");
+		assert.strictEqual((await removeMember("cy", priv, "dan")).status, 200);
+		assert.strictEqual(await access("dan", priv), "none");
+
+		const general = await setOrgAccess("cy", priv, "ask");
+		assert.deepStrictEqual([general.status, general.body], [403, { error: "Only an admin can open a workspace to everyone, or close it." }] as unknown[]);
+		const owner = await removeMember("cy", priv, "ana");
+		assert.deepStrictEqual([owner.status, owner.body], [403, { error: "The owner always has full access." }] as unknown[]);
+		assert.strictEqual((await setMember("cy", priv, "ana", "ask")).status, 403);
+		const deleted = await call<Refusal>("cy", "DELETE", `/api/workspaces/${priv}`);
+		assert.deepStrictEqual([deleted.status, deleted.body.error], [403, "Only the owner can delete this workspace. While it is open to everyone, admins can too."] as unknown[]);
+		const asker = await setMember("bob", priv, "dan", "ask");
+		assert.deepStrictEqual([asker.status, asker.body], [403, { error: "Only the owner and people who can edit can share this workspace." }] as unknown[]);
+		assert.strictEqual(await access("ana", priv), "owner");
 	});
 
 	it("gives every cell of the access table", async () => {
@@ -175,43 +224,47 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		for (const person of ["dan", "admin2"] as const) {
 			assert.strictEqual((await call(person, "GET", `/api/workspaces/${priv}`)).status, 404);
 			assert.strictEqual((await call(person, "PATCH", `/api/workspaces/${priv}`, { name: "Mine now" })).status, 404);
-			assert.strictEqual((await call(person, "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members: [] })).status, 404);
+			assert.strictEqual((await setMember(person, priv, person, "edit")).status, 404);
+			assert.strictEqual((await removeMember(person, priv, "bob")).status, 404);
+			assert.strictEqual((await setOrgAccess(person, priv, "ask")).status, 404);
 			assert.strictEqual((await call(person, "DELETE", `/api/workspaces/${priv}`)).status, 404);
 		}
 		assert.deepStrictEqual((await call("dan", "GET", `/api/workspaces/${priv}`)).body, { error: "Not found" });
 		assert.strictEqual(await access("ana", priv), "owner", "nothing changed");
+		assert.strictEqual(await access("bob", priv), "ask", "nothing changed");
 	});
 
-	it("an added admin gets the access they were given, and no more", async () => {
-		await call("ana", "PUT", `/api/workspaces/${priv}/sharing`, {
-			kind: "private",
-			members: [
-				{ userId: who.bob, access: "ask" },
-				{ userId: who.cy, access: "edit" },
-				{ userId: who.admin2, access: "ask" },
-			],
-		});
+	it("gives an added admin the role they were given, and no right to open someone's workspace to everyone", async () => {
+		await setMember("ana", priv, "admin2", "ask");
 		assert.strictEqual(await access("admin2", priv), "ask");
 		assert.strictEqual((await call("admin2", "PATCH", `/api/workspaces/${priv}`, { name: "Renamed" })).status, 403);
 		assert.strictEqual((await call("admin2", "DELETE", `/api/workspaces/${priv}`)).status, 403);
+		assert.strictEqual((await setOrgAccess("admin2", priv, "ask")).status, 403);
+		await setMember("ana", priv, "admin2", "edit");
+		const opened = await setOrgAccess("admin2", priv, "ask");
+		assert.deepStrictEqual([opened.status, opened.body], [403, { error: "Only its owner can open this workspace to everyone." }] as unknown[]);
+		assert.strictEqual(await access("dan", priv), "none");
+		await setMember("ana", priv, "admin2", "ask");
 	});
 
 	it("lists what each person can use, the newest made first", async () => {
-		const ownOfBob = await create("bob", "private", "Bob's own");
+		const ownOfBob = await create("bob", "Bob's own");
 		const names = async (person: Who) => (await call<List>(person, "GET", "/api/workspaces")).body.workspaces.map((workspace) => workspace.name);
 		assert.deepStrictEqual(await names("bob"), ["Bob's own", "Ana's notes", "Handbook"]);
 		assert.deepStrictEqual(await names("dan"), ["Handbook"]);
 		const ana = (await call<List>("ana", "GET", "/api/workspaces")).body.workspaces;
 		const notes = ana.find((workspace) => workspace.id === priv);
-		assert.deepInclude(notes, { kind: "private", access: "owner", memberCount: 3 });
+		assert.deepInclude(notes, { orgAccess: "none", access: "owner", memberCount: 3 });
+		const handbook = (await call<List>("dan", "GET", "/api/workspaces")).body.workspaces.find((workspace) => workspace.id === org);
+		assert.deepInclude(handbook, { orgAccess: "ask", access: "ask", memberCount: 0 });
 		assert.notInclude(JSON.stringify(ana), "Answer as", "the list has no instructions");
 		await call("bob", "DELETE", `/api/workspaces/${ownOfBob}`);
 	});
 
 	it("pins a workspace at the top of the person's own list, newest first among the pinned; nobody else sees the pin", async () => {
-		const older = await create("ana", "private", "Pin older");
-		const newer = await create("ana", "private", "Pin newer");
-		await call("ana", "PUT", `/api/workspaces/${older}/sharing`, { kind: "private", members: [{ userId: who.bob, access: "ask" }] });
+		const older = await create("ana", "Pin older");
+		const newer = await create("ana", "Pin newer");
+		await setMember("ana", older, "bob", "ask");
 		const listOf = async (person: Who) => (await call<List>(person, "GET", "/api/workspaces")).body.workspaces;
 		const order = async (person: Who) => (await listOf(person)).map((workspace) => workspace.id).filter((id) => id === older || id === newer);
 		assert.deepStrictEqual(await order("ana"), [newer, older]);
@@ -240,7 +293,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 
 	it("refuses a pin on a workspace the person can't use, as if it did not exist", async () => {
 		const notFound = { status: 404, body: { error: "Not found" } };
-		const hidden = await create("ana", "private", "Pin hidden");
+		const hidden = await create("ana", "Pin hidden");
 		for (const method of ["PUT", "DELETE"]) {
 			assert.deepStrictEqual(await call("dan", method, `/api/workspaces/${hidden}/pin`), notFound);
 			assert.deepStrictEqual(await call("dan", method, `/api/workspaces/no-such-${tag}/pin`), notFound);
@@ -251,14 +304,14 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 	});
 
 	it("shows no workspace by a pin once the person lost it, and deleting a workspace takes its pins", async () => {
-		const workspace = await create("ana", "private", "Pin taken back");
-		await call("ana", "PUT", `/api/workspaces/${workspace}/sharing`, { kind: "private", members: [{ userId: who.cy, access: "edit" }] });
+		const workspace = await create("ana", "Pin taken back");
+		await setMember("ana", workspace, "cy", "edit");
 		assert.strictEqual((await call("cy", "PUT", `/api/workspaces/${workspace}/pin`)).status, 200);
 		assert.strictEqual((await call("ana", "PUT", `/api/workspaces/${workspace}/pin`)).status, 200);
 		const ids = async (person: Who) => (await call<List>(person, "GET", "/api/workspaces")).body.workspaces.map((each) => each.id);
 		assert.strictEqual((await ids("cy"))[0], workspace);
 
-		await call("ana", "PUT", `/api/workspaces/${workspace}/sharing`, { kind: "private", members: [] });
+		await removeMember("ana", workspace, "cy");
 		assert.notInclude(await ids("cy"), workspace, "a pin does not bring back a workspace the person lost");
 		assert.strictEqual((await call("cy", "PUT", `/api/workspaces/${workspace}/pin`)).status, 404);
 
@@ -270,7 +323,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 	});
 
 	it("a pin that races the workspace's delete waits for it, finds the workspace gone, and leaves no pin", async () => {
-		const workspace = await create("ana", "private", "Pin racing");
+		const workspace = await create("ana", "Pin racing");
 		// A chat in it, whose row the test holds: the delete stops there, with the workspace taken and its pins gone.
 		const held = `chat-pin-held-${tag}`;
 		await runPromise(Threads.Threads.use((threads) => threads.save(held, who.ana, [{ id: "m1", role: "user", parts: [{ type: "text", text: "Hi" }] }], workspace)));
@@ -293,14 +346,22 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.lengthOf(pins, 0, "no pin on the deleted workspace");
 	});
 
-	it("shows members only to a person who can change them", async () => {
+	it("shows members only to a person who can change them: the owner, editors, and admins while it is open", async () => {
 		const owner = (await call<One>("ana", "GET", `/api/workspaces/${priv}`)).body.workspace;
 		assert.isTrue(owner.canShare);
 		assert.lengthOf(owner.members ?? [], 3);
 		const editor = (await call<One>("cy", "GET", `/api/workspaces/${priv}`)).body.workspace;
-		assert.deepInclude(editor, { access: "edit", canShare: false, members: null, instructions: "Answer as Ana's notes." });
+		assert.deepInclude(editor, { access: "edit", canShare: true, canDelete: false, instructions: "Answer as Ana's notes." });
+		assert.lengthOf(editor.members ?? [], 3);
+		assert.deepInclude((await call<One>("bob", "GET", `/api/workspaces/${priv}`)).body.workspace, { access: "ask", canShare: false, members: null });
 		assert.deepInclude((await call<One>("dan", "GET", `/api/workspaces/${org}`)).body.workspace, { access: "ask", canShare: false, members: null });
-		assert.deepInclude((await call<One>("admin2", "GET", `/api/workspaces/${org}`)).body.workspace, { access: "edit", canShare: true, members: [] });
+		assert.deepInclude((await call<One>("admin2", "GET", `/api/workspaces/${org}`)).body.workspace, {
+			access: "edit",
+			canShare: true,
+			canDelete: true,
+			canChangeOrgAccess: true,
+			members: [],
+		});
 	});
 
 	it("lets editors change a workspace, and refuses people who can only ask", async () => {
@@ -312,7 +373,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.deepInclude(edited.body.workspace, { name: "Ana's notes", instructions: "Cite the page." });
 		assert.strictEqual((await call("dan", "PATCH", `/api/workspaces/${org}`, { name: "Mine" })).status, 403);
 		assert.strictEqual((await call("admin2", "PATCH", `/api/workspaces/${org}`, { description: "For all" })).status, 200);
-		assert.deepStrictEqual(await auditedActions(org), ["create-workspace", "update-workspace"]);
+		assert.deepStrictEqual(await auditedActions(org), ["share-workspace", "update-workspace"]);
 	});
 
 	it("keeps both of two changes to different fields made at once, and logs each as it was made", async () => {
@@ -332,31 +393,105 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.strictEqual((await call("admin", "PATCH", `/api/workspaces/${org}`, { name: "Handbook" })).status, 200);
 	});
 
+	it("keeps both changes when two people change the people at once", async () => {
+		for (const round of [1, 2, 3]) {
+			// The owner adds Dan while an editor adds an admin.
+			const added = await Promise.all([setMember("ana", priv, "dan", "ask"), setMember("cy", priv, "admin", "edit")]);
+			assert.deepStrictEqual(
+				added.map((answer) => answer.status),
+				[200, 200],
+			);
+			assert.deepInclude(roles((await call<One>("ana", "GET", `/api/workspaces/${priv}`)).body.workspace), [who.dan, "ask"], `round ${round}`);
+			assert.deepInclude(roles((await call<One>("ana", "GET", `/api/workspaces/${priv}`)).body.workspace), [who.admin, "edit"], `round ${round}`);
+			// The owner removes Dan while the editor changes the admin's role.
+			const changed = await Promise.all([removeMember("ana", priv, "dan"), setMember("cy", priv, "admin", "ask")]);
+			assert.deepStrictEqual(
+				changed.map((answer) => answer.status),
+				[200, 200],
+			);
+			const now = roles((await call<One>("ana", "GET", `/api/workspaces/${priv}`)).body.workspace);
+			assert.notDeepInclude(now, [who.dan, "ask"], `round ${round}`);
+			assert.deepInclude(now, [who.admin, "ask"], `round ${round}`);
+			await removeMember("ana", priv, "admin");
+		}
+		assert.strictEqual(await access("admin", priv), "none");
+	});
+
+	it("opens a workspace to everyone with its editors kept: others can ask, not edit; closing it takes them out, and its people stay", async () => {
+		const policies = await create("admin", "Policies");
+		await setMember("admin", policies, "cy", "edit");
+		const opened = await setOrgAccess("admin", policies, "ask");
+		assert.deepInclude(opened.body.workspace, { orgAccess: "ask", memberCount: 1 });
+		assert.deepStrictEqual(roles(opened.body.workspace), [[who.cy, "edit"]]);
+		assert.strictEqual(await access("dan", policies), "ask");
+		assert.strictEqual((await call("dan", "PATCH", `/api/workspaces/${policies}`, { name: "Dan's" })).status, 403);
+		assert.strictEqual((await call("cy", "PATCH", `/api/workspaces/${policies}`, { description: "Read me first" })).status, 200);
+		assert.strictEqual(await access("admin2", policies), "edit");
+		const listed = (await call<List>("dan", "GET", "/api/workspaces")).body.workspaces.find((workspace) => workspace.id === policies);
+		assert.deepInclude(listed, { orgAccess: "ask", access: "ask", memberCount: 1 });
+
+		// An editor who is no admin cannot close it; any admin can.
+		assert.strictEqual((await setOrgAccess("cy", policies, "none")).status, 403);
+		const closed = await setOrgAccess("admin2", policies, "none");
+		assert.strictEqual(closed.status, 200);
+		assert.strictEqual(closed.body.workspace.access, "none", "the admin who closed it is not in it");
+		assert.strictEqual(await access("cy", policies), "edit");
+		assert.strictEqual(await access("dan", policies), "none");
+		assert.strictEqual((await call("dan", "GET", `/api/workspaces/${policies}`)).status, 404);
+		const instructions = await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.instructionsFor(who.dan, policies)));
+		assert.isTrue(instructions._tag === "None", "Dan's chats there get no more answers");
+
+		// A change of its people while it is private is not logged.
+		await setMember("admin", policies, "bob", "ask");
+		const logged = await database((sql) => sql<{ before: Record<string, unknown>; after: Record<string, unknown> }>`select before, after from admin_events where action = 'share-workspace' and coalesce(after, before)->>'workspace' = ${policies} order by id`);
+		assert.deepStrictEqual(
+			logged.map(({ before, after }) => [before.orgAccess, after.orgAccess, after.members]),
+			[
+				["none", "ask", [{ id: who.cy, access: "edit" }]],
+				["ask", "none", [{ id: who.cy, access: "edit" }]],
+			],
+		);
+		assert.deepStrictEqual(await auditedActions(policies), ["share-workspace", "update-workspace", "share-workspace"]);
+	});
+
 	it("takes access away from a member who is removed", async () => {
-		const removed = await call("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members: [{ userId: who.cy, access: "edit" }] });
+		const removed = await removeMember("ana", priv, "bob");
 		assert.strictEqual(removed.status, 200);
+		assert.deepStrictEqual(roles(removed.body.workspace), [
+			[who.admin2, "ask"],
+			[who.cy, "edit"],
+		]);
 		assert.strictEqual(await access("bob", priv), "none");
 		assert.strictEqual((await call("bob", "GET", `/api/workspaces/${priv}`)).status, 404);
 		const listed = (await call<List>("bob", "GET", "/api/workspaces")).body.workspaces.map((workspace) => workspace.id);
 		assert.notInclude(listed, priv);
 		const instructions = await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.instructionsFor(who.bob, priv)));
 		assert.isTrue(instructions._tag === "None");
+		assert.strictEqual((await removeMember("ana", priv, "bob")).status, 200, "removing someone who is not there changes nothing");
 	});
 
-	it("lets only an admin share or delete an organisation workspace, and logs it", async () => {
-		assert.strictEqual((await call("dan", "PUT", `/api/workspaces/${org}/sharing`, { kind: "private", members: [] })).status, 403);
+	it("lets an editor remove themselves, and answers the workspace as they see it then", async () => {
+		const notes = await create("ana", "Leaving");
+		await setMember("ana", notes, "cy", "edit");
+		const left = await removeMember("cy", notes, "cy");
+		assert.strictEqual(left.status, 200);
+		assert.deepInclude(left.body.workspace, { access: "none", canShare: false, members: null });
+		assert.strictEqual(await access("cy", notes), "none");
+		await call("ana", "DELETE", `/api/workspaces/${notes}`);
+	});
+
+	it("lets an admin share or delete a workspace open to everyone that is not theirs, and logs it; others can't", async () => {
+		assert.strictEqual((await setMember("dan", org, "dan", "edit")).status, 403, "everyone can ask, no one else shares");
 		assert.strictEqual((await call("dan", "DELETE", `/api/workspaces/${org}`)).status, 403);
-		const toPrivate = await call("admin2", "PUT", `/api/workspaces/${org}/sharing`, { kind: "private", members: [{ userId: who.admin2, access: "edit" }] });
-		assert.strictEqual(toPrivate.status, 200);
-		assert.strictEqual(await access("dan", org), "none");
-		assert.strictEqual(await access("admin2", org), "edit");
-		const back = await call<One>("admin", "PUT", `/api/workspaces/${org}/sharing`, { kind: "org", members: [{ userId: who.cy, access: "edit" }] });
-		assert.deepInclude(back.body.workspace, { kind: "org", members: [] }, "an organisation workspace keeps no members");
-		assert.strictEqual(await access("dan", org), "ask");
+		const shared = await setMember("admin2", org, "cy", "edit");
+		assert.strictEqual(shared.status, 200);
+		assert.strictEqual(await access("cy", org), "edit");
+		assert.strictEqual((await call("cy", "DELETE", `/api/workspaces/${org}`)).status, 403, "an editor who is no admin");
 		assert.strictEqual((await call("admin2", "DELETE", `/api/workspaces/${org}`)).status, 200);
 		const updates = Array.from({ length: 8 }, () => "update-workspace");
-		assert.deepStrictEqual(await auditedActions(org), ["create-workspace", ...updates, "share-workspace", "share-workspace", "delete-workspace"]);
+		assert.deepStrictEqual(await auditedActions(org), ["share-workspace", ...updates, "share-workspace", "delete-workspace"]);
 		assert.strictEqual(await access("admin", org), "none", "a deleted workspace is no one's");
+		assert.strictEqual((await setMember("admin", org, "dan", "ask")).status, 404);
 	});
 
 	it("deletes a workspace by its owner, and its chats stay, in no workspace", async () => {
@@ -402,8 +537,8 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 	});
 
 	it("fills the slugs of workspaces made before slugs, the oldest first, when it migrates", async () => {
-		const older = await create("ana", "private", "Ward rota");
-		const newer = await create("bob", "private", "Ward rota");
+		const older = await create("ana", "Ward rota");
+		const newer = await create("bob", "Ward rota");
 		await database((sql) =>
 			Effect.gen(function* () {
 				yield* sql`alter table workspaces alter column slug drop not null`;
@@ -417,6 +552,44 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.match(slugOf(newer) ?? "", /^ward-rota-[a-z2-9]{4}$/);
 		const [column] = await database((sql) => sql<{ is_nullable: string }>`select is_nullable from information_schema.columns where table_schema = ${schema} and table_name = 'workspaces' and column_name = 'slug'`);
 		assert.strictEqual(column?.is_nullable, "NO");
+	});
+
+	it("moves workspaces made with a kind to General access when it migrates, with their people, and changes nothing the second time", async () => {
+		const opened = await create("admin", "Old handbook");
+		const closed = await create("ana", "Old notes");
+		await setMember("ana", closed, "bob", "edit");
+		// The table as it was: a kind, and no General access.
+		await database((sql) =>
+			Effect.gen(function* () {
+				yield* sql`alter table workspaces add column kind text`;
+				yield* sql`update workspaces set kind = case when org_access = 'ask' or id = ${opened} then 'org' else 'private' end`;
+				yield* sql`alter table workspaces drop column org_access`;
+			}),
+		);
+		const migrate = () => runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.migrate));
+		const state = () =>
+			database((sql) =>
+				Effect.gen(function* () {
+					const workspaces = yield* sql<{ id: string; org_access: string }>`select id, org_access from workspaces where id in (${opened}, ${closed}) order by name`;
+					const members = yield* sql<{ user_id: string; access: string }>`select user_id, access from workspace_members where workspace_id = ${closed}`;
+					const kind = yield* sql`select 1 from information_schema.columns where table_schema = ${schema} and table_name = 'workspaces' and column_name = 'kind'`;
+					return { workspaces: workspaces.map((row) => [row.id, row.org_access]), members: members.map((row) => [row.user_id, row.access]), kind: kind.length };
+				}),
+			);
+		const expected = {
+			workspaces: [
+				[opened, "ask"],
+				[closed, "none"],
+			],
+			members: [[who.bob, "edit"]],
+			kind: 0,
+		};
+		await migrate();
+		assert.deepStrictEqual(await state(), expected);
+		await migrate();
+		assert.deepStrictEqual(await state(), expected, "the second time changes nothing");
+		assert.strictEqual(await access("dan", opened), "ask");
+		assert.strictEqual(await access("bob", closed), "edit");
 	});
 
 	it("finds people by name or email, without case, at most 20", async () => {

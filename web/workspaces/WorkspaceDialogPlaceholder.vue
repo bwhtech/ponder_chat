@@ -6,29 +6,46 @@ import { me } from "../account";
 import DialogFrame from "../DialogFrame.vue";
 import MarkdownEditorPlaceholder from "../MarkdownEditorPlaceholder.vue";
 import ShareRow from "./ShareRow.vue";
-import { closeWorkspaceDialog, dialogTitle, INSTRUCTIONS_DIALOG_WIDTH, INSTRUCTIONS_PLACEHOLDER, KIND_OPTIONS, NAME_PLACEHOLDER, workspaceDialog } from "./dialogs";
-import { isAdmin, type Member, type Person } from "./store";
+import {
+	ADD_PEOPLE,
+	closeWorkspaceDialog,
+	dialogTitle,
+	GENERAL_ACCESS,
+	generalAccessNote,
+	INSTRUCTIONS_DIALOG_WIDTH,
+	INSTRUCTIONS_PLACEHOLDER,
+	NAME_PLACEHOLDER,
+	ROLE_LABELS,
+	workspaceDialog,
+} from "./dialogs";
+import type { Member, Person } from "./store";
 
 /**
  * A workspace dialog (WorkspaceDialogs.vue) while its code arrives: the same box, title,
  * field labels and buttons, with the values it opens with, so the dialog takes its place
- * without a move. Save waits for it; Cancel works. The markup copies frappe-ui's Dialog
- * and FormControl, as DialogPlaceholder.vue does.
+ * without a move. Save and Copy link wait for it; Cancel and Done work. The markup copies
+ * frappe-ui's Dialog, FormControl and ghost Button, as DialogPlaceholder.vue does.
  */
 const request = computed(() => workspaceDialog.request);
 /** New workspace: its empty form. */
-const form = computed(() => (request.value?.kind === "new" ? { kind: isAdmin.value } : null));
+const form = computed(() => request.value?.kind === "new");
 /** Instructions: the text the dialog opens with. */
 const instructions = computed(() => (request.value?.kind === "instructions" ? request.value.workspace.instructions : null));
+/** Share: its people and General access, as ShareDialog.vue draws them, with each menu as its text. */
 const sharing = computed(() => {
 	const value = request.value;
 	if (value?.kind !== "share") return null;
-	const kind = KIND_OPTIONS.find((option) => option.value === value.workspace.kind)?.label ?? "";
-	return { kind, private: value.workspace.kind === "private", owner: value.workspace.owner as Person, members: (value.workspace.members ?? []) as Member[] };
+	const workspace = value.workspace;
+	return {
+		owner: workspace.owner as Person,
+		members: (workspace.members ?? []) as Member[],
+		orgAccess: workspace.orgAccess,
+		canChange: workspace.canChangeOrgAccess,
+	};
 });
-const ACCESS_LABELS = { ask: "Can ask", edit: "Can edit" } as const;
+const myId = computed(() => me.value?.user.id);
+const myName = computed(() => (me.value ? displayName(me.value.user.name, me.value.user.email) : "You"));
 const nameOf = (person: Person) => displayName(person.name, person.email);
-const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 </script>
 
 <template>
@@ -48,10 +65,6 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 						<div class="text-sm leading-tighter text-ink-gray-6">Name</div>
 						<div class="flex h-7 items-center truncate rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">{{ NAME_PLACEHOLDER }}</div>
 					</div>
-					<div v-if="form.kind" class="space-y-1.5">
-						<div class="text-sm leading-tighter text-ink-gray-6">Who can use it</div>
-						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-8">Only the people you add</div>
-					</div>
 					<div class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Instructions (optional)</div>
 						<div class="h-[calc(6lh+0.875rem)] overflow-hidden rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 py-1.5 text-p-sm text-ink-gray-4">{{ INSTRUCTIONS_PLACEHOLDER }}</div>
@@ -62,23 +75,52 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 					<MarkdownEditorPlaceholder :text="instructions" :placeholder="INSTRUCTIONS_PLACEHOLDER" />
 				</div>
 				<template v-else-if="sharing">
-					<div v-if="isAdmin" class="space-y-1.5">
-						<div class="text-sm leading-tighter text-ink-gray-6">Who can use it</div>
-						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-8">{{ sharing.kind }}</div>
-					</div>
-					<div v-if="sharing.private" class="space-y-2">
-						<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">Add people by name or email</div>
-						<!-- PeoplePicker.vue's rows, with what each can do as text. -->
+					<div class="flex h-7 items-center rounded-4 border border-[--surface-gray-2] bg-surface-gray-2 px-2 text-base text-ink-gray-4">{{ ADD_PEOPLE }}</div>
+					<section class="space-y-1">
+						<div class="flex h-7 items-center text-sm text-ink-gray-6">People with access</div>
 						<ul>
-							<ShareRow :avatar="nameOf(sharing.owner)" :name="ownerIsMe ? 'You' : nameOf(sharing.owner)" :email="ownerIsMe ? undefined : sharing.owner.email" owner />
-							<ShareRow v-for="member in sharing.members" :key="member.id" :avatar="nameOf(member)" :name="nameOf(member)" :email="member.email">
-								<span class="flex h-7 w-28 shrink-0 items-center border border-transparent px-2 text-sm text-ink-gray-6">{{ ACCESS_LABELS[member.access] }}</span>
-								<span class="size-7 shrink-0" aria-hidden="true" />
+							<ShareRow
+								:avatar="nameOf(sharing.owner)"
+								:name="sharing.owner.id === myId ? 'You' : nameOf(sharing.owner)"
+								:email="sharing.owner.id === myId ? undefined : sharing.owner.email"
+								owner
+							/>
+							<ShareRow
+								v-for="member in sharing.members"
+								:key="member.id"
+								:avatar="member.id === myId ? myName : nameOf(member)"
+								:name="member.id === myId ? 'You' : nameOf(member)"
+								:email="member.id === myId ? undefined : member.email"
+							>
+								<!-- The role menu's ghost button. -->
+								<span class="flex h-7 w-28 items-center justify-between gap-2 rounded-4 px-2 text-base text-ink-gray-8">
+									{{ ROLE_LABELS[member.access] }}<span class="lucide-chevron-down size-4 shrink-0" aria-hidden="true" />
+								</span>
 							</ShareRow>
 						</ul>
-					</div>
+					</section>
+					<section class="space-y-1">
+						<div class="flex h-7 items-center text-sm text-ink-gray-6">General access</div>
+						<div class="flex items-start gap-x-2.5">
+							<span class="mt-1 flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-gray-2 text-ink-gray-6" aria-hidden="true">
+								<span :class="[GENERAL_ACCESS[sharing.orgAccess].icon, 'size-3']" />
+							</span>
+							<div class="min-w-0 flex-1">
+								<span v-if="sharing.canChange" class="-ml-2 inline-flex h-7 items-center gap-2 rounded-4 px-2 text-base text-ink-gray-8">
+									{{ GENERAL_ACCESS[sharing.orgAccess].label }}<span class="lucide-chevron-down size-4 shrink-0" aria-hidden="true" />
+								</span>
+								<p v-else class="flex h-7 items-center text-base text-ink-gray-8">{{ GENERAL_ACCESS[sharing.orgAccess].label }}</p>
+								<p class="text-p-sm text-ink-gray-6">{{ generalAccessNote(sharing.orgAccess, sharing.canChange) }}</p>
+							</div>
+							<span v-if="sharing.orgAccess === 'ask'" class="hidden h-7 w-28 shrink-0 items-center px-2 text-base text-ink-gray-6 sm:flex">Can ask</span>
+						</div>
+					</section>
 				</template>
-				<div class="flex justify-end gap-2 pt-2">
+				<div v-if="sharing" class="flex items-center justify-between gap-2 pt-2">
+					<Button icon-left="lucide-link" label="Copy link" disabled />
+					<Button variant="solid" theme="gray" label="Done" @click="closeWorkspaceDialog" />
+				</div>
+				<div v-else class="flex justify-end gap-2 pt-2">
 					<Button label="Cancel" @click="closeWorkspaceDialog" />
 					<Button variant="solid" theme="gray" :label="request.kind === 'new' ? 'Create workspace' : 'Save'" disabled />
 				</div>

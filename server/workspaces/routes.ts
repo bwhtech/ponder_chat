@@ -43,22 +43,20 @@ const instructions = z.string().max(MAX_INSTRUCTIONS);
 const icon = z.string().trim().max(40).nullable().transform((value) => value || null);
 
 const createBody = z.object({
-	kind: z.enum(["org", "private"]).default("private"),
 	name,
 	description: description.default(""),
 	instructions: instructions.default(""),
 	icon: icon.default(null),
 });
 const updateBody = z.object({ name: name.optional(), description: description.optional(), instructions: instructions.optional(), icon: icon.optional() });
-const sharingBody = z.object({
-	kind: z.enum(["org", "private"]),
-	members: z.array(z.object({ userId: z.string().min(1).max(200), access: z.enum(["ask", "edit"]) })).max(500).default([]),
-});
+const memberBody = z.object({ access: z.enum(["ask", "edit"]) });
+const orgAccessBody = z.object({ orgAccess: z.enum(["none", "ask"]) });
 // A repeated or odd query value is ignored, not refused.
 const peopleQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
 
 const notFound = (_: Workspaces.WorkspaceNotFound | Documents.DocumentNotFound, c: Context) => c.json({ error: "Not found" }, 404);
 const refused = (error: Workspaces.WorkspaceRefused, c: Context) => c.json({ error: error.message }, 403);
+const sharingErrors = { WorkspaceNotFound: notFound, WorkspaceRefused: refused } as const;
 const documentErrors = { WorkspaceNotFound: notFound, WorkspaceRefused: refused, DocumentNotFound: notFound } as const;
 
 export const workspacesApi = new Hono<Env>()
@@ -66,9 +64,7 @@ export const workspacesApi = new Hono<Env>()
 	.get("/", (c) => route(c, Effect.map(workspaces((service) => service.list(actorOf(c).id)), (list) => c.json({ workspaces: list }))))
 
 	.post("/", body(createBody), (c) =>
-		route(c, Effect.map(workspaces((service) => service.create(actorOf(c), c.req.valid("json"))), (workspace) => c.json({ workspace }, 201)), {
-			WorkspaceRefused: refused,
-		}),
+		route(c, Effect.map(workspaces((service) => service.create(actorOf(c), c.req.valid("json"))), (workspace) => c.json({ workspace }, 201))),
 	)
 
 	.get("/:id", (c) =>
@@ -84,12 +80,21 @@ export const workspacesApi = new Hono<Env>()
 		}),
 	)
 
-	.put("/:id/sharing", body(sharingBody), (c) =>
-		route(c, Effect.map(workspaces((service) => service.share(actorOf(c), c.req.param("id"), c.req.valid("json"))), (workspace) => c.json({ workspace })), {
-			WorkspaceNotFound: notFound,
-			WorkspaceRefused: refused,
-			UnknownPeople: (error, c) => c.json({ error: error.message }, 400),
+	// Sharing, one change at a time (Workspaces.ts). Each answers the workspace as the person sees it now.
+	.put("/:id/members/:userId", body(memberBody), (c) =>
+		route(c, Effect.map(workspaces((service) => service.setMember(actorOf(c), c.req.param("id"), c.req.param("userId"), c.req.valid("json").access)), (workspace) => c.json({ workspace })), {
+			...sharingErrors,
+			UnknownPerson: (error, c) => c.json({ error: error.message }, 400),
 		}),
+	)
+
+	.delete("/:id/members/:userId", (c) =>
+		route(c, Effect.map(workspaces((service) => service.removeMember(actorOf(c), c.req.param("id"), c.req.param("userId"))), (workspace) => c.json({ workspace })), sharingErrors),
+	)
+
+	// General access: everyone in the organisation can ask ("ask"), or only the people added ("none").
+	.put("/:id/access", body(orgAccessBody), (c) =>
+		route(c, Effect.map(workspaces((service) => service.setOrgAccess(actorOf(c), c.req.param("id"), c.req.valid("json").orgAccess)), (workspace) => c.json({ workspace })), sharingErrors),
 	)
 
 	// The person's own pin, at the top of their list: anyone who can use the workspace. Nobody else sees it.

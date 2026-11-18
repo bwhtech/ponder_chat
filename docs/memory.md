@@ -29,7 +29,7 @@ Recall is a workflow step. A reply that was in the middle of its run during the 
 
 ## Differences from Seva
 
-- **No organisation memory.** Every memory belongs to one person (`owner` is the user id). Seva also had org-wide memories, keyed by the connected Frappe site. The tables have no `tenant` column. Ponder now has organisation workspaces (`docs/workspaces-plan.md`), but they share instructions and documents, not memories, and a chat in a workspace still remembers only for its writer.
+- **No organisation memory.** Every memory belongs to one person (`owner` is the user id). Seva also had org-wide memories, keyed by the connected Frappe site. The tables have no `tenant` column. Ponder now has workspaces that can be open to everyone (`docs/workspaces-plan.md`), but they share instructions and documents, not memories, and a chat in a workspace still remembers only for its writer.
 - **Kinds:** `fact` (about the person), `project` (something they work on over weeks), `preference` (how they want answers).
 - **What is never kept** is wider: the person's own phone, email, address, ID, bank and card numbers too, health details, and what they say about other people.
 - **No `ask_user` answers** in the turn: Ponder has no such tool.

@@ -139,15 +139,10 @@ describe.skipIf(!base)("workspace documents", () => {
 				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
 				const workspaces = yield* Workspaces.Workspaces;
-				ids.workspace = (yield* workspaces.create(actor("ana"), { kind: "private", name: "Ward", description: "", instructions: "", icon: null })).id;
-				ids.other = (yield* workspaces.create(actor("dan"), { kind: "private", name: "Dan's", description: "", instructions: "", icon: null })).id;
-				yield* workspaces.share(actor("ana"), ids.workspace, {
-					kind: "private",
-					members: [
-						{ userId: who.bob, access: "ask" },
-						{ userId: who.cy, access: "edit" },
-					],
-				});
+				ids.workspace = (yield* workspaces.create(actor("ana"), { name: "Ward", description: "", instructions: "", icon: null })).id;
+				ids.other = (yield* workspaces.create(actor("dan"), { name: "Dan's", description: "", instructions: "", icon: null })).id;
+				yield* workspaces.setMember(actor("ana"), ids.workspace, who.bob, "ask");
+				yield* workspaces.setMember(actor("ana"), ids.workspace, who.cy, "edit");
 			}),
 		);
 	});

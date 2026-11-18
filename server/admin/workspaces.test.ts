@@ -122,8 +122,9 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 				yield* Credits.Credits.use((credits) => credits.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
 				const workspaces = yield* Workspaces.Workspaces;
-				ids.org = (yield* workspaces.create(actor("admin"), { kind: "org", name: "Handbook", description: "For everyone", instructions: "Be brief.", icon: null })).id;
-				ids.private = (yield* workspaces.create(actor("ana"), { kind: "private", name: SECRET.workspace, description: "Mine", instructions: "Secret.", icon: null })).id;
+				ids.org = (yield* workspaces.create(actor("admin"), { name: "Handbook", description: "For everyone", instructions: "Be brief.", icon: null })).id;
+				yield* workspaces.setOrgAccess(actor("admin"), ids.org, "ask");
+				ids.private = (yield* workspaces.create(actor("ana"), { name: SECRET.workspace, description: "Mine", instructions: "Secret.", icon: null })).id;
 
 				yield* document(ids.orgDocument, ids.org, "handbook.md", "ready", null, who.admin);
 				yield* indexed(ids.orgDocument, ids.org, who.admin, 0.002);
@@ -147,11 +148,11 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		assert.strictEqual((await call("ana", "/api/admin/workspaces")).status, 403, "owning a workspace makes no one an admin");
 	});
 
-	it("shows organisation workspaces with their owner, documents, statuses and cost", async () => {
+	it("shows workspaces open to everyone with their owner, people, documents, statuses and cost", async () => {
 		const report = await json<WorkspacesReport>("admin", "/api/admin/workspaces");
 		assert.lengthOf(report.org, 1);
 		const [handbook] = report.org;
-		assert.deepInclude(handbook, { id: ids.org, name: "Handbook", description: "For everyone", costUsd: 0.002 });
+		assert.deepInclude(handbook, { id: ids.org, name: "Handbook", description: "For everyone", memberCount: 0, costUsd: 0.002 });
 		assert.deepStrictEqual(handbook.owner, { id: who.admin, name: "Admin", email: actor("admin").email });
 		assert.deepStrictEqual(
 			handbook.documents.map((doc) => [doc.id, doc.name, doc.status, doc.error, doc.costUsd]),
@@ -225,10 +226,10 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		assert.strictEqual(month.system.byFunction.find((line) => line.functionId === "workspace-search")?.usd, 0.0001);
 	});
 
-	it("logs an organisation workspace's changes with the length of its instructions, not their text", async () => {
+	it("logs the changes of a workspace open to everyone with the length of its instructions, not their text, and each change of its people", async () => {
 		const long = "Answer from the handbook. ".repeat(800);
 		await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.update(actor("admin"), ids.org, { instructions: long })));
-		await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.share(actor("admin"), ids.org, { kind: "org", members: [] })));
+		await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.setMember(actor("admin"), ids.org, who.ana, "edit")));
 		const answer = await call("admin", "/api/admin/activity");
 		const { events } = parseJson<ActivityPage>(answer.text);
 		assert.notInclude(answer.text, long);
@@ -236,15 +237,33 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		assert.deepInclude(update?.before, { name: "Handbook", instructionsLength: "Be brief.".length });
 		assert.deepInclude(update?.after, { name: "Handbook", instructionsLength: long.length, instructionsChanged: true });
 		assert.notProperty(update?.after, "instructions");
-		const share = events.find((event) => event.action === "share-workspace");
-		assert.deepInclude(share?.after, { workspace: ids.org, kind: "org", name: "Handbook" });
+		const shares = events.filter((event) => event.action === "share-workspace");
+		assert.deepStrictEqual(
+			shares.map((event) => [event.before, event.after]),
+			[
+				[
+					{ workspace: ids.org, orgAccess: "ask", members: [] },
+					{ workspace: ids.org, orgAccess: "ask", members: [{ id: who.ana, access: "edit" }], name: "Handbook" },
+				],
+				[
+					{ workspace: ids.org, orgAccess: "none", members: [] },
+					{ workspace: ids.org, orgAccess: "ask", members: [], name: "Handbook" },
+				],
+			],
+			"one event for each change, the newest first",
+		);
+		const report = await json<WorkspacesReport>("admin", "/api/admin/workspaces");
+		assert.strictEqual(report.org[0]?.memberCount, 1);
 	});
 
-	it("names no workspace that is private now, also one deleted while private, and keeps the name of one deleted while for everyone", async () => {
+	it("names no workspace that is private now, also one deleted while private, and keeps the name of one deleted while open to everyone", async () => {
 		const madeForEveryone = (name: string) =>
 			runPromise(
 				Workspaces.Workspaces.use((workspaces) =>
-					workspaces.create(actor("admin"), { kind: "org", name, description: `${name} description`, instructions: `${name} instructions`, icon: null }),
+					Effect.gen(function* () {
+						const made = yield* workspaces.create(actor("admin"), { name, description: `${name} description`, instructions: `${name} instructions`, icon: null });
+						return yield* workspaces.setOrgAccess(actor("admin"), made.id, "ask");
+					}),
 				),
 			);
 		const hidden = await madeForEveryone(`Obsidian Harbour ${tag}`);
@@ -254,8 +273,9 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 			Workspaces.Workspaces.use((workspaces) =>
 				Effect.gen(function* () {
 					yield* workspaces.update(actor("admin"), hidden.id, { name: `Obsidian Lighthouse ${tag}`, instructions: "Longer instructions here." });
-					yield* workspaces.share(actor("admin"), hidden.id, { kind: "private", members: [{ userId: who.bob, access: "ask" }] });
-					yield* workspaces.share(actor("admin"), gone.id, { kind: "private", members: [] });
+					yield* workspaces.setMember(actor("admin"), hidden.id, who.bob, "ask");
+					yield* workspaces.setOrgAccess(actor("admin"), hidden.id, "none");
+					yield* workspaces.setOrgAccess(actor("admin"), gone.id, "none");
 					yield* workspaces.remove(actor("admin"), gone.id);
 					yield* workspaces.remove(actor("admin"), kept.id);
 				}),
@@ -268,27 +288,34 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		}
 		const { events } = parseJson<ActivityPage>(answer.text);
 		const of = (action: string) => events.filter((event) => event.action === action);
+		assert.deepStrictEqual(of("create-workspace"), [], "a new workspace is private");
+		const opened = of("share-workspace").filter((event) => event.before?.orgAccess === "none" && event.after?.orgAccess === "ask");
 		assert.include(
-			of("create-workspace").map((event) => event.after?.name),
+			opened.map((event) => event.after?.name),
 			`Copper Atlas ${tag}`,
 		);
 		assert.deepStrictEqual(
 			of("delete-workspace").map((event) => event.before?.name),
 			[`Copper Atlas ${tag}`],
 		);
-		// Still says what happened, as “Made a workspace private”, with nothing that tells which.
-		const madePrivate = of("share-workspace").filter((event) => event.after?.kind === "private");
+		// Still says what happened, as “Closed a workspace to everyone”, with nothing that tells which.
+		const closed = of("share-workspace").filter((event) => event.after?.orgAccess === "none");
 		assert.deepStrictEqual(
-			madePrivate.map((event) => [event.before, event.after]),
+			closed.map((event) => [event.before, event.after]),
 			[
-				[{ kind: "org" }, { kind: "private" }],
-				[{ kind: "org" }, { kind: "private" }],
+				[{ orgAccess: "ask" }, { orgAccess: "none" }],
+				[{ orgAccess: "ask" }, { orgAccess: "none" }],
 			],
 		);
 		const unnamed = events.filter((event) => event.action.endsWith("-workspace") && event.before?.name === undefined && event.after?.name === undefined);
-		assert.lengthOf(unnamed, 5, "two made, one edited, two made private");
+		assert.lengthOf(unnamed, 6, "two opened, one edited, one person added, two closed");
 		for (const event of unnamed) {
-			assert.deepStrictEqual([...Object.keys(event.before ?? {}), ...Object.keys(event.after ?? {})].filter((key) => key !== "kind"), [], "a private workspace's event keeps its kind only");
+			const keys = [...Object.keys(event.before ?? {}), ...Object.keys(event.after ?? {})];
+			assert.deepStrictEqual(
+				keys.filter((key) => key !== "orgAccess"),
+				[],
+				"a private workspace's event keeps its General access only",
+			);
 		}
 	});
 });

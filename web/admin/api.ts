@@ -38,7 +38,7 @@ export type Overview = {
 
 export type SystemSpend = { usd: number; calls: number; byFunction: { functionId: string; usd: number; calls: number }[] };
 
-/** GET /api/admin/workspaces (server/workspaces/admin.ts): organisation workspaces in full, private ones as totals. */
+/** GET /api/admin/workspaces (server/workspaces/admin.ts): workspaces open to everyone in full, private ones as totals. */
 export type DocumentStatus = "reading" | "ready" | "failed";
 /** How far an Indexing document is: the same as a workspace's (web/workspaces/documents.ts). */
 export type DocumentProgress = { phase: "pages" | "embedding"; done: number; total: number };
@@ -60,6 +60,8 @@ export type OrgWorkspace = {
 	description: string;
 	icon: string | null;
 	owner: { id: string; name: string; email: string };
+	/** The people added to it. */
+	memberCount: number;
 	createdAt: string;
 	updatedAt: string;
 	documents: OrgDocument[];

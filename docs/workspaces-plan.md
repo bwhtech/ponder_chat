@@ -12,7 +12,7 @@ Part 1, workspaces and sharing: the tables, `accessOf`, the API, people search, 
 
 Part 2, documents (`server/workspaces/documents/`): upload, the indexing workflow, the indexing log, Details and "Try again", inline documents or excerpts and `workspace_search` on each turn, the system function ids in `charged_runs`, and memory embeddings in `runs`. A sweep starts indexing again for a document that stays in Indexing with no run. On the test questions, the top-8 hit rate is 30 of 31 (97%).
 
-Part 3, the admin part, is built: `/admin/workspaces` (`server/workspaces/admin.ts`, `web/admin/pages/Workspaces.vue`) lists organisation workspaces with their documents, statuses, errors, indexing cost and each document's log, and private workspaces as totals with no names: how many, documents by status, indexing cost, and the errors of failed documents with names cut out. The Activity page names the four workspace events and shows the length of the instructions, not their text. The overview has a "System" line: the cost of each system function id over the same days, from `runs`.
+Part 3, the admin part, is built: `/admin/workspaces` (`server/workspaces/admin.ts`, `web/admin/pages/Workspaces.vue`) lists the workspaces open to everyone with their documents, statuses, errors, indexing cost and each document's log, and private workspaces as totals with no names: how many, documents by status, indexing cost, and the errors of failed documents with names cut out. The Activity page names the four workspace events and shows the length of the instructions, not their text. The overview has a "System" line: the cost of each system function id over the same days, from `runs`.
 
 Embedding model: `qwen/qwen3-embedding-8b`, from 18 November 2026. Through OpenRouter with Zero Data Retention, the earlier default `google/gemini-embedding-2` takes only one text for each call, so a 10 MB text was about 12,000 calls. Qwen takes batches. On the test questions it scores the same as `google/gemini-embedding-2`, `google/gemini-embedding-001` and `openai/text-embedding-3-large` (30 of 31, the same answers first), and it costs $0.0026 for both manuals, against $0.049. The embedder still falls back to one text for each call for a model that refuses batches. A change of `PONDER_EMBEDDING_MODEL` embeds the memory index again and indexes the workspace documents again at the next start, also a document that was in the middle of indexing; searches in between find only what the new model has indexed.
 
@@ -21,8 +21,9 @@ Embedding model: `qwen/qwen3-embedding-8b`, from 18 November 2026. Through OpenR
 | Word | Meaning |
 | --- | --- |
 | Workspace | A name, instructions and documents. A chat can belong to one workspace. (A description column exists, but the app does not ask for it or show it for now.) |
-| Organisation workspace | A workspace that everyone can use. Only an admin makes one. |
-| Private workspace | A workspace that only its owner and the people they add can use. Anyone makes one. |
+| General access | Who can use a workspace besides the people added: "Only people added" or "Everyone in the organisation" (`org_access`). |
+| Open to everyone | A workspace whose General access is "Everyone in the organisation". Everyone can ask in it. |
+| Private workspace | A workspace that only its owner and the people added can use. Every workspace starts private. |
 | Owner | The person who made the workspace. |
 | Member | A person the owner added. Each member can ask, or can ask and edit. |
 | Document | A file in a workspace. Its text is kept in the database. |
@@ -33,11 +34,12 @@ Embedding model: `qwen/qwen3-embedding-8b`, from 18 November 2026. Through OpenR
 | Topic | Choice | Why |
 | --- | --- | --- |
 | Teams | None. The owner adds people one by one. | An internal tool with tens of people does not need teams yet. Teams can come later without changing this model. |
-| Who makes what | An admin makes organisation workspaces. Anyone makes private workspaces. | Org-wide content needs one person who is responsible for it. |
-| Who edits an organisation workspace | Admins only. Everyone else can ask. | Enough for the first release. Editors who are not admins are in "Later". |
+| Who makes what | Anyone makes a workspace, private. Only an admin opens one to everyone, or closes it. | Opening a workspace puts it in every person's sidebar, the activity log and the admin report. Ponder has no "browse" list, so this stays an admin's choice, as in Slack. |
+| Who shares | Everyone who can edit: the owner, members with Can edit, and admins while it is open. Nobody changes the owner. | As Google Docs and Claude Projects do. |
+| Who edits a workspace open to everyone | Its owner, members with Can edit, and admins. Everyone else can ask. | A person's access is the higher of their own role and General access. |
 | Finding people | `GET /api/people?q=` searches every account by name or email, for any signed-in person. | Everyone in the organisation can see everyone. The prototype's people picker needs it. |
 | Chats | A chat stays private to the person who wrote it, also in a shared workspace. Members share instructions and documents, never chats. | The privacy rule that admins see usage only must also hold for workspace owners. |
-| Admins | An admin edits organisation workspaces. An admin cannot open a private workspace unless its owner adds them. | Same reason. The admin page shows counts of private workspaces only. |
+| Admins | An admin edits, shares and deletes workspaces open to everyone. An admin cannot open a private workspace unless someone adds them. | Same reason. The admin page shows counts of private workspaces only. |
 | One workspace for each chat | The first message sets it. It never changes. | The instructions are in the cached system prompt. A change would make the answers before it hard to explain. |
 | Lost access | The server checks access on each message. A person who was removed can still read the chat, but cannot send in it. | Access is the owner's decision, and it must take effect at once. |
 | Deleting a workspace | Its documents and passages are deleted. Its chats stay, and are no longer in a workspace. | A member's chats belong to the member, not to the owner. |
@@ -196,14 +198,14 @@ Each document keeps a log of what was done to it, so a person can see why a docu
 4. **Who sees the log.**
    - People who can edit the workspace: "Details" in the document's menu. They open in the right-hand side panel, where the file opens too. A summary comes first: the type, pages and size ("PDF · 398 pages · 2.3 MB"), the status ("Indexing… page 290 of 398" with a bar, "Ready · 3 hours ago", or why it failed with "Try again"), one line on the pages that a model read ("34 pages were read from pictures", and any page it could not read), and "Open file". The Log button in the panel's header shows the plain steps ("Uploaded · PDF, 3 pages", "Read 34 pages from pictures" with the pages as ranges such as "Pages 17–21, 23, 251–253", "Ready"). A run's pages are one step, so a long PDF does not fill the log with a line for each page. A page that the model could not read stays a step of its own. No model names, times or costs. A failure has one wording: the row's status says "2.3 MB · Could not read page 3", with a "Try again" button, and the failed step in Details has the same title. A cause shows under it only when it has plain words ("It took too long."). The admin's log keeps the raw error.
    - People who can only ask: the status while it is not Ready (Reading, Failed).
-   - Admins on `/admin/workspaces`: for organisation workspaces, the full log. A run's page reads are one row ("34 pages read by google/gemini-3.8-flash", with their pages, time and cost added up), which opens to show each page. For private workspaces, the counts, cost and errors, with no workspace or document names, as for the rest of private workspaces.
+   - Admins on `/admin/workspaces`: for workspaces open to everyone, the full log. A run's page reads are one row ("34 pages read by google/gemini-3.8-flash", with their pages, time and cost added up), which opens to show each page. For private workspaces, the counts, cost and errors, with no workspace or document names, as for the rest of private workspaces.
 5. **Server logs and traces.** One log line when indexing starts, ends or fails, with the document id and workspace id only. One trace for each indexing run (`workspace.index`), with a child span for each step (`workspace.parse`, `workspace.page-read`, `workspace.embed`). Add these names to `KNOWN_NAMES` in `server/tracing/privacy.ts`. `tracing.check.ts` must show that no document name or text gets into these spans.
 
 ## Database
 
 ```sql
 workspaces (
-	id, kind ('org' | 'private'), owner_id → users,
+	id, org_access ('none' | 'ask'), owner_id → users,
 	name, description, instructions, icon,
 	created_at, updated_at, deleted_at
 )
@@ -238,14 +240,16 @@ The tables are made in a `migrate` effect in a new `Workspaces` service, added t
 
 Access is in one function, `Workspaces.accessOf(userId, workspaceId)`. It returns `none`, `ask`, `edit` or `owner`:
 
-| Workspace | Owner | Member | Admin | Anyone else |
+| General access | Owner | Member | Admin, not a member | Anyone else |
 | --- | --- | --- | --- | --- |
-| Organisation | `owner` | — | `edit` | `ask` |
-| Private | `owner` | `ask` or `edit` | `none`, unless added | `none` |
+| Only people added (`none`) | `owner` | `ask` or `edit` | `none` | `none` |
+| Everyone in the organisation (`ask`) | `owner` | `ask` or `edit` | `edit` | `ask` |
+
+A person's access is the higher of their own role and what General access gives them. Workspaces made before General access had a `kind`: `Workspaces.migrate` makes each `org` one open to everyone, keeps the people of each private one, and drops `kind`.
 
 Adding to a workspace and deleting it take turns on the workspace's row. A new chat's first message and an upload lock it (`for key share`), check again that it is live and that the person may use it, and insert the chat or the document in the same short transaction (`Workspaces.admit`). A delete locks it first (`for update`), so it waits for those, and they wait for it and then find it deleted. The bucket upload and the start of the indexing run are outside that transaction; an upload that is refused there deletes its object.
 
-Only the owner changes the members of a private workspace. Only an admin changes an organisation workspace, or changes a workspace's kind. Every read and write of a workspace, a document or a passage goes through `accessOf`.
+Everyone who can edit changes the people of a workspace, one person at a time. Only an admin changes General access. Each sharing change is one short transaction that locks the workspace's row (`for no key update`): sharing changes to one workspace take turns, so two people who change different people at once both keep their change, and each change is logged with exactly what it changed. A delete waits for it. Every read and write of a workspace, a document or a passage goes through `accessOf`.
 
 ## API
 
@@ -253,18 +257,19 @@ Only the owner changes the members of a private workspace. Only an admin changes
 | --- | --- |
 | `GET /api/workspaces` | The workspaces the person can use, for the sidebar: the ones they pinned first, then the newest made first. Also in the boot data. |
 | `PUT`, `DELETE /api/workspaces/:id/pin` | The person's own pin. |
-| `POST /api/workspaces` | Anyone for `private`. Admins only for `org`. |
+| `POST /api/workspaces` | Anyone. Every workspace starts private. |
 | `GET /api/workspaces/:id` | `ask` and above. Members are in the answer only for a person who can change them. |
 | `PATCH /api/workspaces/:id` | `edit` and above: name, description, instructions |
-| `PUT /api/workspaces/:id/sharing` | The owner of a private workspace, or an admin for an organisation workspace: kind and members |
-| `DELETE /api/workspaces/:id` | The owner of a private workspace, or an admin for an organisation workspace |
+| `PUT`, `DELETE /api/workspaces/:id/members/:userId` | Who shares: add a person or change their role, or remove them |
+| `PUT /api/workspaces/:id/access` | Admins: General access |
+| `DELETE /api/workspaces/:id` | The owner, or an admin while it is open to everyone |
 | `POST /api/workspaces/:id/documents`, `DELETE /api/workspaces/:id/documents/:doc` | `edit` and above |
 | `GET /api/workspaces/:id/documents/:doc/file` | `ask` and above: the uploaded file, which opens in the chat's side panel from the document's name |
 | `GET /api/people?q=` | Any signed-in person. At most 20 results, with id, name and email. |
 | `POST /api/chat` | The body gets `workspaceId`, read only on the first message. |
-| `GET /api/admin/workspaces` | Admins: organisation workspaces, and counts of private ones |
+| `GET /api/admin/workspaces` | Admins: workspaces open to everyone, and counts of private ones |
 
-A workspace that the person cannot use answers 404, never 403, so a request does not show that the workspace exists. Changes to organisation workspaces go to the audit log (`admin_events`).
+A workspace that the person cannot use answers 404, never 403, so a request does not show that the workspace exists. Changes to a workspace while it is open to everyone go to the audit log (`admin_events`).
 
 ## Chat turn
 
@@ -277,12 +282,12 @@ A workspace that the person cannot use answers 404, never 403, so a request does
 ## Web
 
 - **Layout.** Rename `Workspace.vue` to `Shell.vue`. Add a "Workspaces" section above "Chats" in `ChatsPanel.vue`, and the same rows in `SidebarPlaceholder.vue`, so nothing moves when the panel loads.
-- **Sidebar rows.** Organisation workspaces first, then workspaces that others shared, then the person's own. Each row has an icon for its kind: a building, people, or a lock.
+- **Sidebar rows.** The person's pins first, then the newest made first. Each row has an icon for who can use it: a building while it is open to everyone, people once someone is added, else a lock.
 - **Chats list.** "Chats" shows all of the person's chats, also the ones in a workspace, in the same date groups. A row shows only the chat's title, so titles are not cut short. The chat itself shows its workspace: a breadcrumb in its header ("Dialysis unit / Exit-site care") links back to the workspace page, and the composer's placeholder names it ("Ask in Dialysis unit"). The workspace page also lists its own chats, from `GET /api/threads?workspace=<id>`: the person's chats in that workspace, chosen before the list's limit of 200, so newer chats elsewhere never hide a workspace's older ones. The page adds the chats of the person's list in that workspace (a chat just started, a new title), and asks again whenever that list changes.
-- **Workspace page (`?w=<slug>`).** A header with the name, Share (for the owner, and for admins on organisation workspaces) and a menu with Delete. People who can edit rename the workspace by its title, in place: a click or Enter makes it a field of the same size, Enter or leaving the field saves the name only, Escape cancels, and an empty name is not taken. The page is one column, the chat's (720px), so the header and the message box do not move when a chat opens from it. In it: "Your chats", then the workspace's sections: its instructions across the column, then "Sources" (its documents: files are the one kind of source for now) and "People" (once someone other than the owner can use it) side by side, one under the other on a phone. The composer floats at the bottom. Share in the header is the one place to change who can use it. Files dropped anywhere on the page, other than on the message box, are uploaded, once the page has loaded and for a person who can edit; elsewhere the drop is refused, so the browser does not open the file. An empty Instructions section is an "Add instructions" area; filled ones open a dialog with only the instructions, and it saves only them. The column fades in once the workspace and the person's chats in it are both known, so nothing in it moves when they arrive.
-- **A workspace with no chats yet.** While the person has no chat in the workspace, the workspace's sections are the page. A person who can edit also sees "Set up this workspace" over them, with a line that says they can ask now, a segment for each step that fills from the left as steps are done, and how many are done ("1 of 3 done"). Under it is a card for each step still to do: Instructions, Sources, and People for the owner of a private workspace (an organisation workspace has no People step: everyone uses it already). A card has a small scene drawn in CSS (a note and a pencil, a fan of files and an add tile, faces and a free seat) that moves a little on hover, a title, one line on what the step is for, and one button, whose click area is the whole card: "Add instructions" opens the Instructions dialog, "Upload files" the file picker, and "Share workspace" Share. Files dragged over the page show "Drop to upload" on the Sources card, and dropped anywhere on the page they upload as for that card. A step is done when it has something (instructions that are not empty, one document or more, someone added); its card then leaves, the others slide into its place, what it added fades into the sections below, and a status line tells screen readers ("Instructions added. 1 of 3 done."). These saves show no toast: the setup shows them. Focus moves to the next card's button; after the last step, to the message box. On a narrow column (a phone) the steps are rows, each a button with a small tile, all above the message box; one step left is a row at any width. Once every step is done, the setup fades and folds away, and the sections are the page. While the cards show, the sections show only what has something in them, so their empty areas do not repeat the cards. A file the server refused keeps its reason in view after the last card left, until the next upload. A person who can only ask sees no cards. The cards have nothing to close: they go once the person has a chat in the workspace. A workspace just made in this tab shows at once, with its cards, before it loads.
+- **Workspace page (`?w=<slug>`).** A header with the name, Share (for everyone who can edit) and a menu with Delete (for the owner, and admins while it is open to everyone). People who can edit rename the workspace by its title, in place: a click or Enter makes it a field of the same size, Enter or leaving the field saves the name only, Escape cancels, and an empty name is not taken. The page is one column, the chat's (720px), so the header and the message box do not move when a chat opens from it. In it: "Your chats", then the workspace's sections: its instructions across the column, then "Sources" (its documents: files are the one kind of source for now) and "People" (once someone other than the owner can use it) side by side, one under the other on a phone. The composer floats at the bottom. Share in the header is the one place to change who can use it. Files dropped anywhere on the page, other than on the message box, are uploaded, once the page has loaded and for a person who can edit; elsewhere the drop is refused, so the browser does not open the file. An empty Instructions section is an "Add instructions" area; filled ones open a dialog with only the instructions, and it saves only them. The column fades in once the workspace and the person's chats in it are both known, so nothing in it moves when they arrive.
+- **A workspace with no chats yet.** While the person has no chat in the workspace, the workspace's sections are the page. A person who can edit also sees "Set up this workspace" over them, with a line that says they can ask now, a segment for each step that fills from the left as steps are done, and how many are done ("1 of 3 done"). Under it is a card for each step still to do: Instructions, Sources, and People for everyone who can share it. People is done once someone is added, or the workspace is open to everyone. A card has a small scene drawn in CSS (a note and a pencil, a fan of files and an add tile, faces and a free seat) that moves a little on hover, a title, one line on what the step is for, and one button, whose click area is the whole card: "Add instructions" opens the Instructions dialog, "Upload files" the file picker, and "Share workspace" Share. Files dragged over the page show "Drop to upload" on the Sources card, and dropped anywhere on the page they upload as for that card. A step is done when it has something (instructions that are not empty, one document or more, someone added); its card then leaves, the others slide into its place, what it added fades into the sections below, and a status line tells screen readers ("Instructions added. 1 of 3 done."). Share saves while it is open, so its line ("People added.", "Shared with everyone in the organisation.") is said once it closes. These saves show no toast: the setup shows them. Focus moves to the next card's button; after the last step, to the message box. On a narrow column (a phone) the steps are rows, each a button with a small tile, all above the message box; one step left is a row at any width. Once every step is done, the setup fades and folds away, and the sections are the page. While the cards show, the sections show only what has something in them, so their empty areas do not repeat the cards. A file the server refused keeps its reason in view after the last card left, until the next upload. A person who can only ask sees no cards. The cards have nothing to close: they go once the person has a chat in the workspace. A workspace just made in this tab shows at once, with its cards, before it loads.
 - **Composer.** A new chat picks a workspace with a menu in `PromptInputTools`, beside the model selector. Once a chat has a workspace, the menu goes, and the placeholder names the workspace.
-- **Dialogs.** New workspace (name, instructions, and who can use it for an admin), Instructions and Share, each loaded on first use with a `DialogFrame` placeholder, as Settings is. The people picker is frappe-ui's `Combobox` with `filterable: false`. It calls `/api/people` and shows the name with the email under it.
+- **Dialogs.** New workspace (name and instructions), Instructions and Share, each loaded on first use with a `DialogFrame` placeholder, as Settings is. Share has "Add people" (frappe-ui's `Combobox` with `filterable: false`, which calls `/api/people` and shows the name with the email under it), "People with access" (the owner, then each person with a role menu: Can ask, Can edit, Remove), and "General access" (a menu for an admin, else text, with a line on what it means). Each change applies at once; a refused one is taken back with a line that says why. Opening or closing General access asks first, in place. Removing yourself asks first. The footer has Copy link (`/?w=<slug>`, "Link copied" for 2 s) and Done.
 - **Admin.** A "Workspaces" page at `/admin/workspaces`. Add it in three places: `router.ts`, the navigation in `App.vue`, and the boot navigation in `admin.html`.
 - **Rules.** Follow the ponder-ui skill: loading, empty and error states for each list, no layout shift on load, screenshots at 1440×900 and 390×844 in light and dark.
 
@@ -290,7 +295,7 @@ A workspace that the person cannot use answers 404, never 403, so a request does
 
 1. **Workspaces and sharing.** The tables without documents, `accessOf`, the API, people search, `threads.workspace_id`, instructions in the prompt, the rename to `Shell.vue`, the sidebar, the workspace page, the dialogs and the composer chip. A person can make a workspace with instructions, share it, and chat in it.
 2. **Documents.** Upload, text extraction, the indexing workflow, inline or search on each turn, `workspace_search`, and the Reading, Ready and Failed states. The system function ids in `charged_runs`, and memory embeddings kept in `runs`. The indexing log, the Details view and "Try again".
-3. **Admin page.** `/admin/workspaces` with the indexing log, audit events for organisation workspaces, and the "System" line on the usage page.
+3. **Admin page.** `/admin/workspaces` with the indexing log, audit events for workspaces open to everyone, and the "System" line on the usage page.
 
 Each pull request ships alone, and each one updates the README. The first one also changes the "no organisation" lines in `docs/pilot-plan.md` and `docs/memory.md`.
 
@@ -309,11 +314,11 @@ Each pull request ships alone, and each one updates the README. The first one al
   3. C gets "not found" for the same URL.
   4. A cannot read B's chat in the workspace.
   5. A removes B, and B can no longer send in that chat.
-  6. An admin makes an organisation workspace, and every person sees it.
+  6. An admin opens a workspace to everyone, and it keeps its editor. Every person sees it and can ask, but not edit. The editor shares it, but cannot change General access. Closing it, after a confirmation, takes the others out.
   7. A document goes from Reading to Ready, and an answer uses one of its passages.
   8. An editor opens the document's Details in the side panel, sees its summary, and sees its steps under Log. A person who can only ask does not see them.
   9. A document that fails shows its error, and "Try again" makes it Ready.
-  10. An owner sets up a new workspace from its cards (instructions, a document, Share). Each card leaves once its step is done, and what it added shows in the sections below; with all done, the sections are the page. A question in the box opens a chat. Then the page shows the chat over the sections, and the cards are gone. An organisation workspace has no People step. A person who can only ask sees no cards.
+  10. An owner sets up a new workspace from its cards (instructions, a document, Share). Each card leaves once its step is done, and what it added shows in the sections below; with all done, the sections are the page. A question in the box opens a chat. Then the page shows the chat over the sections, and the cards are gone. Opening a workspace to everyone does the People step. A person who can only ask sees no cards.
 - **Embeddings in end-to-end tests.** The fake OpenRouter (`e2e/fake/server.ts`) already answers embedding calls for memory. Make sure its vectors put a question near the passage it is about.
 - **Traces.** Add each new span name to `KNOWN_NAMES`. Extend `tracing.check.ts` to show that no workspace name, document name or passage text gets into a trace.
 - **Indexing log.** A unit test runs the workflow on a PDF with one picture page and a fake model. It checks the rows in order, that each cost matches its `runs` row, and that no row holds page text.
@@ -322,7 +327,8 @@ Each pull request ships alone, and each one updates the README. The first one al
 
 - Connectors in a workspace. Add an `mcp_servers` table for the shared definition, as `docs/connectors-plan.md` plans. Each member signs in once to each server, and their connection points to the server.
 - Teams, if adding people one by one becomes too slow.
-- Editors for organisation workspaces who are not admins.
+- A General access role "Can edit", for everyone in the organisation (widen the `org_access` check).
+- A "Browse workspaces" list, if owners who are not admins should open their own workspaces to everyone.
 - DOCX, XLSX and HTML documents, as Flow reads them.
 - A strict "workspace only" mode, with a "Search the web" button when the workspace has no answer.
 - Source chips under an answer that name the document and the passage.

@@ -3,7 +3,7 @@ import { me } from "../account";
 import { client, unwrap, type Answer } from "../api";
 import { fromBoot } from "../boot";
 import { toast } from "../toasts";
-import { canEdit, people } from "./access";
+import { accessIcon, canEdit, canShare, isShared, people, sharedWith } from "./access";
 
 /**
  * The workspaces the person can use (server/workspaces/), for the sidebar, the composer's
@@ -21,7 +21,10 @@ export type WorkspaceDetail = Answer<(typeof client.api.workspaces)[":id"]["$get
 export type Person = { id: string; name: string; email: string };
 export type MemberAccess = "ask" | "edit";
 export type Member = Person & { access: MemberAccess };
-export type WorkspaceInput = { kind?: "org" | "private"; name: string; instructions: string };
+/** General access: "ask" while everyone in the organisation can ask in it. */
+export type OrgAccess = "none" | "ask";
+/** Every workspace starts private: an admin opens it to everyone from Share. */
+export type WorkspaceInput = { name: string; instructions: string };
 
 export const workspaces = ref<WorkspaceSummary[]>([]);
 /** The list came from the server: until then the sidebar shows skeleton rows. */
@@ -108,18 +111,38 @@ export function takeMadeWorkspace(slug: string) {
 }
 
 /** Only the fields given change: the title renames, the Instructions dialog sets the instructions. */
-export async function updateWorkspace(id: string, changes: Partial<Omit<WorkspaceInput, "kind">>) {
+export async function updateWorkspace(id: string, changes: Partial<WorkspaceInput>) {
 	const { workspace } = await unwrap(client.api.workspaces[":id"].$patch({ param: { id: encodeURIComponent(id) }, json: changes }), "The workspace could not be saved.");
 	await loadWorkspaces();
 	return workspace;
 }
 
-export async function shareWorkspace(id: string, kind: "org" | "private", members: { userId: string; access: MemberAccess }[]) {
-	const json = { kind, members };
-	const { workspace } = await unwrap(client.api.workspaces[":id"].sharing.$put({ param: { id: encodeURIComponent(id) }, json }), "Sharing could not be saved.");
-	await loadWorkspaces();
+/**
+ * Sharing, one change at a time (ShareDialog.vue): a person added or given a role, a person
+ * removed, General access changed. Each answers the workspace as the person sees it now; the
+ * sidebar is read again, for its icon.
+ */
+export async function setMember(id: string, userId: string, access: MemberAccess) {
+	const param = { id: encodeURIComponent(id), userId: encodeURIComponent(userId) };
+	const { workspace } = await unwrap(client.api.workspaces[":id"].members[":userId"].$put({ param, json: { access } }), SHARING_FAILED);
+	void loadWorkspaces();
 	return workspace;
 }
+
+export async function removeMember(id: string, userId: string) {
+	const param = { id: encodeURIComponent(id), userId: encodeURIComponent(userId) };
+	const { workspace } = await unwrap(client.api.workspaces[":id"].members[":userId"].$delete({ param }), SHARING_FAILED);
+	void loadWorkspaces();
+	return workspace;
+}
+
+export async function setOrgAccess(id: string, orgAccess: OrgAccess) {
+	const { workspace } = await unwrap(client.api.workspaces[":id"].access.$put({ param: { id: encodeURIComponent(id) }, json: { orgAccess } }), SHARING_FAILED);
+	void loadWorkspaces();
+	return workspace;
+}
+
+const SHARING_FAILED = "The change could not be saved.";
 
 export async function deleteWorkspace(id: string) {
 	await unwrap(client.api.workspaces[":id"].$delete({ param: { id: encodeURIComponent(id) } }), "The workspace could not be deleted.");
@@ -209,22 +232,9 @@ export async function searchPeople(q: string): Promise<readonly Person[]> {
 	return (await unwrap(client.api.people.$get({ query: { q } }), "People could not load.")).people;
 }
 
-/** The icon of a workspace's kind: a building for everyone, people when shared, a lock when only the owner uses it. */
-export function kindIcon(workspace: Pick<WorkspaceSummary, "kind" | "memberCount">) {
-	if (workspace.kind === "org") return "lucide-building-2";
-	return workspace.memberCount ? "lucide-users" : "lucide-lock";
+/** Who deletes it: its owner, and admins while it is open to everyone (server/workspaces/access.ts). */
+export function canDelete(workspace: Pick<WorkspaceSummary, "orgAccess" | "access">) {
+	return workspace.access === "owner" || (workspace.orgAccess !== "none" && isAdmin.value);
 }
 
-/** Who can use it, in a few words: the sidebar row's hint. */
-export function sharedWith(workspace: Pick<WorkspaceSummary, "kind" | "access" | "memberCount">) {
-	if (workspace.kind === "org") return "Everyone";
-	if (workspace.access !== "owner") return "Shared with you";
-	return workspace.memberCount ? `You and ${people(workspace.memberCount)}` : "Only you";
-}
-
-/** The owner shares a private workspace; an admin an organisation one (server/workspaces/access.ts). */
-export function canShare(workspace: Pick<WorkspaceSummary, "kind" | "access">) {
-	return workspace.kind === "org" ? isAdmin.value : workspace.access === "owner";
-}
-
-export { canEdit, people };
+export { accessIcon, canEdit, canShare, isShared, people, sharedWith };

@@ -27,8 +27,17 @@ export async function createWorkspace(page: Page, name: string, instructions = "
 	return (await jsonOf<{ workspace: { id: string; slug: string } }>(response)).workspace;
 }
 
+/** Adds each person to the workspace, with their role, as Share does: one at a time. */
 export async function share(page: Page, workspaceId: string, members: { userId: string; access: "ask" | "edit" }[]) {
-	const response = await page.request.put(`/api/workspaces/${workspaceId}/sharing`, { data: { kind: "private", members } });
+	for (const member of members) {
+		const response = await page.request.put(`/api/workspaces/${workspaceId}/members/${member.userId}`, { data: { access: member.access } });
+		expect(response.ok(), await response.text()).toBe(true);
+	}
+}
+
+/** Opens the workspace to everyone in the organisation: the page's person must be an admin. */
+export async function openToEveryone(page: Page, workspaceId: string) {
+	const response = await page.request.put(`/api/workspaces/${workspaceId}/access`, { data: { orgAccess: "ask" } });
 	expect(response.ok(), await response.text()).toBe(true);
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkspaceDocument } from "./documents";
+import { accessIcon, isShared, sharedWith } from "./access";
 import { setupSteps } from "./onboarding";
 import type { WorkspaceDetail } from "./store";
 
@@ -9,7 +10,7 @@ function workspace(changes: Partial<WorkspaceDetail> = {}): WorkspaceDetail {
 	return {
 		id: "w1",
 		slug: "hr-policies",
-		kind: "private",
+		orgAccess: "none",
 		name: "HR Policies",
 		description: "",
 		icon: null,
@@ -19,6 +20,8 @@ function workspace(changes: Partial<WorkspaceDetail> = {}): WorkspaceDetail {
 		instructions: "",
 		owner,
 		canShare: true,
+		canDelete: true,
+		canChangeOrgAccess: false,
 		createdAt: "2026-11-18T10:00:00.000Z",
 		members: [],
 		documents: [],
@@ -50,15 +53,32 @@ describe("a new workspace's setup steps", () => {
 		expect(setupSteps(workspace({ instructions: "  \n " }))[0]?.done).toBe(false);
 	});
 
-	it("an organisation workspace has no People step: everyone in the organisation uses it already", () => {
-		expect(setupSteps(workspace({ kind: "org", access: "edit" })).map((step) => [step.key, step.done])).toEqual([
+	it("People is done once the workspace is open to everyone, also with nobody added", () => {
+		expect(setupSteps(workspace({ orgAccess: "ask", access: "edit" })).map((step) => [step.key, step.done])).toEqual([
 			["instructions", false],
 			["documents", false],
+			["people", true],
 		]);
 	});
 
-	it("an editor who can't share has no People step, and a person who can only ask has none", () => {
-		expect(setupSteps(workspace({ access: "edit", canShare: false })).map((step) => step.key)).toEqual(["instructions", "documents"]);
+	it("an editor shares, so has the People step too; a person who can only ask has no steps", () => {
+		expect(setupSteps(workspace({ access: "edit", canShare: true })).map((step) => step.key)).toEqual(["instructions", "documents", "people"]);
 		expect(setupSteps(workspace({ access: "ask", canShare: false }))).toEqual([]);
+	});
+});
+
+describe("who can use a workspace, in a word and an icon", () => {
+	const summary = (orgAccess: "none" | "ask", access: string, memberCount: number) => ({ orgAccess, access, memberCount });
+
+	it("is open to everyone, shared, or the owner's alone", () => {
+		expect(accessIcon(summary("ask", "ask", 0))).toBe("lucide-building-2");
+		expect(accessIcon(summary("ask", "owner", 3))).toBe("lucide-building-2");
+		expect(accessIcon(summary("none", "owner", 2))).toBe("lucide-users");
+		expect(accessIcon(summary("none", "owner", 0))).toBe("lucide-lock");
+		expect(sharedWith(summary("ask", "edit", 2))).toBe("Everyone");
+		expect(sharedWith(summary("none", "ask", 2))).toBe("Shared with you");
+		expect(sharedWith(summary("none", "owner", 1))).toBe("You and 1 person");
+		expect(sharedWith(summary("none", "owner", 0))).toBe("Only you");
+		expect([isShared(summary("ask", "owner", 0)), isShared(summary("none", "owner", 1)), isShared(summary("none", "owner", 0))]).toEqual([true, true, false]);
 	});
 });
