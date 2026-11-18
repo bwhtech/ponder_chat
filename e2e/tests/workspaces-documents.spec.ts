@@ -347,6 +347,53 @@ test("10. the page stops reading an Indexing document again once Details close, 
 	});
 });
 
+test("10c. a person removed while a document is Indexing: the next read of the workspace says it is gone, and closes its Details", async ({ page, person, fake, db, browser }) => {
+	test.setTimeout(90_000);
+	const tag = person.id.slice(0, 6);
+	const name = `Removed while read ${tag}`;
+	const { id, slug } = await createWorkspace(page, name);
+	await uploadReady(page, id, textFile("notes.md", "Notes."));
+	const editor = await newPerson(browser, db, fake, "removed editor");
+	await share(page, id, [{ userId: editor.person.id, access: "edit" }]);
+	// For the editor, the document stays Indexing, so the page keeps reading the workspace.
+	await editor.page.route(
+		(url) => [`/api/workspaces/${slug}`, `/api/workspaces/${id}`].includes(url.pathname),
+		async (route) => {
+			if (route.request().method() !== "GET") return route.fallback();
+			const response = await route.fetch();
+			if (!response.ok()) return route.fulfill({ response });
+			const body = await jsonOf<{ workspace: { documents: { status: string }[] } }>(response);
+			for (const document of body.workspace.documents) document.status = "reading";
+			await route.fulfill({ response, json: body });
+		},
+	);
+	// Its Details say so too: they would otherwise tell the page it is Ready.
+	await editor.page.route(
+		(url) => url.pathname.startsWith(`/api/workspaces/${id}/documents/`) && url.pathname.endsWith("/log"),
+		async (route) => {
+			const response = await route.fetch();
+			if (!response.ok()) return route.fulfill({ response });
+			const body = await jsonOf<{ document: { status: string } }>(response);
+			body.document.status = "reading";
+			await route.fulfill({ response, json: body });
+		},
+	);
+	await editor.page.goto(`/?w=${slug}`);
+	await expect(row(editor.page, "notes.md")).toHaveAttribute("data-status", "reading");
+	const { details } = await openDetails(editor.page, "notes.md");
+
+	const refusals: number[] = [];
+	editor.page.on("response", (response) => new URL(response.url()).pathname === `/api/workspaces/${id}` && response.status() >= 400 && refusals.push(response.status()));
+	expect((await page.request.delete(`/api/workspaces/${id}/members/${editor.person.id}`)).ok()).toBe(true);
+	// The next poll, at most a few seconds on.
+	await expect.poll(() => refusals.length, { timeout: 15_000 }).toBeGreaterThan(0);
+	await expect(editor.page.getByText("No workspace here")).toBeVisible();
+	await expect(row(editor.page, "notes.md")).toHaveCount(0);
+	await expect(details).toHaveCount(0);
+	await expect(editor.page.locator('[data-slot="workspace-rows"]').getByRole("button", { name, exact: true })).toHaveCount(0);
+	await editor.context.close();
+});
+
 test("10b. Details closed while Try again is on its way do not read the log again, and an older log never undoes the row's Ready", async ({ page, person }) => {
 	test.setTimeout(90_000);
 	const tag = person.id.slice(0, 6);

@@ -3,6 +3,7 @@ import { Button, Skeleton } from "frappe-ui";
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
 import { dialog } from "../dialogs";
 import EmptyState from "../EmptyState.vue";
+import { closePanel } from "../side-panel/panel";
 import { toast } from "../toasts";
 import { useThreads, useWorkspaceThreads } from "../threads";
 import { firstGreeting, forgetWorkspace, peekWorkspace, writeWorkspace } from "./cache";
@@ -179,17 +180,62 @@ async function load() {
 		if (JSON.stringify(found) !== JSON.stringify(detail.value)) detail.value = found;
 	} catch (error) {
 		if (mine !== asked) return;
-		if (isGone(error)) {
-			// Deleted, or not shared with the person (any more): a copy shown from memory goes too.
-			if (detail.value) forgetWorkspace(detail.value.id);
-			detail.value = undefined;
-			missing.value = true;
-			// It may have been in the sidebar: the person lost it, or it was deleted.
-			void loadWorkspaces();
-		} else if (!detail.value) loadError.value = (error as Error).message;
-		// Offline for a moment, with a copy shown: it stays, as a chat's does.
+		if (isGone(error)) gone();
+		else if (!detail.value) loadError.value = (error as Error).message;
+		// Offline for a moment, with a copy shown: it stays, as a chat's does, and is read again
+		// once the person is back online or back on the tab (below).
 	}
 }
+
+/**
+ * Deleted, or not shared with the person (any more), as a load, a poll or a check says: the
+ * page says it is not found, and what it showed goes, from memory too, with the side panel,
+ * which only shows this workspace's files and Details here.
+ */
+function gone() {
+	const shown = detail.value?.id ?? workspaceId.value;
+	if (shown) forgetWorkspace(shown);
+	poller.stop();
+	detail.value = undefined;
+	missing.value = true;
+	closePanel();
+	// It may have been in the sidebar: the person lost it, or it was deleted.
+	void loadWorkspaces();
+}
+
+/**
+ * Reads the workspace again, as a poll or a check: its answer replaces what shows, unless a
+ * change made here since is newer. False when the workspace is gone; a read that fails for
+ * another reason (offline) changes nothing.
+ */
+async function readAgain(current: () => boolean = () => true) {
+	const mine = asked;
+	const seen = changes;
+	try {
+		const fresh = await fetchWorkspace(workspaceId.value);
+		if (current() && mine === asked && seen === changes && JSON.stringify(fresh) !== JSON.stringify(detail.value)) detail.value = fresh;
+		return true;
+	} catch (error) {
+		if (!isGone(error)) return true;
+		if (current() && mine === asked) gone();
+		return false;
+	}
+}
+
+/**
+ * Back on the tab, or back online: the workspace is read again, so a copy shown from memory,
+ * or one whose read failed or never came back, does not stay out of date, nor show a
+ * workspace the person lost meanwhile.
+ */
+function recheck() {
+	if (document.visibilityState === "visible" && detail.value && !missing.value) void readAgain();
+}
+addEventListener("online", recheck);
+document.addEventListener("visibilitychange", recheck);
+onBeforeUnmount(() => {
+	removeEventListener("online", recheck);
+	document.removeEventListener("visibilitychange", recheck);
+});
 
 /** Each version the page shows, for the next visit (cache.ts): a change made here is in it. */
 watch(detail, (now) => now && writeWorkspace(now));
@@ -222,18 +268,8 @@ function startPolling() {
 /** Reads the workspace again; the wait before the next read, or null. */
 async function poll(current: () => boolean) {
 	const mine = asked;
-	const seen = changes;
-	try {
-		const fresh = await fetchWorkspace(workspaceId.value);
-		if (current() && mine === asked && seen === changes) detail.value = fresh;
-	} catch (error) {
-		// Deleted, or shared no more: asking again will not help, and the next visit asks first.
-		// Offline for a moment: the next poll tries again.
-		if (isGone(error)) {
-			forgetWorkspace(workspaceId.value);
-			return null;
-		}
-	}
+	// Deleted, or shared no more: asking again will not help. Offline for a moment: the next poll tries again.
+	if (!(await readAgain(current))) return null;
 	if (!current() || mine !== asked || !reading.value) return null;
 	pollDelay = Math.min(counting.value ? POLL_PROGRESS_MAX_MS : POLL_MAX_MS, pollDelay * 1.5);
 	return pollDelay;
