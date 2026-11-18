@@ -25,6 +25,11 @@ export async function loadSkills() {
 	if (response?.ok) skills.value = (await response.json()).skills;
 }
 
+/** The message box's placeholder, with the $ hint while there are skills to choose. */
+export function withSkillsHint(placeholder: string) {
+	return skills.value.length ? `${placeholder}. Type $ for skills` : placeholder;
+}
+
 export function skillDescription(name: string) {
 	return skills.value.find((skill) => skill.name === name)?.description;
 }

@@ -1,9 +1,12 @@
 import type { UIMessage } from "ai";
-import { computed, ref, shallowRef } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import { nameFromFirstMessage } from "../shared/thread-name";
 import { client, unwrap, type Answer } from "./api";
 import { fromBoot } from "./boot";
-import { forgetThread, peekThread, readThread, writeThread, type CachedThread } from "./thread-cache";
+import { isRecord } from "./json";
+import { forgetThread, peekThread, readThread, threadFrom, writeThread, type CachedThread } from "./thread-cache";
+import { forgetChat, peekWorkspaceChats, writeWorkspaceChats } from "./workspaces/cache";
+import { openWorkspaceKey } from "./workspaces/store";
 
 /**
  * The person's threads and the one open now. The open thread lives in the URL
@@ -13,6 +16,9 @@ import { forgetThread, peekThread, readThread, writeThread, type CachedThread } 
  * A thread kept on this device (thread-cache.ts) shows at once, and the server is
  * asked afterwards: a 304 when nothing changed, or the newer thread, which replaces
  * the chat unless a reply is on its way. The list is kept in localStorage the same way.
+ *
+ * A workspace page (`?w=<slug>`) takes the open thread's place in the URL; opening a thread
+ * takes it back.
  */
 export type ThreadSummary = Answer<typeof client.api.threads.$get>["threads"][number];
 
@@ -28,6 +34,8 @@ const loading = ref(false);
 const running = ref(false);
 /** The open thread's last reply failed (the model kept erroring); the chat offers Retry. */
 const failed = ref(false);
+/** The open thread's workspace, from the server's copy; null for a thread in no workspace, or a new one. */
+const threadWorkspace = ref<string | null>(null);
 /** Goes up when a newer copy of the open thread replaces the one shown, so the chat remounts with it. */
 const revision = ref(0);
 /**
@@ -44,11 +52,14 @@ const pending = new Map<string, ThreadSummary>();
 
 export function useThreads() {
 	const currentThread = computed(() => threads.value.find((thread) => thread.id === current.value));
+	/** The open chat's workspace: from the list, or from the thread itself when the list does not have it yet. */
+	const currentWorkspace = computed(() => currentThread.value?.workspaceId ?? threadWorkspace.value ?? undefined);
 	return {
 		threads,
 		listLoaded,
 		current,
 		currentThread,
+		currentWorkspace,
 		messages,
 		running,
 		failed,
@@ -58,6 +69,7 @@ export function useThreads() {
 		reload,
 		refresh,
 		open,
+		resume,
 		prefetch,
 		remember,
 		start,
@@ -73,12 +85,15 @@ async function init() {
 	// Read now, not on load: signing in (account.ts) may have just cleared another person's list.
 	threads.value = storedList();
 	listLoaded.value = threads.value.length > 0;
-	const id = new URL(location.href).searchParams.get("t");
-	await Promise.all([refresh(), id ? open(id, { push: false }) : start({ push: false })]);
+	const params = new URL(location.href).searchParams;
+	const id = params.get("t");
+	// A workspace page has no thread open until one is picked or started.
+	await Promise.all([refresh(), id ? open(id, { push: false }) : params.has("w") ? undefined : start({ push: false })]);
 	addEventListener("popstate", () => {
-		const id = new URL(location.href).searchParams.get("t");
+		const params = new URL(location.href).searchParams;
+		const id = params.get("t");
 		if (id && id !== current.value) void open(id, { push: false });
-		else if (!id) start({ push: false });
+		else if (!id && !params.has("w")) start({ push: false });
 	});
 }
 
@@ -98,19 +113,125 @@ async function refresh() {
 
 /** The list from the server; undefined when it refused. The first one comes with the page (boot.ts). */
 async function fetchList(): Promise<ThreadSummary[] | undefined> {
-	const response = await client.api.threads.$get();
+	const response = await client.api.threads.$get({ query: {} });
 	return response.ok ? (await response.json()).threads : undefined;
 }
 
+/**
+ * The person's chats in one workspace, newest first: the server's list for the workspace,
+ * which it filters before its limit of 200, so a workspace's older chats are there however
+ * many newer chats are elsewhere. With the chats of the person's list in that workspace,
+ * which has a chat started on this page and its new title first. Asked again whenever the
+ * person's list changes (a refresh, a rename, a delete), so the two never disagree for long.
+ */
+export function useWorkspaceThreads(workspaceId: () => string) {
+	const fetched = ref<ThreadSummary[]>([]);
+	/** The workspace whose list has been asked for once, answered or not: until then, no chats does not mean none. */
+	const askedFor = ref("");
+	// Each ask takes a number; a slower answer for another workspace, or an older one, is dropped.
+	let asking = 0;
+	async function ask() {
+		const id = workspaceId();
+		const token = ++asking;
+		if (!id) return void (fetched.value = []);
+		// A workspace opened before on this page (workspaces/cache.ts): its list shows at once, and is asked again.
+		const cached = askedFor.value === id ? undefined : peekWorkspaceChats(id);
+		if (cached) {
+			fetched.value = cached;
+			askedFor.value = id;
+		}
+		const fresh = await fetchWorkspaceChats(id);
+		// Asked for before a chat changed: the ask that change started has the newer list.
+		if (token !== asking || fresh === "older") return;
+		if (fresh) fetched.value = fresh;
+		askedFor.value = id;
+	}
+	watch([workspaceId, threads, chatsChanged], ask, { immediate: true });
+	const chats = computed(() => {
+		const id = workspaceId();
+		if (!id) return [];
+		const byId = new Map(fetched.value.filter((thread) => thread.workspaceId === id && !deleted.value.has(thread.id)).map((thread) => [thread.id, thread]));
+		if (listLoaded.value) for (const thread of threads.value) if (thread.workspaceId === id) byId.set(thread.id, thread);
+		return [...byId.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+	});
+	const loaded = computed(() => Boolean(workspaceId()) && askedFor.value === workspaceId());
+	return { chats, loaded };
+}
+
+/**
+ * Goes up each time this page deletes, renames or starts a chat. A workspace's list asked for
+ * before then may not have the change: it is neither shared with a later ask nor kept, and
+ * the change asks again (useWorkspaceThreads). A deleted chat leaves every list at once.
+ */
+const chatsChanged = ref(0);
+const deleted = shallowRef<ReadonlySet<string>>(new Set());
+function chatChanged() {
+	chatsChanged.value++;
+}
+
+type WorkspaceChats = ThreadSummary[] | undefined | "older";
+const chatsInflight = new Map<string, { version: number; request: Promise<WorkspaceChats> }>();
+
+/**
+ * The server's list of the person's chats in a workspace, kept for the next visit
+ * (workspaces/cache.ts); undefined when it could not be reached (offline: the person's list
+ * still gives the chats it has), and "older" when a chat changed while it was on its way. A
+ * request on its way for the workspace, asked for since the last change, is shared.
+ */
+function fetchWorkspaceChats(id: string) {
+	const version = chatsChanged.value;
+	const pending = chatsInflight.get(id);
+	if (pending?.version === version) return pending.request;
+	const request = (async (): Promise<WorkspaceChats> => {
+		try {
+			const response = await client.api.threads.$get({ query: { workspace: id } });
+			if (!response.ok) return undefined;
+			const list = (await response.json()).threads;
+			if (version !== chatsChanged.value) return "older";
+			writeWorkspaceChats(id, list);
+			return list;
+		} catch {
+			return undefined;
+		} finally {
+			if (chatsInflight.get(id)?.version === version) chatsInflight.delete(id);
+		}
+	})();
+	chatsInflight.set(id, { version, request });
+	return request;
+}
+
+/** Fetches a workspace's chats ahead of a click on its row, as `prefetch` does a chat's messages. */
+export function prefetchWorkspaceChats(id: string) {
+	if (!peekWorkspaceChats(id)) void fetchWorkspaceChats(id);
+}
+
 async function open(id: string, { push = true } = {}) {
-	if (id === current.value) return;
+	// Open already, behind a workspace page: only the URL goes back to it. Its chat
+	// mounts again, and the shell calls resume() for that.
+	if (id === current.value) return void (new URL(location.href).searchParams.get("t") !== id && setUrl(id, push));
+	const loaded = load(id);
+	setUrl(id, push);
+	await loaded;
+}
+
+/**
+ * The open thread's chat mounts again, back from a workspace page (Shell.vue).
+ * `messages` still holds the thread as it opened; the chat's own messages since then are in
+ * the cache (remember), so it shows those, and asks the server. A new thread that has
+ * sent nothing has no copy, and nothing to restore.
+ */
+function resume() {
+	if (peekThread(current.value)) void load(current.value);
+}
+
+/** Shows the thread from this device at once, then asks the server for a newer copy. */
+async function load(id: string) {
 	const token = ++opening;
 	// The messages change with the id, so the chat never mounts the new thread with the old one's messages.
 	const peeked = peekThread(id);
 	if (peeked) show(peeked);
 	else loading.value = true;
 	current.value = id;
-	setUrl(id, push);
 
 	const cached = peeked ?? (await readThread(id));
 	if (token !== opening) return;
@@ -119,6 +240,7 @@ async function open(id: string, { push = true } = {}) {
 	const fresh = await fetchThread(id, cached?.etag ?? null);
 	if (token !== opening) return;
 	loading.value = false;
+	if (fresh && fresh !== "same") threadWorkspace.value = fresh.workspaceId ?? null;
 	if (!cached) return show(fresh && fresh !== "same" ? fresh : { messages: [], running: false, etag: null });
 	// Nothing new, or the same messages under a new version (the page saved them itself).
 	if (!fresh || fresh === "same" || sameThread(cached, fresh)) return;
@@ -163,8 +285,8 @@ function fetchThread(id: string, etag: string | null) {
 			});
 			if (response.status === 304) return "same" as const;
 			if (!response.ok) return undefined;
-			const body = await response.json();
-			const thread: CachedThread = { messages: body.messages, running: !!body.running, failed: !!body.failed, etag: response.headers.get("ETag") };
+			const thread = threadFrom(await response.json(), response.headers.get("ETag"));
+			if (!thread) return undefined;
 			// Not saved yet (a new thread in the URL): nothing to keep.
 			if (thread.etag) writeThread(id, thread);
 			return thread;
@@ -180,6 +302,7 @@ function fetchThread(id: string, etag: string | null) {
 
 function show(thread: CachedThread) {
 	loading.value = false;
+	threadWorkspace.value = thread.workspaceId ?? null;
 	messages.value = thread.messages;
 	running.value = thread.running;
 	failed.value = !!thread.failed;
@@ -197,6 +320,7 @@ function start({ push = true } = {}) {
 	running.value = false;
 	failed.value = false;
 	loading.value = false;
+	threadWorkspace.value = null;
 	current.value = id;
 	setUrl(id, push);
 }
@@ -206,11 +330,12 @@ function start({ push = true } = {}) {
  * that message, as the server names it until it has a title. The server names it with a cheap
  * model a moment later (server/thread-title.ts), so the list is asked again until the name changes.
  */
-function added(id: string, text: string) {
+function added(id: string, text: string, workspaceId?: string) {
 	if (threads.value.some((thread) => thread.id === id)) return;
-	const thread = { id, title: nameFromFirstMessage(text), updatedAt: new Date().toISOString(), messages: 1 };
+	const thread = { id, title: nameFromFirstMessage(text), updatedAt: new Date().toISOString(), messages: 1, ...(workspaceId && { workspaceId }) };
 	pending.set(id, thread);
 	threads.value = [thread, ...threads.value];
+	chatChanged();
 	void waitForTitle(id, thread.title);
 }
 
@@ -227,12 +352,16 @@ async function waitForTitle(id: string, untitled: string) {
 
 async function rename(id: string, title: string) {
 	await unwrap(client.api.threads[":id"].$patch({ param: { id: encodeURIComponent(id) }, json: { title } }), "The thread could not be renamed.");
+	chatChanged();
 	await refresh();
 }
 
 async function remove(id: string) {
 	await unwrap(client.api.threads[":id"].$delete({ param: { id: encodeURIComponent(id) } }), "The thread could not be deleted.");
 	forgetThread(id);
+	forgetChat(id);
+	deleted.value = new Set([...deleted.value, id]);
+	chatChanged();
 	pending.delete(id);
 	await refresh();
 	if (id === current.value) {
@@ -244,14 +373,28 @@ async function remove(id: string) {
 
 function storedList(): ThreadSummary[] {
 	try {
-		return JSON.parse(localStorage.getItem(LIST_KEY) ?? "[]");
+		const stored: unknown = JSON.parse(localStorage.getItem(LIST_KEY) ?? "[]");
+		return Array.isArray(stored) ? stored.filter(isThreadSummary) : [];
 	} catch {
 		return [];
 	}
 }
 
+function isThreadSummary(value: unknown): value is ThreadSummary {
+	return (
+		isRecord(value) &&
+		typeof value.id === "string" &&
+		typeof value.title === "string" &&
+		typeof value.updatedAt === "string" &&
+		typeof value.messages === "number" &&
+		(value.workspaceId === undefined || typeof value.workspaceId === "string")
+	);
+}
+
 function setUrl(id: string, push: boolean) {
 	const url = new URL(location.href);
+	url.searchParams.delete("w");
+	openWorkspaceKey.value = "";
 	url.searchParams.set("t", id);
 	if (push) history.pushState(null, "", url);
 	else history.replaceState(null, "", url);

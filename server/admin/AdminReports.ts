@@ -11,14 +11,15 @@ import { utcDay } from "../credits/Credits.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
 import * as Invites from "../people/Invites.ts";
 import * as Settings from "../settings/Settings.ts";
-import { type Activity, type Named, PAGE, toActivity, unknownTarget } from "./activity.ts";
+import { type Activity, type Named, PAGE, workspaceIds, toActivity, unknownTarget } from "./activity.ts";
 import * as AdminEvents from "./AdminEvents.ts";
 import { deviceName, displayName, type Person, PersonRow, toPerson } from "./people.ts";
-import { byModel, lastDays, limitsOf, Usage } from "./usage.ts";
+import * as Runs from "../telemetry/Runs.ts";
+import { byModel, lastDays, limitsOf, systemSpend, Usage } from "./usage.ts";
 
 /**
- * What /admin reads (admin/routes.ts): its sidebar's counts, the Overview, People,
- * Requests and Activity pages. Usage numbers only: nothing here reads messages or
+ * What /admin reads (admin/routes.ts): its sidebar's counts, the Overview (with the
+ * app's own spend, its "System" line), People, Requests and Activity pages. Usage numbers only: nothing here reads messages or
  * thread titles.
  */
 export type ActivityPage = { events: Activity[]; next: number | null; person: Named | null };
@@ -26,6 +27,7 @@ export type ActivityPage = { events: Activity[]; next: number | null; person: Na
 const NamedRow = Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String });
 const UsageRow = Schema.Struct({ user: Schema.String, day: Schema.String, usd: Schema.Number, replies: Schema.Number });
 const ModelRow = Schema.Struct({ model: Schema.String, usd: Schema.Number });
+const SystemRow = Schema.Struct({ function_id: Schema.String, usd: Schema.Number, calls: Schema.Number });
 const OwnRow = Schema.Struct({ user_id: Schema.String, daily_credits: Schema.Number });
 const ExtraRow = Schema.Struct({ user_id: Schema.String, credits: Schema.Number });
 const SessionRow = Schema.Struct({ user_agent: Schema.NullOr(Schema.String), updated_at: Schema.Date });
@@ -82,6 +84,15 @@ const makeReads = Effect.gen(function* () {
 			where created_at >= ${since} ${user ? sql`and "user" = ${user}` : sql``}
 			group by 1`,
 	});
+	// From `runs`, not `charged_runs`: the view leaves these calls out (telemetry/Runs.ts).
+	const findSystem = SqlSchema.findAll({
+		Request: Schema.Date,
+		Result: SystemRow,
+		execute: (since) => sql`
+			select function_id, coalesce(sum(cost_usd), 0)::float8 as usd, count(*)::int as calls from runs
+			where created_at >= ${since} and function_id = any(${[...Runs.SYSTEM_FUNCTION_IDS]})
+			group by 1`,
+	});
 	const findOwn = SqlSchema.findAll({ Request: Schema.Void, Result: OwnRow, execute: () => sql`select user_id, daily_credits from credit_limits` });
 	const findExtra = SqlSchema.findAll({
 		Request: Schema.String,
@@ -113,6 +124,12 @@ const makeReads = Effect.gen(function* () {
 		return byModel(rows, creditsPerUsd);
 	});
 
+	/** What the app's own calls cost over the last `days` days, per system function id. */
+	const systemCost = Effect.fn("AdminReports.systemCost")(function* (days: number) {
+		const since = new Date(`${lastDays(days, yield* today)[0]}T00:00:00Z`);
+		return systemSpend(yield* findSystem(since).pipe(Effect.catchTags({ SchemaError: Effect.die })));
+	});
+
 	/** The limit for today of each person. Both tables are small, so they are read whole. */
 	const limitsToday = Effect.gen(function* () {
 		const { defaultDailyCredits } = yield* settings.get;
@@ -129,16 +146,24 @@ const makeReads = Effect.gen(function* () {
 		return new Map(rows.map((row): [string, Named] => [row.id, { id: row.id, name: displayName(row.name, row.email), email: row.email }]));
 	});
 
-	return { sql, settings, usage, creditsByModel, limitsToday, namesOf };
+	return { sql, settings, usage, creditsByModel, systemCost, limitsToday, namesOf };
 });
 
 type Reads = Effect.Success<typeof makeReads>;
 
-function makeOverview({ sql, settings, usage, creditsByModel, limitsToday }: Reads, extraCredits: ExtraCredits.ExtraCredits["Service"]) {
+function makeOverview({ sql, settings, usage, creditsByModel, systemCost, limitsToday }: Reads, extraCredits: ExtraCredits.ExtraCredits["Service"]) {
 	const findAccounts = SqlSchema.findAll({ Request: Schema.Void, Result: NamedRow, execute: () => sql`select id, name, email from users` });
 	return Effect.fn("AdminReports.overview")(function* (days: number) {
-		const [usageOf, limits, models, accounts, pending, { creditsPerUsd }] = yield* Effect.all(
-			[usage(Math.max(days, 2)), limitsToday, creditsByModel(days), findAccounts(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die })), extraCredits.pendingCount, settings.get],
+		const [usageOf, limits, models, system, accounts, pending, { creditsPerUsd }] = yield* Effect.all(
+			[
+				usage(Math.max(days, 2)),
+				limitsToday,
+				creditsByModel(days),
+				systemCost(days),
+				findAccounts(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die })),
+				extraCredits.pendingCount,
+				settings.get,
+			],
 			{ concurrency: "unbounded" },
 		);
 		const everyone = usageOf.everyone();
@@ -157,6 +182,8 @@ function makeOverview({ sql, settings, usage, creditsByModel, limitsToday }: Rea
 			yesterday: { active: yesterday.active, replies: yesterday.replies },
 			days: everyone.slice(-days),
 			byModel: models,
+			/** No one's credits: in US dollars. */
+			system,
 			people,
 			pendingRequests: pending,
 			creditsPerUsd,
@@ -289,14 +316,29 @@ const make = Effect.gen(function* () {
 			select id, name, email from users where id = ${person} or lower(email) = ${person.toLowerCase()} limit 1`,
 	});
 
+	// Workspaces open to everyone only: an admin sees no private workspace's name, also one they closed to everyone.
+	// Deleted ones too: a workspace deleted while open to everyone keeps its name; one deleted while private stays private.
+	const findOrgNames = SqlSchema.findAll({
+		Request: Schema.Array(Schema.String),
+		Result: Schema.Struct({ id: Schema.String, name: Schema.String }),
+		execute: (ids) => sql`select id, name from workspaces where id in ${sql.in(ids)} and org_access <> 'none'`,
+	});
+	const orgWorkspaceNames = (ids: ReadonlyArray<string>) =>
+		ids.length
+			? findOrgNames(ids).pipe(
+					Effect.map((rows) => new Map(rows.map((row) => [row.id, row.name]))),
+					Effect.catchTags({ SchemaError: Effect.die }),
+				)
+			: Effect.succeed(new Map<string, string>());
+
 	const summary = Effect.all({ pendingRequests: extraCredits.pendingCount, invited: invites.waiting }, { concurrency: "unbounded" }).pipe(
 		Effect.withSpan("AdminReports.summary"),
 	);
 
 	const people = Effect.gen(function* () {
-		const [rows, usageOf, limits] = yield* Effect.all([peopleRows(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die })), usage(7), limitsToday], {
-			concurrency: "unbounded",
-		});
+		// Its own const: inside Effect.all's array, catchTags's types are lost and the error type is `any`.
+		const everyone = peopleRows(undefined).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+		const [rows, usageOf, limits] = yield* Effect.all([everyone, usage(7), limitsToday], { concurrency: "unbounded" });
 		const now = new Date(yield* Clock.currentTimeMillis);
 		return rows.map((row) => toPerson(row, usageOf, limits, now));
 	}).pipe(Effect.withSpan("AdminReports.people"));
@@ -317,8 +359,9 @@ const make = Effect.gen(function* () {
 		const rows = yield* adminEvents.list({ olderThan, people: filter?.ids, limit: PAGE + 1 });
 		const page = rows.slice(0, PAGE);
 		const names = yield* namesOf([...new Set(page.flatMap((row) => [row.actor_id, row.target ?? ""]).filter(Boolean))]);
+		const workspaces = yield* orgWorkspaceNames(workspaceIds(page));
 		return {
-			events: page.map((row) => toActivity(row, names)),
+			events: page.map((row) => toActivity(row, names, workspaces)),
 			next: rows.length > PAGE ? page.at(-1)!.id : null,
 			person: filter?.named ?? null,
 		} satisfies ActivityPage;

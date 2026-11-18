@@ -1,0 +1,205 @@
+<script setup lang="ts">
+import { Alert, Badge, Button, Dropdown, TabButtons } from "frappe-ui";
+import { dialog } from "../dialogs";
+import { onMounted, ref } from "vue";
+import { canUndo, fetchMemory, forgetMemory, KIND_LABELS, undoSave, updateMemory, type Memory, type MemoryOverview, type MemorySave } from "../memory";
+import { when } from "../dates";
+import EmptyState from "../EmptyState.vue";
+import { useThreads } from "../threads";
+import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
+import PanelBody from "./PanelBody.vue";
+import PanelHeader from "./PanelHeader.vue";
+import { MEMORY_INTRO, MEMORY_TABS } from "./state";
+
+/** Settings, Memory: what Ponder remembers about the person, the decisions behind it, and the prompt that decides. */
+const emit = defineEmits<{
+	/** Open the chat a memory or decision came from. */
+	openThread: [id: string];
+}>();
+
+const { threads } = useThreads();
+const overview = ref<MemoryOverview>();
+/** The last load failed. Its error replaces the tabs and what loaded before, with Try again. */
+const loadError = ref("");
+const tab = ref<"memories" | "decisions" | "prompt">("memories");
+
+onMounted(load);
+
+// Each load takes a number: after two undos, the older answer arriving last is dropped.
+let asked = 0;
+
+async function load() {
+	const mine = ++asked;
+	loadError.value = "";
+	try {
+		const next = await fetchMemory();
+		if (mine === asked) overview.value = next;
+	} catch (error) {
+		if (mine === asked) loadError.value = error instanceof Error ? error.message : String(error);
+	}
+}
+
+function threadTitle(id: string | null) {
+	return id ? (threads.value.find((thread) => thread.id === id)?.title ?? null) : null;
+}
+
+function menu(memory: Memory) {
+	return [
+		{ label: "Edit", icon: "lucide-pencil", onClick: () => askEdit(memory) },
+		{ label: "Forget", icon: "lucide-trash-2", theme: "red" as const, onClick: () => askForget(memory) },
+	];
+}
+
+function askEdit(memory: Memory) {
+	dialog.prompt({
+		title: "Edit memory",
+		fields: [{ name: "text", label: "What Ponder remembers", type: "textarea", defaultValue: memory.text, required: true }],
+		confirmLabel: "Save",
+		onConfirm: async ({ values }) => {
+			await updateMemory(memory.id, String(values.text));
+			await load();
+		},
+	});
+}
+
+function askForget(memory: Memory) {
+	dialog.danger({
+		title: "Forget this?",
+		message: `Ponder will stop using "${memory.text}" in new chats. You can undo this under Decisions.`,
+		confirmLabel: "Forget",
+		onConfirm: async () => {
+			await forgetMemory(memory.id);
+			await load();
+		},
+	});
+}
+
+const OP_LABELS = { add: "Remembered", update: "Updated", forget: "Forgot" } as const;
+
+function applied(save: MemorySave) {
+	return save.operations.filter((op) => op.status === "applied");
+}
+
+/** The decisions being undone now: each shows its own spinner. */
+const undoing = ref(new Set<number>());
+const undoError = ref("");
+
+async function undo(save: MemorySave) {
+	undoing.value.add(save.id);
+	undoError.value = "";
+	try {
+		await undoSave(save.id);
+		await load();
+	} catch (error) {
+		undoError.value = error instanceof Error ? error.message : String(error);
+	} finally {
+		undoing.value.delete(save.id);
+	}
+}
+</script>
+
+<template>
+	<PanelHeader title="Memory" :description="MEMORY_INTRO" />
+	<PanelBody>
+		<div data-slot="memory-view" class="space-y-5 pt-5">
+
+			<EmptyState v-if="loadError" icon="lucide-circle-alert" title="Your memory could not load" :body="loadError" alert>
+				<Button label="Try again" @click="load" />
+			</EmptyState>
+			<Alert
+				v-else-if="overview && !overview.enabled"
+				theme="amber"
+				title="Memory is off"
+				description="The server runs with PONDER_MEMORY=off, so new chats neither use nor add memories."
+			/>
+			<TabButtons v-if="!loadError" v-model="tab" :options="MEMORY_TABS" />
+
+			<MemoryRowsSkeleton v-if="!overview && !loadError" />
+
+			<template v-if="overview && !loadError">
+				<div v-if="tab === 'memories'">
+					<ul v-if="overview.memories.length" class="divide-y divide-outline-gray-1 rounded-6 border border-outline-gray-2">
+						<li v-for="memory in overview.memories" :key="memory.id" class="flex items-start gap-3 px-3 py-2.5">
+							<div class="min-w-0 flex-1 space-y-1">
+								<p class="text-p-base text-ink-gray-8">{{ memory.text }}</p>
+								<div class="flex flex-wrap items-center gap-x-1 gap-y-1 text-sm text-ink-gray-6">
+									<Badge :label="KIND_LABELS[memory.kind]" size="sm" class="mr-1" />
+									<button
+										v-if="threadTitle(memory.sourceThread)"
+										type="button"
+										class="truncate hover:text-ink-gray-8 hover:underline"
+										@click="emit('openThread', memory.sourceThread!)"
+									>
+										From “{{ threadTitle(memory.sourceThread) }}”
+									</button>
+									<span v-if="threadTitle(memory.sourceThread)" aria-hidden="true">·</span>
+									<span>{{ when(memory.updatedAt) }}</span>
+								</div>
+							</div>
+							<Dropdown :options="menu(memory)" align="end">
+								<template #trigger>
+									<Button variant="ghost" class="touch-target -mt-0.5" icon="lucide-ellipsis" :aria-label="`Actions for ${memory.text}`" />
+								</template>
+							</Dropdown>
+						</li>
+					</ul>
+					<EmptyState
+						v-else
+						icon="lucide-brain"
+						title="Nothing remembered yet"
+						body="Tell Ponder about your work or how you like answers, or say &quot;remember that…&quot;, and it will."
+					/>
+				</div>
+
+				<div v-else-if="tab === 'decisions'" class="space-y-2">
+					<p class="text-p-sm text-ink-gray-6">
+						After every reply, Ponder decides whether the chat held anything worth remembering. Most of the time it doesn't. These are its latest decisions.
+					</p>
+					<Alert v-if="undoError" theme="red" :title="undoError" />
+					<ul v-if="overview.saves.length" class="divide-y divide-outline-gray-1 rounded-6 border border-outline-gray-2">
+						<li v-for="save in overview.saves" :key="save.id" class="space-y-1 px-3 py-2.5">
+							<div class="flex items-start gap-2">
+								<span
+									class="mt-0.5 size-4 shrink-0"
+									:class="!save.ok ? 'lucide-circle-alert text-ink-red-6' : applied(save).length ? 'lucide-brain text-ink-gray-7' : 'lucide-circle-minus text-ink-gray-4'"
+									aria-hidden="true"
+								/>
+								<p class="min-w-0 flex-1 text-p-base" :class="applied(save).length ? 'text-ink-gray-8' : 'text-ink-gray-6'">{{ save.summary }}</p>
+								<Badge v-if="save.undoneAt" label="Undone" size="sm" />
+								<Button v-else-if="canUndo(save)" variant="ghost" size="sm" class="touch-target" label="Undo" :loading="undoing.has(save.id)" @click="undo(save)" />
+							</div>
+							<ul v-if="applied(save).length" class="space-y-0.5 pl-6">
+								<li v-for="op in applied(save)" :key="op.memoryId + op.op" class="text-p-sm text-ink-gray-6" :class="{ 'line-through': save.undoneAt }">
+									<span class="text-ink-gray-8">{{ OP_LABELS[op.op] }}:</span> {{ op.op === "forget" ? op.note : op.text }}
+								</li>
+							</ul>
+							<p v-if="save.error" class="pl-6 text-p-sm text-ink-red-6">{{ save.error }}</p>
+							<div class="flex flex-wrap gap-x-1 pl-6 text-sm text-ink-gray-6">
+								<button
+									v-if="threadTitle(save.threadId)"
+									type="button"
+									class="truncate hover:text-ink-gray-8 hover:underline"
+									@click="emit('openThread', save.threadId!)"
+								>
+									“{{ threadTitle(save.threadId) }}”
+								</button>
+								<span v-if="threadTitle(save.threadId)" aria-hidden="true">·</span>
+								<span>{{ when(save.createdAt) }}</span>
+								<template v-if="save.model"><span aria-hidden="true">·</span><span>{{ save.model }}</span></template>
+							</div>
+						</li>
+					</ul>
+					<EmptyState v-else icon="lucide-list-checks" title="No decisions yet" />
+				</div>
+
+				<div v-else class="space-y-2">
+					<p class="text-p-sm text-ink-gray-6">
+						After each reply, a decision model answers two questions, and only on a yes does a small model write the changes. Both live in
+						<code class="rounded-2 bg-surface-gray-2 px-1 text-ink-gray-8">server/memory/</code>. Search: {{ overview.adapter }}.
+					</p>
+					<pre class="overflow-x-auto whitespace-pre-wrap rounded-6 border border-outline-gray-2 bg-surface-gray-1 p-3 text-p-sm text-ink-gray-8">{{ overview.prompt }}</pre>
+				</div>
+			</template>
+		</div>
+	</PanelBody>
+</template>

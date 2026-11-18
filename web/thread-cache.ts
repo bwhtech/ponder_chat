@@ -1,4 +1,5 @@
 import type { UIMessage } from "ai";
+import { isMessages, isRecord, plainCopy } from "./json";
 
 /**
  * Threads kept on this device, so opening one shows it at once and the server is asked
@@ -6,7 +7,7 @@ import type { UIMessage } from "ai";
  * next visit. `etag` is the server's version of the thread; null when the page wrote the
  * entry itself (after a reply), so the next check fetches it whole.
  */
-export type CachedThread = { messages: UIMessage[]; running: boolean; failed?: boolean; etag: string | null };
+export type CachedThread = { messages: UIMessage[]; running: boolean; failed?: boolean; workspaceId?: string; etag: string | null };
 
 const memory = new Map<string, CachedThread>();
 /**
@@ -49,11 +50,24 @@ export async function readThread(id: string): Promise<CachedThread | undefined> 
 	const inMemory = memory.get(id);
 	if (inMemory) return inMemory;
 	const before = generation.get(id);
-	const stored = await run<{ thread: CachedThread } | undefined>("readonly", (store) => store.get(id));
+	const stored = await run<unknown>("readonly", (store) => store.get(id));
 	// Written or forgotten while IndexedDB answered: what memory holds now is newer.
 	if (generation.get(id) !== before) return memory.get(id);
-	if (stored) memory.set(id, stored.thread);
-	return stored?.thread;
+	const thread = isRecord(stored) && isRecord(stored.thread) ? threadFrom(stored.thread, stored.thread.etag) : undefined;
+	if (thread) memory.set(id, thread);
+	return thread;
+}
+
+/** A thread from JSON: the server's answer, or what IndexedDB kept. Undefined when it is not one. */
+export function threadFrom(value: unknown, etag: unknown): CachedThread | undefined {
+	if (!isRecord(value) || !isMessages(value.messages)) return undefined;
+	return {
+		messages: value.messages,
+		running: value.running === true,
+		failed: value.failed === true,
+		...(typeof value.workspaceId === "string" && value.workspaceId && { workspaceId: value.workspaceId }),
+		etag: typeof etag === "string" ? etag : null,
+	};
 }
 
 /** The thread from memory only: no wait, for the first paint. */
@@ -63,7 +77,7 @@ export function writeThread(id: string, thread: CachedThread) {
 	bump(id);
 	memory.set(id, thread);
 	// Messages from the chat are reactive proxies; IndexedDB needs plain data.
-	const plain = { thread: { ...thread, messages: JSON.parse(JSON.stringify(thread.messages)) }, openedAt: Date.now() };
+	const plain = { thread: { ...thread, messages: plainCopy(thread.messages) }, openedAt: Date.now() };
 	void run("readwrite", (store) => store.put(plain, id)).then(prune);
 }
 
@@ -95,7 +109,8 @@ async function ages(): Promise<{ key: IDBValidKey; openedAt: number }[]> {
 		request.onsuccess = () => {
 			const cursor = request.result;
 			if (!cursor) return resolve(found);
-			found.push({ key: cursor.primaryKey, openedAt: (cursor.value as { openedAt?: number })?.openedAt ?? 0 });
+			const value: unknown = cursor.value;
+			found.push({ key: cursor.primaryKey, openedAt: isRecord(value) && typeof value.openedAt === "number" ? value.openedAt : 0 });
 			cursor.continue();
 		};
 		request.onerror = () => resolve(found);

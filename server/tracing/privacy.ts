@@ -185,6 +185,8 @@ const KNOWN_NAMES = [
 	// Effect.fn("Service.operation") in Ponder's services (docs/effect.md), and Effect's SQL transactions.
 	/^[A-Z][A-Za-z]{1,60}\.[a-z][A-Za-z]{1,60}$/,
 	/^sql\.transaction$/,
+	// A workspace document's indexing run and its steps, and a workspace search (workspaces/documents/).
+	/^workspace\.(index|parse|page-read|embed|search)$/,
 ];
 
 export function cleanName(name: string): string {

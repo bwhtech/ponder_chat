@@ -1,5 +1,5 @@
 import { e2e } from "../env.ts";
-import { chat, expect, randomIp, signIn, test, uniqueEmail } from "../fixtures.ts";
+import { chat, expect, jsonOf, randomIp, signIn, test, uniqueEmail, type Thread } from "../fixtures.ts";
 
 test("an admin sees the people page", async ({ page, admin }) => {
 	await page.goto("/admin/people");
@@ -10,7 +10,7 @@ test("an admin sees the people page", async ({ page, admin }) => {
 
 test("an admin sets how much Auto may spend, and the next reply asks for it", async ({ page, admin, fake }) => {
 	void admin;
-	const tier = async () => (await (await page.request.get("/api/admin/settings")).json()).autoCostTier;
+	const tier = async () => (await jsonOf<{ autoCostTier: string }>(await page.request.get("/api/admin/settings"))).autoCostTier;
 	expect(await tier()).toBe("medium");
 	try {
 		await page.goto("/admin/settings");
@@ -50,7 +50,7 @@ test("one person can't read another's chat", async ({ page, person, fake, db, br
 	await chat.idle(page);
 	const id = new URL(page.url()).searchParams.get("t")!;
 	// The page goes idle when the stream ends; the reply is saved a moment later.
-	await expect.poll(async () => (await (await page.request.get(`/api/threads/${id}`)).json()).messages.length).toBe(2);
+	await expect.poll(async () => (await jsonOf<Thread>(await page.request.get(`/api/threads/${id}`))).messages.length).toBe(2);
 
 	// Signed out: refused.
 	const stranger = await browser.newContext({ baseURL: e2e.baseUrl });

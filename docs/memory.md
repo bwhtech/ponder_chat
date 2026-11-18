@@ -14,7 +14,7 @@ The design comes from the Seva platform (`~/.t3/projects/seva-studio/platform/do
 | `server/memory/decision-gate.ts`, `server/memory/gate.json` | The gate: a decision model and its questions. |
 | `server/memory/extract.ts`, `server/memory/extract.md` | The two steps together, and the writer and its prompt. |
 | `server/memory.ts` | The `Memory` service: the scope, the guidance for the model, the Memory page's calls, and `setup`. |
-| `web/MemoryView.vue`, `web/memory.ts` | The Memory page, and the "Remembered" notes under replies. |
+| `web/settings/MemoryPanel.vue`, `web/memory.ts` | Settings › Memory, and the "Remembered" notes under replies. |
 
 ## How a reply uses memory
 
@@ -29,7 +29,7 @@ Recall is a workflow step. A reply that was in the middle of its run during the 
 
 ## Differences from Seva
 
-- **No organisations.** Every memory belongs to one person (`owner` is the user id). Seva also had org-wide memories, keyed by the connected Frappe site. The tables have no `tenant` column.
+- **No organisation memory.** Every memory belongs to one person (`owner` is the user id). Seva also had org-wide memories, keyed by the connected Frappe site. The tables have no `tenant` column. Ponder now has workspaces that can be open to everyone (`docs/workspaces-plan.md`), but they share instructions and documents, not memories, and a chat in a workspace still remembers only for its writer.
 - **Kinds:** `fact` (about the person), `project` (something they work on over weeks), `preference` (how they want answers).
 - **What is never kept** is wider: the person's own phone, email, address, ID, bank and card numbers too, health details, and what they say about other people.
 - **No `ask_user` answers** in the turn: Ponder has no such tool.
@@ -86,18 +86,18 @@ Only the person whose save it was can undo it, and only once. The undo is logged
 
 With 30 or fewer memories, recall gives all of them. Above that it finds the 8 most relevant:
 
-1. **The index** (pgvector): a hybrid query that combines full-text search with vector search over embeddings, merged with reciprocal-rank fusion. Embeddings come from OpenRouter (`PONDER_EMBEDDING_MODEL`, default `google/gemini-embedding-2`), so a query in Hindi finds a memory written in English.
+1. **The index** (pgvector): a hybrid query that combines full-text search with vector search over embeddings, merged with reciprocal-rank fusion. Embeddings come from OpenRouter (`PONDER_EMBEDDING_MODEL`, default `qwen/qwen3-embedding-8b`), so a query in Hindi finds a memory written in English.
 2. **Postgres** full-text search, when the index is off, fails or finds nothing.
 3. The most recent memories, when neither finds anything.
 
 The recalled block quotes each memory's text as JSON, so a saved sentence cannot break out of the list and pose as instructions. It tells the model that what the person says now wins over memory.
 
-The index is the `memory_vectors` table. Saves, edits and forgets update it after `memories`; if that fails, the memory is still saved and the log says the index failed. On start, `syncIndex` rebuilds it when its count differs from `memories`.
+The index is the `memory_vectors` table. Saves, edits and forgets update it after `memories`; if that fails, the memory is still saved and the log says the index failed. Each row keeps the embedding model that made it. On start, `syncIndex` compares each row with `memories`. It embeds a memory again when its row is missing, is from another model (or from no model: rows from before the column), or has text other than the memory's. It removes the rows of memories that are forgotten. If that pass changed something, a second pass follows: a memory edited while the first pass embedded can have a row of its older text. The `runs` table records each call as `memory-embed`. Until the pass ends, search reads only the current model's rows, so it finds fewer memories but never compares vectors of two models.
 
 ## On the page
 
-- **Under a reply:** "Remembered: …", "Updated memory: …" or "Forgot: …" for each change that reply led to, with **Undo**. When a reply finishes, the page asks again with `?wait=1`: the server waits for the run to save the reply and for the memory save to end. A click on a note opens the Memory page.
-- **Memory page** (sidebar, `?view=memory`), in three tabs: **Memories** (edit and forget), **Decisions** (the latest 30, including the ones that saved nothing, each with **Undo**), and **How it decides** (the gate's questions and the writer's prompt).
+- **Under a reply:** "Remembered: …", "Updated memory: …" or "Forgot: …" for each change that reply led to, with **Undo**. When a reply finishes, the page asks again with `?wait=1`: the server waits for the run to save the reply and for the memory save to end. A click on a note opens Settings › Memory.
+- **Settings › Memory** (the Memory tab in Settings; an older `?view=memory` link opens it too), in three tabs: **Memories** (edit and forget), **Decisions** (the latest 30, including the ones that saved nothing, each with **Undo**), and **How it decides** (the gate's questions and the writer's prompt).
 
 ## API
 
@@ -117,7 +117,7 @@ The index is the `memory_vectors` table. Saves, edits and forgets update it afte
 | `PONDER_MEMORY_INDEX` | pgvector | `off` leaves the index out; search then uses Postgres only. |
 | `PONDER_MEMORY_GATE_MODEL` | `perplexity/pplx-decider-v1.2` | The gate's decision model. |
 | `PONDER_MEMORY_MODEL` | `z-ai/glm-5.3-flash` | The writer's model. |
-| `PONDER_EMBEDDING_MODEL` | `google/gemini-embedding-2` | The embedding model. After a change, run `delete from memory_vectors` and restart, so the index is rebuilt. |
+| `PONDER_EMBEDDING_MODEL` | `qwen/qwen3-embedding-8b` | The embedding model. After a change, the next start embeds the memory index again and indexes the workspace documents again. |
 
 ## Checks
 

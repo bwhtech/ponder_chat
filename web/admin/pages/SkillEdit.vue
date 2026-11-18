@@ -6,7 +6,7 @@ import { checkSkill, MAX_DESCRIPTION, parseSkillFile, skillTitle, toSkillName, t
 import { Response } from "frappe-ui-ai-elements";
 import { admin, ApiError, unwrap, type SkillDetail } from "../api";
 import NewSkillDialog from "../components/NewSkillDialog.vue";
-import SkillInstructionsEditor from "../components/SkillInstructionsEditor.vue";
+import MarkdownEditor from "../../MarkdownEditor.vue";
 import { lastActive } from "../lib/format";
 import { isMobile } from "../lib/viewport";
 import EmptyState from "../../EmptyState.vue";
@@ -204,7 +204,7 @@ function onKeydown(event: KeyboardEvent) {
 					<TabButtons v-model="tab" :options="tabs" class="w-max" />
 					<span class="ml-auto truncate text-sm text-ink-gray-6">Instructions · {{ words }} words</span>
 				</div>
-				<SkillInstructionsEditor v-if="tab === 'edit'" v-model="form.body" class="mt-3 min-h-0 flex-1" />
+				<MarkdownEditor v-if="tab === 'edit'" v-model="form.body" placeholder="Write the steps Ponder follows, as you would brief a new colleague." class="mt-3 min-h-0 flex-1" />
 				<div v-else class="mt-3 min-h-0 flex-1 overflow-y-auto rounded-4 border border-outline-gray-2 p-5">
 					<Response v-if="form.body.trim()" :content="form.body" class="max-w-[770px]" />
 					<p v-else class="text-p-sm text-ink-gray-6">No instructions yet.</p>

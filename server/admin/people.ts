@@ -1,3 +1,4 @@
+import { displayName } from "../../shared/display-name.ts";
 import * as Schema from "effect/Schema";
 import { roleFrom } from "../people/Accounts.ts";
 import type { Limits, Usage } from "./usage.ts";
@@ -86,10 +87,8 @@ export function deviceName(userAgent: string | null) {
 	return system ? `${browser} on ${system}` : browser;
 }
 
-/** People have no name until they set one, so the start of the email stands in. */
-export function displayName(name: string | null, email: string) {
-	return name?.trim() || email.split("@")[0];
-}
+/** People have no name until they set one, so the start of the email stands in (shared/display-name.ts). */
+export { displayName };
 
 // Order matters: Edge and Opera also say "Chrome", Chrome also says "Safari", and an iPhone "like Mac OS X".
 const BROWSERS: [string, RegExp][] = [

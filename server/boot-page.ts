@@ -12,10 +12,11 @@ import * as Skills from "./skills.ts";
 import * as Sandbox from "./python/pyodide.ts";
 import * as Threads from "./threads/Threads.ts";
 import * as WebBuild from "./web-build.ts";
+import * as Workspaces from "./workspaces/Workspaces.ts";
 
 /**
  * The chat page (dist/index.html) with what its first screen needs: who is signed in, with
- * their credits, their chats, the models, the skills, the features and the logos. Without it the
+ * their credits, their chats, their workspaces, the models, the skills, the features and the logos. Without it the
  * page asks for them once its code runs, and the chats only after /api/me answers: two
  * round trips after the code, each a second or more on a slow phone network.
  *
@@ -50,12 +51,14 @@ export async function bootPage(c: Context, next: Next) {
 	return c.body(body, 200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "private, no-cache" });
 }
 
-/** The same answers as GET /api/me, /api/threads, /api/models, /api/features, /api/skills and /api/brand. */
+/** The same answers as GET /api/me, /api/threads, /api/workspaces, /api/models, /api/features, /api/skills and /api/brand. */
 export type BootData = {
 	me: Effect.Success<ReturnType<typeof meOf>> | null;
 	/** The logos an admin set, for signed-out pages too: the sign-in page shows the logo. */
 	logos: Branding.LogoVersions;
 	threads?: Threads.ThreadSummary[];
+	/** The sidebar's workspaces. */
+	workspaces?: Workspaces.WorkspaceSummary[];
 	models?: Models.Pickable;
 	features?: { python: boolean };
 	skills?: { name: string; description: string }[];
@@ -86,15 +89,20 @@ const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetc
 	);
 	if (Option.isNone(session)) return { me: null, logos } satisfies BootData;
 	const { user } = session.value;
-	const { me, threads, skills } = yield* Effect.all(
-		{ me: meOf(user), threads: Threads.Threads.use((threads) => threads.list(user.id)), skills: skillOptions },
+	const { me, threads, workspaces, skills } = yield* Effect.all(
+		{
+			me: meOf(user),
+			threads: Threads.Threads.use((threads) => threads.list(user.id)),
+			workspaces: Workspaces.Workspaces.use((workspaces) => workspaces.list(user.id)),
+			skills: skillOptions,
+		},
 		{ concurrency: "unbounded" },
 	);
 	// Only what is ready now: the models wait for OpenRouter on a cold start, and the page asks for them itself then.
 	const python = Option.getOrUndefined(yield* Sandbox.Sandbox.use((sandbox) => sandbox.readyNow));
 	const models = Option.getOrUndefined(yield* Models.Models.use((models) => models.cached));
 	const features = python === undefined ? undefined : { python };
-	return { me, logos, threads, skills, models, features, prefetch: prefetchFor(me.user.role, prefetch) } satisfies BootData;
+	return { me, logos, threads, workspaces, skills, models, features, prefetch: prefetchFor(me.user.role, prefetch) } satisfies BootData;
 });
 
 /** Everyone's files, and for an admin the admin pages' after them: only admins can open those. */

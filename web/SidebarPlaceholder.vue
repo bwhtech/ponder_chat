@@ -3,11 +3,12 @@ import { Button, Skeleton } from "frappe-ui";
 import { me } from "./account";
 import BrandLogo from "./BrandLogo.vue";
 import ThreadRowsSkeleton from "./ThreadRowsSkeleton.vue";
+import WorkspaceRowsPlaceholder from "./workspaces/WorkspaceRowsPlaceholder.vue";
 
 /**
  * The chats panel (ChatsPanel.vue) while its chunk arrives, in the sidebar or in the phone's
- * bottom sheet: the same layout, with skeleton rows for the chats and the credits, so nothing
- * moves when the panel takes its place. Vue gives it ChatsPanel's props (Workspace.vue).
+ * bottom sheet: the same layout, with the workspaces' rows, and skeleton rows for the chats and the credits, so nothing
+ * moves when the panel takes its place. Vue gives it ChatsPanel's props (Shell.vue).
  */
 defineOptions({ inheritAttrs: false });
 defineProps<{ sheet?: boolean; name: string }>();
@@ -35,7 +36,7 @@ defineProps<{ sheet?: boolean; name: string }>();
 						Search chats
 					</div>
 				</div>
-				<div class="-mx-2 flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-2 pb-3"><ThreadRowsSkeleton /></div>
+				<div class="-mx-2 flex min-h-0 flex-1 flex-col gap-4 overflow-hidden px-2 pb-3"><WorkspaceRowsPlaceholder /><ThreadRowsSkeleton /></div>
 			</div>
 		</div>
 		<div class="px-2 pb-3 pt-3">
@@ -72,7 +73,7 @@ defineProps<{ sheet?: boolean; name: string }>();
 					Search chats
 				</div>
 			</div>
-			<div class="flex flex-col gap-4"><ThreadRowsSkeleton /></div>
+			<div class="flex flex-col gap-4"><WorkspaceRowsPlaceholder /><ThreadRowsSkeleton /></div>
 		</div>
 		<div v-if="me" class="border-t border-outline-gray-1 pt-2">
 			<div class="flex flex-col gap-1.5 rounded-7 px-2 py-2">

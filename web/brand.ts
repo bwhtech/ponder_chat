@@ -1,5 +1,6 @@
 import { reactive } from "vue";
 import { fromBoot } from "./boot";
+import { isRecord } from "./json";
 
 /**
  * The logo the pages show: the organisation's own when an admin set one (Settings, Branding),
@@ -38,7 +39,8 @@ export function loadLogos() {
 		if (boot) return setLogos(boot);
 		try {
 			const response = await fetch("/api/brand");
-			if (response.ok) setLogos(((await response.json()) as { logos: LogoVersions }).logos);
+			const body: unknown = response.ok ? await response.json() : undefined;
+			if (isRecord(body) && isLogoVersions(body.logos)) setLogos(body.logos);
 		} catch {
 			// Offline: Ponder's logo, which the page has already.
 		}
@@ -51,4 +53,9 @@ export function setLogos(next: LogoVersions) {
 	Object.assign(logos, next);
 	const link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
 	if (link) link.href = faviconUrl();
+}
+
+/** An answer's logos: /api/brand's, or an admin's change (BrandingSettings.vue). */
+export function isLogoVersions(value: unknown): value is LogoVersions {
+	return isRecord(value) && [value.light, value.dark].every((version) => version === null || typeof version === "number");
 }

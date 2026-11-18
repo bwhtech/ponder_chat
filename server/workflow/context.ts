@@ -76,10 +76,23 @@ function stripReasoningDetails(metadata: Record<string, unknown>) {
  * this message are then the same as on the last call, and providers can cache them.
  */
 export function addRecalledMemory(messages: ModelMessage[], recalled: string): ModelMessage[] {
+	return recalled ? addToLatest(messages, `<memory>\n${recalled}\n</memory>`) : messages;
+}
+
+/**
+ * Adds the workspace's best passages for this message (workspaces/prompt.ts, already in
+ * their <workspace_excerpts> block) to the person's latest message, for the same reason
+ * as memory: they change with every message.
+ */
+export function addWorkspaceExcerpts(messages: ModelMessage[], excerpts: string): ModelMessage[] {
+	return excerpts ? addToLatest(messages, excerpts) : messages;
+}
+
+function addToLatest(messages: ModelMessage[], text: string): ModelMessage[] {
 	const index = lastUserIndex(messages);
 	const message = messages[index];
-	if (!recalled || message?.role !== "user") return messages;
-	const note = { type: "text" as const, text: `<memory>\n${recalled}\n</memory>` };
+	if (message?.role !== "user") return messages;
+	const note = { type: "text" as const, text };
 	const content = typeof message.content === "string" ? [note, { type: "text" as const, text: message.content }] : [note, ...message.content];
 	return messages.map((each, i) => (i === index ? { ...message, content } : each));
 }

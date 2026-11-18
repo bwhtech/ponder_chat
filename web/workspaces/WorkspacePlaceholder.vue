@@ -1,0 +1,39 @@
+<script setup lang="ts">
+import { Skeleton } from "frappe-ui";
+import { computed } from "vue";
+import { accessIcon, workspaceByKey } from "./store";
+
+/**
+ * The workspace page (WorkspacePage.vue) while its code arrives: its header with the name
+ * from the sidebar's row, and a bar where its message box goes, at the bottom. Vue gives it the page's props and
+ * slots (Shell.vue), so the phone's buttons are already in the header.
+ */
+defineOptions({ inheritAttrs: false });
+const props = defineProps<{ slugOrId: string }>();
+const workspace = computed(() => workspaceByKey(props.slugOrId));
+</script>
+
+<template>
+	<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
+		<div class="scroll-gutter-match flex min-w-0 items-center gap-2">
+			<slot name="start" />
+			<template v-if="workspace">
+				<span class="flex size-6 shrink-0 items-center justify-center rounded-4 bg-surface-gray-2 text-ink-gray-7" aria-hidden="true">
+					<span :class="[accessIcon(workspace), 'size-3.5']" />
+				</span>
+				<h1 class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9">{{ workspace.name }}</h1>
+			</template>
+			<div v-else class="flex h-[1lh] min-w-0 flex-1 items-center text-lg-semibold"><Skeleton class="h-4 w-48 max-w-full rounded-4" /></div>
+			<slot name="end" />
+		</div>
+	</header>
+	<!-- The page's frame (WorkspacePage.vue): its message box at the bottom of its column, the chat's. -->
+	<div class="flex min-h-0 flex-1 flex-col overflow-hidden sm:[scrollbar-gutter:stable_both-edges]" aria-busy="true">
+		<div class="mx-auto mt-auto w-full max-w-[720px] px-4 sm:px-5">
+			<div class="min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+				<!-- The box's height with its placeholder on one line. -->
+				<Skeleton class="h-[5.625rem] w-full rounded-7" />
+			</div>
+		</div>
+	</div>
+</template>

@@ -18,10 +18,12 @@ import * as AdminActions from "./AdminActions.ts";
 import * as AdminEvents from "./AdminEvents.ts";
 import * as AdminReports from "./AdminReports.ts";
 import { validate } from "../validate.ts";
+import * as AdminWorkspaces from "../workspaces/admin.ts";
 
 /**
  * The API behind /admin, mounted at /api/admin. Every route needs an admin (requireAdmin).
- * It returns usage numbers only: no route reads messages or thread titles.
+ * It returns usage numbers only: no route reads messages or thread titles. Workspaces
+ * show in full only while they are open to everyone; private ones as totals (workspaces/admin.ts).
  *
  * What a route reads is in AdminReports.ts, and what it changes in AdminActions.ts, which
  * also records each change in the admin activity log (AdminEvents.ts). Role, ban and
@@ -37,6 +39,7 @@ const actorOf = (c: Context<Env>): AdminActions.Actor => ({ id: c.get("user").id
 /** One method of each service. */
 const reports = <A, E>(use: (service: AdminReports.AdminReports["Service"]) => Effect.Effect<A, E>) => AdminReports.AdminReports.use(use);
 const actions = <A, E>(use: (service: AdminActions.AdminActions["Service"]) => Effect.Effect<A, E>) => AdminActions.AdminActions.use(use);
+const workspaces = <A, E>(use: (service: AdminWorkspaces.AdminWorkspaces["Service"]) => Effect.Effect<A, E>) => AdminWorkspaces.AdminWorkspaces.use(use);
 const skills = <A, E>(use: (service: Skills.Skills["Service"]) => Effect.Effect<A, E>) => Skills.Skills.use(use);
 /** The address the admin uses, for the links in emails (auth/Auth.ts). */
 const originOf = (c: Context<Env>) => Auth.appOrigin(c.req.raw.headers);
@@ -107,6 +110,19 @@ export const adminApi = new Hono<Env>()
 		const { before, person } = c.req.valid("query");
 		return route(c, Effect.map(reports((service) => service.activity({ olderThan: before, person })), (page) => c.json(page)));
 	})
+
+	// Workspaces (workspaces/admin.ts): organisation ones in full, private ones as totals with no names.
+	.get("/workspaces", (c) => route(c, Effect.map(workspaces((service) => service.report), (report) => c.json(report))))
+
+	// An organisation document's indexing log. A private, deleted or unknown one is not found.
+	.get("/workspaces/:id/documents/:doc/log", (c) =>
+		route(
+			c,
+			Effect.map(workspaces((service) => service.documentLog(c.req.param("id"), c.req.param("doc"))), (log) =>
+				Option.isSome(log) ? c.json(log.value) : c.json({ error: "Not found" }, 404),
+			),
+		),
+	)
 
 	// People
 

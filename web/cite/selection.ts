@@ -2,6 +2,9 @@ import { onBeforeUnmount, onMounted, ref, type Ref } from "vue";
 import { CITATION_MAX_TEXT, type Citation } from "./citations";
 import { captureSelection } from "./text";
 
+/** Something the comment editor can sit against: the quoted text in the reply. */
+export type CiteAnchor = { getBoundingClientRect: () => DOMRect; contextElement?: Element };
+
 export type PendingCite = { citation: Citation; range: Range; x: number; y: number; tooLong: boolean };
 
 /**

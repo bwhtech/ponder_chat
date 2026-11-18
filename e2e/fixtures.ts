@@ -1,8 +1,10 @@
 import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { randomBytes } from "node:crypto";
+import type { UIMessage } from "ai";
 import postgres from "postgres";
 import { e2e } from "./env.ts";
-import type { ChatScript, MemoryScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
+import type { ChatScript, MemoryScript, PageScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
+import { jsonBody } from "../server/test-json.ts";
 
 /**
  * What the tests share:
@@ -32,6 +34,16 @@ export class Fake {
 		await this.post("/__fake/memory", script);
 	}
 
+	/** How the page model reads a PDF page that holds `script.match` (pdfs.ts, scanPdf). */
+	async page(script: PageScript) {
+		await this.post("/__fake/page", script);
+	}
+
+	/** Lets `count` page reads of a script with `hold` go, in the order they came. */
+	async releasePage(match: string, count = 1) {
+		await this.post("/__fake/page/release", { match, count });
+	}
+
 	/** The summary of long chats whose transcript contains `match`. */
 	async summary(script: SummaryScript) {
 		await this.post("/__fake/summary", script);
@@ -39,21 +51,21 @@ export class Fake {
 
 	/** The summary calls whose transcript contains `match`. */
 	async summaries(match: string): Promise<ReceivedSummary[]> {
-		return (await this.api.get(`/__fake/summaries?match=${encodeURIComponent(match)}&since=${this.since}`)).json();
+		return jsonOf(await this.api.get(`/__fake/summaries?match=${encodeURIComponent(match)}&since=${this.since}`));
 	}
 
 	/** The chat calls whose person's latest message contains `match`. */
 	async calls(match: string): Promise<ReceivedCall[]> {
-		return (await this.api.get(`/__fake/calls?match=${encodeURIComponent(match)}&since=${this.since}`)).json();
+		return jsonOf(await this.api.get(`/__fake/calls?match=${encodeURIComponent(match)}&since=${this.since}`));
 	}
 
 	/** Every span Ponder exported (server/tracing/), and each export request as it came. */
 	async spans(): Promise<{ spans: ReceivedSpan[]; exports: string[] }> {
-		return (await this.api.get("/__fake/spans")).json();
+		return jsonOf(await this.api.get("/__fake/spans"));
 	}
 
 	async emails(to: string): Promise<SentEmail[]> {
-		return (await this.api.get(`/__fake/emails?to=${encodeURIComponent(to)}&since=${this.since}`)).json();
+		return jsonOf(await this.api.get(`/__fake/emails?to=${encodeURIComponent(to)}&since=${this.since}`));
 	}
 
 	/** The newest email to `to`, once it has come. */
@@ -110,6 +122,15 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 export { expect };
 
 /** A made-up address for a browser, so Ponder's limits per address apply to one test only. */
+/** A saved thread, as GET /api/threads/:id answers it. */
+export type Thread = { messages: UIMessage[]; running: boolean; failed?: boolean; workspaceId?: string };
+
+/**
+ * A JSON answer's body, typed as the shape the test expects (server/test-json.ts). Playwright
+ * types it as `any`: read it with this, not with an assertion, which `npm run lint` refuses.
+ */
+export const jsonOf = jsonBody;
+
 export function randomIp() {
 	return [10, ...randomBytes(3)].join(".");
 }
@@ -137,7 +158,7 @@ export async function signIn(page: Page, db: postgres.Sql, fake: Fake, email: st
 	const otp = await fake.signInCode(email);
 	const signed = await page.request.post("/api/auth/sign-in/email-otp", { data: { email, otp }, headers });
 	expect(signed.ok(), await signed.text()).toBe(true);
-	const { user } = (await signed.json()) as { user: { id: string } };
+	const { user } = await jsonOf<{ user: { id: string } }>(signed);
 	return { id: user.id, email };
 }
 

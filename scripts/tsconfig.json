@@ -1,0 +1,6 @@
+{
+	// The scripts' and the build configs' (vite.config.ts) TypeScript settings: the server's.
+	// The linter (npm run lint, .oxlintrc.json) reads them.
+	"extends": "../server/tsconfig.json",
+	"include": ["*.ts", "../vite.config.ts", "../vitest.config.ts", "../nitro.config.ts", "../types/*.d.ts"]
+}

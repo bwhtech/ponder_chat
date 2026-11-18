@@ -46,7 +46,7 @@ export async function unwrap<R extends ClientResponse<unknown>>(call: R | Promis
 }
 
 /** A route's successful answer, to name its type: `type Me = Answer<typeof client.api.me.$get>`. */
-export type Answer<Call extends (...args: any[]) => unknown> = Success<Awaited<ReturnType<Call>>>;
+export type Answer<Call extends (...args: never[]) => unknown> = Success<Awaited<ReturnType<Call>>>;
 
 /** The server's message, with its HTTP status, so a page can tell "not found" from a failure. */
 export class ApiError extends Error {
@@ -60,5 +60,5 @@ export class ApiError extends Error {
 	}
 }
 
-/** The body of the 2xx JSON answers a route can give. `any` for the check without the server (tsconfig.no-node.json). */
-type Success<R> = 0 extends 1 & R ? any : R extends ClientResponse<infer Body, infer Status, "json"> ? (Status extends SuccessStatusCode ? Body : never) : never;
+/** The body of the 2xx JSON answers a route can give. */
+type Success<R> = R extends ClientResponse<infer Body, infer Status, "json"> ? (Status extends SuccessStatusCode ? Body : never) : never;

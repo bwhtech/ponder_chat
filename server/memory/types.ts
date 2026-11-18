@@ -102,13 +102,16 @@ export interface MemoryAdapter<E = never> {
 /** What the search index holds for one memory: never more than this. */
 export type IndexedMemory = { id: string; owner: string; text: string };
 
-/** A search index over the memories in use. Postgres stays the source of truth; the index can be rebuilt from it. */
+/** One row of the index: the text it was embedded from, and whether the current embedding model made it. */
+export type IndexEntry = { id: string; text: string; current: boolean };
+
+/** A search index over the memories in use. Postgres stays the source of truth; the index is repaired from it. */
 export interface MemoryIndex<E = never> {
 	readonly name?: string;
 	readonly upsert: (memories: IndexedMemory[]) => Effect.Effect<void, E>;
 	readonly remove: (ids: string[]) => Effect.Effect<void, E>;
 	/** The ids of the person's memories that best match `query`, best first. */
 	readonly search: (owner: string, query: string, limit: number) => Effect.Effect<string[], E>;
-	readonly rebuild: (memories: IndexedMemory[]) => Effect.Effect<void, E>;
-	readonly count: Effect.Effect<number, E>;
+	/** Every row, without its vector: the store compares them with `memories`. */
+	readonly entries: Effect.Effect<ReadonlyArray<IndexEntry>, E>;
 }

@@ -31,6 +31,8 @@ import { messageIdFor, replyStream, saveReply } from "./reply.ts";
 import * as ThreadRuns from "./runs.ts";
 import type { Continued, ThreadRun } from "./runs.ts";
 import * as WorkflowRuns from "./WorkflowRuns.ts";
+import { atLeast } from "../workspaces/access.ts";
+import * as Workspaces from "../workspaces/Workspaces.ts";
 
 /**
  * A reply's whole life, for the routes (app.ts): start it, follow it, stop it, and delete
@@ -60,6 +62,18 @@ export class ThreadNotYours extends Schema.TaggedError<ThreadNotYours>()("Thread
 	}
 }
 
+/**
+ * The person was removed from the chat's workspace, or can no longer use it. The chat is
+ * still theirs to read, but not to send in. The message is the plain text the chat shows.
+ */
+export class WorkspaceAccessLost extends Schema.TaggedError<WorkspaceAccessLost>()("WorkspaceAccessLost", {
+	threadId: Schema.String,
+}) {
+	override get message() {
+		return "You no longer have access to this chat's workspace. You can read this chat, but not send in it.";
+	}
+}
+
 /** No credits left today. The message is the plain text the chat shows. */
 export class OutOfCredits extends Schema.TaggedError<OutOfCredits>()("OutOfCredits", {
 	hours: Schema.Number,
@@ -69,7 +83,14 @@ export class OutOfCredits extends Schema.TaggedError<OutOfCredits>()("OutOfCredi
 	}
 }
 
-export type StartInput = { threadId: string; owner: string; messages: UIMessage[]; model?: string };
+export type StartInput = {
+	threadId: string;
+	owner: string;
+	messages: UIMessage[];
+	model?: string;
+	/** The workspace of a new chat. Read on its first message only: a chat's workspace never changes. */
+	workspaceId?: string;
+};
 
 export class Replies extends Context.Service<
 	Replies,
@@ -85,8 +106,11 @@ export class Replies extends Context.Service<
 		 * starts (approval-uses.ts). An answer sent again, such as from a second tab, starts
 		 * nothing and saves nothing: the page gets the outcome, and reloads the thread
 		 * (answeredAgain).
+		 *
+		 * A chat in a workspace needs the person to be able to ask in it, on every message: a
+		 * new chat fails with WorkspaceNotFound, a saved one with WorkspaceAccessLost.
 		 */
-		readonly start: (input: StartInput) => Effect.Effect<Started, OutOfCredits | ThreadNotYours | SqlError>;
+		readonly start: (input: StartInput) => Effect.Effect<Started, OutOfCredits | ThreadNotYours | Workspaces.WorkspaceNotFound | WorkspaceAccessLost | SqlError>;
 		/**
 		 * The latest reply of a thread, by the thread id (a reloaded page) or the run id (a
 		 * dropped connection), from `uiStartIndex` (the UI chunks the page has). A finished run
@@ -137,6 +161,8 @@ const make = Effect.gen(function* () {
 	const sandbox = yield* Sandbox.Sandbox;
 	const cache = yield* ThreadCache.ThreadCache;
 	const pythonStates = yield* PythonState.PythonState;
+	const workspaces = yield* Workspaces.Workspaces;
+	const sql = yield* PgClient.PgClient;
 	// Work that the request does not wait for (a thread's title) runs here, and stops with the runtime.
 	const scope = yield* Effect.scope;
 	// What the reply's save and stream (reply.ts) and the title (thread-title.ts) run on: these
@@ -156,6 +182,31 @@ const make = Effect.gen(function* () {
 	const ownerOf = (threadId: string) => threads.owner(threadId);
 	/** The person's thread, or a thread id nobody has taken yet. */
 	const mayUse = (threadId: string, owner: string) => Effect.map(ownerOf(threadId), (found) => Option.getOrElse(found, () => owner) === owner);
+
+	/**
+	 * The chat's workspace: the one a new chat's first message names, else the one the chat
+	 * has. Checked on every message, so a person who was removed can no longer send. Under
+	 * the thread's lock: two first messages sent at once both use the workspace that the
+	 * first of them saved, never the one the second names.
+	 */
+	const workspaceFor = Effect.fnUntraced(function* (input: StartInput) {
+		const isNew = Option.isNone(yield* ownerOf(input.threadId));
+		const workspaceId = isNew ? input.workspaceId : Option.getOrUndefined(yield* threads.workspaceOf(input.threadId));
+		if (!workspaceId) return { workspaceId: undefined, isNew };
+		if (atLeast(yield* workspaces.accessOf(input.owner, workspaceId), "ask")) return { workspaceId, isNew };
+		return yield* isNew ? new Workspaces.WorkspaceNotFound({ workspaceId }) : new WorkspaceAccessLost({ threadId: input.threadId });
+	});
+
+	/**
+	 * Saves the thread. A new chat joins its workspace in one transaction with the workspace
+	 * locked and checked again (Workspaces.admit): a delete that came after workspaceFor wins,
+	 * and the chat is not saved into a workspace that let its chats go.
+	 */
+	const saveThread = (input: StartInput, workspaceId: string | undefined, isNew: boolean) => {
+		const save = threads.save(input.threadId, input.owner, input.messages, workspaceId);
+		if (!workspaceId || !isNew) return save;
+		return sql.withTransaction(Effect.andThen(workspaces.admit(input.owner, workspaceId, "ask"), save)).pipe(Effect.catchTags({ WorkspaceRefused: Effect.die }));
+	};
 
 	/** Cancels a run and saves what it wrote so far, inside the run's trace (server/tracing/reply-trace.ts). */
 	const cancel = (run: ThreadRun, owner: string) =>
@@ -207,6 +258,7 @@ const make = Effect.gen(function* () {
 	/** Under the thread's lock: the run that answers the thread, a new one or the one already going. */
 	const startRun = Effect.fnUntraced(function* (input: StartInput, model: Models.ChatModel, python: boolean, requested: number) {
 		const { threadId, owner, messages } = input;
+		const { workspaceId, isNew } = yield* workspaceFor(input);
 		const continued = continuedFrom(messages);
 		const previous = Option.getOrUndefined(yield* runs.active(threadId));
 		if (previous && sameContinuation(previous.continued, continued)) return { runId: previous.runId, model: previous.model, followed: true };
@@ -222,12 +274,22 @@ const make = Effect.gen(function* () {
 		const carriesOn = continued && tracingOn() ? Option.getOrUndefined(yield* runs.latest(threadId))?.runId : undefined;
 		const runId = yield* Effect.gen(function* () {
 			// The run reads the thread from the database, so it is saved first.
-			yield* threads.save(threadId, owner, messages);
+			yield* saveThread(input, workspaceId, isNew);
 			// Under Auto, a reply carried on after an approval goes back to the model that wrote it.
 			const answeredBy = continued && isAuto(model.id) ? Option.getOrUndefined(yield* router.lastAnsweringModel(threadId)) : undefined;
 			// Set here, so the prompt does not read the clock inside the workflow (chat.ts).
 			const today = new Date(yield* Clock.currentTimeMillis).toDateString();
-			return yield* workflow.start({ threadId, owner, model: { id: model.id, name: model.name }, python, today, maxSteps: config.maxSteps, continued, answeredBy });
+			return yield* workflow.start({
+				threadId,
+				owner,
+				model: { id: model.id, name: model.name },
+				python,
+				today,
+				maxSteps: config.maxSteps,
+				continued,
+				answeredBy,
+				workspaceId,
+			});
 		}).pipe(
 			// No run carries the answers out, so the page may send them again. The start's own
 			// failure is the one the route answers; a release that fails too changes nothing for it.
@@ -265,7 +327,8 @@ const make = Effect.gen(function* () {
 		const status = yield* credits.status(owner);
 		const checked = yield* Clock.currentTimeMillis;
 		if (status.remaining <= 0) return yield* new OutOfCredits({ hours: Math.max(1, Math.ceil((new Date(status.resetsAt).getTime() - checked) / 3_600_000)) });
-		if (!(yield* mayUse(threadId, owner))) return yield* new ThreadNotYours({ threadId });
+		const savedOwner = yield* ownerOf(threadId);
+		if (Option.getOrElse(savedOwner, () => owner) !== owner) return yield* new ThreadNotYours({ threadId });
 		const model = yield* models.pick(input.model);
 		const python = yield* sandbox.ready;
 		const continued = continuedFrom(messages);
@@ -282,7 +345,7 @@ const make = Effect.gen(function* () {
 		return { runId: started.runId, followed: started.followed, stream } satisfies Started;
 	});
 
-	const follow = Effect.fn("Replies.follow")(function* (id: string, owner: string, uiStartIndex = 0) {
+	const follow = Effect.fn("Replies.follow")(function* (id: string, owner: string, uiStartIndex: number = 0) {
 		const run = Option.getOrUndefined(yield* runs.latest(id));
 		if (!run || !(yield* mayUse(run.threadId, owner))) return Option.none<Reply>();
 		const stream = yield* provided(replyStream(run.runId, run.model, { uiStartIndex, untilTail: run.cancelled || run.failed, continued: run.continued })).pipe(inReplyTrace(run.runId));
@@ -321,7 +384,7 @@ const make = Effect.gen(function* () {
 		return deleted;
 	});
 
-	const whenFinished = Effect.fn("Replies.whenFinished")(function* (threadId: string, timeout = 10_000) {
+	const whenFinished = Effect.fn("Replies.whenFinished")(function* (threadId: string, timeout: number = 10_000) {
 		yield* runs.active(threadId).pipe(Effect.repeat({ while: Option.isSome, schedule: Schedule.spaced("250 millis") }), Effect.timeoutOption(timeout));
 	});
 

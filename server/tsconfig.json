@@ -1,0 +1,14 @@
+{
+	// The server's TypeScript settings, the same as `npm run typecheck:server`. The linter
+	// (npm run lint, .oxlintrc.json) reads them to know the types of the server's code.
+	"compilerOptions": {
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
+		"target": "es2022",
+		"strict": true,
+		"skipLibCheck": true,
+		"allowImportingTsExtensions": true,
+		"noEmit": true
+	},
+	"include": ["**/*.ts", "../types/*.d.ts"]
+}

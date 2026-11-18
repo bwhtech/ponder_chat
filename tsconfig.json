@@ -1,9 +1,12 @@
 {
-	"extends": "frappe-ui/tsconfig.base.json",
-	"compilerOptions": {
-		"types": ["vite/client"],
-		// The server's API types, for the typed client (web/api.ts). Imported as types only.
-		"paths": { "#server/app": ["./server/app.ts"] }
-	},
-	"include": ["web/**/*.ts", "web/**/*.vue", "web/env.d.ts"]
+	// Each part of the code has its own TypeScript settings, in its own folder. This file
+	// only lists them, so that editors and the linter (npm run lint) find the right ones.
+	"files": [],
+	"references": [
+		{ "path": "./web" },
+		{ "path": "./server" },
+		{ "path": "./shared" },
+		{ "path": "./scripts" },
+		{ "path": "./e2e" }
+	]
 }

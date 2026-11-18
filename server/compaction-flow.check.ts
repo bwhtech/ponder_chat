@@ -182,7 +182,7 @@ const textOf = (messages: ModelMessage[]) => JSON.stringify(messages);
 	assert.equal(result.kind, "compacted");
 	assert.ok(!JSON.stringify(world.summarized[0]).includes("<connectors>"), "the summarizer never reads the note");
 	assert.ok(result.kind === "compacted" && count(result.messages) === 1, "the note is sent once");
-	const last = result.kind === "compacted" ? result.messages.findLast((message) => message.role === "user") : undefined;
+	const last = result.kind === "compacted" ? result.messages.filter((message) => message.role === "user").at(-1) : undefined;
 	assert.ok(textOf(last ? [last] : []).includes("<connectors>") && textOf(last ? [last] : []).includes("CURRENT question"), "on the current turn's message, not the summary's");
 
 	// Between steps, the current turn is already in the prompt with its note: the summary message carries none.

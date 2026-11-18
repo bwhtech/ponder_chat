@@ -2,6 +2,7 @@ import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
+import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as AdminEvents from "./admin/AdminEvents.ts";
 import * as Auth from "./auth/Auth.ts";
@@ -27,6 +28,8 @@ import * as ApprovalUses from "./workflow/approval-uses.ts";
 import * as ThreadRuns from "./workflow/runs.ts";
 import * as WebBuild from "./web-build.ts";
 import * as OpenRouter from "./openrouter/OpenRouter.ts";
+import * as Documents from "./workspaces/documents/Documents.ts";
+import * as Workspaces from "./workspaces/Workspaces.ts";
 
 /**
  * What the server does once when it starts, before it answers requests: create and
@@ -49,6 +52,13 @@ export async function startup() {
 	const lock = await runPromise(Scope.make());
 	await runPromise(becomeTheOnlyWorker.pipe(Scope.provide(lock)));
 	await runPromise(releaseDeadWorkers);
+	// Before the worker resumes the runs a stop left: documents whose passages another embedding model made are
+	// indexed again with a new generation, so the run of a document that was Reading can't fail it (Documents.ts).
+	await runPromise(
+		Documents.Documents.use((documents) => documents.reindexOutdated).pipe(
+			Effect.catchTags({ SqlError: (error) => Effect.logError("workspace documents: could not check for documents to index again:", sqlMessage(error)) }),
+		),
+	);
 	const { getWorld } = await import("workflow/runtime");
 	const world = await getWorld();
 	await world.start?.();
@@ -81,6 +91,8 @@ const migrateAll = Effect.gen(function* () {
 	// After threads: its tables reference them.
 	yield* CompactionStore.CompactionStore.use((store) => store.migrate);
 	yield* Auth.Auth.use((auth) => auth.migrate);
+	// After Auth and Threads: its tables reference users, and threads.workspace_id references it.
+	yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
 	yield* Files.Files.use((files) => files.migrate);
 	yield* Credits.Credits.use((credits) => credits.migrate);
 	yield* Invites.Invites.use((invites) => invites.migrate);
@@ -108,12 +120,15 @@ const migrateAll = Effect.gen(function* () {
  *
  * The connection is reserved from the pool for as long as the scope is open: one of its 10.
  */
+const LockRow = Schema.Struct({ locked: Schema.Boolean });
+
 const becomeTheOnlyWorker = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
 	const connection = yield* sql.reserve;
 	const key = 7_316_420_901;
-	const [first] = yield* connection.execute("select pg_try_advisory_lock($1) as locked", [key], undefined);
-	if (first?.locked) return;
+	const rows = yield* connection.execute("select pg_try_advisory_lock($1) as locked", [key], undefined);
+	const { locked } = yield* Schema.decodeUnknownEffect(LockRow)(rows[0]).pipe(Effect.orDie);
+	if (locked) return;
 	yield* Effect.log("workflow: waiting for the previous server to stop");
 	yield* connection.execute("select pg_advisory_lock($1)", [key], undefined);
 });

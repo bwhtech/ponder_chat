@@ -69,7 +69,6 @@ function keep(connector: Connector) {
 	return connector;
 }
 
-// Probe is written out: the dialog indexes with its `auth`, which the check without the server would see as `any`.
 export const probeServer = (url: string): Promise<Probe> => unwrap(api.probe.$post({ json: { url } }));
 
 /** A connector with no sign-in or a key is added at once; OAuth returns the URL where the person signs in. */

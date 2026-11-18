@@ -1,0 +1,15 @@
+{
+	// The web app with the browser's types only (npm run typecheck). The server's API types
+	// come from their declarations (server/tsconfig.api-types.json), which leave out the
+	// server's code and with it Node's types. scripts/typecheck-browser.cjs fails if Node's
+	// types get in some other way.
+	"extends": "../tsconfig.json",
+	"compilerOptions": {
+		"paths": {
+			"#server/app": ["../../node_modules/.cache/ponder-api-types/server/app.d.ts"],
+			"pg": ["./pg.d.ts"]
+		}
+	},
+	"include": ["../**/*.ts", "../**/*.vue"],
+	"exclude": ["../vue-shim.d.ts"]
+}

@@ -5,12 +5,16 @@
   "main": "index.js",
   "scripts": {
     "build": "PONDER_PAGE=chat vite build && PONDER_PAGE=admin vite build && tsx scripts/compress-web.ts && nitro build",
-    "typecheck": "node scripts/vue-tsc.cjs --noEmit -p tsconfig.json && node scripts/vue-tsc.cjs --noEmit -p tsconfig.no-node.json",
+    "typecheck": "node scripts/vue-tsc.cjs --noEmit -p web/tsconfig.vue.json && npm run typecheck:browser",
+    "typecheck:browser": "npm run api-types && tsx scripts/typecheck-browser.ts",
+    "api-types": "tsc -p server/tsconfig.api-types.json",
+    "lint": "tsx scripts/no-suppressions.ts && npm run lint:vue && oxlint && tsx scripts/no-any-casts.ts",
+    "lint:vue": "npm run api-types && node --require ./scripts/typescript5.cjs node_modules/eslint/bin/eslint.js --concurrency auto \"web/**/*.vue\"",
     "dev": "tsx scripts/dev.ts",
     "test": "vitest run",
     "start": "./start.sh",
-    "typecheck:server": "tsc --ignoreConfig --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --allowImportingTsExtensions server/app.ts server/plugins/startup.ts server/plugins/tracing.ts server/tracing/flow-middleware.ts server/pdf-text-worker.ts server/runtime/main.ts server/config.test.ts server/runtime/boundaries.test.ts server/runtime/Database.test.ts server/threads/Threads.test.ts server/secrets/Secrets.test.ts server/settings/Settings.test.ts server/branding/Branding.test.ts server/net/NetGuard.test.ts server/openrouter/OpenRouter.test.ts server/models/Models.test.ts server/notify/Notify.test.ts server/telemetry/ModelCalls.test.ts server/telemetry/run-recorder.test.ts server/memory/memory.test.ts server/memory/pgvector-index.test.ts server/compaction/compaction.test.ts server/memory.check.ts server/mcp.check.ts server/mcp/McpClients.test.ts server/mcp/ConnectorStore.test.ts server/mcp/errors.test.ts scripts/credits.ts scripts/admin.ts scripts/invite.ts server/credits/Credits.test.ts server/people/Invites.test.ts server/admin/AdminEvents.test.ts server/limits/RateLimits.test.ts server/files.test.ts server/skills.test.ts server/thread-search.test.ts server/web-build.test.ts server/python/pyodide.test.ts server/python/state.test.ts server/search.check.ts server/pdf-text.check.ts server/workflow/model-attempt.test.ts server/workflow/replies.test.ts server/genui/tool.test.ts",
-    "typecheck:e2e": "tsc --ignoreConfig --noEmit --module nodenext --moduleResolution nodenext --target es2023 --strict --skipLibCheck --allowImportingTsExtensions --types node playwright.config.ts e2e/*.ts e2e/fake/*.ts e2e/mcp/*.ts e2e/tests/*.ts",
+    "typecheck:server": "tsc --ignoreConfig --noEmit --module nodenext --moduleResolution nodenext --target es2022 --strict --skipLibCheck --allowImportingTsExtensions types/json.d.ts types/fetch.d.ts types/array.d.ts server/app.ts server/plugins/startup.ts server/plugins/tracing.ts server/tracing/flow-middleware.ts server/pdf-text-worker.ts server/runtime/main.ts server/config.test.ts server/runtime/boundaries.test.ts server/runtime/Database.test.ts server/threads/Threads.test.ts server/secrets/Secrets.test.ts server/settings/Settings.test.ts server/branding/Branding.test.ts server/net/NetGuard.test.ts server/openrouter/OpenRouter.test.ts server/models/Models.test.ts server/notify/Notify.test.ts server/telemetry/ModelCalls.test.ts server/telemetry/run-recorder.test.ts server/memory/memory.test.ts server/memory/pgvector-index.test.ts server/memory/model-change.test.ts server/compaction/compaction.test.ts server/memory.check.ts server/mcp.check.ts server/mcp/McpClients.test.ts server/mcp/ConnectorStore.test.ts server/mcp/errors.test.ts scripts/credits.ts scripts/admin.ts scripts/invite.ts server/credits/Credits.test.ts server/people/Invites.test.ts server/admin/AdminEvents.test.ts server/admin/workspaces.test.ts server/limits/RateLimits.test.ts server/files.test.ts server/skills.test.ts server/thread-search.test.ts server/web-build.test.ts server/python/pyodide.test.ts server/python/state.test.ts server/search.check.ts server/pdf-text.check.ts server/workflow/model-attempt.test.ts server/workflow/replies.test.ts server/display-name.test.ts server/workspaces/Workspaces.test.ts server/workspaces/slug.test.ts server/workspaces/prompt.test.ts server/workspaces/chats.test.ts server/workspaces/documents/chunk.test.ts server/workspaces/documents/read-pdf.test.ts server/workspaces/documents/page-reader.test.ts server/workspaces/documents/read-document.test.ts server/workspaces/documents/documents.test.ts server/workspaces/documents/search.test.ts server/workspaces/documents/lifecycle.test.ts server/workspaces/documents/read-pdf.check.ts server/workspaces/documents/pdf-pages-worker.ts server/workspaces/documents/prepare-text-worker.ts server/workspaces/documents/prepare-text.test.ts server/workspaces/documents/fixtures/make-fixture.ts server/workspaces/eval/run.ts web/workspaces/poller.test.ts server/genui/tool.test.ts",
+    "typecheck:e2e": "tsc -p e2e/tsconfig.json",
     "e2e": "npm run build && playwright test",
     "e2e:server": "tsx e2e/start.ts",
     "sandbox:setup": "sandbox/pyodide/setup.sh",
@@ -33,6 +37,7 @@
     "@effect/sql-pg": "4.1.1",
     "@hono/node-server": "^2.1.5",
     "@hono/zod-validator": "^0.9.1",
+    "@llamaindex/liteparse": "^2.19.0",
     "@mozilla/readability": "^0.6.0",
     "@openrouter/ai-sdk-provider": "^3.1.0",
     "@opentelemetry/api": "1.9.1",
@@ -73,16 +78,51 @@
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@playwright/test": "^1.65.0",
     "@types/express": "^5.0.6",
+    "@types/json-schema": "7.0.15",
     "@types/node": "^26.6.5",
     "@types/pg": "^8.23.1",
     "@vitejs/plugin-vue": "^6.0.10",
     "autoprefixer": "^10.6.1",
+    "eslint": "10.15.0",
+    "oxlint": "1.94.0",
+    "oxlint-tsgolint": "7.0.2007",
     "postcss": "^8.5.31",
     "tailwindcss": "^3.4.19",
     "typescript": "^7.0.2",
+    "typescript-eslint": "8.73.0",
     "vite": "^8.3.5",
     "vitest": "5.0.5",
+    "vue-eslint-parser": "10.4.2",
     "vue-tsc": "^3.3.13"
   },
-  "private": true
+  "private": true,
+  "overrides": {
+    "typescript-eslint": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/parser": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/eslint-plugin": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/typescript-estree": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/type-utils": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/utils": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/project-service": {
+      "typescript": "$typescript"
+    },
+    "@typescript-eslint/tsconfig-utils": {
+      "typescript": "$typescript"
+    },
+    "ts-api-utils": {
+      "typescript": "$typescript"
+    }
+  }
 }

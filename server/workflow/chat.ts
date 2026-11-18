@@ -24,7 +24,10 @@ import {
 	trustedPagesStep,
 	webFetchStep,
 	webSearchStep,
+	workspaceContextStep,
+	workspaceSearchStep,
 } from "./steps.ts";
+import { WORKSPACE_SEARCH, WORKSPACE_SEARCH_DESCRIPTION, workspacePrompt, workspaceSearchInput } from "../workspaces/prompt.ts";
 
 export type ChatTurn = {
 	threadId: string;
@@ -41,6 +44,8 @@ export type ChatTurn = {
 	 * last call (replies.ts). The run goes to it, and the reply keeps its reasoning.
 	 */
 	answeredBy?: string;
+	/** The chat's workspace, checked by the route (replies.ts). Its instructions go into the system prompt. */
+	workspaceId?: string;
 };
 
 /**
@@ -74,6 +79,10 @@ export async function chatTurn(turn: ChatTurn) {
 		const skills = await skillsStep().catch(() => []);
 		// Without it, every page waits for the person: safe, only slower.
 		const trustedPages = await trustedPagesStep(turn.threadId).catch(() => []);
+		// The workspace's instructions, documents and excerpts (server/workspaces/). Without them the reply is still written.
+		const workspaceId = turn.workspaceId;
+		const workspace = workspaceId ? await workspaceContextStep(workspaceId, turn.owner, turn.threadId, turn.model.id).catch(() => null) : null;
+		const searchDocumentIds = workspace?.searchDocumentIds ?? [];
 		const tools: ToolSet = {
 			[WEB_SEARCH]: tool({
 				description: WEB_SEARCH_DESCRIPTION,
@@ -102,14 +111,29 @@ export async function chatTurn(turn: ChatTurn) {
 			...connectorTools(catalog, turn.owner),
 			// Changes only when an admin changes the skills.
 			...skillTools(skills),
+			// Only when some of the workspace's documents are searched, not given whole. Bound to the chat's workspace:
+			// the model gives the query, never which workspace or documents.
+			...(workspaceId &&
+				searchDocumentIds.length && {
+					[WORKSPACE_SEARCH]: tool({
+						description: WORKSPACE_SEARCH_DESCRIPTION,
+						inputSchema: workspaceSearchInput,
+						execute: (input) => workspaceSearchStep(input, { owner: turn.owner, workspaceId, threadId: turn.threadId, documentIds: searchDocumentIds }),
+					}),
+				}),
 		};
-		const system = [instructions(turn), skillsGuidance(skills), catalog.connectors.length ? CONNECTOR_GUIDANCE : "", memory.guidance].filter(Boolean).join("\n\n");
+		// The workspace comes right after Ponder's own rules: it stays the same for the whole chat, so the cache keeps it.
+		const system = [instructions(turn), workspace ? workspacePrompt(workspace) : "", skillsGuidance(skills), catalog.connectors.length ? CONNECTOR_GUIDANCE : "", memory.guidance]
+			.filter(Boolean)
+			.join("\n\n");
 		// The <connectors> note goes with the latest message, as memory's does, and is never summarized.
 		const connectors = connectorNote(catalog);
 		// A long chat is summarized before a call would go over the model's window (context-guard.ts).
 		const keep = turn.answeredBy ? turn.continued?.messageId : undefined;
-		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors, keep);
-		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors, keepReasoningOf: keep };
+		// The workspace's best passages for this message go with it, as memory's do.
+		const excerpts = workspace?.excerpts ?? "";
+		const context = await loadModelMessages(writable, turn.threadId, turn.owner, turn.model.id, memory.recalled, skills, connectors, keep, excerpts);
+		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: turn.model.id, recalled: memory.recalled, skills, connectors, excerpts, keepReasoningOf: keep };
 		const guard = new ContextGuard(base, context, await toolTokens(tools), writable, turn.model.name);
 		// Each model call records its cost in `runs`, which credits are charged from (model-attempt.ts).
 		await runReply({

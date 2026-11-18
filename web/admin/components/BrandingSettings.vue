@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { Button, SettingsRow, toast } from "frappe-ui";
 import { reactive, ref } from "vue";
-import { logos, logoUrl, setLogos, type LogoVersions, type Theme } from "../../brand";
+import { isLogoVersions, logos, logoUrl, setLogos, type Theme } from "../../brand";
 import { when } from "../../dates";
+import { isRecord } from "../../json";
 
 /**
  * The organisation's logo, for light and dark mode (server/branding/Branding.ts). An upload
@@ -47,8 +48,10 @@ async function change(theme: Theme, kind: "upload" | "remove", send: () => Promi
 	busy[theme] = kind;
 	try {
 		const response = await send();
-		const answer = (await response.json().catch(() => ({}))) as { logos?: LogoVersions; error?: string };
-		if (!response.ok || !answer.logos) throw new Error(answer.error ?? "The logo could not be saved. Try again.");
+		const answer: unknown = await response.json().catch(() => ({}));
+		if (!response.ok || !isRecord(answer) || !isLogoVersions(answer.logos)) {
+			throw new Error(isRecord(answer) && typeof answer.error === "string" ? answer.error : "The logo could not be saved. Try again.");
+		}
 		setLogos(answer.logos);
 		toast.success(done);
 	} catch (error) {

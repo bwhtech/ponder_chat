@@ -19,9 +19,8 @@ export type Admin = SettingsData["admins"][number];
 export type Person = Answer<typeof admin.people.$get>["people"][number];
 export type PersonDetail = Answer<(typeof admin.people)[":id"]["$get"]>;
 
-// Written out, not read from the routes: the pages compute with their fields, which the
-// check without the server (tsconfig.no-node.json) would see as `any`. Where a page keeps
-// an answer in one of them, the full check confirms that the answer fits.
+// Written out, not read from the routes. Where a page keeps an answer in one of them, the
+// typecheck confirms that the answer fits.
 export type Status = "active" | "invited" | "banned";
 export type Day = { date: string; credits: number; replies: number };
 export type ModelShare = { model: string; credits: number };
@@ -30,10 +29,46 @@ export type Overview = {
 	yesterday: { active: number; replies: number };
 	days: (Day & { active: number })[];
 	byModel: ModelShare[];
+	/** The app's own calls, in US dollars: no one's credits (server/admin/usage.ts). */
+	system: SystemSpend;
 	people: { id: string; name: string; today: { used: number; limit: number }; credits: number; replies: number; activeDays: number }[];
 	pendingRequests: number;
 	creditsPerUsd: number;
 };
+
+export type SystemSpend = { usd: number; calls: number; byFunction: { functionId: string; usd: number; calls: number }[] };
+
+/** GET /api/admin/workspaces (server/workspaces/admin.ts): workspaces open to everyone in full, private ones as totals. */
+export type DocumentStatus = "reading" | "ready" | "failed";
+/** How far an Indexing document is: the same as a workspace's (web/workspaces/documents.ts). */
+export type DocumentProgress = { phase: "pages" | "embedding"; done: number; total: number };
+export type OrgDocument = {
+	id: string;
+	name: string;
+	mediaType: string;
+	size: number;
+	status: DocumentStatus;
+	error: string | null;
+	createdAt: string;
+	progress: DocumentProgress | null;
+	costUsd: number | null;
+};
+export type OrgWorkspace = {
+	id: string;
+	slug: string;
+	name: string;
+	description: string;
+	icon: string | null;
+	owner: { id: string; name: string; email: string };
+	/** The people added to it. */
+	memberCount: number;
+	createdAt: string;
+	updatedAt: string;
+	documents: OrgDocument[];
+	costUsd: number | null;
+};
+export type PrivateWorkspaces = { workspaces: number; documents: Record<DocumentStatus, number>; costUsd: number; errors: { error: string; documents: number }[] };
+export type WorkspacesReport = { org: OrgWorkspace[]; private: PrivateWorkspaces };
 
 type Requests = Answer<typeof admin.requests.$get>;
 export type PendingRequest = Requests["pending"][number];

@@ -104,7 +104,7 @@ const make = Effect.gen(function* () {
 
 	const setup = Effect.gen(function* () {
 		yield* store.migrate;
-		// The index is rebuilt from Postgres when it is missing or out of step; a failure leaves search to Postgres.
+		// The index is repaired from Postgres where it is out of step; a failure leaves search to Postgres.
 		yield* store.syncIndex.pipe(
 			recoverAll((error) => Effect.logError("memory: could not sync the search index:", problem(error))),
 			Effect.forkIn(layerScope),

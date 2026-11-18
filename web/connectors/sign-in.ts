@@ -1,3 +1,4 @@
+import { isRecord } from "../json";
 import type { SignInMessage } from "./api";
 
 /**
@@ -8,7 +9,7 @@ import type { SignInMessage } from "./api";
  * (Cross-Origin-Opener-Policy), so the channel is what Ponder relies on.
  *
  * On a phone, and when the popup is blocked, the sign-in uses this tab and comes back to
- * /?settings=connectors (Workspace.vue).
+ * /?settings=connectors (Shell.vue).
  */
 const CHANNEL = "ponder-connectors";
 
@@ -79,8 +80,8 @@ export function waitForSignIn(popup: Window, options: WaitOptions): Promise<Sign
 	};
 	const onMessage = (event: MessageEvent) => {
 		if (event instanceof MessageEvent && event.origin && event.origin !== location.origin) return;
-		const data = event.data as SignInMessage | undefined;
-		if (data?.type !== "ponder:connector-sign-in" || !mine(data)) return;
+		const data: unknown = event.data;
+		if (!isSignInMessage(data) || !mine(data)) return;
 		if (settled) options.onLate?.(data);
 		else end({ kind: "answered", message: data });
 		stop();
@@ -121,4 +122,14 @@ export function waitForSignIn(popup: Window, options: WaitOptions): Promise<Sign
 	if (options.signal?.aborted) onAbort();
 	else options.signal?.addEventListener("abort", onAbort);
 	return result;
+}
+
+/** A message on the sign-in's channel, which any page of Ponder's origin can post to. */
+function isSignInMessage(value: unknown): value is SignInMessage {
+	return (
+		isRecord(value) &&
+		value.type === "ponder:connector-sign-in" &&
+		typeof value.ok === "boolean" &&
+		[value.id, value.error, value.state].every((field) => field === undefined || typeof field === "string")
+	);
 }

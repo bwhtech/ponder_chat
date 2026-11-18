@@ -1,4 +1,4 @@
-import { defineAsyncComponent, ref } from "vue";
+import { computed, defineAsyncComponent, ref } from "vue";
 import type { ModelOption } from "frappe-ui-ai-elements";
 import { client } from "./api";
 import { fromBoot } from "./boot";
@@ -15,6 +15,9 @@ export const defaultModel = ref("");
 
 /** What the server can do: Python only when its sandbox is set up. */
 export const features = ref({ python: false });
+
+/** The files a message can carry: what the server can pass to the model; spreadsheets only when Python can read them. */
+export const acceptedFiles = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
 
 /** The model menu's button was tapped before the menu's code came: the menu opens when it comes (model-selector.ts). */
 export const modelMenuAsked = ref(false);

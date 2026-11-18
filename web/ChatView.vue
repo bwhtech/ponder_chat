@@ -10,18 +10,19 @@ import { useDraft } from "./drafts";
 import { canUndo, MEMORY_LABELS, useRememberedNotes } from "./remembered-notes";
 import { closeOpenCalls, useMessageQueue, waitingOnPerson, type Queued } from "./message-queue";
 import { isAuto } from "../shared/auto-model";
-import { defaultModel, features, ModelSelector, modelName, models } from "./models";
+import { acceptedFiles, defaultModel, features, ModelSelector, modelName, models } from "./models";
 import { chosenCitations, citationLabel, citationPart, withComment, type Citation } from "./cite/citations";
-import type { CiteAnchor } from "./cite/CitationChip.vue";
-import type { PendingCite } from "./cite/selection";
+import type { CiteAnchor, PendingCite } from "./cite/selection";
 import { SkillMenu, useSkillPicker } from "./skills/picker";
-import { chosenSkills, loadSkills, skillPart, skills, skillTitle } from "./skills/skills";
+import { chosenSkills, loadSkills, skillPart, skillTitle, withSkillsHint } from "./skills/skills";
 import { summarizedThrough } from "./compaction";
 import { THREAD_CHANGED } from "../shared/replies";
 import { useThreads } from "./threads";
 import { useLazyChat } from "./lazy-chat";
 import { once } from "./once";
+import { isRecord } from "./json";
 import { preloadChat } from "./preload";
+import { useChatWorkspace, WorkspacePicker } from "./workspaces/chat-workspace";
 // The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
 import {
 	CitationChip,
@@ -57,8 +58,11 @@ import {
 	Suggestions,
 } from "frappe-ui-ai-elements";
 
-/** One chat: the conversation and the message field. The shell mounts a new one per thread. */
-const props = defineProps<{ threadId: string; initialMessages: UIMessage[]; running?: boolean; failed?: boolean }>();
+/**
+ * One chat: the conversation and the message field. The shell mounts a new one per thread.
+ * `workspaceId` is the saved chat's workspace; a new chat picks one in the composer.
+ */
+const props = defineProps<{ threadId: string; initialMessages: UIMessage[]; running?: boolean; failed?: boolean; workspaceId?: string }>();
 const emit = defineEmits<{
 	/** A reply finished and the thread was saved: its place in the list and the credits left changed. */
 	saved: [];
@@ -85,6 +89,14 @@ function lastReplyModel(messages: UIMessage[]) {
 	return reply && replyModelId(reply);
 }
 
+// The chat's workspace (workspaces/chat-workspace.ts), and a question asked on a workspace page, sent as the first message.
+const workspace = useChatWorkspace(
+	props.threadId,
+	() => props.workspaceId,
+	() => messages.value.some((message) => message.role === "user"),
+);
+if (workspace.firstMessage?.model) threadModel.value = workspace.firstMessage.model;
+
 /** The server said the saved thread is ahead of this page (THREAD_CHANGED). */
 let threadChanged = false;
 // The AI SDK loads beside the page (lazy-chat.ts); the messages show without it.
@@ -97,7 +109,8 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 		api: "/api/chat",
 		prepareSendMessagesRequest: ({ id, messages }) => ({
 			headers: { "Content-Type": "application/json" },
-			body: { id, messages, model: threadModel.value },
+			// The server reads the workspace on the chat's first message only.
+			body: { id, messages, model: threadModel.value, workspaceId: workspace.chosen.value ?? undefined },
 		}),
 		fetch: patientFetch,
 	}),
@@ -112,7 +125,11 @@ const { messages, sendMessage, addToolApprovalResponse, status, error, stop, reg
 		emit("saved");
 		void notes.load({ wait: true });
 	},
-	onError: () => emit("refused"),
+	onError: () => {
+		emit("refused");
+		// Perhaps removed from the chat's workspace meanwhile: the list says so, and the composer closes.
+		workspace.recheck();
+	},
 }), props.initialMessages);
 
 /**
@@ -146,6 +163,10 @@ onMounted(() => {
 	if (props.initialMessages.length) void notes.load();
 	// The reply was still being written when the thread loaded (after a reload, say): follow it.
 	if (props.running) void resumeStream();
+	const first = workspace.firstMessage;
+	if (!first) return;
+	skillChips.value = first.skills;
+	void send(first.text, first.files);
 });
 
 const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
@@ -158,8 +179,6 @@ useDraft(props.threadId, input);
 watch(input, () => void preloadChat(), { once: true });
 const uploading = ref(false);
 const uploadError = ref("");
-// What the server can pass to the model; spreadsheets only when Python can read them.
-const ACCEPT = computed(() => `image/png,image/jpeg,image/webp,image/gif,application/pdf,.csv,.tsv,.txt,.md,.json${features.value.python ? ",.xlsx,.xls,.ods" : ""}`);
 
 // Skills: $name in the message box opens the menu (skills/picker.ts); a chosen skill is a chip until the message goes out.
 const composer = ref<HTMLElement | null>(null);
@@ -175,7 +194,9 @@ const {
 	listeners: skillListeners,
 } = useSkillPicker(input, composer);
 void loadSkills();
-const placeholder = computed(() => (skills.value.length ? "Message Ponder Chat. Type $ for skills" : "Message Ponder Chat"));
+// A chat in a workspace names it, as the workspace page does: the header's breadcrumb leads back to it.
+const askIn = computed(() => workspace.summary.value?.name);
+const placeholder = computed(() => withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat"));
 
 /** The skills the person asked for in the message this reply answers, for the line above the reply. */
 function askedSkills(message: UIMessage) {
@@ -218,23 +239,32 @@ function turnStart(list: UIMessage[], index: number) {
 }
 
 // A new chat opens with the field in the middle of the page, under the greeting (on phones it
-// stays at the bottom, by the thumb and the keyboard). The first message sends it down.
-const landing = computed(() => messages.value.length === 0);
+// stays at the bottom, by the thumb and the keyboard). The first message sends it down. A
+// question asked on a workspace page is that first message: the chat opens as sent, with no
+// greeting, and its field slides in from where the page's box was.
+const landing = computed(() => messages.value.length === 0 && !workspace.firstMessage);
 const area = ref<HTMLElement | null>(null);
 const footer = ref<HTMLElement | null>(null);
 let footerTop = 0;
 // Before the page re-renders: where the field is now.
 watch(landing, () => (footerTop = footer.value?.getBoundingClientRect().top ?? 0), { flush: "pre" });
-watch(landing, (now) => !now && settleFooter(), { flush: "post" });
+watch(landing, (now) => !now && footer.value && settleFooter(0, footerTop - footer.value.getBoundingClientRect().top), { flush: "post" });
+onMounted(() => {
+	const from = workspace.firstMessage?.from;
+	const box = composer.value?.getBoundingClientRect();
+	if (from && box) settleFooter(from.left - box.left, from.bottom - box.bottom);
+});
 
-/** The field moves from where it was to its place at the bottom. The first message shows at once, like every message you send. */
-function settleFooter() {
+/**
+ * The field moves from where it was, `dx` and `dy` away, to its place at the bottom. The first
+ * message shows at once, like every message you send. Only the place animates: a field of
+ * another width takes its own at once.
+ */
+function settleFooter(dx: number, dy: number) {
 	const field = footer.value;
-	if (!field) return;
-	const shift = footerTop - field.getBoundingClientRect().top;
-	if (Math.abs(shift) <= 1 || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+	if (!field || (Math.abs(dx) <= 1 && Math.abs(dy) <= 1) || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
 	const easing = getComputedStyle(document.documentElement).getPropertyValue("--ease-out-strong").trim() || "ease-out";
-	field.animate([{ transform: `translateY(${shift}px)` }, { transform: "none" }], { duration: 300, easing });
+	field.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration: 300, easing });
 }
 
 /** The greeting fades out where it stood, out of the layout, so it does not hold the field up. */
@@ -357,7 +387,7 @@ watch(
 	(now, before) => {
 		chatBusy.value = now;
 		if (now) failedBefore.value = false;
-		if (before && !now) remember(props.threadId, { messages: messages.value, running: false, failed: Boolean(error.value) });
+		if (before && !now) remember(props.threadId, { messages: messages.value, running: false, failed: Boolean(error.value), workspaceId: workspace.chosen.value ?? undefined });
 		if (before && !now && threadChanged) {
 			threadChanged = false;
 			void reload(props.threadId);
@@ -366,7 +396,7 @@ watch(
 	{ immediate: true },
 );
 onBeforeUnmount(() => {
-	if (busy.value) remember(props.threadId, { messages: messages.value, running: true });
+	if (busy.value) remember(props.threadId, { messages: messages.value, running: true, workspaceId: workspace.chosen.value ?? undefined });
 	chatBusy.value = false;
 });
 
@@ -421,7 +451,7 @@ async function send(text: string, files: File[] = []) {
 		if (!skillChips.value.length) skillChips.value = chosen;
 		if (!citeChips.value.length) citeChips.value = quoted;
 	};
-	if ((!text.trim() && !files.length && !chosen.length && !quoted.length) || uploading.value || outOfCredits.value) {
+	if ((!text.trim() && !files.length && !chosen.length && !quoted.length) || uploading.value || outOfCredits.value || workspace.lostAccess.value) {
 		if (outOfCredits.value) giveBack();
 		return;
 	}
@@ -435,7 +465,7 @@ function sendNow({ text, files, skills: chosen, citations: quoted }: Queued) {
 	const closed = closeOpenCalls(messages.value);
 	if (closed) messages.value = closed;
 	// The first message: the thread shows in the list now, not once the reply ends.
-	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", ") || citationLabel(quoted[0]!));
+	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", ") || citationLabel(quoted[0]!), workspace.chosen.value ?? undefined);
 	if (!chosen.length && !quoted.length) return sendMessage(files.length ? { text, files } : { text });
 	// The skills go first in the message, so their instructions come before the person's text (server/workflow/skills.ts).
 	// The quotes come next, so the text that follows can refer to them (server/workflow/citations.ts).
@@ -461,8 +491,8 @@ async function upload(files: File[]): Promise<FileUIPart[] | null> {
 				const body = new FormData();
 				body.append("file", file);
 				const response = await fetch("/api/files", { method: "POST", body });
-				const result = await response.json().catch(() => ({ error: `"${file.name}" could not be uploaded.` }));
-				if (!response.ok) throw new Error(result.error ?? `"${file.name}" could not be uploaded.`);
+				const result: unknown = await response.json().catch(() => null);
+				if (!response.ok || !isUploaded(result)) throw new Error(refusalOf(result) ?? `"${file.name}" could not be uploaded.`);
 				return { type: "file" as const, mediaType: result.mediaType, filename: result.name, url: result.url };
 			}),
 		);
@@ -472,6 +502,16 @@ async function upload(files: File[]): Promise<FileUIPart[] | null> {
 	} finally {
 		uploading.value = false;
 	}
+}
+
+/** The stored file that POST /api/files answers (StoredFile in server/files.ts). */
+function isUploaded(value: unknown): value is { mediaType: string; name: string; url: string } {
+	return isRecord(value) && typeof value.mediaType === "string" && typeof value.name === "string" && typeof value.url === "string";
+}
+
+/** The server's reason for refusing an upload, such as a file too large. */
+function refusalOf(value: unknown) {
+	return isRecord(value) && typeof value.error === "string" ? value.error : undefined;
 }
 
 function isStreaming(message: UIMessage) {
@@ -601,7 +641,7 @@ function replyModelId(message: UIMessage) {
 							<MessageContent><Loader :text="thinkingText" /></MessageContent>
 						</Message>
 					</ConversationItem>
-					<ConversationItem v-if="(error || failedBefore) && !outOfCredits">
+					<ConversationItem v-if="(error || failedBefore) && !outOfCredits && !workspace.lostAccess.value">
 						<Alert
 							theme="red"
 							title="Something went wrong"
@@ -617,13 +657,23 @@ function replyModelId(message: UIMessage) {
 
 	<footer ref="footer" class="scroll-gutter-match flex shrink-0 flex-col gap-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 		<!-- Above the field on phones; under it in the middle of the page. -->
-		<!-- The chips fade out with the greeting when the first message goes. -->
+		<!-- The chips fade out with the greeting when the first message goes. With a workspace
+		     picked they go too, but keep their space under a centred composer, so it does not
+		     jump under the pointer. -->
 		<Transition leave-active-class="transition-opacity duration-150 ease-out-strong motion-reduce:transition-none" leave-to-class="opacity-0" @before-leave="pinInPlace">
-			<Suggestions v-if="landing && !outOfCredits" class="-mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
+			<Suggestions v-if="landing && !outOfCredits" :class="{ 'max-sm:hidden sm:invisible': askIn }" :inert="!!askIn" class="-mx-4 w-[calc(100%+2rem)] px-4 sm:[@media(pointer:coarse)]:gap-y-4 [@media(pointer:coarse)]:-my-1.5 [@media(pointer:coarse)]:py-1.5 sm:w-full [--scroll-fade-size:40px] sm:order-last sm:mx-0 sm:px-0 sm:mt-1 sm:flex-wrap sm:justify-center sm:overflow-visible sm:[mask-image:none]">
 				<Suggestion v-for="suggestion in suggestions" :key="suggestion" :suggestion="suggestion" @select="send" />
 			</Suggestions>
 		</Transition>
 		<OutOfCredits v-if="outOfCredits" />
+		<!-- The server's own words for a send it refuses (server/workflow/replies.ts). -->
+		<Alert
+			v-if="workspace.lostAccess.value"
+			data-slot="workspace-access-lost"
+			theme="amber"
+			title="You no longer have access to this chat's workspace."
+			description="You can read this chat, but not send in it."
+		/>
 		<Alert v-if="uploadError" theme="red" :title="uploadError" description="Attach the files again to send them." />
 		<div ref="composer" class="relative" v-bind="skillListeners">
 			<SkillMenu
@@ -640,8 +690,8 @@ function replyModelId(message: UIMessage) {
 				v-model="input"
 				queue
 				:status="status"
-				:disabled="uploading || outOfCredits"
-				:accept="ACCEPT"
+				:disabled="uploading || outOfCredits || workspace.lostAccess.value"
+				:accept="acceptedFiles"
 				:ready="skillChips.length > 0 || citeChips.length > 0"
 				@submit="send($event.text, $event.files)"
 				@stop="queue.stop"
@@ -672,6 +722,7 @@ function replyModelId(message: UIMessage) {
 					<PromptInputTools>
 						<PromptInputAttachButton />
 						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
+						<WorkspacePicker v-if="workspace.pickable.value" v-model="workspace.chosen.value" />
 						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-6">Uploading…</span>
 					</PromptInputTools>
 					<PromptInputSubmit />

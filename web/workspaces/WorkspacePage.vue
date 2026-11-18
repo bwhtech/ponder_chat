@@ -1,0 +1,413 @@
+<script setup lang="ts">
+import { Button, Skeleton } from "frappe-ui";
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from "vue";
+import { dialog } from "../dialogs";
+import EmptyState from "../EmptyState.vue";
+import { closePanel } from "../side-panel/panel";
+import { toast } from "../toasts";
+import { useThreads, useWorkspaceThreads } from "../threads";
+import { firstGreeting, forgetWorkspace, peekWorkspace, writeWorkspace } from "./cache";
+import { openWorkspaceDialog } from "./dialogs";
+import type { WorkspaceDocument } from "./documents";
+import type { FirstMessage } from "./first-message";
+import type { ComposerHandle, UploadHandle } from "./handles";
+import { setupSteps, type SetupStepKey } from "./onboarding";
+import { Poller } from "./poller";
+import WorkspaceAbout from "./WorkspaceAbout.vue";
+import WorkspaceChats from "./WorkspaceChats.vue";
+import WorkspaceComposer from "./WorkspaceComposer.vue";
+import WorkspaceHeading from "./WorkspaceHeading.vue";
+import WorkspaceOnboarding from "./WorkspaceOnboarding.vue";
+import {
+	canEdit,
+	deleteWorkspace,
+	fetchWorkspace,
+	isGone,
+	isShared,
+	loadWorkspaces,
+	openingWorkspace,
+	replaceWorkspaceKey,
+	takeMadeWorkspace,
+	updateWorkspace,
+	workspaceByKey,
+	type WorkspaceDetail,
+} from "./store";
+
+/**
+ * A workspace (`?w=<slug>`), in one column, the chat's: its name, the person's own chats in
+ * it, then what the workspace is (its instructions, documents and people, WorkspaceAbout.vue),
+ * and the composer, whose new chat is in this workspace, at the bottom, where the chat's own
+ * box will be. While the person has no chat here, the workspace's sections are the page, under
+ * setup cards for an editor until each step is done (WorkspaceOnboarding.vue). The sidebar's
+ * row draws the header at once; which of these the page shows depends on the workspace and on
+ * the person's chats in it, so the column fades in once both are here, and nothing in it moves
+ * then. A workspace just made in this tab shows at once. A workspace the person cannot use is
+ * not found. An older link by the workspace's id opens it too, and the slug takes its place.
+ *
+ * A workspace opened before on this page, or fetched as the person pointed at its row, shows at
+ * once from memory (cache.ts), with no fade, as a chat does; the server is asked then, and its
+ * answer replaces what shows, in place. Each version the page shows is kept there for the next
+ * visit. A workspace the server no longer has for the person is not found, and leaves memory.
+ *
+ * It renders its own header, as the main area's first child, so the hairline under it follows
+ * this page's scroller (style.css).
+ */
+const props = defineProps<{ slugOrId: string }>();
+const emit = defineEmits<{ openChat: [id: string]; ask: [message: FirstMessage]; deleted: []; newChat: [] }>();
+
+const { refresh: refreshThreads } = useThreads();
+const detail = shallowRef<WorkspaceDetail>();
+const missing = ref(false);
+const loadError = ref("");
+/** What the page shows before the workspace loads: the sidebar's row. */
+const summary = computed(() => detail.value ?? workspaceByKey(props.slugOrId));
+const workspaceId = computed(() => summary.value?.id ?? "");
+const { chats, loaded: chatsLoaded } = useWorkspaceThreads(() => workspaceId.value);
+/** A workspace made in this tab has no chats: its page need not wait for the list to say so. */
+const madeHere = ref("");
+/** The workspace, and whether the person has a chat in it, are known: the column can show. */
+const ready = computed(() => Boolean(detail.value && (chatsLoaded.value || madeHere.value === detail.value.id)));
+/** No chat of the person's here, for sure: the setup cards show for an editor, over the workspace's sections. */
+const onboarding = computed(() => ready.value && !chats.value.length);
+
+/**
+ * The first time the setup shows on this page, it is the column's entrance (style.css,
+ * [data-greet]): its heading rises in, its cards follow one after another, and the sections
+ * under it come with the last card. The column then does not fade as well. Later showings, and
+ * a workspace with no setup to do, are just there, or fade in as the page loads.
+ */
+const GREET_MS = 600;
+const greeting = ref(false);
+let greetTimer: ReturnType<typeof setTimeout> | undefined;
+watch(
+	ready,
+	(now) => {
+		const shown = detail.value;
+		if (!now || !shown || chats.value.length || !setupSteps(shown).some((step) => !step.done) || !firstGreeting(shown.id)) return;
+		greeting.value = true;
+		greetTimer = setTimeout(() => (greeting.value = false), GREET_MS);
+	},
+	// Before the column renders, so it never draws without the greeting first.
+	{ immediate: true, flush: "sync" },
+);
+onBeforeUnmount(() => clearTimeout(greetTimer));
+
+/**
+ * What Tab reaches scrolls clear of the message box: the page keeps scroll padding at the
+ * bottom as tall as the box's row and its fade (40px). The box grows with its text, files and
+ * the credits alert, so the padding follows its height.
+ */
+const FADE_PX = 40;
+const dock = ref<HTMLElement | null>(null);
+const dockHeight = ref(0);
+const dockObserver = new ResizeObserver(([entry]) => (dockHeight.value = entry ? Math.ceil(entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height) : 0));
+watch(dock, (now, before) => {
+	if (before) dockObserver.unobserve(before);
+	if (now) dockObserver.observe(now);
+});
+onBeforeUnmount(() => dockObserver.disconnect());
+/** The setup is done, and focus was on it: asking is what is left to do. */
+const composer = ref<ComposerHandle>();
+
+/**
+ * Files dropped anywhere else on the page, such as the blank space under the setup cards, are
+ * uploaded too, for a person who can edit, once the page is ready: on the setup while they have
+ * no chat here, so the Sources step counts them, else in the Sources section. Otherwise
+ * (still loading, or they can only ask) the drop is refused, so the browser does not open the
+ * file in place of the app. The setup, the sections and the message box take their own drops
+ * first (they mark the event handled).
+ *
+ * While files are dragged over the page, and a drop would upload them, the Sources step says
+ * so (`dragging`), except over the message box, which attaches them to the question. The count
+ * goes up and down as the drag enters and leaves each element, so it does not flicker between
+ * them; a drop, or the drag leaving the page or being cancelled (Esc), brings it to zero.
+ */
+const onboardingUpload = ref<UploadHandle>();
+const aboutUpload = ref<UploadHandle>();
+const hasFiles = (event: DragEvent) => Boolean(event.dataTransfer?.types.includes("Files"));
+function dropTarget() {
+	if (!ready.value || !detail.value || !canEdit(detail.value)) return undefined;
+	return chats.value.length ? aboutUpload.value : onboardingUpload.value;
+}
+const dragDepth = ref(0);
+const dragOverBox = ref(false);
+const pageDragging = computed(() => dragDepth.value > 0 && !dragOverBox.value && Boolean(dropTarget()));
+function pageDragEnter(event: DragEvent) {
+	if (hasFiles(event)) dragDepth.value++;
+}
+function pageDragLeave(event: DragEvent) {
+	if (hasFiles(event)) dragDepth.value = Math.max(0, dragDepth.value - 1);
+}
+function pageDragOver(event: DragEvent) {
+	if (!hasFiles(event) || !event.dataTransfer) return;
+	dragOverBox.value = event.target instanceof Node && Boolean(dock.value?.contains(event.target));
+	if (event.defaultPrevented) return;
+	event.preventDefault();
+	event.dataTransfer.dropEffect = dropTarget() ? "copy" : "none";
+}
+function pageDrop(event: DragEvent) {
+	dragDepth.value = 0;
+	if (!hasFiles(event) || event.defaultPrevented) return;
+	event.preventDefault();
+	const files = Array.from(event.dataTransfer?.files ?? []);
+	if (files.length) void dropTarget()?.upload(files);
+}
+
+// Each load takes a number: the answer for a workspace no longer open is dropped.
+let asked = 0;
+// Each change made on this page takes a number too: a load or poll asked for before it is older.
+let changes = 0;
+watch(() => props.slugOrId, (key) => (detail.value?.slug === key ? undefined : load()), { immediate: true });
+
+async function load() {
+	const mine = ++asked;
+	// One made in this tab shows as it was made, and one opened before as it was last shown.
+	// Otherwise no document is Reading now, so the polls stop (below).
+	const made = takeMadeWorkspace(props.slugOrId);
+	detail.value = made ?? peekWorkspace(props.slugOrId);
+	madeHere.value = made?.id ?? "";
+	missing.value = false;
+	loadError.value = "";
+	// The workspace shown can be changed (an upload, its instructions) before this answer comes.
+	// Then the answer is older than the page: it is dropped, and the workspace read again.
+	const seen = changes;
+	try {
+		const found = await openingWorkspace(props.slugOrId);
+		if (mine !== asked) return;
+		replaceWorkspaceKey(props.slugOrId, found.slug);
+		if (seen !== changes) return void poller.start(0);
+		// The same as the copy shown: nothing to draw again.
+		if (JSON.stringify(found) !== JSON.stringify(detail.value)) detail.value = found;
+	} catch (error) {
+		if (mine !== asked) return;
+		if (isGone(error)) gone();
+		else if (!detail.value) loadError.value = (error as Error).message;
+		// Offline for a moment, with a copy shown: it stays, as a chat's does, and is read again
+		// once the person is back online or back on the tab (below).
+	}
+}
+
+/**
+ * Deleted, or not shared with the person (any more), as a load, a poll or a check says: the
+ * page says it is not found, and what it showed goes, from memory too, with the side panel,
+ * which only shows this workspace's files and Details here.
+ */
+function gone() {
+	const shown = detail.value?.id ?? workspaceId.value;
+	if (shown) forgetWorkspace(shown);
+	poller.stop();
+	detail.value = undefined;
+	missing.value = true;
+	closePanel();
+	// It may have been in the sidebar: the person lost it, or it was deleted.
+	void loadWorkspaces();
+}
+
+/**
+ * Reads the workspace again, as a poll or a check: its answer replaces what shows, unless a
+ * change made here since is newer. False when the workspace is gone; a read that fails for
+ * another reason (offline) changes nothing.
+ */
+async function readAgain(current: () => boolean = () => true) {
+	const mine = asked;
+	const seen = changes;
+	try {
+		const fresh = await fetchWorkspace(workspaceId.value);
+		if (current() && mine === asked && seen === changes && JSON.stringify(fresh) !== JSON.stringify(detail.value)) detail.value = fresh;
+		return true;
+	} catch (error) {
+		if (!isGone(error)) return true;
+		if (current() && mine === asked) gone();
+		return false;
+	}
+}
+
+/**
+ * Back on the tab, or back online: the workspace is read again, so a copy shown from memory,
+ * or one whose read failed or never came back, does not stay out of date, nor show a
+ * workspace the person lost meanwhile.
+ */
+function recheck() {
+	if (document.visibilityState === "visible" && detail.value && !missing.value) void readAgain();
+}
+addEventListener("online", recheck);
+document.addEventListener("visibilitychange", recheck);
+onBeforeUnmount(() => {
+	removeEventListener("online", recheck);
+	document.removeEventListener("visibilitychange", recheck);
+});
+
+/** Each version the page shows, for the next visit (cache.ts): a change made here is in it. */
+watch(detail, (now) => now && writeWorkspace(now));
+
+/**
+ * While a document is Indexing, the workspace is read again, a little less often each time
+ * (2 s up to 10 s), until none is. While one shows its progress (a model reads its pages, or
+ * its passages are embedded), the wait stays at 3 s at most, so the numbers move on the
+ * row. A failed poll changes nothing on the page; the next one tries again, unless the
+ * workspace is gone. An answer asked for before a change in the side panel is dropped: it
+ * may not have the new document yet. One chain of polls runs at a time, and none once the
+ * page is left (poller.ts).
+ */
+const POLL_FIRST_MS = 2000;
+const POLL_MAX_MS = 10_000;
+const POLL_PROGRESS_MAX_MS = 3000;
+const poller = new Poller(poll);
+let pollDelay = POLL_FIRST_MS;
+const reading = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading")));
+const counting = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading" && document.progress)));
+// At once too: a copy from memory may show a document Reading as the page opens.
+watch(reading, (now) => (now ? startPolling() : poller.stop()), { immediate: true });
+onBeforeUnmount(() => poller.stop());
+
+function startPolling() {
+	pollDelay = POLL_FIRST_MS;
+	poller.start(pollDelay);
+}
+
+/** Reads the workspace again; the wait before the next read, or null. */
+async function poll(current: () => boolean) {
+	const mine = asked;
+	// Deleted, or shared no more: asking again will not help. Offline for a moment: the next poll tries again.
+	if (!(await readAgain(current))) return null;
+	if (!current() || mine !== asked || !reading.value) return null;
+	pollDelay = Math.min(counting.value ? POLL_PROGRESS_MAX_MS : POLL_MAX_MS, pollDelay * 1.5);
+	return pollDelay;
+}
+
+/** An upload, a delete or "Try again", in the sections or on the setup cards. */
+function documentsChanged(documents: WorkspaceDocument[]) {
+	if (!detail.value) return;
+	changes++;
+	detail.value = { ...detail.value, documents };
+	// A new Reading document starts the polls again from the shortest wait.
+	if (reading.value) startPolling();
+}
+
+/**
+ * A new name from the title shows at once; the sidebar and a chat's breadcrumb follow once it
+ * is saved. If saving fails, the old name comes back.
+ */
+async function rename(name: string) {
+	const before = detail.value;
+	if (!before) return;
+	changes++;
+	detail.value = { ...before, name };
+	try {
+		const saved = await updateWorkspace(before.id, { name });
+		if (detail.value?.id === saved.id) detail.value = saved;
+	} catch (error) {
+		if (detail.value?.id === before.id) detail.value = { ...detail.value, name: before.name };
+		toast.error((error as Error).message);
+	}
+}
+
+function editInstructions() {
+	if (detail.value) openWorkspaceDialog({ kind: "instructions", workspace: detail.value, onSaved: savedHere, quiet: stepToDo("instructions") });
+}
+
+/**
+ * Share saves each change at once, and the page follows each answer: its People, the setup's
+ * People step, the header's icon. A person who removed themselves leaves the page; one who
+ * gave themselves Can ask stays, as a person who asks. A workspace gone meanwhile is loaded
+ * again, which says so.
+ */
+function share() {
+	if (detail.value) openWorkspaceDialog({ kind: "share", workspace: detail.value, onSaved: sharedHere, onGone: () => void load() });
+}
+
+function sharedHere(saved: WorkspaceDetail) {
+	if (saved.access !== "none") return savedHere(saved);
+	forgetWorkspace(saved.id);
+	toast.success(`You left “${saved.name}”`);
+	emit("deleted");
+}
+
+/** The setup shows this step still to do: saving it is confirmed there, with no toast over the setup. */
+function stepToDo(key: SetupStepKey) {
+	return Boolean(detail.value && onboarding.value && setupSteps(detail.value).some((step) => step.key === key && !step.done));
+}
+
+/** A change saved on this page: a load or a poll asked for before it is older, and is dropped. */
+function savedHere(saved: WorkspaceDetail) {
+	changes++;
+	detail.value = saved;
+}
+
+function askDelete() {
+	const workspace = detail.value;
+	if (!workspace) return;
+	dialog.danger({
+		title: "Delete this workspace?",
+		message: `“${workspace.name}”, its instructions and its sources will be deleted. Chats in it are kept.`,
+		onConfirm: async () => {
+			await deleteWorkspace(workspace.id);
+			void refreshThreads();
+			toast.success(`Deleted “${workspace.name}”`);
+			emit("deleted");
+		},
+	});
+}
+</script>
+
+<template>
+	<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
+		<div class="scroll-gutter-match flex min-w-0 items-center gap-2">
+			<slot name="start" />
+			<h1 v-if="missing || loadError" class="min-w-0 flex-1 truncate text-lg-semibold text-ink-gray-9">Workspace</h1>
+			<WorkspaceHeading v-else-if="summary" :workspace="summary" :ready="Boolean(detail)" @rename="rename" @share="share" @delete="askDelete" />
+			<div v-else class="flex h-[1lh] min-w-0 flex-1 items-center text-lg-semibold"><Skeleton class="h-4 w-48 max-w-full rounded-4" /></div>
+			<slot name="end" />
+		</div>
+	</header>
+
+	<div v-if="missing || loadError" class="min-h-0 flex-1 overflow-y-auto sm:[scrollbar-gutter:stable_both-edges]">
+		<div class="mx-auto w-full max-w-[720px] px-4 sm:px-5">
+			<EmptyState v-if="missing" icon="lucide-circle-alert" title="No workspace here" body="It was deleted, or it isn't shared with you.">
+				<Button label="New chat" @click="emit('newChat')" />
+			</EmptyState>
+			<EmptyState v-else icon="lucide-circle-alert" title="This workspace could not load" :body="loadError" alert>
+				<Button label="Try again" @click="load" />
+			</EmptyState>
+		</div>
+	</div>
+
+	<!-- The page scrolls under its message box, which floats at the bottom of the column, where a chat's box
+	     sits. The box comes first, for the keyboard and screen readers, and shows last (order-last, sticky). It
+	     sits in the same scroller, so the wheel scrolls the page over it, and its own row is the room the page
+	     needs to scroll clear of it. -->
+	<div
+		v-else
+		data-slot="workspace-view"
+		@dragenter="pageDragEnter"
+		@dragleave="pageDragLeave"
+		@dragover="pageDragOver"
+		@drop="pageDrop"
+		class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]"
+		:style="{ scrollPaddingBottom: `${dockHeight + FADE_PX}px` }"
+	>
+		<div class="flex min-h-full flex-col">
+			<div ref="dock" class="pointer-events-none sticky bottom-0 z-10 order-last" data-slot="workspace-dock">
+				<div class="mx-auto w-full max-w-[720px] px-4 sm:px-5">
+					<div class="pointer-events-auto relative min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
+						<!-- The page's background behind the box, fading in over 40px above it, as a chat fades out above its box. -->
+						<div class="pointer-events-none absolute -inset-x-4 -top-10 bottom-0 -z-10 bg-surface-base [mask-image:linear-gradient(to_bottom,transparent,#000_40px)] sm:-inset-x-5" aria-hidden="true" />
+						<WorkspaceComposer ref="composer" :key="workspaceId" :workspace-id="workspaceId" :name="summary?.name ?? ''" @ask="emit('ask', $event)" />
+					</div>
+				</div>
+			</div>
+			<!-- The column fills the page while it waits, so the box stays at the bottom. -->
+			<div class="mx-auto w-full max-w-[720px] flex-1 px-4 pb-10 pt-6 sm:px-5" :aria-busy="!ready || undefined">
+				<!-- Fades in when the workspace and the person's chats in it are here, unless the setup greets; a workspace
+				     made here, or opened before, shows at once. -->
+				<Transition :css="!greeting" enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
+					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8" :data-greet="greeting || undefined">
+						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="isShared(detail)" @open="emit('openChat', $event)" />
+						<WorkspaceOnboarding v-else ref="onboardingUpload" :workspace="detail" :dragging="pageDragging" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
+						<WorkspaceAbout ref="aboutUpload" :workspace="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
+					</div>
+				</Transition>
+			</div>
+		</div>
+	</div>
+</template>

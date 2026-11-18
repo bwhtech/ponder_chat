@@ -31,6 +31,7 @@ jobs:
 
       - uses: ./.github/actions/setup
 
+      # Also with the browser's types only, without Node's (npm run typecheck:browser).
       - name: Check the web app's types
         run: npm run typecheck
 
@@ -39,6 +40,10 @@ jobs:
 
       - name: Check the tests' types
         run: npm run typecheck:e2e
+
+      # No `any` in our TypeScript, and no comments that turn a check off (README.md, "No `any`").
+      - name: Lint
+        run: npm run lint -- --format github
 
       # The tests that need Postgres skip here, without TEST_DATABASE_URL; the e2e job runs them.
       - name: Run the server's unit tests

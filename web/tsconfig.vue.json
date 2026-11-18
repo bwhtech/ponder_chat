@@ -1,0 +1,6 @@
+{
+	// The web app's typecheck (npm run typecheck), .vue files included, without the
+	// linter's stand-in for them (vue-shim.d.ts).
+	"extends": "./tsconfig.json",
+	"exclude": ["vue-shim.d.ts"]
+}

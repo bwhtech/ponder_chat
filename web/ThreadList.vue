@@ -97,6 +97,8 @@ function askDelete(thread: ThreadSummary) {
 			class="flex flex-col gap-4"
 			:class="{ 'scroll-fade-y scrollbar-thin -mx-2 min-h-0 flex-1 overflow-y-auto px-2 pb-3 [--scroll-fade-range:32px] [--scroll-fade-size:32px]': scroll }"
 		>
+			<!-- What scrolls with the chats, above them: the workspaces (ChatsPanel.vue). The search finds chats only, so it hides them. -->
+			<slot v-if="!searching" />
 			<div v-if="searching" data-slot="thread-search-results" class="space-y-0.5" :aria-busy="search.searching.value">
 				<!-- The first answer: rows shaped like results. A newer search over results already shown dims them instead. -->
 				<div v-if="search.searching.value && !search.hits.value.length" aria-label="Searching chats" class="space-y-0.5">
@@ -173,7 +175,6 @@ function askDelete(thread: ThreadSummary) {
 				</div>
 			</TransitionGroup>
 			<ThreadRowsSkeleton v-if="!listLoaded && !searching" />
-			<p v-else-if="!threads.length && !searching" class="px-2 text-p-sm text-ink-gray-6">Your chats show up here once you start one.</p>
 		</div>
 	</nav>
 </template>

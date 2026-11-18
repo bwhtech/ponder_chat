@@ -60,7 +60,7 @@ export const makeDecisionGate = Effect.gen(function* () {
 		const started = yield* Clock.currentTimeMillis;
 		// The turn is data: it goes in `state`, apart from the questions.
 		const state = { saved_memories: existing.map((m) => m.text), person_said: turn.user, assistant_replied: turn.assistant };
-		const questions = JSON.parse(yield* readGateQuestions) as unknown;
+		const questions = JSON.parse(yield* readGateQuestions);
 		const request = HttpClientRequest.post(endpoint).pipe(
 			HttpClientRequest.setHeader("Authorization", `Bearer ${yield* keys.key}`),
 			HttpClientRequest.bodyJsonUnsafe({ model, state, questions, provider: OpenRouter.privateRoutingBody }),

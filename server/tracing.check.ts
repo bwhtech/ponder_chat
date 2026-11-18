@@ -20,7 +20,7 @@ import * as Schema from "effect/Schema";
 import { z } from "zod";
 import { withPeer } from "./tracing/http.ts";
 import { cleanSpan, withoutConnector } from "./tracing/privacy.ts";
-import { endReplyTrace, linkToReply, recordReplySpan, replyIds, runStartTime, withReplyTrace } from "./tracing/reply-trace.ts";
+import { endIndexTrace, endReplyTrace, linkToReply, recordReplySpan, replyIds, runStartTime, withReplyTrace } from "./tracing/reply-trace.ts";
 import * as Logger from "./tracing/Logger.ts";
 import { SQL_STATEMENT_SPAN, startTracing, tracesUrl, withoutContent } from "./tracing/setup.ts";
 import { tracingState } from "./tracing/state.ts";
@@ -435,6 +435,75 @@ await check("a compaction's span keeps its outcome and counts, and no summary or
 	const clean = cleanSpan(compaction);
 	assert.equal(clean.name, "compaction.run");
 	assert.deepEqual(clean.attributes, { "ponder.between_steps": false, "ponder.last_attempt": false, "ponder.outcome": "compacted", "ponder.tokens": 24_000 });
+});
+
+await check("a workspace's spans keep their names, and no workspace name or instructions", async () => {
+	const span = (name: string) =>
+		({
+			name,
+			kind: SpanKind.INTERNAL,
+			spanContext: () => ({ traceId: "a".repeat(32), spanId: "f".repeat(16), traceFlags: TraceFlags.SAMPLED }),
+			startTime: [0, 0],
+			endTime: [1, 0],
+			duration: [1, 0],
+			ended: true,
+			status: { code: SpanStatusCode.OK },
+			// Workspaces.ts sets none of these; they stand for a mistake that would.
+			attributes: { "ponder.workspace": MARKER, "ponder.workspace_name": MARKER, "ponder.instructions": MARKER, "ponder.messages": 2 },
+			links: [],
+			events: [],
+			resource: { attributes: {} },
+			instrumentationScope: { name: "ponder" },
+			droppedAttributesCount: 0,
+			droppedEventsCount: 0,
+			droppedLinksCount: 0,
+		}) as unknown as ReadableSpan;
+	const names = ["Workspaces.accessOf", "Workspaces.instructionsFor", "Workspaces.share", "Threads.workspaceOf", "Accounts.search"];
+	const documents = ["workspace.index", "workspace.parse", "workspace.page-read", "workspace.embed", "workspace.search", "Documents.upload", "Indexer.prepare"];
+	for (const name of [...names, ...documents]) {
+		const clean = cleanSpan(span(name));
+		assert.equal(clean.name, name);
+		assert.deepEqual(clean.attributes, { "ponder.messages": 2 });
+	}
+	// A workspace's name is never a span's name.
+	assert.equal(cleanSpan(span(`Workspaces.${MARKER}`)).name, "span");
+	assert.equal(cleanSpan(span(`workspace.${MARKER}`)).name, "span");
+});
+
+await check("a document's indexing run is one trace, workspace.index, with its steps under it, and no workspace name, document name or text", async () => {
+	const indexRun = "wrun_01M7AAXEME3MDRQZPA53SJG1W8";
+	const before = exported.getFinishedSpans().length;
+	// What Indexer.ts and page-reader.ts set, with what they must never set: names and text, which stand for a mistake.
+	const leak = { "ponder.workspace_name": MARKER, "ponder.document_name": MARKER, "ponder.passage": MARKER, "ponder.query": MARKER };
+	// The workflow's deliveries run inside the run's trace (flow-middleware.ts), as a reply's do.
+	await withReplyTrace(indexRun, async () => {
+		// As Effect.fn nests them: the page reads run inside the parse.
+		const pageRead = Tracing.annotate({ "ponder.page": 2, "ponder.attempts": 1, "ponder.chars": 80, "ponder.ok": true, ...leak }).pipe(Effect.withSpan("workspace.page-read"));
+		await effects.runPromise(Effect.andThen(Tracing.annotate({ "ponder.bytes": 5_928, ...leak }), pageRead).pipe(Effect.withSpan("workspace.parse")));
+		await span("workspace.embed", { "ponder.batch": 0, "ponder.passages": 96, ...leak }, async () => undefined);
+		await span("workspace.embed", { "ponder.batch": 1, ...leak }, async () => {
+			throw new Error(`the passage ${MARKER} could not be embedded`);
+		}).catch(() => undefined);
+	});
+	// A search in a reply: the question and the passages stay out.
+	await withReplyTrace(RUN_ID, () => span("workspace.search", { "ponder.documents": 2, "ponder.passages": 8, ...leak }, async () => undefined));
+	endIndexTrace({ runId: indexRun, outcome: "ready", passages: 120 });
+	await tracing.flush();
+	const added = exported.getFinishedSpans().slice(before);
+	assert.ok(!sent(added).includes(MARKER), sent(added));
+
+	const { traceId, spanId } = replyIds(indexRun);
+	const root = added.find((each) => each.name === "workspace.index");
+	assert.ok(root, "no workspace.index root");
+	assert.deepEqual([root.spanContext().traceId, root.spanContext().spanId, root.parentSpanContext], [traceId, spanId, undefined]);
+	assert.deepEqual(root.attributes, { "workflow.run.id": indexRun, "ponder.outcome": "ready", "ponder.passages": 120 });
+	const steps = added.filter((each) => each.spanContext().traceId === traceId && each !== root);
+	assert.deepEqual(steps.map((each) => each.name).sort(), ["workspace.embed", "workspace.embed", "workspace.page-read", "workspace.parse"]);
+	const parse = steps.find((each) => each.name === "workspace.parse")!;
+	assert.equal(parse.parentSpanContext?.spanId, spanId);
+	assert.equal(steps.find((each) => each.name === "workspace.page-read")?.parentSpanContext?.spanId, parse.spanContext().spanId);
+	assert.deepEqual(parse.attributes, { "ponder.bytes": 5_928 });
+	assert.equal(added.find((each) => each.name === "workspace.search")?.spanContext().traceId, replyIds(RUN_ID).traceId);
 });
 
 await effects.dispose();

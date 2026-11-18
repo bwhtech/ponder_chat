@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
+import { text as bodyText } from "node:stream/consumers";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -34,6 +35,7 @@ import { Catalog } from "./mcp/catalog.ts";
 import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor, toToolInfo } from "./mcp/tools.ts";
 import * as NetGuard from "./net/NetGuard.ts";
 import { dispose, runPromise } from "./runtime/runtime.ts";
+import { parseJson } from "./test-json.ts";
 import * as Secrets from "./secrets/Secrets.ts";
 
 // The test servers are on 127.0.0.1, over http. The app's runtime reads this when it
@@ -122,12 +124,6 @@ function rpc(message: { id?: number | string; method: string; params?: Record<st
 	}
 }
 
-async function readBody(request: IncomingMessage) {
-	const chunks: Buffer[] = [];
-	for await (const chunk of request) chunks.push(chunk as Buffer);
-	return Buffer.concat(chunks).toString();
-}
-
 function send(response: ServerResponse, status: number, body?: unknown, headers: Record<string, string> = {}) {
 	response.writeHead(status, { ...(body !== undefined && { "content-type": "application/json" }), ...headers });
 	response.end(body === undefined ? undefined : JSON.stringify(body));
@@ -146,7 +142,7 @@ function issueTokens(clientId: string) {
 async function handle(request: IncomingMessage, response: ServerResponse) {
 	const url = new URL(request.url!, base);
 	const path = url.pathname;
-	const body = request.method === "POST" ? await readBody(request) : "";
+	const body = request.method === "POST" ? await bodyText(request) : "";
 
 	if (path === "/.well-known/oauth-protected-resource/oauth/mcp") return send(response, 200, { resource: `${base}/oauth/mcp`, authorization_servers: [`${base}/as`] });
 	if (path === "/.well-known/oauth-authorization-server/as")
@@ -163,7 +159,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
 	if (path === "/as/register") {
 		const clientId = `dyn-${randomBytes(4).toString("hex")}`;
 		mock.clients.set(clientId, {});
-		return send(response, 201, { ...JSON.parse(body), client_id: clientId, client_id_issued_at: Math.floor(Date.now() / 1000) });
+		return send(response, 201, { ...parseJson<Record<string, unknown>>(body), client_id: clientId, client_id_issued_at: Math.floor(Date.now() / 1000) });
 	}
 	if (path === "/as/authorize") {
 		const q = url.searchParams;
@@ -204,7 +200,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
 			return send(response, 401, { error: "unauthorized" }, { "www-authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/oauth/mcp"` });
 		if (request.method === "DELETE") return send(response, 200);
 		if (request.method !== "POST") return send(response, 405);
-		const message = JSON.parse(body);
+		const message = parseJson<Parameters<typeof rpc>[0]>(body);
 		if (message.id === undefined) return send(response, 202);
 		return send(response, 200, rpc(message));
 	}

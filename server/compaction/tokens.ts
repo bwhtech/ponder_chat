@@ -85,7 +85,7 @@ export function estimateTokens(value: unknown): number {
 export function estimate(value: unknown): Estimate {
 	let media = 0;
 	const json =
-		JSON.stringify(value, function (key, item) {
+		JSON.stringify(value, function (key: string, item: unknown): unknown {
 			if (key === "providerOptions" || key === "providerMetadata") return undefined;
 			// An approval is not sent to the provider, and it repeats the call's whole input: counted, an approved call would count twice.
 			if (key === "inputSchemaInput" || isApproval(item)) return undefined;

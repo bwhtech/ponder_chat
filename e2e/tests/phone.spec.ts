@@ -1,11 +1,12 @@
+import type { Page } from "@playwright/test";
 import { chat, expect, test } from "../fixtures.ts";
+import { addChats, createWorkspace, newPerson, share, textFile, uploadReady, workspacePage } from "../workspaces.ts";
 
-test.beforeEach(async ({ person, page }) => {
+const about = (page: Page) => page.locator('[data-slot="workspace-about"]');
+
+test("chats on a phone, and finds the chat in the chat list", async ({ page, person }) => {
 	void person;
 	await page.goto("/");
-});
-
-test("chats on a phone, and finds the chat in the chat list", async ({ page }) => {
 	await chat.send(page, "Hello from a phone");
 	await expect(chat.reply(page)).toContainText("You said: Hello from a phone");
 	await chat.idle(page);
@@ -13,4 +14,155 @@ test("chats on a phone, and finds the chat in the chat list", async ({ page }) =
 	// On a phone the chat list is a sheet, opened from the header.
 	await page.getByRole("button", { name: "Chats", exact: true }).click();
 	await expect(page.getByRole("dialog").getByText("Hello from a phone")).toBeVisible();
+});
+
+test("on a phone, a workspace's message box sits where the chat's does: the page scrolls clear of it, and asking does not move it", async ({ page, person, db }) => {
+	const tag = person.id.slice(0, 6);
+	const question = `When is the exit site cleaned, ${tag}?`;
+	const { id, slug } = await createWorkspace(page, `Renal ward ${tag}`);
+	await uploadReady(page, id, textFile("Exit-site care.md", "# Exit-site care\n\nClean the exit site every second day."));
+	await uploadReady(page, id, textFile("Night handover.md", "# Night handover\n\nCheck the exit sites at 22:00."));
+	await addChats(db, person.id, id, 12);
+	await page.goto(`/?w=${slug}`);
+	const box = workspacePage.box(page);
+	await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(12);
+	await expect(about(page).locator('[data-slot="document-name"]')).toHaveCount(2);
+	const top = (await box.boundingBox())!.y;
+
+	// Under the chats come the workspace's sections; at the end, the last document is clear of the box.
+	await workspacePage.scrollToEnd(page);
+	await expect(box).toBeInViewport({ ratio: 1 });
+	expect((await box.boundingBox())!.y).toBeCloseTo(top, 0);
+	const lastDocument = about(page).locator('[data-slot="document-name"]').last();
+	expect(await workspacePage.reachable(lastDocument)).toBe(true);
+	await lastDocument.click();
+	await expect(page.locator('[data-slot="side-panel"]')).toContainText("Check the exit sites at 22:00.");
+	await page.keyboard.press("Escape");
+	await expect(page.locator('[data-slot="side-panel"]')).toHaveCount(0);
+
+	await workspacePage.field(page).fill(question);
+	await workspacePage.field(page).press("Enter");
+	await expect(page).toHaveURL(/[?&]t=/);
+	await expect(chat.reply(page)).toContainText(`You said: ${question}`);
+	await chat.idle(page);
+	// The chat's empty box is where the page's empty box was.
+	expect(Math.abs((await page.locator('[data-slot="prompt-input"]').boundingBox())!.y - top)).toBeLessThanOrEqual(2);
+});
+
+test("on a phone, a new workspace's setup cards come first, over its sections, and the box covers none of it", async ({ page, person }) => {
+	const tag = person.id.slice(0, 6);
+	const name = `Theatre lists ${tag}`;
+	const { id, slug } = await createWorkspace(page, name, "Answer from the theatre lists.");
+	await uploadReady(page, id, textFile("Monday list.md", "# Monday\n\nHip replacement at 09:00."));
+	await uploadReady(page, id, textFile("Tuesday list.md", "# Tuesday\n\nKnee arthroscopy at 10:30."));
+	await page.goto(`/?w=${slug}`);
+	const setup = page.locator('[data-slot="workspace-setup"]');
+	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("2 of 3 done");
+	// One column: the setup card, then the workspace's sections that have something in them.
+	expect((await setup.boundingBox())!.y + (await setup.boundingBox())!.height).toBeLessThanOrEqual((await about(page).boundingBox())!.y);
+	await expect(about(page).locator('[data-slot="document-name"]')).toHaveCount(2);
+
+	await workspacePage.scrollToEnd(page);
+	expect(await workspacePage.reachable(about(page).locator('[data-slot="document-name"]').last())).toBe(true);
+	await setup.getByRole("button", { name: "Share workspace" }).click();
+	await expect(page.getByRole("dialog", { name: `Share “${name}”` })).toBeVisible();
+});
+
+test("on a phone, a new workspace's three setup steps are rows, all in view above the message box, with nothing to scroll sideways", async ({ page, person }) => {
+	const name = `Clinic rota ${person.id.slice(0, 6)}`;
+	const { slug } = await createWorkspace(page, name);
+	await page.goto(`/?w=${slug}`);
+	const setup = page.locator('[data-slot="workspace-setup"]');
+	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("0 of 3 done");
+	await expect(setup.getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Sources", "People"]);
+
+	const boxTop = (await workspacePage.box(page).boundingBox())!.y;
+	for (const action of ["Add instructions", "Upload files", "Share workspace"]) {
+		const row = setup.getByRole("button", { name: action });
+		await expect(row).toBeInViewport({ ratio: 1 });
+		const { y, height } = (await row.boundingBox())!;
+		expect(y + height, `${action} is above the message box`).toBeLessThan(boxTop);
+	}
+	const sideways = await page.locator('[data-slot="workspace-view"]').evaluate((view) => view.scrollWidth - view.clientWidth);
+	expect(sideways).toBe(0);
+
+	// The whole row is the button.
+	await setup.getByRole("button", { name: "Add instructions" }).tap();
+	await expect(page.getByRole("dialog", { name: "Instructions" })).toBeVisible();
+});
+
+test("on a phone whose keyboard covers the page, as Safari on iOS does, the workspace's message box and header stay in the part above it", async ({ page, person }) => {
+	const tag = person.id.slice(0, 6);
+	const { slug } = await createWorkspace(page, `Keyboard ${tag}`);
+	// Safari on iOS keeps the page full height under the keyboard, and reports what shows above it in
+	// window.visualViewport. Chromium's keyboard does not, so the page gets the same report from the test.
+	await page.addInitScript(() => {
+		const events = new EventTarget();
+		const state = { height: innerHeight, offsetTop: 0 };
+		Object.defineProperty(window, "visualViewport", {
+			configurable: true,
+			value: Object.defineProperties(events, {
+				height: { get: () => state.height },
+				offsetTop: { get: () => state.offsetTop },
+				scale: { value: 1 },
+			}),
+		});
+		Object.assign(window, {
+			showKeyboard: (height: number, offsetTop: number) => {
+				Object.assign(state, { height, offsetTop });
+				events.dispatchEvent(new Event("resize"));
+			},
+		});
+	});
+	await page.goto(`/?w=${slug}`);
+	const box = workspacePage.box(page);
+	await workspacePage.field(page).focus();
+	const viewport = page.viewportSize()!;
+	const visible = { top: 120, height: viewport.height - 120 - 330 };
+	await page.evaluate(({ top, height }) => (window as unknown as { showKeyboard: (height: number, top: number) => void }).showKeyboard(height, top), visible);
+
+	await expect.poll(async () => Math.round((await box.boundingBox())!.y + (await box.boundingBox())!.height)).toBeLessThanOrEqual(visible.top + visible.height);
+	const header = (await page.locator('[data-slot="chat-header"]').boundingBox())!;
+	expect(header.y).toBeGreaterThanOrEqual(visible.top);
+	await expect(page.getByRole("heading", { name: `Keyboard ${tag}`, level: 1 })).toBeVisible();
+
+	// The keyboard goes: the page fills the screen again.
+	await page.evaluate((height) => (window as unknown as { showKeyboard: (height: number, top: number) => void }).showKeyboard(height, 0), viewport.height);
+	await expect.poll(async () => Math.round((await page.locator('[data-slot="shell"]').boundingBox())!.height)).toBe(viewport.height);
+});
+
+test("an admin on a phone reaches Workspaces, Activity and Settings under More", async ({ page, admin }) => {
+	void admin;
+	await page.goto("/admin");
+	const more = page.locator('[data-slot="mobile-nav"]').getByRole("button", { name: "More" });
+	for (const [name, path] of [["Workspaces", "/admin/workspaces"], ["Activity", "/admin/activity"], ["Settings", "/admin/settings"]]) {
+		await more.click();
+		await page.getByRole("menuitem", { name }).click();
+		await expect(page).toHaveURL(new RegExp(`${path}$`));
+	}
+});
+
+test("on a phone, Share puts each role on its own line under the name, every control can be tapped, and nothing scrolls sideways", async ({ page, person, fake, db, browser }) => {
+	const member = await newPerson(browser, db, fake, "phone share member");
+	const name = `Phone share ${person.id.slice(0, 6)}`;
+	const { id, slug } = await createWorkspace(page, name);
+	await share(page, id, [{ userId: member.person.id, access: "edit" }]);
+	await page.goto(`/?w=${slug}`);
+	// On a phone Share is in the header's menu.
+	await page.getByRole("button", { name: "Workspace actions" }).tap();
+	await page.getByRole("menuitem", { name: "Share" }).tap();
+	const dialog = page.getByRole("dialog", { name: `Share “${name}”` });
+	const row = dialog.locator('[data-slot="workspace-member"]');
+	const role = row.getByRole("button", { name: /^What / });
+	await expect(role).toHaveText("Can edit");
+	const email = row.getByText(member.person.email);
+	expect((await role.boundingBox())!.y, "the role is under the name and email").toBeGreaterThan((await email.boundingBox())!.y);
+	expect(await dialog.evaluate((box) => box.scrollWidth - box.clientWidth)).toBe(0);
+	// A tap 18px above the role button's middle, outside its 28px box, still reaches it (touch-target).
+	const { x, y, width, height } = (await role.boundingBox())!;
+	expect(height).toBeLessThan(44);
+	await page.touchscreen.tap(x + width / 2, y + height / 2 - 18);
+	await page.getByRole("menuitem", { name: /^Can ask/ }).tap();
+	await expect(role).toHaveText("Can ask");
+	await member.context.close();
 });

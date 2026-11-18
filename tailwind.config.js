@@ -1,6 +1,7 @@
 import { fileURLToPath } from "node:url";
 import preset, { content } from "frappe-ui/tailwind";
 import { content as aiElements } from "frappe-ui-ai-elements/tailwind";
+import plugin from "tailwindcss/plugin";
 
 const here = new URL(".", import.meta.url).pathname;
 const frappeUI = fileURLToPath(new URL("node_modules/frappe-ui/", import.meta.url));
@@ -29,8 +30,24 @@ const chatContent = [
 	`!${here}web/admin.html`,
 ];
 
+/**
+ * `pose:`, a decorative move while the pointer is on the `group` (the setup cards' scenes). As
+ * frappe-ui's `hover:` and `group-hover:`, only where a fine pointer can hover, so a tap does not
+ * leave it stuck; and only when motion is allowed, so it does not jump with reduced motion.
+ */
+const pose = plugin(({ addVariant }) =>
+	addVariant("pose", "@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) { .group:hover & }"),
+);
+
+/**
+ * `can-hover:`, for a hover style frappe-ui's `hover:` cannot write, such as an arbitrary
+ * `has-[…:hover]:`: only where a fine pointer can hover, so a tap does not leave it stuck.
+ */
+const canHover = plugin(({ addVariant }) => addVariant("can-hover", "@media (hover: hover) and (pointer: fine)"));
+
 /** @type {import('tailwindcss').Config} */
 export default {
 	presets: [preset],
 	content: chatOnly ? chatContent : [...content, ...aiElements, `${here}web/**/*.{html,vue,ts}`],
+	plugins: [pose, canHover],
 };

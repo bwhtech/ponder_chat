@@ -1,8 +1,8 @@
 import { defineConfig } from "vitest/config";
 
 /**
- * The server's unit tests (npm run test): server/**\/*.test.ts, with @effect/vitest.
- * The web app has none; e2e/ is Playwright's.
+ * The unit tests (npm run test): the server's, server/**\/*.test.ts, with @effect/vitest,
+ * and a few of plain web code that needs no browser, web/**\/*.test.ts. e2e/ is Playwright's.
  *
  * Tests that need Postgres run only when TEST_DATABASE_URL is set, and skip otherwise.
  * It is its own variable, not DATABASE_URL, so a shell with Ponder's real database in its
@@ -11,7 +11,7 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
 	test: {
-		include: ["server/**/*.test.ts"],
+		include: ["server/**/*.test.ts", "web/**/*.test.ts"],
 		environment: "node",
 	},
 });

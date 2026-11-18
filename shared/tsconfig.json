@@ -1,0 +1,7 @@
+{
+	// Code for both the browser and the server, so neither Node's nor the browser's globals.
+	// The linter (npm run lint, .oxlintrc.json) reads these settings.
+	"extends": "../server/tsconfig.json",
+	"compilerOptions": { "lib": ["es2022"], "types": [] },
+	"include": ["*.ts", "../types/json.d.ts", "../types/array.d.ts"]
+}

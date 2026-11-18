@@ -1,7 +1,8 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MODELS } from "../../server/models/Models.ts";
-import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
+import { jsonBody, parseJson } from "../../server/test-json.ts";
+import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type PageScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
 
 /**
  * A fake OpenRouter, and a fake Cloudflare email API, for the end-to-end tests. Ponder
@@ -14,6 +15,9 @@ import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, t
  * - web search: url_citation annotations (`SearchScript`);
  * - memory: the decision gate and the writer (`MemoryScript`), and embeddings;
  * - chat summaries, when a chat gets too long (`SummaryScript`);
+ * - the PDF pages a workspace document sends to a model (`PageScript`), and in a workspace
+ *   chat, the line of its documents or excerpts that best matches the question, so a test
+ *   sees which of them reached the model;
  * - the list of models with private (ZDR) endpoints: every model Ponder lists, with
  *   a 1M-token window, except GLM 5.3's small one (SMALL_WINDOW).
  * - what a streamed reply cost, by its generation id (`GET /api/v1/generation`).
@@ -36,16 +40,41 @@ export function fakeApp() {
 	const exports: string[] = [];
 	const summaryScripts: SummaryScript[] = [];
 	const summaries: ReceivedSummary[] = [];
+	const pageScripts: PageScript[] = [];
+	/** The page reads held for each script with `hold`, by its match, and the releases that came before their reads. */
+	const pageHolds = new Map<string, { free: number; waiting: (() => void)[] }>();
+	const holdOf = (match: string) => {
+		const hold = pageHolds.get(match) ?? { free: 0, waiting: [] };
+		pageHolds.set(match, hold);
+		return hold;
+	};
+	const released = (match: string) => {
+		const hold = holdOf(match);
+		if (hold.free > 0) return void hold.free--;
+		return new Promise<void>((resolve) => hold.waiting.push(resolve));
+	};
 	/** How many calls each step of a script has had, for `failFirst`. */
 	const attempts = new Map<string, number>();
 	const app = new Hono();
 
 	// --- Control, for the tests. The newest script wins, so a test can replace one.
 	app.get("/__fake/health", (c) => c.text("ok"));
-	app.post("/__fake/chat", async (c) => (chats.unshift(await c.req.json()), c.json({ ok: true })));
-	app.post("/__fake/search", async (c) => (searches.unshift(await c.req.json()), c.json({ ok: true })));
-	app.post("/__fake/memory", async (c) => (memories.unshift(await c.req.json()), c.json({ ok: true })));
-	app.post("/__fake/summary", async (c) => (summaryScripts.unshift(await c.req.json()), c.json({ ok: true })));
+	app.post("/__fake/chat", async (c) => (chats.unshift(await jsonBody<ChatScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/search", async (c) => (searches.unshift(await jsonBody<SearchScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/memory", async (c) => (memories.unshift(await jsonBody<MemoryScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/summary", async (c) => (summaryScripts.unshift(await jsonBody<SummaryScript>(c.req)), c.json({ ok: true })));
+	app.post("/__fake/page", async (c) => (pageScripts.unshift(await jsonBody<PageScript>(c.req)), c.json({ ok: true })));
+	// Lets `count` page reads of a script with `hold` go. A release that comes before its read is kept for it.
+	app.post("/__fake/page/release", async (c) => {
+		const { match, count = 1 } = await jsonBody<{ match: string; count?: number }>(c.req);
+		const hold = holdOf(match);
+		for (let index = 0; index < count; index++) {
+			const next = hold.waiting.shift();
+			if (next) next();
+			else hold.free++;
+		}
+		return c.json({ ok: true });
+	});
 	const since = (query: string | undefined) => Number(query ?? 0);
 	app.get("/__fake/emails", (c) => c.json(emails.filter((email) => email.to === c.req.query("to") && email.at >= since(c.req.query("since")))));
 	app.get("/__fake/spans", (c) => c.json({ spans, exports }));
@@ -68,8 +97,15 @@ export function fakeApp() {
 	app.get("/api/v1/key", (c) => c.json({ data: { label: "fake" } }));
 
 	app.post("/api/v1/chat/completions", async (c) => {
-		const body = (await c.req.json()) as Completion;
+		const body = await jsonBody<Completion>(c.req);
 		const messages = body.messages ?? [];
+		const pdf = pagePdf(messages);
+		if (pdf) {
+			const held = pageScripts.find((candidate) => candidate.hold && pdf.text.includes(candidate.match));
+			if (held) await released(held.match);
+			const { status, answer } = pageReply(body.model, pdf, pageScripts, attempts);
+			return c.json(answer, status as 200);
+		}
 		if (body.tools?.some((tool) => tool.type === "openrouter:web_search")) return c.json(searchReply(body.model, latestUserText(messages), searches));
 		const schema = body.response_format?.json_schema?.schema?.properties ?? {};
 		if ("title" in schema) return c.json(jsonReply(body.model, { title: titleOf(latestUserText(messages)) }));
@@ -94,7 +130,7 @@ export function fakeApp() {
 			sessionId: body.session_id,
 			at: Date.now(),
 		});
-		const { step, key } = chatStep(messages, chats);
+		const { step, key } = chatStep(messages, chats, system);
 		const attempt = (attempts.get(key) ?? 0) + 1;
 		attempts.set(key, attempt);
 		const fails = step.failFirst === undefined ? Boolean(step.error) : attempt <= step.failFirst;
@@ -112,7 +148,7 @@ export function fakeApp() {
 	});
 
 	app.post("/api/v1/embeddings", async (c) => {
-		const body = (await c.req.json()) as { model: string; input: string | string[] };
+		const body = await jsonBody<{ model: string; input: string | string[] }>(c.req);
 		const inputs = Array.isArray(body.input) ? body.input : [body.input];
 		return c.json({
 			object: "list",
@@ -123,14 +159,14 @@ export function fakeApp() {
 	});
 
 	app.post("/api/alpha/decisions", async (c) => {
-		const body = (await c.req.json()) as { state?: { person_said?: string } };
+		const body = await jsonBody<{ state?: { person_said?: string } }>(c.req);
 		const script = memories.find((memory) => (body.state?.person_said ?? "").includes(memory.match));
 		return c.json({ answers: { save: { noul: script?.save ?? 0.05 }, refuse: { noul: 0.01 } }, usage: { cost: 0, input_tokens: 100, output_tokens: 0 } });
 	});
 
 	// --- Cloudflare Email Service.
 	app.post("/client/v4/accounts/:account/email/sending/send", async (c) => {
-		emails.push({ ...((await c.req.json()) as Omit<SentEmail, "at">), at: Date.now() });
+		emails.push({ ...(await jsonBody<Omit<SentEmail, "at">>(c.req)), at: Date.now() });
 		return c.json({ success: true });
 	});
 
@@ -138,7 +174,7 @@ export function fakeApp() {
 	app.post("/v1/traces", async (c) => {
 		const body = await c.req.text();
 		exports.push(body);
-		spans.push(...spansIn(JSON.parse(body) as OtlpRequest));
+		spans.push(...spansIn(parseJson<OtlpRequest>(body)));
 		return c.json({});
 	});
 
@@ -158,7 +194,7 @@ export function startFake(port: number) {
 
 // --- Chat replies -------------------------------------------------------------
 
-type Message = { role: string; content: string | { type: string; text?: string }[] | null };
+type Message = { role: string; content: string | { type: string; text?: string; file?: { filename?: string; file_data?: string } }[] | null };
 type Completion = {
 	model: string;
 	stream?: boolean;
@@ -183,11 +219,19 @@ function promptTokens(body: Completion) {
 const generations = new Map<string, { cost: number; tokens: number }>();
 let generationCount = 0;
 
-/** The step for this call: the turn's script, at the number of model calls made since the person's message. */
-function chatStep(messages: Message[], scripts: ChatScript[]): { step: Step; key: string } {
+/**
+ * The step for this call: the turn's script, at the number of model calls made since the person's message.
+ * With no script, "You said: <message>", and in a workspace chat also the first line of the workspace's
+ * instructions and the line of its documents that best matches the message, so a test can see that
+ * they reached the model (workspaces.spec.ts, workspaces-documents.spec.ts).
+ */
+function chatStep(messages: Message[], scripts: ChatScript[], system: string): { step: Step; key: string } {
 	const said = latestUserText(messages);
 	const script = scripts.find((candidate) => said.includes(candidate.match));
-	if (!script) return { step: { text: `You said: ${said}` }, key: "" };
+	if (!script) {
+		const question = withoutExcerpts(said);
+		return { step: { text: [`You said: ${question}`, workspaceLine(system), documentLine(system, said, question)].filter(Boolean).join("\n\n") }, key: "" };
+	}
 	const lastUser = messages.findLastIndex((message) => message.role === "user");
 	const callsSince = messages.slice(lastUser + 1).filter((message) => message.role === "assistant").length;
 	const summarized = messages.some((message) => message.role === "user" && textOf(message.content).startsWith("<summary>"));
@@ -328,6 +372,82 @@ function latestUserText(messages: Message[]) {
 	const message = messages.findLast((candidate) => candidate.role === "user");
 	return message ? textOf(message.content) : "";
 }
+
+/** "Workspace “<name>” says: <first line of its instructions>", from the system prompt's <workspace> block; "" outside a workspace. */
+function workspaceLine(system: string) {
+	const block = /<workspace name="([^"]*)">\n([^\n]*)/.exec(system);
+	return block ? `Workspace “${block[1]}” says: ${block[2]}` : "";
+}
+
+// --- Workspace documents ------------------------------------------------------
+
+/** The person's message without the <workspace_excerpts> block that Ponder puts before it. */
+function withoutExcerpts(said: string) {
+	return said.replace(/<workspace_excerpts>[\s\S]*?<\/workspace_excerpts>\n*/g, "").trim();
+}
+
+/**
+ * The line of the workspace's text that shares the most words with the question, as a model
+ * that answers from it would quote it: from a whole document in the system prompt, “From the
+ * document “<name>”: …”, or from an excerpt with the message, “From the excerpt “<location>”: …”.
+ * "" when no line shares a word, or outside a workspace.
+ */
+function documentLine(system: string, said: string, question: string) {
+	const words = new Set(wordsOf(question).filter((word) => word.length > 3));
+	if (words.size === 0) return "";
+	const candidates: { source: string; line: string }[] = [];
+	for (const [, name, text] of system.matchAll(/<document name="([^"]*)">\n([\s\S]*?)\n<\/document>/g)) {
+		for (const line of text.split("\n")) candidates.push({ source: `the document “${name}”`, line });
+	}
+	const excerpts = /<workspace_excerpts>\n([\s\S]*?)\n<\/workspace_excerpts>/.exec(said)?.[1] ?? "";
+	for (const excerpt of excerpts.split(/\n\n(?=\[\d+\] )/)) {
+		const [location = "", ...lines] = excerpt.split("\n");
+		for (const line of lines) candidates.push({ source: `the excerpt “${location.replace(/^\[\d+\] /, "")}”`, line });
+	}
+	let best: { source: string; line: string; score: number } | undefined;
+	for (const candidate of candidates) {
+		const score = wordsOf(candidate.line).filter((word) => words.has(word)).length;
+		if (score > (best?.score ?? 0)) best = { ...candidate, score };
+	}
+	return best ? `From ${best.source}: ${best.line.trim()}` : "";
+}
+
+function wordsOf(text: string) {
+	return text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+}
+
+/** The one-page PDF of a page read (page-reader.ts), as text; none for any other call. */
+function pagePdf(messages: Message[]) {
+	for (const message of messages) {
+		if (typeof message.content === "string" || !message.content) continue;
+		for (const part of message.content) {
+			const data = part.type === "file" ? part.file?.file_data : undefined;
+			if (data?.startsWith("data:application/pdf;base64,")) {
+				const page = Number(/page-(\d+)\.pdf/.exec(part.file?.filename ?? "")?.[1] ?? 0);
+				return { page, text: Buffer.from(data.slice(data.indexOf(",") + 1), "base64").toString("latin1") };
+			}
+		}
+	}
+	return undefined;
+}
+
+/**
+ * The page model's answer: the script's text, or its refusal for the first `failFirst` calls.
+ * A refusal is a 400, which the page reader does not try again, so each read is one call.
+ */
+function pageReply(model: string, pdf: { page: number; text: string }, scripts: PageScript[], attempts: Map<string, number>) {
+	const script = scripts.find((candidate) => pdf.text.includes(candidate.match));
+	const key = `page#${script?.match ?? ""}#${pdf.page}`;
+	const attempt = (attempts.get(key) ?? 0) + 1;
+	attempts.set(key, attempt);
+	if (script && attempt <= (script.failFirst ?? 0)) {
+		return { status: 400, answer: { error: { code: 400, message: script.error ?? "The fake model could not read this page." } } };
+	}
+	const text = script?.text ?? `Page ${pdf.page}, as the fake model read it.`;
+	return { status: 200, answer: { ...textReply(model, { text, cost: PAGE_COST }, 1_200), id: `gen-fake-page-${Date.now()}-${attempt}` } };
+}
+
+const PAGE_COST = 0.0018;
 
 // --- Traces -------------------------------------------------------------------
 

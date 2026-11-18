@@ -14,6 +14,7 @@ import { closestNames, rank, words } from "./mcp/rank.ts";
 import { signature } from "./mcp/signature.ts";
 import { addConnectorNote, approvedIn, connectorCallsInHistory } from "./workflow/connector-messages.ts";
 import { calledToolName, connectorTools } from "./workflow/connectors.ts";
+import { expected } from "./test-json.ts";
 
 const linear = { slug: "linear", name: "Linear", server: "Linear MCP" };
 const shop = { slug: "shop", name: "Shop" };
@@ -296,7 +297,7 @@ for (const huge of [Array.from({ length: 2_000 }, (_, i) => `word${i}`).join(" "
 	const took = performance.now() - started;
 	assert.ok(took < 500, `a ${huge.length}-character query took ${Math.round(took)} ms`);
 }
-const searched = (await search.execute!({ query: "find order" }, options)) as { results: { tool: string }[] };
+const searched = expected<{ results: { tool: string }[] }>(await search.execute!({ query: "find order" }, options));
 assert.equal(searched.results[0]!.tool, "shop__find_order");
 const call = given.connector_call as Tool<{ tool: string; input?: Record<string, unknown> }>;
 const needsApproval = call.needsApproval as (input: { tool: string; input?: Record<string, unknown> }, options: unknown) => boolean;

@@ -23,7 +23,11 @@ export const messageIdFor = (runId: string) => `msg-${runId}`;
  *
  * No span of its own: a route runs it inside the reply's trace, and Workflow's spans of the read are the reply's.
  */
-export const replyStream = Effect.fnUntraced(function* (runId: string, model: string, { uiStartIndex = 0, untilTail = false, continued = null as Continued | null } = {}) {
+export const replyStream = Effect.fnUntraced(function* (
+	runId: string,
+	model: string,
+	{ uiStartIndex = 0, untilTail = false, continued = null }: { uiStartIndex?: number; untilTail?: boolean; continued?: Continued | null } = {},
+) {
 	const readable = yield* WorkflowRuns.WorkflowRuns.use((runs) => runs.readable(runId));
 	const raw = untilTail ? firstChunks(readable, (yield* Effect.promise(() => readable.getTailIndex())) + 1) : readable;
 	// A run that carries on a message keeps its id, so the page and the saved thread extend that message.

@@ -40,8 +40,8 @@ describe.skipIf(!url)("Threads", () => {
 				yield* threads.save(id("a"), owner, messages);
 				assert.deepStrictEqual(yield* threads.load(id("a")), messages);
 				assert.deepStrictEqual(yield* threads.owner(id("a")), Option.some(owner));
-				const updatedAt = yield* threads.updatedAt(id("a"), owner);
-				assert.isTrue(Option.isSome(updatedAt) && updatedAt.value instanceof Date);
+				const version = yield* threads.version(id("a"), owner);
+				assert.isTrue(Option.isSome(version) && version.value.updatedAt instanceof Date);
 			}),
 		);
 
@@ -50,7 +50,7 @@ describe.skipIf(!url)("Threads", () => {
 				const threads = yield* Threads.Threads;
 				assert.deepStrictEqual(yield* threads.load(id("none")), []);
 				assert.deepStrictEqual(yield* threads.owner(id("none")), Option.none());
-				assert.deepStrictEqual(yield* threads.updatedAt(id("none"), owner), Option.none());
+				assert.deepStrictEqual(yield* threads.version(id("none"), owner), Option.none());
 			}),
 		);
 
@@ -63,19 +63,19 @@ describe.skipIf(!url)("Threads", () => {
 				assert.isFalse(yield* threads.update(id("a"), other, []));
 				assert.isFalse(yield* threads.rename(id("a"), other, "Taken"));
 				assert.isFalse(yield* threads.remove(id("a"), other));
-				assert.deepStrictEqual(yield* threads.updatedAt(id("a"), other), Option.none());
+				assert.deepStrictEqual(yield* threads.version(id("a"), other), Option.none());
 			}),
 		);
 
 		it.effect("updates a saved thread, and not a deleted one", () =>
 			Effect.gen(function* () {
 				const threads = yield* Threads.Threads;
-				const before = yield* threads.updatedAt(id("a"), owner);
+				const before = yield* threads.version(id("a"), owner);
 				const messages = [...(yield* threads.load(id("a"))), message("user", "And Porto?")];
 				assert.isTrue(yield* threads.update(id("a"), owner, messages));
 				assert.deepStrictEqual(yield* threads.load(id("a")), messages);
-				const after = yield* threads.updatedAt(id("a"), owner);
-				assert.isTrue(Option.isSome(before) && Option.isSome(after) && after.value.getTime() >= before.value.getTime());
+				const after = yield* threads.version(id("a"), owner);
+				assert.isTrue(Option.isSome(before) && Option.isSome(after) && after.value.updatedAt.getTime() >= before.value.updatedAt.getTime());
 				assert.isFalse(yield* threads.update(id("gone"), owner, messages));
 			}),
 		);

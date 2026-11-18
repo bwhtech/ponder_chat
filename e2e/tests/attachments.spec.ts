@@ -1,4 +1,4 @@
-import { chat, expect, test } from "../fixtures.ts";
+import { chat, expect, jsonOf, test } from "../fixtures.ts";
 import { slowPdf, textPdf } from "../pdfs.ts";
 
 test.beforeEach(async ({ person, page }) => {
@@ -48,8 +48,8 @@ test("stops reading a PDF that takes too long, and answers other requests meanwh
 	test.setTimeout(60_000);
 	const upload = await page.request.post("/api/files", { multipart: { file: { name: "slow.pdf", mimeType: "application/pdf", buffer: slowPdf() } } });
 	expect(upload.ok(), await upload.text()).toBe(true);
-	const { id } = (await upload.json()) as { id: string };
-	const text = async () => (await db`select text from files where id = ${id}`)[0].text as string | null;
+	const { id } = await jsonOf<{ id: string }>(upload);
+	const text = async () => (await db<{ text: string | null }[]>`select text from files where id = ${id}`)[0].text;
 
 	// The read runs in a worker thread: on the server's own thread, nothing was answered until it ended.
 	for (let asked = 0; asked < 5; asked++) {

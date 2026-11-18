@@ -122,6 +122,21 @@ async function settleAdmin(page) {
 /** The card (rounded box) that holds `text`. */
 const cardOf = (page, text) => page.getByText(text, { exact: true }).locator('xpath=ancestor::div[contains(@class, "rounded")][1]');
 
+// The stage for shots with no colour of their own (the logo is gray, and so is most of the
+// UI): the glass script would fall back to a gray stage. It is the blue and teal that the
+// palette of the earlier images gave, so these sit with them.
+const GLASS =
+  'radial-gradient(70% 58% at 0% 0%, hsl(207 74% 80%) 0%, transparent 100%), radial-gradient(65% 55% at 100% 6%, hsl(219 74% 83%) 0%, transparent 100%), radial-gradient(75% 60% at 100% 100%, hsl(177 74% 80%) 0%, transparent 100%), radial-gradient(70% 58% at 0% 100%, hsl(195 74% 83%) 0%, transparent 100%), linear-gradient(160deg, hsl(207 70% 96%) 0%, hsl(177 60% 94%) 100%)';
+
+/** Opens a workspace page and waits for it, past its entrance (the setup cards rise in one after another). */
+async function openWorkspace(page, text) {
+  await page.getByText(text).first().waitFor();
+  await page.waitForTimeout(1200);
+}
+
+/** Takes focus off whatever has it, so no focus ring shows: a dialog or a menu gives focus back to its button. */
+const blur = (page) => page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur());
+
 export default [
   {
     // The whole window, all four edges: chats, a reply with sources, a memory note, credits.
@@ -129,6 +144,7 @@ export default [
     path: '/?t=demo-heat-pumps',
     viewport: HD,
     routes: signIn,
+    gradient: GLASS,
     async setup({ page }) {
       await openChat(page, 'What to ask the installer');
       await scrollToTop(page);
@@ -288,17 +304,19 @@ export default [
     },
   },
   {
-    // Top-right corner: the Memory page, bleeding down through the list.
+    // Top-left corner: Memory in Settings (an older ?view=memory link opens it). As the
+    // connectors image, it keeps the dimmed sidebar whole and bleeds right, through the backdrop.
     name: 'memory',
     path: '/?view=memory',
     viewport: HD,
     routes: signIn,
+    gradient: GLASS,
     async setup({ page }) {
       await page.getByText('Lives in Minneapolis').first().waitFor();
-      const list = await boxOf(page.getByText('Lives in Minneapolis'));
-      const bottom = await under(page.getByText('Prefers short answers'), 24);
-      const x = Math.round(list.x - 152);
-      this.crop = { x, y: 0, w: HD.width - x, h: Math.round(Math.min(bottom, HD.height)) };
+      await page.waitForTimeout(600);
+      await blur(page);
+      const dialog = await boxOf(page.getByRole('dialog'));
+      this.crop = { x: 0, y: 0, w: Math.round(dialog.x + dialog.width + 64), h: Math.round(Math.min(dialog.y + dialog.height + 48, HD.height)) };
     },
   },
   {
@@ -322,12 +340,14 @@ export default [
     path: '/',
     viewport: HD,
     routes: signIn,
+    gradient: GLASS,
     async setup({ page }) {
       await page.getByText("What's on your mind?").waitFor();
       await page.getByRole('button', { name: /^Model:/ }).click();
       await page.waitForTimeout(600);
       const top = (await boxOf(page.getByPlaceholder('Find a model'))).y - 48;
-      const bottom = await under(page.getByText('Chart compound interest'), 48);
+      // The last suggestion: the chart one when Python is set up, the trip one when it is not.
+      const bottom = await under(page.getByText(/^(Chart compound interest|Plan a 3-day trip)/), 48);
       const crop = await columnCrop(page, HD.height);
       this.crop = { ...crop, y: Math.round(top), h: Math.round(bottom - top) };
     },
@@ -365,6 +385,82 @@ export default [
       const plan = await under(page.getByText('One refrigerated van'), 0);
       const next = await boxOf(page.getByRole('heading', { name: '3. The budget' }));
       this.crop = await columnCrop(page, (plan + next.y) / 2);
+    },
+  },
+  {
+    // The whole window: a workspace in use, with the pinned workspaces in the sidebar. Its
+    // chats, instructions, sources and people, and the message box for a new chat in it.
+    name: 'workspace',
+    path: '/?w=volunteer-handbook',
+    viewport: { width: 1280, height: 800 },
+    routes: signIn,
+    gradient: GLASS,
+    async setup({ page }) {
+      await openWorkspace(page, 'Your chats');
+    },
+  },
+  {
+    // Top-right corner: a new workspace, with a card for each step to set it up. Ends under the cards.
+    name: 'workspace-setup',
+    path: '/?w=events-2027',
+    viewport: HD,
+    routes: signIn,
+    gradient: GLASS,
+    settle: 1200,
+    async setup({ page }) {
+      await page.locator('[data-slot="workspace-setup-step"]').nth(2).waitFor();
+      await openWorkspace(page, 'Set up this workspace');
+      const composer = await boxOf(page.locator('[data-slot="workspace-composer"]'));
+      const x = Math.round(composer.x - 96);
+      this.crop = { x, y: 0, w: HD.width - x, h: Math.round(await under(page.locator('[data-slot="workspace-setup-step"]'), 64)) };
+    },
+  },
+  {
+    // Top, right and bottom edges: Share on a private workspace. Three people in their roles,
+    // and General access. Bleeds left through the sidebar's edge. The whole height, so the
+    // crop cuts through no row of the page under the backdrop.
+    name: 'workspace-share',
+    path: '/?w=grant-applications',
+    viewport: HD,
+    routes: signIn,
+    gradient: GLASS,
+    async setup({ page }) {
+      await openWorkspace(page, 'Your chats');
+      await page.getByRole('button', { name: 'Share', exact: true }).click();
+      await page.getByText('People with access').waitFor();
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(600);
+      await blur(page);
+      const sidebar = await boxOf(page.locator('[data-slot="sidebar"]'));
+      const x = Math.round(sidebar.x + sidebar.width);
+      this.crop = { x, y: 0, w: HD.width - x, h: HD.height };
+    },
+  },
+  {
+    // Top-right corner: a source's Details in the side panel, with its log. It is still
+    // Indexing: a model is reading its picture pages, and its row says how far. Ends under
+    // that row, over the message box. The seed's Indexing document is started again after
+    // 5 minutes, and fails on the demo key: seed again before this image.
+    name: 'workspace-sources',
+    path: '/?w=grant-applications',
+    viewport: HD,
+    routes: signIn,
+    gradient: GLASS,
+    async setup({ page }) {
+      await openWorkspace(page, 'Your chats');
+      await page.getByRole('button', { name: 'Actions for “Annual report 2025.pdf”' }).click();
+      await page.getByRole('menuitem', { name: 'Details' }).click();
+      await page.locator('[data-slot="document-details"]').waitFor();
+      await page.getByRole('button', { name: 'Log' }).click();
+      await page.locator('[data-slot="document-steps"]').waitFor();
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(800);
+      await blur(page);
+      const sidebar = await boxOf(page.locator('[data-slot="sidebar"]'));
+      const composer = await boxOf(page.locator('[data-slot="workspace-composer"]'));
+      const x = Math.round(sidebar.x + sidebar.width);
+      const bottom = Math.min(await under(page.locator('[data-slot="workspace-document"]').last(), 12), composer.y - 2);
+      this.crop = { x, y: 0, w: HD.width - x, h: Math.round(bottom) };
     },
   },
   {

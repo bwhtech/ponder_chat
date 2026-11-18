@@ -1,0 +1,6 @@
+{
+	// ESLint's program for the .vue files (eslint.config.js): the browser-only one, with the
+	// stand-in for .vue imports (../vue-shim.d.ts) that TypeScript needs without vue-tsc.
+	"extends": "./tsconfig.json",
+	"exclude": []
+}

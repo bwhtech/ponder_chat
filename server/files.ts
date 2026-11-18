@@ -26,7 +26,7 @@ export const URL_PREFIX = "/api/files/";
 /** What the model can read, by media type. Everything else is refused at upload. */
 const BINARY_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "application/pdf"]);
 export const TEXT_TYPES = new Set(["text/plain", "text/csv", "text/markdown", "application/json", "text/tab-separated-values"]);
-const TEXT_EXTENSIONS: Record<string, string> = { csv: "text/csv", tsv: "text/tab-separated-values", txt: "text/plain", md: "text/markdown", json: "application/json" };
+export const TEXT_EXTENSIONS: Record<string, string> = { csv: "text/csv", tsv: "text/tab-separated-values", txt: "text/plain", md: "text/markdown", json: "application/json" };
 const SPREADSHEET = /\.(xlsx|xls|ods)$/i;
 /** Spreadsheets only Python can read, so they are taken only while it is on. */
 export const SPREADSHEET_TYPES: Record<string, string> = {
@@ -34,6 +34,22 @@ export const SPREADSHEET_TYPES: Record<string, string> = {
 	xls: "application/vnd.ms-excel",
 	ods: "application/vnd.oasis.opendocument.spreadsheet",
 };
+/** What the model reads cannot run script, so it opens in the browser. */
+const INLINE_TYPES = new Set([...BINARY_TYPES, ...TEXT_TYPES]);
+
+/**
+ * The headers of a stored file's bytes (a chat file, a workspace document), all but its cache
+ * policy. Other types (HTML or SVG that Python wrote) download, sandboxed.
+ */
+export function fileHeaders(name: string, mediaType: string): Record<string, string> {
+	const inline = INLINE_TYPES.has(mediaType);
+	return {
+		"Content-Type": mediaType,
+		"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(name)}`,
+		"X-Content-Type-Options": "nosniff",
+		...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
+	};
+}
 
 export type StoredFile = { id: string; url: string; name: string; mediaType: string; size: number };
 export type LoadedFile = { name: string; media_type: string; data: Buffer; text: string | null };

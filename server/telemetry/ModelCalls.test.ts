@@ -191,7 +191,7 @@ describe.skipIf(!url)("ModelCalls and Runs", () => {
 			}),
 		);
 
-		it.effect("reports a person's usage: every run, and totals without the uncharged calls", () =>
+		it.effect("reports a person's usage: every run, and totals without the uncharged calls and the app's own", () =>
 			Effect.gen(function* () {
 				const runs = yield* Runs.Runs;
 				yield* runs.insert({
@@ -215,8 +215,8 @@ describe.skipIf(!url)("ModelCalls and Runs", () => {
 				assert.isTrue(report.runs.every((row) => row.thread_id === threadId && row.created_at instanceof Date));
 				const title = report.runs.find((row) => row.id === `${runId}:title`)!;
 				assert.strictEqual(title.cost_usd, 0.5);
-				// Every run that finished: step_1 and the title. The calls that did not finish are left out.
-				assert.deepStrictEqual(report.totals, { runs: 2, input_tokens: 1010, output_tokens: 55, cached_tokens: 900, cost_usd: 0.500123 });
+				// Every run that finished and costs credits: step_1. The calls that did not finish, and the title (the app's own call), are left out.
+				assert.deepStrictEqual(report.totals, { runs: 1, input_tokens: 1000, output_tokens: 50, cached_tokens: 900, cost_usd: 0.000123 });
 				assert.deepStrictEqual(yield* runs.usageReport({ user, thread: "" }), yield* runs.usageReport({ user }));
 				assert.deepStrictEqual((yield* runs.usageReport({ user: `nobody-${run}` })).totals, { runs: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, cost_usd: 0 });
 			}),

@@ -11,6 +11,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Predicate from "effect/Predicate";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
@@ -126,7 +127,7 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 			// Ponder uses codes only to sign in. A code of another type gets the usual answer, but
 			// none is stored: a stored one would show, when it is checked, that the email has an account.
 			before: createAuthMiddleware(async (ctx) => {
-				if (ctx.path === "/email-otp/send-verification-otp" && ctx.body?.type !== "sign-in") return ctx.json({ success: true });
+				if (ctx.path === "/email-otp/send-verification-otp" && codeType(ctx.body) !== "sign-in") return ctx.json({ success: true });
 				await run.beforeCall(ctx);
 			}),
 			after: createAuthMiddleware(async (ctx) => {
@@ -306,3 +307,8 @@ export function originFor(hosts: ReadonlyArray<string>, headers: Headers) {
 
 /** originFor with the hosts of PonderConfig. */
 export const appOrigin = (headers: Headers) => PonderConfig.PonderConfig.useSync((config) => originFor(config.hosts, headers));
+
+/** The type of code a request to send one asks for. Better Auth types a hook's body as `any`. */
+function codeType(body: unknown) {
+	return Predicate.hasProperty(body, "type") ? body.type : undefined;
+}

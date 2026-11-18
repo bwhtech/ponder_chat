@@ -1,0 +1,14 @@
+{
+	// The declarations of the API's types (AppType, ApiClient in app.ts), for the web app's
+	// browser-only typecheck (web/browser-check). Not committed: npm run typecheck writes them.
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": false,
+		"declaration": true,
+		"emitDeclarationOnly": true,
+		"rootDir": "..",
+		"outDir": "../node_modules/.cache/ponder-api-types"
+	},
+	"include": [],
+	"files": ["app.ts", "../types/json.d.ts", "../types/fetch.d.ts", "../types/array.d.ts"]
+}

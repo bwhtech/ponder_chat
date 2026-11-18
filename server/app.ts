@@ -3,6 +3,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
+import { createMiddleware } from "hono/factory";
 import { etag } from "hono/etag";
 import type { hc } from "hono/client";
 import { HTTPException } from "hono/http-exception";
@@ -19,7 +20,7 @@ import * as Branding from "./branding/Branding.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
 import * as Credits from "./credits/Credits.ts";
 import * as Files from "./files.ts";
-import { MAX_FILE_BYTES, refusalText } from "./files.ts";
+import { fileHeaders, MAX_FILE_BYTES, refusalText } from "./files.ts";
 import * as Memory from "./memory.ts";
 import { memoryApi } from "./memory/routes.ts";
 import * as Models from "./models/Models.ts";
@@ -35,6 +36,7 @@ import * as Runs from "./telemetry/Runs.ts";
 import { validate } from "./validate.ts";
 import { WEB_BUILD } from "./web-build.ts";
 import * as Replies from "./workflow/replies.ts";
+import { peopleApi, workspacesApi } from "./workspaces/routes.ts";
 
 /**
  * The HTTP API, served by Nitro (nitro.config.ts), which also compiles the chat workflow
@@ -115,21 +117,27 @@ app.get("/api/brand/logo/:theme", async (c) => {
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
 app.on(["GET", "POST"], "/api/auth/*", (c) => route(c, Auth.Auth.use((auth) => auth.handler(c.req.raw))));
-app.use("/api/*", async (c, next) => {
-	const session = await route(c, Auth.Auth.use((auth) => auth.session(c.req.raw.headers)));
-	if (Option.isNone(session)) return c.json({ error: "Sign in first." }, 401);
-	c.set("user", session.value.user);
-	await next();
-});
+// createMiddleware: an inline handler here would type its input as `any`.
+app.use(
+	"/api/*",
+	createMiddleware<Env>(async (c, next) => {
+		const session = await route(c, Auth.Auth.use((auth) => auth.session(c.req.raw.headers)));
+		if (Option.isNone(session)) return c.json({ error: "Sign in first." }, 401);
+		c.set("user", session.value.user);
+		await next();
+	}),
+);
 const userOf = (c: Context<Env>) => c.get("user").id;
 /** At most so many uses per person (rate-limit.ts). */
 const perPerson = (limit: LimitName, options?: { plain?: boolean }) => limitPerPerson(limit, (c: Context<Env>) => userOf(c), options);
 
 // A repeated or odd query value is ignored, not refused.
+const threadListQuery = z.object({ workspace: z.string().max(100).optional() });
 const searchQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
 const threadTitle = z.object({ title: z.string().optional().transform((title) => (title ?? "").slice(0, 120)) });
 // The messages are the AI SDK's UIMessages, which the workflow reads; only the shape is checked here.
-const chatBody = z.object({ id: z.string(), messages: z.array(z.custom<UIMessage>()).min(1), model: z.string().optional() });
+// workspaceId is read on a new chat's first message only (workflow/replies.ts).
+const chatBody = z.object({ id: z.string(), messages: z.array(z.custom<UIMessage>()).min(1), model: z.string().optional(), workspaceId: z.string().max(200).optional() });
 const streamQuery = z.object({ startIndex: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0).catch(0) });
 const memoryQuery = z.object({ wait: z.string().optional().catch(undefined) });
 const usageQuery = z.object({ thread: z.string().optional().catch(undefined) });
@@ -153,6 +161,10 @@ const api = app
 
 	// Connectors: the MCP servers each person connected (server/mcp/).
 	.route("/api/connectors", connectorsApi)
+
+	// Workspaces and the people picker (server/workspaces/). A workspace the person can't use is a 404.
+	.route("/api/workspaces", workspacesApi)
+	.route("/api/people", peopleApi)
 
 	// Whether the chat can run Python, for the attach button.
 	.get("/api/features", (c) => route(c, Effect.map(Sandbox.Sandbox.use((sandbox) => sandbox.ready), (python) => c.json({ python }))))
@@ -188,11 +200,12 @@ const api = app
 	)
 
 	// The list revalidates by its content and goes gzipped; one thread has its own cache (thread-cache.ts).
-	.get("/api/threads", compress(), etag(), (c) =>
+	// `?workspace=<id>`: only the person's chats in that workspace (the workspace page's "Your chats").
+	.get("/api/threads", compress(), etag(), validate("query", threadListQuery), (c) =>
 		route(
 			c,
 			Effect.map(
-				Threads.Threads.use((threads) => threads.list(userOf(c))),
+				Threads.Threads.use((threads) => threads.list(userOf(c), c.req.valid("query").workspace)),
 				(threads) => c.json({ threads }),
 			),
 		),
@@ -237,12 +250,15 @@ const api = app
 		return route(
 			c,
 			Effect.map(
-				Replies.Replies.use((replies) => replies.start({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model })),
+				Replies.Replies.use((replies) => replies.start({ threadId: body.id, owner: userOf(c), messages: body.messages, model: body.model, workspaceId: body.workspaceId })),
 				(reply) => createUIMessageStreamResponse({ stream: reply.stream, headers: { "x-workflow-run-id": reply.runId } }),
 			),
 			{
 				OutOfCredits: (error, c) => c.text(error.message, 402),
 				ThreadNotYours: (_, c) => c.json({ error: "Not found" }, 404),
+				WorkspaceNotFound: (error, c) => c.text(error.message, 404),
+				// The chat is the person's own, so it may say why: they were removed from its workspace.
+				WorkspaceAccessLost: (error, c) => c.text(error.message, 403),
 			},
 		);
 	})
@@ -314,17 +330,7 @@ const api = app
 				Files.Files.use((files) => files.load(c.req.param("id"), userOf(c))),
 				Option.match({
 					onNone: () => c.json({ error: "Not found" }, 404),
-					onSome: (file) => {
-						// Only types that cannot run script open in the browser. Anything else (HTML or SVG that Python wrote) downloads, sandboxed.
-						const inline = INLINE_TYPES.has(file.media_type);
-						return c.body(new Uint8Array(file.data), 200, {
-							"Content-Type": file.media_type,
-							"Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${encodeURIComponent(file.name)}`,
-							"Cache-Control": "private, max-age=31536000, immutable",
-							"X-Content-Type-Options": "nosniff",
-							...(!inline && { "Content-Security-Policy": "default-src 'none'; sandbox" }),
-						});
-					},
+					onSome: (file) => c.body(new Uint8Array(file.data), 200, { ...fileHeaders(file.name, file.media_type), "Cache-Control": "private, max-age=31536000, immutable" }),
 				}),
 			),
 		),
@@ -343,7 +349,7 @@ const api = app
 
 /** The API's routes, for the typed client (web/api.ts). Import it as a type only, so no server code reaches the browser. */
 export type AppType = typeof api;
-/** The typed client itself. web/api.ts declares its client with it, so a check without the server can replace it (web/server-stub.d.ts). */
+/** The typed client itself. web/api.ts declares its client with it: the real one loads at the first request. */
 export type ApiClient = ReturnType<typeof hc<AppType>>;
 
 // The admin pages are their own app (web/admin.html) with its own routes under /admin/.
@@ -385,5 +391,3 @@ export default app;
 function isChat(path: string) {
 	return path === "/api/chat" || path.startsWith("/api/chat/");
 }
-
-const INLINE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf", "text/plain", "text/csv", "text/tab-separated-values", "text/markdown", "application/json"]);

@@ -73,6 +73,16 @@ export type MemoryScript = {
  */
 export type SummaryScript = { match: string; text?: string; error?: { status: number; message: string }; delayMs?: number };
 
+/**
+ * A PDF page that a workspace document sends to the page model (server/workspaces/documents/page-reader.ts),
+ * when the one-page PDF holds `match`: a test writes it into the page's picture (pdfs.ts, scanPdf).
+ * The first `failFirst` calls are refused with `error`, and the calls after them answer `text`.
+ * A page that no script matches is read as "Page <n>, as the fake model read it."
+ * With `hold`, each read waits until the test lets one go (`Fake.releasePage`), so a test
+ * sees a document while its pages are read.
+ */
+export type PageScript = { match: string; text?: string; failFirst?: number; error?: string; hold?: boolean };
+
 /** A summary call as the fake received it: the summarizer's instructions and the transcript it read. */
 export type ReceivedSummary = { model: string; system: string; prompt: string; at: number };
 

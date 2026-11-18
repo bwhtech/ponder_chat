@@ -13,7 +13,7 @@
   [data-slot='chat-column'] {
     timeline-scope: --transcript;
   }
-  [data-slot='chat-column'] :is([data-slot='message-scroller-viewport'], [data-slot='memory-view']) {
+  [data-slot='chat-column'] :is([data-slot='message-scroller-viewport'], [data-slot='memory-view'], [data-slot='workspace-view']) {
     scroll-timeline: --transcript block;
   }
   [data-slot='chat-column'] > [data-slot='chat-header'] {
@@ -37,6 +37,17 @@
     animation-range:
       0 40px,
       calc(100% - var(--scroll-fade-range, 96px)) 100%;
+    animation-fill-mode: both;
+  }
+}
+
+/* The workspace page fades only under its header. Its message box floats at the bottom of the same scroller, and a
+   fade there would fade the box too; the box's own backdrop fades the page out above it (workspaces/WorkspacePage.vue). */
+@supports (animation-timeline: scroll()) {
+  [data-slot='chat-column'] [data-slot='workspace-view'] {
+    animation: ai-scroll-fade-t 1ms ease-in-out;
+    animation-timeline: scroll(self y);
+    animation-range: 0 40px;
     animation-fill-mode: both;
   }
 }
@@ -90,6 +101,38 @@
 @media (prefers-reduced-motion: reduce) {
   [data-slot='artifact-step'] {
     animation-name: fade-in;
+  }
+}
+
+/* A workspace's setup greets the first time its page shows it (WorkspacePage.vue, WorkspaceSetup.vue):
+   the heading leads, the cards follow 60, 110 and 150ms behind it, and the sections under the setup
+   come with the last card, rising least. It is the column's one entrance: the column does not fade
+   as well. `backwards` holds each part hidden through its delay and lets go at the end, so the
+   cards' own leave and move transitions, and the sections' own, are not overridden. With reduced
+   motion they fade in together, without moving. */
+@keyframes setup-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise));
+  }
+}
+[data-greet] [data-slot='workspace-setup-intro'] {
+  --rise: 8px;
+  animation: setup-rise 300ms var(--ease-out-strong) backwards;
+}
+[data-greet] [data-slot='workspace-setup-step'] {
+  --rise: 6px;
+  animation: setup-rise 260ms var(--ease-out-strong) var(--greet-delay, 0ms) backwards;
+}
+[data-greet] > [data-slot='workspace-about'] {
+  --rise: 4px;
+  animation: setup-rise 240ms var(--ease-out-strong) 180ms backwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-greet] [data-slot='workspace-setup-intro'],
+  [data-greet] [data-slot='workspace-setup-step'],
+  [data-greet] > [data-slot='workspace-about'] {
+    animation: fade-in 200ms var(--ease-out-strong) backwards;
   }
 }
 
@@ -189,4 +232,12 @@ html {
 ::highlight(ponder-cite-flash) {
 	background-color: color-mix(in srgb, var(--surface-amber-3, #fde68a) 80%, transparent);
 	color: inherit;
+}
+
+/* Toasts (ToastsHost.vue) are centred on the page's column, not the window, where vue-sonner
+   lays them out at its own width (above 600px). :root lifts this over vue-sonner's rule, which loads later. */
+@media (min-width: 601px) {
+	:root [data-sonner-toaster][data-x-position="center"] {
+		left: var(--toast-centre-x, 50%);
+	}
 }

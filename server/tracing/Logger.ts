@@ -15,7 +15,8 @@ import * as Logger from "effect/Logger";
  * A Cause passed to a log (`Effect.logError("x:", cause)`) is printed pretty, after the message.
  */
 export const logger = Logger.make(({ logLevel, message, cause }) => {
-	const parts: unknown[] = Array.isArray(message) ? [...message] : [message];
+	// One value, or an array of them: `[message].flat()` spreads an array and keeps one value.
+	const parts: unknown[] = [message].flat();
 	if (cause.reasons.length > 0) parts.push(Cause.pretty(cause));
 	switch (logLevel) {
 		case "Fatal":

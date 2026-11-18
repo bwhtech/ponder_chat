@@ -265,8 +265,8 @@ test("Stop during the summary saves nothing, and the next message summarizes aga
 	const saved = () => db`select count(*)::int as n from thread_summaries s join threads t on t.id = s.thread_id where t.owner = ${person.id}`;
 	expect((await saved())[0].n).toBe(0);
 	// The stopped reply had only its compaction status, so it is not saved: the thread ends on the person's message.
-	const [thread] = await db`select messages from threads where owner = ${person.id}`;
-	expect((thread.messages as { role: string }[]).at(-1)?.role).toBe("user");
+	const [thread] = await db<{ messages: { role: string }[] }[]>`select messages from threads where owner = ${person.id}`;
+	expect(thread.messages.at(-1)?.role).toBe("user");
 
 	await fake.summary({ match: "STOP-M1 ", text: "SUMMARY-STOP: the person sent long notes." });
 	await fake.chat({ match: "STOP-AFTER", steps: [{ text: "Noted STOP-AFTER." }] });

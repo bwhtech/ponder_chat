@@ -5,12 +5,15 @@ import { connectors, connectorsError, loadConnectors } from "../connectors/api";
 import ConnectorPage from "../connectors/ConnectorPage.vue";
 import ConnectorsPanel from "../connectors/ConnectorsPanel.vue";
 import AccountPanel from "./AccountPanel.vue";
-import { settings, type SettingsTab } from "./state";
+import MemoryPanel from "./MemoryPanel.vue";
+import { SETTINGS_TABS, settings, type SettingsTab } from "./state";
 
 /**
- * Settings: frappe-ui's SettingsDialog, as on /admin, with Account and Connectors.
- * Cmd+Shift+, (Ctrl+Shift+,) opens it too. On a phone it fills the screen.
+ * Settings: frappe-ui's SettingsDialog, as on /admin, with Account, Memory and Connectors.
+ * Cmd+Shift+, (Ctrl+Shift+,) opens it too. On a phone it fills the screen. A chat that a
+ * memory came from opens in the page, and Settings closes.
  */
+const emit = defineEmits<{ openThread: [id: string] }>();
 const tab = computed({
 	get: () => settings.tab,
 	set: (value: string | number | undefined) => {
@@ -20,6 +23,11 @@ const tab = computed({
 });
 const connector = computed(() => connectors.value?.find((each) => each.id === settings.connector));
 const attention = computed(() => connectors.value?.filter((each) => each.status !== "connected").length ?? 0);
+
+function openThread(id: string) {
+	settings.open = false;
+	emit("openThread", id);
+}
 
 // The list loads when Settings opens, so a sign-in that ended elsewhere shows. When it
 // fails, Connectors shows why, with Retry (connectorsError in connectors/api.ts).
@@ -34,14 +42,10 @@ watch(
 	<SettingsDialog v-model:open="settings.open" v-model:tab="tab">
 		<SettingsSidebar>
 			<SettingsNavGroup label="Settings" class="[&>div:first-child]:text-xs-medium">
-				<SettingsNavItem value="account" class="!text-sm [@media(pointer:coarse)]:!h-11">
-					<template #prefix><span class="lucide-circle-user size-4 text-ink-gray-6" aria-hidden="true" /></template>
-					Account
-				</SettingsNavItem>
-				<SettingsNavItem value="connectors" class="!text-sm [@media(pointer:coarse)]:!h-11">
-					<template #prefix><span class="lucide-plug size-4 text-ink-gray-6" aria-hidden="true" /></template>
-					Connectors
-					<template #suffix>
+				<SettingsNavItem v-for="each in SETTINGS_TABS" :key="each.value" :value="each.value" class="!text-sm [@media(pointer:coarse)]:!h-11">
+					<template #prefix><span :class="[each.icon, 'size-4 text-ink-gray-6']" aria-hidden="true" /></template>
+					{{ each.label }}
+					<template v-if="each.value === 'connectors'" #suffix>
 						<span v-if="attention" class="size-2 rounded-full bg-surface-amber-7" role="img" :aria-label="`${attention} need attention`" />
 					</template>
 				</SettingsNavItem>
@@ -49,6 +53,7 @@ watch(
 		</SettingsSidebar>
 		<SettingsContent>
 			<SettingsPanel value="account"><AccountPanel /></SettingsPanel>
+			<SettingsPanel value="memory"><MemoryPanel @open-thread="openThread" /></SettingsPanel>
 			<SettingsPanel value="connectors">
 				<ConnectorPage v-if="connector && !connectorsError" :key="connector.id" :connector="connector" />
 				<ConnectorsPanel v-else />
