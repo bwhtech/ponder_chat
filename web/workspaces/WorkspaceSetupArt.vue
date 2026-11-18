@@ -116,12 +116,12 @@ const faces = computed(() => (props.compact ? FACES.slice(0, 2) : FACES));
 					<!-- In a tile the letters would be a few pixels high: plain discs, as the files have no labels. -->
 					<template v-if="!compact">{{ face.initial }}</template>
 				</span>
-				<!-- The free seat: a dashed circle, as the Sources tile, tucked behind the faces. -->
+				<!-- The free seat: a dashed circle, as the Sources tile, tucked behind the faces, with someone to add. -->
 				<span
 					class="relative -ms-4 flex size-[3.25rem] items-center justify-center rounded-full border-dashed bg-surface-gray-1 transition-[border-color,color,transform] duration-300 ease-out-strong pose:translate-x-1"
 					:class="dashed"
 				>
-					<span class="lucide-plus" :class="compact ? 'size-6' : 'size-4'" />
+					<span class="lucide-user-plus" :class="compact ? 'size-7' : 'size-5'" />
 				</span>
 			</div>
 		</div>
