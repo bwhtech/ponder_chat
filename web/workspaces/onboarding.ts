@@ -45,7 +45,7 @@ export function setupSteps(workspace: WorkspaceDetail): SetupStep[] {
 		steps.push({
 			key: "people",
 			title: "People",
-			description: "Choose who can ask in this workspace.",
+			description: "Choose who can ask here.",
 			done: workspace.memberCount > 0,
 			action: "Share workspace",
 		});

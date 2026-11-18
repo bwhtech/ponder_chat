@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { count } from "../numbers";
 import type { WorkspaceDocument } from "./documents";
-import type { SetupHandle } from "./handles";
+import type { SetupHandle, UploadHandle } from "./handles";
 import { setupSteps, type SetupStepKey } from "./onboarding";
 import type { WorkspaceDetail } from "./store";
 import { useDocumentUpload } from "./upload";
@@ -66,6 +66,9 @@ function refocusAfterLeave() {
 	check();
 }
 onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
+
+/** Files dropped on the page around the setup (WorkspacePage.vue) go up here too, so the Documents step counts them. */
+defineExpose<UploadHandle>({ upload });
 </script>
 
 <template>
@@ -87,9 +90,9 @@ onBeforeUnmount(() => cancelAnimationFrame(refocusFrame));
 						:class="errors.length ? 'pb-3' : 'pb-8'"
 						:steps="steps"
 						:uploading="uploading"
+						:upload="upload"
 						@instructions="emit('instructions')"
 						@share="emit('share')"
-						@upload="upload"
 					/>
 				</div>
 			</div>

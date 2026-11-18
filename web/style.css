@@ -201,3 +201,11 @@ html {
 	background-color: color-mix(in srgb, var(--surface-amber-3, #fde68a) 80%, transparent);
 	color: inherit;
 }
+
+/* Toasts (ToastsHost.vue) are centred on the page's column, not the window, where vue-sonner
+   lays them out at its own width (above 600px). :root lifts this over vue-sonner's rule, which loads later. */
+@media (min-width: 601px) {
+	:root [data-sonner-toaster][data-x-position="center"] {
+		left: var(--toast-centre-x, 50%);
+	}
+}

@@ -9,14 +9,14 @@ import { useThreads, useWorkspaceThreads } from "../threads";
 import { openWorkspaceDialog } from "./dialogs";
 import type { WorkspaceDocument } from "./documents";
 import type { FirstMessage } from "./first-message";
-import type { ComposerHandle } from "./handles";
+import type { ComposerHandle, UploadHandle } from "./handles";
 import { Poller } from "./poller";
 import WorkspaceAbout from "./WorkspaceAbout.vue";
 import WorkspaceChats from "./WorkspaceChats.vue";
 import WorkspaceComposer from "./WorkspaceComposer.vue";
 import WorkspaceHeading from "./WorkspaceHeading.vue";
 import WorkspaceOnboarding from "./WorkspaceOnboarding.vue";
-import { deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, takeMadeWorkspace, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
+import { canEdit, deleteWorkspace, fetchWorkspace, loadWorkspaces, replaceWorkspaceKey, takeMadeWorkspace, updateWorkspace, workspaceByKey, type WorkspaceDetail } from "./store";
 
 /**
  * A workspace (`?w=<slug>`), in one column, the chat's: its name, the person's own chats in
@@ -66,6 +66,29 @@ watch(dock, (now, before) => {
 onBeforeUnmount(() => dockObserver.disconnect());
 /** The setup is done, and focus was on it: asking is what is left to do. */
 const composer = ref<ComposerHandle>();
+
+/**
+ * Files dropped anywhere else on the page, such as the blank space under the setup cards, are
+ * uploaded too, for a person who can edit: on the setup while they have no chat here, so the
+ * Documents step counts them, else in the Documents section. For anyone else they are refused,
+ * so the browser does not open the file in place of the app. The setup, the sections and the
+ * message box take their own drops first (they mark the event handled).
+ */
+const onboardingUpload = ref<UploadHandle>();
+const aboutUpload = ref<UploadHandle>();
+const dropsHere = (event: DragEvent) => !event.defaultPrevented && Boolean(event.dataTransfer?.types.includes("Files"));
+function pageDragOver(event: DragEvent) {
+	if (!dropsHere(event) || !event.dataTransfer) return;
+	event.preventDefault();
+	event.dataTransfer.dropEffect = detail.value && canEdit(detail.value) ? "copy" : "none";
+}
+function pageDrop(event: DragEvent) {
+	if (!dropsHere(event)) return;
+	event.preventDefault();
+	const files = Array.from(event.dataTransfer?.files ?? []);
+	if (!files.length || !detail.value || !canEdit(detail.value)) return;
+	void (chats.value.length ? aboutUpload.value : onboardingUpload.value)?.upload(files);
+}
 
 // Each load takes a number: the answer for a workspace no longer open is dropped.
 let asked = 0;
@@ -226,6 +249,8 @@ function askDelete() {
 	<div
 		v-else
 		data-slot="workspace-view"
+		@dragover="pageDragOver"
+		@drop="pageDrop"
 		class="scroll-fade-y scrollbar-thin min-h-0 flex-1 overflow-y-auto [--scroll-fade-size:40px] sm:[scrollbar-gutter:stable_both-edges]"
 		:style="{ scrollPaddingBottom: `${dockHeight + FADE_PX}px` }"
 	>
@@ -245,8 +270,8 @@ function askDelete() {
 				<Transition enter-from-class="opacity-0" enter-active-class="transition-opacity duration-200 ease-out-strong motion-reduce:transition-none">
 					<div v-if="ready && detail" :key="detail.id" class="flex flex-col gap-8">
 						<WorkspaceChats v-if="chats.length" :chats="chats" :shared="detail.kind === 'org' || detail.memberCount > 0" @open="emit('openChat', $event)" />
-						<WorkspaceOnboarding v-else :workspace="detail" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
-						<WorkspaceAbout :workspace="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
+						<WorkspaceOnboarding v-else ref="onboardingUpload" :workspace="detail" @instructions="editInstructions" @share="share" @documents="documentsChanged" @finished="composer?.focus()" />
+						<WorkspaceAbout ref="aboutUpload" :workspace="detail" :setup="onboarding" @instructions="editInstructions" @documents="documentsChanged" />
 					</div>
 				</Transition>
 			</div>

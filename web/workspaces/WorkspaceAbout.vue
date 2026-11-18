@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from "vue";
 import type { WorkspaceDocument } from "./documents";
 import { useFileDrop } from "./file-drop";
-import type { DocumentsHandle } from "./handles";
+import type { DocumentsHandle, UploadHandle } from "./handles";
 import { canEdit, type WorkspaceDetail } from "./store";
 import WorkspaceDocuments from "./WorkspaceDocuments.vue";
 import WorkspaceInstructions from "./WorkspaceInstructions.vue";
@@ -50,6 +50,8 @@ const drop = useFileDrop(
 	() => editable.value && showDocuments.value,
 	(files) => documents.value?.upload(files),
 );
+/** Files dropped on the page outside the sections (WorkspacePage.vue), once the person has chats here. */
+defineExpose<UploadHandle>({ upload: async (files) => documents.value?.upload(files) });
 </script>
 
 <template>

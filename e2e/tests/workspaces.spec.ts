@@ -241,6 +241,8 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 		await expect(step(page, "documents")).toHaveCount(0);
 		await expect(setupCount(page)).toHaveText("2 of 3 done");
 		await expect(setupStatus(page)).toHaveText("Documents added. 2 of 3 done.");
+		// Its button had focus: the one step left takes it.
+		await expect(setup(page).getByRole("button", { name: "Share workspace" })).toBeFocused();
 		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
 	});
 
@@ -351,7 +353,7 @@ test("a new workspace keeps what is set up while it still loads, and a refused f
 		const handover = { name: "Handover.md", type: "text/markdown", text: `# Handover\n\nHand over at seven, ${tag}.` };
 		await dropFiles(step(page, "documents"), "dragenter", [handover]);
 		await expect(step(page, "documents").locator('[data-slot="document-drop"]')).toBeVisible();
-		await expect(step(page, "documents").getByRole("button")).toHaveText("Drop to upload");
+		await expect(step(page, "documents")).toContainText("Drop to upload");
 		await dropFiles(step(page, "documents"), "drop", [handover, { name: "tool.exe", type: "application/x-msdownload", text: "MZ not a document" }]);
 		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveCount(1);
 		await expect(setup(page)).toHaveCount(0);
@@ -566,6 +568,27 @@ test("the message box floats at the bottom of a workspace page's column, where t
 	});
 });
 
+test("files dropped on the blank page under a new workspace's setup go up as its documents, and the app stays open", async ({ page, person }) => {
+	const name = `Blank drop ${person.id.slice(0, 6)}`;
+	const { slug } = await createWorkspace(page, name);
+	await page.goto(`/?w=${slug}`);
+	await expect(setupCount(page)).toHaveText("0 of 3 done");
+
+	// Dropped on the page itself, away from the cards, the sections and the message box.
+	const handled = await page.locator('[data-slot="workspace-view"]').evaluate((view) => {
+		const data = new DataTransfer();
+		data.items.add(new File(["# Rota\n\nNights rotate every four weeks."], "Rota.md", { type: "text/markdown" }));
+		const over = view.dispatchEvent(new DragEvent("dragover", { dataTransfer: data, bubbles: true, cancelable: true }));
+		const drop = view.dispatchEvent(new DragEvent("drop", { dataTransfer: data, bubbles: true, cancelable: true }));
+		// dispatchEvent is false when the page handled the event: the browser does not open the file.
+		return { over: !over, drop: !drop };
+	});
+	expect(handled).toEqual({ over: true, drop: true });
+	await expect(setupCount(page)).toHaveText("1 of 3 done");
+	await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveCount(1);
+	await expect(page).toHaveURL(new RegExp(`[?&]w=${escape(slug)}$`));
+});
+
 test("an older link by a workspace's id opens it, with the slug in its place", async ({ page, person }) => {
 	const name = `Old link ${person.id.slice(0, 6)}`;
 	const { id, slug } = await createWorkspace(page, name);
@@ -581,7 +604,8 @@ const instructionsSection = (page: Page) => about(page).getByRole("region", { na
 const setup = (page: Page) => page.locator('[data-slot="workspace-setup"]');
 const setupCount = (page: Page) => page.locator('[data-slot="workspace-setup-count"]');
 const setupStatus = (page: Page) => page.locator('[data-slot="workspace-setup-status"]');
-const step = (page: Page, key: "instructions" | "documents" | "people") => page.locator(`[data-slot="workspace-setup-step"][data-step="${key}"]`);
+// A step that is leaving is inert, for the moment it fades out.
+const step = (page: Page, key: "instructions" | "documents" | "people") => page.locator(`[data-slot="workspace-setup-step"][data-step="${key}"]:not([inert])`);
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Drags files over an element (dragenter), or drops them on it. */

@@ -6,27 +6,33 @@ import WorkspaceSetupArt from "./WorkspaceSetupArt.vue";
 
 /**
  * One setup step to do (WorkspaceSetup.vue): its scene, its title, what it is for, and what
- * does it. As a card, with a button under its text. `compact`, on a narrow column: a row, its
- * scene in a small tile, and the whole row is the button, named for what it does ("Add
- * instructions"), with the line under the title as its description. `busy` while the files
- * picked from it go up. `dropping` while files are dragged over the setup: a dashed outline
- * over the scene, and the button says "Drop to upload".
+ * does it. As a card, its button is under the text, and its click area covers the whole card,
+ * which the hover moves too. `compact`, a row: the scene in a small tile, and the row is the
+ * button, named for what it does ("Add instructions"), with the line under the title as its
+ * description. Either way, focus shows on the button. `busy` while the files picked from it go
+ * up. `dropping` while files are dragged over the setup: a dashed outline over the scene, and
+ * the step says "Drop to upload".
  */
 const props = defineProps<{ step: SetupStep; busy?: boolean; dropping?: boolean; compact?: boolean }>();
 const emit = defineEmits<{ act: [] }>();
 
 const label = computed(() => (props.busy ? "Uploading…" : props.dropping ? "Drop to upload" : props.step.action));
-const titleId = computed(() => `workspace-setup-${props.step.key}`);
-const descriptionId = computed(() => `workspace-setup-${props.step.key}-description`);
+const titleId = computed(() => `workspace-setup-${props.step.key}${props.compact ? "-row" : ""}`);
+const descriptionId = computed(() => `${titleId.value}-description`);
 </script>
 
 <template>
 	<article
 		class="group relative flex rounded-6 border border-outline-gray-1 bg-surface-base p-2 shadow-sm dark:border-outline-gray-2"
-		:class="compact ? 'items-center gap-3 pe-3 transition-colors duration-150 ease-out-strong has-[button:active]:bg-surface-gray-1' : 'flex-col'"
+		:class="
+			compact
+				? 'items-center gap-3 pe-3 transition-colors duration-150 ease-out-strong hover:bg-surface-gray-1 has-[button:active]:bg-surface-gray-2'
+				: 'flex-col'
+		"
 		:aria-labelledby="titleId"
 		data-slot="workspace-setup-step"
 		:data-step="step.key"
+		:data-layout="compact ? 'row' : 'card'"
 	>
 		<div class="relative shrink-0">
 			<WorkspaceSetupArt :kind="step.key" :compact="compact" />
@@ -50,14 +56,14 @@ const descriptionId = computed(() => `workspace-setup-${props.step.key}-descript
 		<template v-if="compact">
 			<div class="min-w-0 flex-1">
 				<h3 :id="titleId" class="text-base font-medium text-ink-gray-9">{{ step.title }}</h3>
-				<p :id="descriptionId" class="mt-0.5 text-p-sm text-ink-gray-6">{{ busy || dropping ? label : step.description }}</p>
+				<p :id="descriptionId" class="mt-0.5 text-pretty text-p-sm text-ink-gray-6">{{ busy || dropping ? label : step.description }}</p>
 			</div>
 			<LoadingIndicator v-if="busy" class="size-4 shrink-0 text-ink-gray-5" />
 			<span v-else class="lucide-chevron-right size-4 shrink-0 text-ink-gray-4" aria-hidden="true" />
 			<!-- Over the whole row: the row is the button. -->
 			<button
 				type="button"
-				class="absolute inset-0 rounded-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-gray-3"
+				class="absolute inset-0 cursor-pointer rounded-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-gray-3"
 				:aria-label="step.action"
 				:aria-describedby="descriptionId"
 				:disabled="busy"
@@ -66,9 +72,10 @@ const descriptionId = computed(() => `workspace-setup-${props.step.key}-descript
 		</template>
 		<div v-else class="flex flex-1 flex-col px-2 pb-2 pt-3">
 			<h3 :id="titleId" class="text-base font-medium text-ink-gray-9">{{ step.title }}</h3>
-			<p class="mt-1 text-p-sm text-ink-gray-6">{{ step.description }}</p>
+			<p class="mt-1 text-pretty text-p-sm text-ink-gray-6">{{ step.description }}</p>
 			<div class="mt-auto pt-4">
-				<Button :label="label" :loading="busy" class="touch-target" @click="emit('act')" />
+				<!-- Its click area stretches over the card (the card is `relative`, the button is not). -->
+				<Button :label="label" :loading="busy" class="after:absolute after:inset-0 after:rounded-6 after:content-['']" @click="emit('act')" />
 			</div>
 		</div>
 	</article>
