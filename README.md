@@ -202,15 +202,17 @@ Limits:
 Ponder's TypeScript has no `any`, in the web app, the server and the tests:
 
 - Do not write `any` (`: any`, `as any`, `any[]`). Do not turn a check off with a comment: no `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `oxlint-disable`, `eslint-disable` or `@vue-ignore`.
-- Do not let `any` in from untyped values: `response.json()`, `JSON.parse`, IndexedDB, raw SQL rows, a library's loose types. Give them the type `unknown` and narrow it. On the server, decode them with `Schema` ([`docs/effect.md`](docs/effect.md)).
+- Do not let `any` in from untyped values: `response.json()`, `JSON.parse`, IndexedDB, `event.data`, `workerData`, raw SQL rows, a library's loose types. Give them the type `unknown` and narrow it. On the server, decode them with `Schema` ([`docs/effect.md`](docs/effect.md)). Do not assert a type on them (`(await response.json()) as Thing`): an assertion from `any` hides the `any`. Where a cast is right, as in a typed helper, cast from `unknown`, so that it is seen.
+- In `server/`, `e2e/`, `scripts/` and `shared/`, the declarations in `types/` make `JSON.parse`, `json()` of a fetch `Request` or `Response`, and `Array.isArray` give `unknown` in place of `any`. `web/` does not have them: its typecheck reads frappe-ui's source, which needs the `any`. There, assign the value to an `unknown` variable first.
 - Where a library gives `any`, wrap it once in a small typed function or declaration.
-- Tests read JSON answers with `jsonBody` and `parseJson` (`server/test-json.ts`) or `jsonOf` (`e2e/fixtures.ts`), typed as the shape the test expects.
+- Tests read JSON answers with `jsonBody` and `parseJson` (`server/test-json.ts`) or `jsonOf` (`e2e/fixtures.ts`, for Playwright's answers), typed as the shape the test expects. `expected` (`server/test-json.ts`) does the same for another value of no known type, such as a tool's output.
 - Put types that other files use in `.ts` files, not in `.vue` files. For a component's `defineExpose`, write its type in a `.ts` file, check it with `defineExpose({ ... } satisfies Handle)` and type the parent's ref with it (`web/workspaces/handles.ts`).
 
-`npm run lint` checks this. CI runs it on every pull request. It runs three checks:
+`npm run lint` checks this. CI runs it on every pull request. It runs four checks:
 
 - oxlint (`.oxlintrc.json`) on every `.ts` and `.js` file and on the scripts of `.vue` files: no written `any`, and no `@ts-` comments (`ban-ts-comment`). In `.ts` files, its type-aware rules (oxlint-tsgolint) also stop `any` that flows in: `no-unsafe-assignment`, `-member-access`, `-call`, `-return` and `-argument`. They read the types with each folder's `tsconfig.json`.
-- ESLint (`eslint.config.js`, `npm run lint:vue`) runs the same six rules on the `<script>` of each `.vue` file, which tsgolint cannot read. typescript-eslint needs TypeScript 5's JS API, so it loads the copy that frappe-ui has (`scripts/typescript5.cjs`), like vue-tsc. It reads the types with `web/browser-check/tsconfig.eslint.json`.
+- `scripts/no-any-casts.ts` fails on a type assertion (`as` or `<T>`) from `any` in the `.ts` files. It runs oxlint's `no-unsafe-type-assertion` alone and drops the reports of assertions that narrow a type that is not `any`, by their message. That rule has no option to report only the assertions from `any`. Any other report fails, so a message that a newer oxlint words differently fails too, and does not get through. It takes about 4 seconds.
+- ESLint (`eslint.config.js`, `npm run lint:vue`) runs the same six rules on the `<script>` of each `.vue` file, which tsgolint cannot read, and `ponder/no-any-cast`: typescript-eslint's `no-unsafe-type-assertion` without the narrowing reports, by their message id. typescript-eslint needs TypeScript 5's JS API, so it loads the copy that frappe-ui has (`scripts/typescript5.cjs`), like vue-tsc. It reads the types with `web/browser-check/tsconfig.eslint.json`.
 - `scripts/no-suppressions.ts` fails on `oxlint-` and `eslint-` disable and enable comments, inline rule settings, and `@vue-ignore`, `@vue-expect-error` and `@vue-skip`, in every file git tracks or would track. oxlint has no setting to ignore them.
 
 `npm run typecheck` also checks that `web/` uses only what the browser has. Its second step (`npm run typecheck:browser`) runs vue-tsc with the browser's types and without Node's (`web/browser-check/tsconfig.json`). Then `process`, `Buffer`, `globalThis.process`, `node:fs`, `net` and `timer.unref()` are type errors there. A timer is a `number`, and `ReturnType<typeof setTimeout>` is `number` too. The web app's types include the server's API types (`web/api.ts`), and the server's code brings Node's types. So this check reads declarations of the API's types (`npm run api-types`, `server/tsconfig.api-types.json`, written to `node_modules/.cache/ponder-api-types`). `web/browser-check/pg.d.ts` stands in for pg's types, which bring Node's: the API's types name pg's `Pool` only as a server option. `scripts/typecheck-browser.ts` fails if Node's types get into that program some other way.
@@ -218,7 +220,8 @@ Ponder's TypeScript has no `any`, in the web app, the server and the tests:
 What these checks do not catch:
 
 - An `any` in a `.vue` template (`{{ }}`, `v-if`, an `@click` handler). The unsafe rules read only the `<script>`. vue-tsc checks the template's types, but it lets an `any` through. Keep logic in the `<script>`.
-- A type assertion from `any`, such as `(await response.json()) as Thing`. The unsafe rules allow it. Narrow the `unknown` value instead.
+- An `any` that a generic function's default type parameter hides, such as Hono's `c.req.json<T = any>()`: in `(await c.req.json()) as Thing`, TypeScript reads `T` from the assertion, so the value asserted is a `Thing`, not `any`. Use `jsonBody(c.req)`.
+- A callback's parameter that is typed over a library's `any`, such as `worker.once("message", (answer: Answer) => …)`. The unsafe rules read the parameter's type, not the library's.
 - An `any` that flows in from Deno globals or `npm:` imports in `sandbox/pyodide`. tsgolint cannot read Deno's types, so only a written `any` fails there. Plain `.js`, `.mjs` and `.cjs` files have no types, so the unsafe rules are off for them too.
 
 ## How it works
