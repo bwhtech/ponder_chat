@@ -6,6 +6,7 @@ import type { Member, MemberAccess, OrgAccess, WorkspaceDetail } from "./store";
 const owner = { id: "ana", name: "Ana", email: "ana@example.test" };
 const bea = { id: "bea", name: "Bea", email: "bea@example.test" };
 const cal = { id: "cal", name: "Cal", email: "cal@example.test" };
+let workspaces = 0;
 
 function detail(members: Member[], orgAccess: OrgAccess = "none", changes: Partial<WorkspaceDetail> = {}): WorkspaceDetail {
 	return {
@@ -32,57 +33,86 @@ function detail(members: Member[], orgAccess: OrgAccess = "none", changes: Parti
 
 /**
  * A server the test answers by hand: each request waits until the test settles it, so the
- * test chooses the order. `members` and `orgAccess` are what it has saved.
+ * test chooses the order. `members` and `orgAccess` are what it has saved; `refresh.answer` is
+ * what GET /api/workspaces/:id answers.
  */
 function fakeServer(start: WorkspaceDetail) {
 	let members = [...(start.members ?? [])];
 	let orgAccess = start.orgAccess;
 	const sent: string[] = [];
-	const waiting: { answer: () => void; refuse: (error: Error) => void }[] = [];
+	const waiting: { answer: (answer?: WorkspaceDetail) => void; refuse: (error: Error) => void }[] = [];
+	const now = () => ({ ...start, ...detail(members, orgAccess), id: start.id });
 	const request = (line: string, change: () => void) =>
 		new Promise<WorkspaceDetail>((resolve, reject) => {
 			sent.push(line);
 			waiting.push({
-				answer: () => {
+				answer: (answer) => {
 					change();
-					resolve(detail(members, orgAccess));
+					resolve(answer ?? now());
 				},
 				refuse: reject,
 			});
 		});
 	const person = (id: string) => [bea, cal].find((each) => each.id === id)!;
-	const api: SharingApi = {
-		setMember: (userId: string, access: MemberAccess) =>
-			request(`PUT ${userId} ${access}`, () => {
-				members = [...members.filter((member) => member.id !== userId), { ...person(userId), access }];
-			}),
-		removeMember: (userId: string) => request(`DELETE ${userId}`, () => (members = members.filter((member) => member.id !== userId))),
-		setOrgAccess: (value: OrgAccess) => request(`ACCESS ${value}`, () => (orgAccess = value)),
+	const refresh = { answer: (): Promise<WorkspaceDetail> => Promise.resolve(now()) };
+	return {
+		sent,
+		refresh,
+		api: {
+			setMember: (userId: string, access: MemberAccess) =>
+				request(`PUT ${userId} ${access}`, () => {
+					members = [...members.filter((member) => member.id !== userId), { ...person(userId), access }];
+				}),
+			removeMember: (userId: string) => request(`DELETE ${userId}`, () => (members = members.filter((member) => member.id !== userId))),
+			setOrgAccess: (value: OrgAccess) => request(`ACCESS ${value}`, () => (orgAccess = value)),
+			refresh: () => refresh.answer(),
+		} satisfies SharingApi,
+		/** Settles the oldest request still waiting, then lets the next one go out. */
+		next: async (refusal?: Error) => {
+			const first = waiting.shift();
+			if (!first) throw new Error("No request is waiting.");
+			if (refusal) first.refuse(refusal);
+			else first.answer();
+			await settle();
+		},
+		/** Answers the oldest request with this workspace: what the server had once the change was in, and others' changes after it. */
+		answerWith: async (answer: WorkspaceDetail) => {
+			const first = waiting.shift();
+			if (!first) throw new Error("No request is waiting.");
+			first.answer({ ...answer, id: start.id });
+			await settle();
+		},
+		saved: () => members.map((member) => `${member.id}:${member.access}`),
 	};
-	/** Settles the oldest request still waiting, then lets the next one go out. */
-	const next = async (refusal?: Error) => {
-		const first = waiting.shift();
-		if (!first) throw new Error("No request is waiting.");
-		if (refusal) first.refuse(refusal);
-		else first.answer();
-		await new Promise((resolve) => setTimeout(resolve, 0));
-	};
-	return { api, sent, next, saved: () => members.map((member) => `${member.id}:${member.access}`) };
 }
 
-function setup(start = detail([])) {
-	const server = fakeServer(start);
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+/** A dialog on the workspace: its events, and what it shows. */
+function openShare(start: WorkspaceDetail, server: ReturnType<typeof fakeServer>, me = "ana") {
 	const said: string[] = [];
 	const answers: WorkspaceDetail[] = [];
 	const ended: string[] = [];
-	const sharing = useSharing(start, server.api, {
-		saved: (workspace) => answers.push(workspace),
-		lost: () => ended.push("lost"),
-		gone: () => ended.push("gone"),
-		failed: (message) => said.push(message),
-	});
+	const sharing = useSharing(
+		start,
+		server.api,
+		{
+			saved: (workspace) => answers.push(workspace),
+			lost: (_, why) => ended.push(`lost:${why}`),
+			gone: () => ended.push("gone"),
+			failed: (message) => said.push(message),
+		},
+		me,
+	);
 	const shown = () => sharing.members.value.map((member) => `${member.id}:${member.access}`);
-	return { sharing, server, said, answers, ended, shown };
+	return { sharing, said, answers, ended, shown };
+}
+
+/** A workspace of the test's own (the queues are kept by workspace), its server, and Share open on it. */
+function setup(start = detail([]), me = "ana") {
+	const workspace = { ...start, id: `w${++workspaces}` };
+	const server = fakeServer(workspace);
+	return { ...openShare(workspace, server, me), server, workspace };
 }
 
 describe("Share applies each change at once", () => {
@@ -118,9 +148,9 @@ describe("Share applies each change at once", () => {
 		const { sharing, server, said, shown } = setup(detail([{ ...bea, access: "ask" }]));
 		sharing.setRole("bea", "edit");
 		expect(shown()).toEqual(["bea:edit"]);
-		await server.next(new ApiError("Only the owner and people who can edit can share this workspace.", 403));
+		await server.next(new ApiError("The owner always has full access.", 403));
 		expect(shown()).toEqual(["bea:ask"]);
-		expect(said).toEqual(["Bea's role could not be changed. Only the owner and people who can edit can share this workspace."]);
+		expect(said).toEqual(["Bea's role could not be changed. The owner always has full access."]);
 		sharing.add(cal, "ask");
 		await server.next(new ApiError("Something went wrong (500).", 500));
 		expect(shown()).toEqual(["bea:ask"]);
@@ -151,15 +181,85 @@ describe("Share applies each change at once", () => {
 		expect(sharing.orgAccess.value).toBe("ask");
 	});
 
-	it("stops once the person can no longer share, or the workspace is gone for them", async () => {
-		const lost = setup(detail([{ ...bea, access: "ask" }]));
-		lost.server.api.removeMember = () => Promise.resolve(detail([], "none", { access: "none", canShare: false, members: null }));
+	it("shows the server's state once it answers a choice, even when someone changed it meanwhile", async () => {
+		const { sharing, server, shown } = setup(detail([{ ...bea, access: "ask" }]));
+		sharing.setRole("bea", "edit");
+		// Another editor set Bea back to Can ask before this answer was read.
+		await server.answerWith(detail([{ ...bea, access: "ask" }]));
+		expect(shown()).toEqual(["bea:ask"]);
+		expect(server.sent).toEqual(["PUT bea edit"]);
+
+		sharing.setGeneral("ask");
+		await server.answerWith(detail([{ ...bea, access: "ask" }], "none"));
+		expect(sharing.orgAccess.value).toBe("none");
+
+		// A choice made after the request went stays, and is sent next.
+		sharing.setRole("bea", "edit");
+		sharing.setRole("bea", "ask");
+		sharing.setRole("bea", "edit");
+		await server.answerWith(detail([{ ...bea, access: "ask" }]));
+		expect(shown()).toEqual(["bea:edit"]);
+		expect(server.sent.slice(-1)).toEqual(["PUT bea edit"]);
+	});
+
+	it("keeps one queue for the workspace when Share is opened again while a change is on its way, and the closed dialog hears nothing more", async () => {
+		const first = setup(detail([{ ...bea, access: "ask" }]));
+		first.sharing.setRole("bea", "edit");
+		expect(first.server.sent).toEqual(["PUT bea edit"]);
+		// Done, then Share again: Bea is removed while the grant is still on its way.
+		const again = openShare(first.workspace, first.server);
+		expect(again.shown()).toEqual(["bea:edit"]);
+		again.sharing.remove("bea");
+		expect(first.server.sent, "the removal waits for the grant").toEqual(["PUT bea edit"]);
+		await first.server.next();
+		expect(first.server.sent).toEqual(["PUT bea edit", "DELETE bea"]);
+		await first.server.next();
+		expect(first.server.saved()).toEqual([]);
+		expect(again.shown()).toEqual([]);
+		expect(first.answers).toEqual([]);
+		expect(again.answers).toHaveLength(2);
+	});
+
+	it("ends Share on a 404, even when a newer choice for the row waits", async () => {
+		const { sharing, server, said, ended } = setup(detail([{ ...bea, access: "ask" }]));
+		sharing.setRole("bea", "edit");
+		sharing.setRole("bea", "ask");
+		sharing.add(cal, "ask");
+		await server.next(new ApiError("Not found", 404));
+		expect(ended).toEqual(["gone"]);
+		expect(said).toEqual([]);
+		expect(server.sent).toEqual(["PUT bea edit"]);
+	});
+
+	it("asks again after a 403: a person who can no longer share sees Share end, and nothing more is sent", async () => {
+		const demoted = setup(detail([{ ...bea, access: "edit" }, { ...cal, access: "ask" }], "none", { access: "edit" }), "bea");
+		demoted.server.refresh.answer = () => Promise.resolve(detail([], "none", { id: demoted.workspace.id, access: "ask", canShare: false, members: null }));
+		demoted.sharing.setRole("cal", "edit");
+		demoted.sharing.add(cal, "edit");
+		await demoted.server.next(new ApiError("Only the owner and people who can edit can share this workspace.", 403));
+		await settle();
+		expect(demoted.ended).toEqual(["lost:changed"]);
+		expect(demoted.said).toEqual([]);
+		demoted.sharing.setRole("cal", "ask");
+		expect(demoted.server.sent).toEqual(["PUT cal edit"]);
+
+		// A 403 for something else is said in the dialog, and Share stays.
+		const refused = setup(detail([{ ...bea, access: "ask" }]));
+		refused.sharing.setGeneral("ask");
+		await refused.server.next(new ApiError("Only an admin can open a workspace to everyone, or close it.", 403));
+		await settle();
+		expect(refused.ended).toEqual([]);
+		expect(refused.said).toEqual(["General access could not be changed. Only an admin can open a workspace to everyone, or close it."]);
+	});
+
+	it("ends once the person removes themselves, or the workspace is gone for them", async () => {
+		const lost = setup(detail([{ ...bea, access: "edit" }], "none", { access: "edit" }), "bea");
+		lost.server.api.removeMember = () => Promise.resolve(detail([], "none", { id: lost.workspace.id, access: "none", canShare: false, members: null }));
 		// Bea, an editor, removes herself; Cal, added just after, is never sent.
 		lost.sharing.remove("bea");
 		lost.sharing.add(cal, "ask");
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		expect(lost.ended).toEqual(["lost"]);
-		// Nothing more is sent.
+		await settle();
+		expect(lost.ended).toEqual(["lost:self"]);
 		expect(lost.server.sent).toEqual([]);
 
 		const gone = setup();

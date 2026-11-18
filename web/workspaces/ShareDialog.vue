@@ -9,7 +9,7 @@ import { dialogTitle, GENERAL_ACCESS, generalAccessNote, ROLE_LABELS, useFrameFo
 import PeoplePicker from "./PeoplePicker.vue";
 import ShareRow from "./ShareRow.vue";
 import { useSharing } from "./sharing";
-import { isAdmin, removeMember, setMember, setOrgAccess, workspaceHref, type Member, type MemberAccess, type OrgAccess, type Person } from "./store";
+import { fetchWorkspace, isAdmin, removeMember, setMember, setOrgAccess, workspaceHref, type Member, type MemberAccess, type OrgAccess, type Person } from "./store";
 
 /**
  * Share, as Google Docs has it: the people with access, each with their own role, then General
@@ -26,23 +26,38 @@ const myId = computed(() => me.value?.user.id ?? "");
 const myName = computed(() => (me.value ? displayName(me.value.user.name, me.value.user.email) : "You"));
 
 const error = ref("");
+/**
+ * This dialog is open. A change still on its way when it closed answers to the page, and to a
+ * toast; it never closes or writes in a dialog opened after it.
+ */
+let shown = true;
+onBeforeUnmount(() => (shown = false));
+const showing = () => shown && open.value;
+function close() {
+	if (showing()) open.value = false;
+}
 const sharing = useSharing(
 	workspace,
 	{
 		setMember: (userId, access) => setMember(workspace.id, userId, access),
 		removeMember: (userId) => removeMember(workspace.id, userId),
 		setOrgAccess: (orgAccess) => setOrgAccess(workspace.id, orgAccess),
+		refresh: () => fetchWorkspace(workspace.id),
 	},
 	{
 		saved: (answer) => props.request.onSaved(answer),
-		lost: () => (open.value = false),
+		lost: (_, why) => {
+			close();
+			// Someone else changed your role: say why Share went.
+			if (why === "changed") toast.info(`You can no longer share “${workspace.name}”.`);
+		},
 		gone: () => {
-			open.value = false;
+			close();
 			props.request.onGone();
 		},
-		// Said in the dialog; once it is closed, in a toast.
-		failed: (message) => (open.value ? (error.value = message) : toast.error(message)),
+		failed: (message) => (showing() ? (error.value = message) : toast.error(message)),
 	},
+	me.value?.user.id ?? "",
 );
 useFrameFocus();
 
