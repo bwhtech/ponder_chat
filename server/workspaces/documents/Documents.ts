@@ -145,8 +145,18 @@ const make = Effect.gen(function* () {
 		return summaryOf(Option.getOrThrow(yield* store.find(workspaceId, id)));
 	});
 
+	/** With the workspace locked (Workspaces.admit), so a person removed meanwhile, or a delete, comes first. */
 	const remove = Effect.fn("Documents.remove")(function* (actor: Workspaces.Actor, workspaceId: string, documentId: string) {
-		yield* store.remove(yield* editable(actor, workspaceId, documentId));
+		const keys = yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* workspaces.admit(actor.id, workspaceId, "edit");
+				const found = yield* store.find(workspaceId, documentId);
+				if (Option.isNone(found)) return yield* new DocumentNotFound({ documentId });
+				return yield* store.removeRows(found.value);
+			}),
+		);
+		// The bytes only once the rows are gone for good.
+		yield* store.removeObjects(keys);
 	});
 
 	const readLog = Effect.fn("Documents.log")(function* (actor: Workspaces.Actor, workspaceId: string, documentId: string) {
@@ -171,11 +181,20 @@ const make = Effect.gen(function* () {
 	});
 
 	const retry = Effect.fn("Documents.retry")(function* (actor: Workspaces.Actor, workspaceId: string, documentId: string) {
-		const row = yield* editable(actor, workspaceId, documentId);
-		// A stalled one only from the generation read here: a run that took over meanwhile is left alone.
-		const generation = (yield* stalled(row)) ? yield* store.restart(row.id, ["reading"], row.generation) : yield* store.restart(row.id, ["failed"]);
-		if (Option.isNone(generation)) return yield* new DocumentNotFailed({ documentId });
-		yield* log.write({ documentId: row.id, workspaceId, generation: generation.value, step: "reindexed", detail: { reason: "asked", by: actor.id } });
+		// With the workspace locked, as an upload is: the run starts once the new generation is in.
+		const { row, generation } = yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* workspaces.admit(actor.id, workspaceId, "edit");
+				const found = yield* store.find(workspaceId, documentId);
+				if (Option.isNone(found)) return yield* new DocumentNotFound({ documentId });
+				const row = found.value;
+				// A stalled one only from the generation read here: a run that took over meanwhile is left alone.
+				const generation = (yield* stalled(row)) ? yield* store.restart(row.id, ["reading"], row.generation) : yield* store.restart(row.id, ["failed"]);
+				if (Option.isNone(generation)) return yield* new DocumentNotFailed({ documentId });
+				yield* log.write({ documentId: row.id, workspaceId, generation: generation.value, step: "reindexed", detail: { reason: "asked", by: actor.id } });
+				return { row, generation };
+			}),
+		);
 		yield* startIndexing(row, generation.value);
 		return summaryOf(Option.getOrThrow(yield* store.find(workspaceId, row.id)));
 	});

@@ -252,10 +252,8 @@ export function documentStore(sql: PgClient.PgClient, objects: ObjectStore.Objec
 			sql`update workspace_documents set status = ${status}, error = ${error} where id = ${documentId} and generation = ${generation}`.pipe(Effect.asVoid),
 
 		/** The row, then its object once the delete committed. Not inside another transaction. */
-		remove: Effect.fnUntraced(function* (row: DocumentRow) {
-			const keys = yield* deleteWhere(sql`id = ${row.id}`);
-			yield* removeObjects(keys.map((key) => key.object_key));
-		}),
+		/** The document's rows, inside the caller's transaction. Gives the keys of its objects, for removeObjects after it commits. */
+		removeRows: (row: DocumentRow) => Effect.map(deleteWhere(sql`id = ${row.id}`), (keys) => keys.map((key) => key.object_key)),
 
 		/**
 		 * All of a workspace's documents, with their passages and logs, inside the caller's
@@ -293,7 +291,7 @@ export type DocumentStore = {
 	readonly setRun: (documentId: string, generation: number, runId: string) => Effect.Effect<void, SqlError>;
 	readonly readingFor: (seconds: number) => Effect.Effect<ReadonlyArray<DocumentRow>, SqlError>;
 	readonly settle: (documentId: string, generation: number, status: Exclude<DocumentStatus, "reading">, error: string | null) => Effect.Effect<void, SqlError>;
-	readonly remove: (row: DocumentRow) => Effect.Effect<void, SqlError>;
+	readonly removeRows: (row: DocumentRow) => Effect.Effect<ReadonlyArray<string>, SqlError>;
 	readonly removeAll: (workspaceId: string) => Effect.Effect<ReadonlyArray<string>, SqlError>;
 	readonly removeObjects: (keys: ReadonlyArray<string>) => Effect.Effect<void>;
 	readonly removeLeftObjects: (seconds: number) => Effect.Effect<number, SqlError>;

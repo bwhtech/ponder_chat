@@ -224,18 +224,23 @@ const make = Effect.gen(function* () {
 	/**
 	 * Workspaces made before General access had a `kind`: an organisation workspace ('org',
 	 * which kept no members) is open to everyone; a private one keeps its people. Once
-	 * `kind` is gone, this changes nothing.
+	 * `kind` is gone, this changes nothing. Two servers that start at once take turns: the
+	 * advisory lock is held until the transaction ends, and is taken before `kind` is looked
+	 * for, so the second one finds it gone.
 	 */
-	const migrateOrgAccess = Effect.gen(function* () {
-		yield* sql`alter table workspaces add column if not exists org_access text not null default 'none' check (org_access in ('none', 'ask'))`;
-		yield* sql.unsafe(`
-			do $$ begin
-				if exists (select 1 from information_schema.columns where table_schema = current_schema() and table_name = 'workspaces' and column_name = 'kind') then
-					update workspaces set org_access = 'ask' where kind = 'org';
-					alter table workspaces drop column kind;
-				end if;
-			end $$`);
-	});
+	const migrateOrgAccess = sql.withTransaction(
+		Effect.gen(function* () {
+			yield* sql`select pg_advisory_xact_lock(hashtext('ponder.workspaces.org_access'))`;
+			yield* sql`alter table workspaces add column if not exists org_access text not null default 'none' check (org_access in ('none', 'ask'))`;
+			yield* sql.unsafe(`
+				do $$ begin
+					if exists (select 1 from information_schema.columns where table_schema = current_schema() and table_name = 'workspaces' and column_name = 'kind') then
+						update workspaces set org_access = 'ask' where kind = 'org';
+						alter table workspaces drop column kind;
+					end if;
+				end $$`);
+		}),
+	);
 
 	/** The person's access, and whether they are an admin; none for a deleted or unknown workspace. */
 	const resolve = Effect.fnUntraced(function* (userId: string, workspaceId: string) {
@@ -283,15 +288,27 @@ const make = Effect.gen(function* () {
 		yield* withAccess(userId, workspaceId, needed);
 	});
 
-	// FOR KEY SHARE: admissions do not wait for each other or for a rename, only for a delete's FOR UPDATE.
-	// Read committed: after a delete commits, the row is read again and no longer matches.
-	const lockLive = Effect.fnUntraced(function* (workspaceId: string) {
-		const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null for key share`;
+	/**
+	 * Every change to a workspace locks its row first, inside the caller's transaction, and only
+	 * then reads the person's access: a change made meanwhile (a person removed, General access
+	 * closed, the workspace deleted) is in before the check, never after it.
+	 *
+	 * - `add`, FOR SHARE: what is added to the workspace, or the person's own state in it (a
+	 *   chat, a document, a pin). These do not wait for each other.
+	 * - `change`, FOR NO KEY UPDATE: the workspace itself (its fields, its people, General
+	 *   access). These take turns, and wait for the adds in progress, which wait for them.
+	 * - `delete`, FOR UPDATE: waits for all of these, and they then find it deleted.
+	 *
+	 * Read committed: a statement that waited reads the row again, as the other left it.
+	 */
+	const LOCKS = { add: "for share", change: "for no key update", delete: "for update" } as const;
+	const lockLive = Effect.fnUntraced(function* (workspaceId: string, lock: keyof typeof LOCKS) {
+		const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null ${sql.literal(LOCKS[lock])}`;
 		if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
 	});
 
 	const admit = Effect.fn("Workspaces.admit")(function* (userId: string, workspaceId: string, needed: "ask" | "edit") {
-		yield* lockLive(workspaceId);
+		yield* lockLive(workspaceId, "add");
 		yield* withAccess(userId, workspaceId, needed);
 	});
 
@@ -307,7 +324,7 @@ const make = Effect.gen(function* () {
 	const pin = Effect.fn("Workspaces.pin")(function* (userId: string, workspaceId: string, pinned: boolean) {
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
-				yield* lockLive(workspaceId);
+				yield* lockLive(workspaceId, "add");
 				if ((yield* resolve(userId, workspaceId)).access === "none") return yield* new WorkspaceNotFound({ workspaceId });
 				if (pinned) yield* sql`insert into workspace_pins (user_id, workspace_id) values (${userId}, ${workspaceId}) on conflict (user_id, workspace_id) do nothing`;
 				else yield* sql`delete from workspace_pins where user_id = ${userId} and workspace_id = ${workspaceId}`;
@@ -338,26 +355,28 @@ const make = Effect.gen(function* () {
 	});
 
 	const update = Effect.fn("Workspaces.update")(function* (actor: Actor, workspaceId: string, changes: WorkspaceChanges) {
-		const found = yield* withAccess(actor.id, workspaceId, "edit");
-		const changed = yield* setFields(workspaceId, changes);
-		// Deleted since the access check.
-		if (Option.isNone(changed)) return yield* new WorkspaceNotFound({ workspaceId });
-		const { before, after } = changed.value;
-		yield* audit(actor, "update-workspace", before.orgAccess !== "none" || after.orgAccess !== "none", before, after);
+		const found = yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* lockLive(workspaceId, "change");
+				const found = yield* withAccess(actor.id, workspaceId, "edit");
+				const { before, after } = Option.getOrThrow(yield* setFields(workspaceId, changes));
+				yield* audit(actor, "update-workspace", before.orgAccess !== "none" || after.orgAccess !== "none", before, after);
+				return found;
+			}),
+		);
 		return yield* detail(workspaceId, found.access, found.admin);
 	});
 
 	/**
 	 * Sets only the fields given, in one statement, so that a change to another field made
-	 * at the same time stays. The row as this statement found and left it, for the log:
-	 * the subquery locks the row and reads its latest version.
+	 * at the same time stays. The row as this statement found and left it, for the log.
 	 */
 	const setFields = Effect.fnUntraced(function* (workspaceId: string, changes: WorkspaceChanges) {
 		const fields = Object.fromEntries(Object.entries(changes).filter(([, value]) => value !== undefined));
 		const assignments = Object.keys(fields).length > 0 ? sql`${sql.update(fields)}, updated_at = now()` : sql`updated_at = now()`;
 		const found = yield* sql<{ before: AuditView; after: AuditView }>`
 			update workspaces w set ${assignments}
-			from (select * from workspaces where id = ${workspaceId} and deleted_at is null for update) old
+			from (select * from workspaces where id = ${workspaceId} and deleted_at is null for no key update) old
 			where w.id = old.id
 			returning ${auditJson("old")} as before, ${auditJson("w")} as after`;
 		return Arr.head(found);
@@ -379,16 +398,15 @@ const make = Effect.gen(function* () {
 	 * One change to who can use the workspace, by a person who can share it, in a transaction
 	 * of its own. The workspace's row is locked FOR NO KEY UPDATE: sharing changes to it take
 	 * turns, so each one reads the people as the one before left them, and each is logged
-	 * with exactly what it changed. A delete waits for it, or it finds the workspace gone.
-	 * Chats and pins are not held up (they lock FOR KEY SHARE). Answers the workspace as the
-	 * person sees it after the change: they may have removed themselves.
+	 * with exactly what it changed. A delete waits for it, or it finds the workspace gone
+	 * (lockLive). Answers the workspace as the person sees it after the change: they may have
+	 * removed themselves.
 	 */
 	const changeSharing = <E>(actor: Actor, workspaceId: string, change: (found: Resolved) => Effect.Effect<void, E | SqlError>) =>
 		Effect.gen(function* () {
 			yield* sql.withTransaction(
 				Effect.gen(function* () {
-					const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null for no key update`;
-					if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
+					yield* lockLive(workspaceId, "change");
 					const found = yield* withAccess(actor.id, workspaceId, "share");
 					const before = yield* sharingView(workspaceId);
 					yield* change(found);
@@ -436,20 +454,19 @@ const make = Effect.gen(function* () {
 	});
 
 	const remove = Effect.fn("Workspaces.remove")(function* (actor: Actor, workspaceId: string) {
-		const found = yield* withAccess(actor.id, workspaceId, "delete");
-		const before = yield* detail(workspaceId, found.access, found.admin);
-		const keys = yield* sql.withTransaction(
+		const { keys, before } = yield* sql.withTransaction(
 			Effect.gen(function* () {
 				// Waits for the chats and documents being added now (admit), and they wait for this.
-				const live = yield* sql`select id from workspaces where id = ${workspaceId} and deleted_at is null for update`;
-				if (live.length === 0) return yield* new WorkspaceNotFound({ workspaceId });
+				yield* lockLive(workspaceId, "delete");
+				const found = yield* withAccess(actor.id, workspaceId, "delete");
+				const before = yield* detail(workspaceId, found.access, found.admin);
 				yield* sql`update workspaces set deleted_at = now(), updated_at = now() where id = ${workspaceId}`;
 				yield* sql`delete from workspace_members where workspace_id = ${workspaceId}`;
 				yield* sql`delete from workspace_pins where workspace_id = ${workspaceId}`;
 				// The chats stay their writers', in no workspace.
 				yield* sql`update threads set workspace_id = null where workspace_id = ${workspaceId}`;
 				// With their passages and logs.
-				return yield* documents.removeAll(workspaceId);
+				return { keys: yield* documents.removeAll(workspaceId), before };
 			}),
 		);
 		// The bytes in the bucket only once the rows are gone for good: no bucket call holds the transaction open.

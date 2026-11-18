@@ -9,6 +9,8 @@ import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Result from "effect/Result";
+import * as Schedule from "effect/Schedule";
+import type * as Statement from "effect/sql/Statement";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../auth.ts";
 import { jsonBody } from "../test-json.ts";
@@ -346,6 +348,54 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.lengthOf(pins, 0, "no pin on the deleted workspace");
 	});
 
+	it("checks who may change or delete a workspace only once it holds its row: a change that was on its way comes first", async () => {
+		// Held in a transaction of the test's own, as a change half-way: it has the row, and has not committed.
+		const whileHeld = <A, E>(change: (sql: PgClient.PgClient) => Statement.Statement<unknown>, attempt: (service: (typeof Workspaces.Workspaces)["Service"]) => Effect.Effect<A, E>) =>
+			runPromise(
+				Effect.gen(function* () {
+					const sql = yield* PgClient.PgClient;
+					const hold = yield* holdRows(sql, change(sql));
+					const trying = yield* Effect.forkChild(Effect.result(Workspaces.Workspaces.use(attempt)));
+					// The attempt waits for the held change; one that does not wait is done at once.
+					yield* Effect.raceFirst(Effect.asVoid(Fiber.await(trying)), Effect.asVoid(blockedBy(sql, hold.pid)));
+					yield* hold.release;
+					return yield* Fiber.join(trying);
+				}),
+			);
+		const tagOf = <A, E extends { _tag: string }>(result: Result.Result<A, E>) => (Result.isFailure(result) ? result.failure._tag : "Success");
+
+		// An admin closes General access while another admin, who was never added, deletes it.
+		const closing = await create("admin", "Closing");
+		await setOrgAccess("admin", closing, "ask");
+		const deleted = await whileHeld(
+			(sql) => sql`with held as (select id from workspaces where id = ${closing} for no key update) update workspaces set org_access = 'none' where id in (select id from held)`,
+			(workspaces) => workspaces.remove({ id: who.admin2, email: "admin2@example.invalid" }, closing),
+		);
+		assert.strictEqual(tagOf(deleted), "WorkspaceNotFound", "it was no longer open, so the other admin can't use it");
+		assert.strictEqual(await access("admin", closing), "owner", "the workspace is still there");
+
+		// An editor's change waits behind their removal, and is not made.
+		const notes = await create("ana", "Removing");
+		await setMember("ana", notes, "cy", "edit");
+		const edited = await whileHeld(
+			(sql) => sql`with held as (select id from workspaces where id = ${notes} for no key update) delete from workspace_members where workspace_id in (select id from held) and user_id = ${who.cy}`,
+			(workspaces) => workspaces.update({ id: who.cy, email: "cy@example.invalid" }, notes, { instructions: "Cy was here." }),
+		);
+		assert.strictEqual(tagOf(edited), "WorkspaceNotFound");
+		assert.strictEqual((await call<One>("ana", "GET", `/api/workspaces/${notes}`)).body.workspace.instructions, "Answer as Removing.");
+
+		// An editor demoted to Can ask meanwhile can't share any more.
+		await setMember("ana", notes, "cy", "edit");
+		const shared = await whileHeld(
+			(sql) => sql`with held as (select id from workspaces where id = ${notes} for no key update) update workspace_members set access = 'ask' where workspace_id in (select id from held) and user_id = ${who.cy}`,
+			(workspaces) => workspaces.setMember({ id: who.cy, email: "cy@example.invalid" }, notes, who.dan, "edit"),
+		);
+		assert.strictEqual(tagOf(shared), "WorkspaceRefused");
+		assert.strictEqual(await access("dan", notes), "none");
+		await call("ana", "DELETE", `/api/workspaces/${notes}`);
+		await call("admin", "DELETE", `/api/workspaces/${closing}`);
+	});
+
 	it("shows members only to a person who can change them: the owner, editors, and admins while it is open", async () => {
 		const owner = (await call<One>("ana", "GET", `/api/workspaces/${priv}`)).body.workspace;
 		assert.isTrue(owner.canShare);
@@ -590,6 +640,50 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.deepStrictEqual(await state(), expected, "the second time changes nothing");
 		assert.strictEqual(await access("dan", opened), "ask");
 		assert.strictEqual(await access("bob", closed), "edit");
+	});
+
+	it("moves workspaces made with a kind once, when two servers migrate at the same time", async () => {
+		const opened = await create("admin", "Racing handbook");
+		const closed = await create("ana", "Racing notes");
+		await setMember("ana", closed, "bob", "ask");
+		await database((sql) =>
+			Effect.gen(function* () {
+				yield* sql`alter table workspaces add column kind text`;
+				yield* sql`update workspaces set kind = case when org_access = 'ask' or id = ${opened} then 'org' else 'private' end`;
+				yield* sql`alter table workspaces drop column org_access`;
+			}),
+		);
+		// Both migrations start while the table is held, so they reach the old table together.
+		const migrated = await runPromise(
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const hold = yield* holdRows(sql, sql`lock table workspaces in access exclusive mode`);
+				const migrations = yield* Effect.forkChild(Effect.all([1, 2, 3, 4].map(() => Effect.result(Workspaces.Workspaces.use((workspaces) => workspaces.migrate))), { concurrency: "unbounded" }));
+				yield* sql<{ waiting: number }>`
+					select count(*)::int as waiting from pg_stat_activity
+					where wait_event_type = 'Lock' and (query ilike '%workspaces%' or query ilike '%advisory%')`.pipe(
+					Effect.map((rows) => rows[0]?.waiting ?? 0),
+					Effect.repeat({ until: (waiting) => waiting >= 4, schedule: Schedule.spaced("10 millis") }),
+					Effect.timeout("10 seconds"),
+					Effect.orDie,
+				);
+				yield* hold.release;
+				return yield* Fiber.join(migrations);
+			}),
+		);
+		assert.deepStrictEqual(
+			migrated.map((result) => (Result.isFailure(result) ? String(result.failure) : "ok")),
+			["ok", "ok", "ok", "ok"],
+		);
+		const rows = await database((sql) => sql<{ id: string; org_access: string }>`select id, org_access from workspaces where id in (${opened}, ${closed}) order by name`);
+		assert.deepStrictEqual(
+			rows.map((row) => [row.id, row.org_access]),
+			[
+				[opened, "ask"],
+				[closed, "none"],
+			],
+		);
+		assert.strictEqual(await access("bob", closed), "ask");
 	});
 
 	it("finds people by name or email, without case, at most 20", async () => {
