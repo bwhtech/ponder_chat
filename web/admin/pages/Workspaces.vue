@@ -11,7 +11,7 @@ import ListSkeleton from "../components/ListSkeleton.vue";
 import PrivacyNote from "../components/PrivacyNote.vue";
 import EmptyState from "../../EmptyState.vue";
 import { count } from "../../numbers";
-import { fileSize, STATUS_LABELS } from "../../workspaces/documents";
+import { fileSize, progressText, STATUS_LABELS, statusLabel } from "../../workspaces/documents";
 import { Poller } from "../../workspaces/poller";
 import { money } from "../lib/format";
 import { isMobile } from "../lib/viewport";
@@ -39,7 +39,7 @@ void load();
 
 /**
  * While an organisation document is Indexing, the report is read again every few seconds, so
- * its status and cost, and the log open on it, follow the indexing. A failed read changes
+ * its status, progress and cost, and the log open on it, follow the indexing. A failed read changes
  * nothing; the next one tries again. None runs once the page is left (poller.ts).
  */
 const POLL_MS = 4000;
@@ -119,7 +119,7 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 									<ListCell class="flex-col items-stretch gap-0.5">
 										<span class="truncate text-base text-ink-gray-8">{{ item.name }}</span>
 										<span class="truncate text-sm text-ink-gray-6">
-											<span :class="statusTone(item)">{{ STATUS_LABELS[item.status] }}</span> · {{ fileSize(item.size) }} · {{ cost(item.costUsd) }}
+											<span :class="statusTone(item)" data-slot="document-status">{{ statusLabel(item) }}</span> · {{ fileSize(item.size) }} · {{ cost(item.costUsd) }}
 										</span>
 										<span v-if="item.error" class="line-clamp-2 text-sm text-ink-red-6">{{ item.error }}</span>
 									</ListCell>
@@ -144,7 +144,13 @@ const statusTone = (document: OrgDocument) => (document.status === "failed" ? "t
 												<div v-if="item.error" class="truncate text-sm text-ink-red-6" :title="item.error">{{ item.error }}</div>
 											</div>
 										</ListCell>
-										<ListCell class="text-sm" :class="statusTone(item)">{{ STATUS_LABELS[item.status] }}</ListCell>
+										<ListCell class="text-sm" :class="statusTone(item)">
+											<!-- An Indexing document's progress goes under its status: the column is narrow. -->
+											<div class="min-w-0" data-slot="document-status">
+												<div>{{ STATUS_LABELS[item.status] }}</div>
+												<div v-if="item.status === 'reading' && progressText(item.progress)" class="truncate tabular-nums">{{ progressText(item.progress) }}</div>
+											</div>
+										</ListCell>
 										<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">{{ fileSize(item.size) }}</ListCell>
 										<ListCell class="justify-end text-sm tabular-nums text-ink-gray-7">{{ cost(item.costUsd) }}</ListCell>
 										<ListCell class="justify-end"><span class="lucide-chevron-right size-4 text-ink-gray-4" aria-hidden="true" /></ListCell>

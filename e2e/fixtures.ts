@@ -39,6 +39,11 @@ export class Fake {
 		await this.post("/__fake/page", script);
 	}
 
+	/** Lets `count` page reads of a script with `hold` go, in the order they came. */
+	async releasePage(match: string, count = 1) {
+		await this.post("/__fake/page/release", { match, count });
+	}
+
 	/** The summary of long chats whose transcript contains `match`. */
 	async summary(script: SummaryScript) {
 		await this.post("/__fake/summary", script);

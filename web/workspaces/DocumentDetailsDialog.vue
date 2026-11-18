@@ -6,7 +6,7 @@ import EmptyState from "../EmptyState.vue";
 import { toast } from "../toasts";
 import { dialogTitle, useFrameFocus, workspaceDialog, type WorkspaceDialogRequest } from "./dialogs";
 import { plainSteps } from "./document-log";
-import { fetchDocumentLog, retryDocument, type LogEntry, type WorkspaceDocument } from "./documents";
+import { fetchDocumentLog, retryDocument, statusLabel, type LogEntry, type WorkspaceDocument } from "./documents";
 import { Poller } from "./poller";
 
 /**
@@ -14,7 +14,8 @@ import { Poller } from "./poller";
  * steps (document-log.ts, plainSteps), such as the pages read from a picture, and what went
  * wrong. Models, times and costs are the admin's (/admin/workspaces). A failed document
  * offers "Try again". While it is Indexing and the dialog is open, the log is read again
- * every few seconds, and the side panel hears of each change. Closing the dialog keeps it
+ * every few seconds: each page shows once a model read it, and the last line says how far
+ * the run is ("Indexing… page 12 of 40"). The side panel hears of each change of status. Closing the dialog keeps it
  * mounted for its transition, so the polls stop on close, not on unmount.
  */
 const props = defineProps<{ request: Extract<WorkspaceDialogRequest, { kind: "document" }> }>();
@@ -92,6 +93,10 @@ function retryFirstLoad() {
 						{{ step.title }}<span v-if="step.facts" class="text-ink-gray-6">{{ ` · ${step.facts}` }}</span>
 					</p>
 					<p v-if="step.error" class="mt-0.5 break-words text-p-sm text-ink-gray-6" data-slot="document-step-error">{{ step.error }}</p>
+				</li>
+				<!-- Where the run is now, as the document's row says it: it moves with each read of the log. -->
+				<li v-if="doc.status === 'reading'" data-slot="document-progress">
+					<p class="text-sm tabular-nums text-ink-gray-6">{{ statusLabel(doc) }}</p>
 				</li>
 			</ol>
 

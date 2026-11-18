@@ -97,24 +97,29 @@ test("the page follows a document while it is being read, and so does its open l
 	const orgId = await createWorkspace(page.request, "org", orgName);
 	await addDocument(page.request, orgId, orgDocument);
 
-	// The first answers say the document is still Indexing; the later ones say what the server says (Ready).
+	// The first answers say the document is still Indexing, with a model on its second page of five; the later ones
+	// say what the server says (Ready).
 	let held = 2;
 	await page.route("**/api/admin/workspaces", async (route) => {
 		const response = await route.fetch();
-		const body = await jsonOf<{ org: { id: string; documents: { status: string }[] }[] }>(response);
+		const body = await jsonOf<{ org: { id: string; documents: { status: string; progress: unknown }[] }[] }>(response);
 		if (held > 0) {
 			held--;
-			for (const document of body.org.find((workspace) => workspace.id === orgId)?.documents ?? []) document.status = "reading";
+			for (const document of body.org.find((workspace) => workspace.id === orgId)?.documents ?? []) {
+				document.status = "reading";
+				document.progress = { phase: "pages", done: 2, total: 5 };
+			}
 		}
 		await route.fulfill({ response, json: body });
 	});
 
 	await page.goto("/admin/workspaces");
 	const row = page.getByRole("article", { name: orgName }).locator(`[data-document="${orgDocument}"]`);
-	await expect(row).toContainText("Indexing");
+	// On a wide screen the progress is a line of its own under the status.
+	await expect(row.locator('[data-slot="document-status"]')).toHaveText(/^Indexing…\s*page 2 of 5$/);
 	await row.click();
 	const log = page.getByRole("dialog");
-	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Indexing");
+	await expect(log.locator('[data-slot="document-progress"]')).toHaveText("Indexing… page 2 of 5");
 	// No reload: the page reads the report again, and the row and the open log say Ready.
 	await expect(log.locator('[data-slot="document-log"] > p').first()).toContainText("Ready", { timeout: 15_000 });
 	await page.keyboard.press("Escape");

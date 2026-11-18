@@ -7,8 +7,9 @@ import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady, t
 /**
  * Workspace documents (docs/workspaces-plan.md, "Tests", 7 to 9): an editor uploads a document,
  * it goes from Indexing to Ready, and answers use it, whole when it fits the model's window and
- * as searched passages when it does not; the indexing log in Details, for editors only; and a
- * document that fails, then reads on "Try again"; and a document opened in the side viewer.
+ * as searched passages when it does not; the indexing log in Details, for editors only; a
+ * document that fails, then reads on "Try again"; a PDF whose pages are counted on its row and
+ * in Details while the model reads them; and a document opened in the side viewer.
  *
  * The fake model quotes the line of the workspace's text that best matches the question, and
  * says whether it came from a whole document or an excerpt (fake/server.ts). Its embeddings
@@ -187,6 +188,50 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 		await page.getByRole("dialog", { name: "Delete this document?" }).getByRole("button", { name: "Delete" }).click();
 		await expect(rows(page)).toHaveCount(0);
 		expect(await documentOf(page, id, "scan.pdf")).toBeUndefined();
+	});
+});
+
+test("9b. while a model reads a PDF's pages, its row and its Details count them, then it is Ready", async ({ page, person, fake }) => {
+	test.setTimeout(90_000);
+	const tag = person.id.slice(0, 6);
+	const key = `PAGEKEY-held-${tag}`;
+	// A line of text, then three scans. Each read waits until the test lets it go.
+	await fake.page({ match: key, text: "Exit site care: clean the exit site every second day.", hold: true });
+	const { slug } = await createWorkspace(page, `Scanned forms ${tag}`);
+	await page.goto(`/?w=${slug}`);
+	await picker(page).setInputFiles({ name: "forms.pdf", mimeType: "application/pdf", buffer: scanPdf("Ward forms", key, 3) });
+	const forms = row(page, "forms.pdf");
+	const status = forms.locator('[data-slot="document-status"]');
+
+	await test.step("once the PDF is parsed, the row counts its text page as read", async () => {
+		await expect(status).toContainText("Indexing… page 1 of 4", { timeout: 30_000 });
+		await expect(forms).toHaveAttribute("data-status", "reading");
+	});
+
+	await test.step("Details show the pages, each page once it is read, and the same count", async () => {
+		await forms.getByRole("button", { name: "Actions for “forms.pdf”" }).click();
+		await page.getByRole("menuitem", { name: "Details" }).click();
+		const details = page.getByRole("dialog", { name: "forms.pdf" });
+		const steps = details.locator('[data-slot="document-step"]');
+		const progress = details.locator('[data-slot="document-progress"]');
+		await expect(steps).toHaveText(["Uploaded · PDF, 4 pages"]);
+		await expect(progress).toHaveText("Indexing… page 1 of 4");
+
+		await fake.releasePage(key);
+		await expect(progress).toHaveText("Indexing… page 2 of 4", { timeout: 15_000 });
+		await expect(steps).toHaveCount(2);
+		await expect(steps.nth(1)).toHaveText(/^Read page [234] from a picture$/);
+		await details.getByRole("button", { name: "Close" }).first().click();
+		await expect(details).toHaveCount(0);
+	});
+
+	await test.step("the row follows each page, then says Ready", async () => {
+		await expect(status).toContainText("Indexing… page 2 of 4", { timeout: 15_000 });
+		await fake.releasePage(key);
+		await expect(status).toContainText("Indexing… page 3 of 4", { timeout: 15_000 });
+		await fake.releasePage(key);
+		await expect(forms).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
+		await expect(status).not.toContainText("Indexing");
 	});
 });
 

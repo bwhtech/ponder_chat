@@ -41,6 +41,18 @@ export function fakeApp() {
 	const summaryScripts: SummaryScript[] = [];
 	const summaries: ReceivedSummary[] = [];
 	const pageScripts: PageScript[] = [];
+	/** The page reads held for each script with `hold`, by its match, and the releases that came before their reads. */
+	const pageHolds = new Map<string, { free: number; waiting: (() => void)[] }>();
+	const holdOf = (match: string) => {
+		const hold = pageHolds.get(match) ?? { free: 0, waiting: [] };
+		pageHolds.set(match, hold);
+		return hold;
+	};
+	const released = (match: string) => {
+		const hold = holdOf(match);
+		if (hold.free > 0) return void hold.free--;
+		return new Promise<void>((resolve) => hold.waiting.push(resolve));
+	};
 	/** How many calls each step of a script has had, for `failFirst`. */
 	const attempts = new Map<string, number>();
 	const app = new Hono();
@@ -52,6 +64,17 @@ export function fakeApp() {
 	app.post("/__fake/memory", async (c) => (memories.unshift(await jsonBody<MemoryScript>(c.req)), c.json({ ok: true })));
 	app.post("/__fake/summary", async (c) => (summaryScripts.unshift(await jsonBody<SummaryScript>(c.req)), c.json({ ok: true })));
 	app.post("/__fake/page", async (c) => (pageScripts.unshift(await jsonBody<PageScript>(c.req)), c.json({ ok: true })));
+	// Lets `count` page reads of a script with `hold` go. A release that comes before its read is kept for it.
+	app.post("/__fake/page/release", async (c) => {
+		const { match, count = 1 } = await jsonBody<{ match: string; count?: number }>(c.req);
+		const hold = holdOf(match);
+		for (let index = 0; index < count; index++) {
+			const next = hold.waiting.shift();
+			if (next) next();
+			else hold.free++;
+		}
+		return c.json({ ok: true });
+	});
 	const since = (query: string | undefined) => Number(query ?? 0);
 	app.get("/__fake/emails", (c) => c.json(emails.filter((email) => email.to === c.req.query("to") && email.at >= since(c.req.query("since")))));
 	app.get("/__fake/spans", (c) => c.json({ spans, exports }));
@@ -78,6 +101,8 @@ export function fakeApp() {
 		const messages = body.messages ?? [];
 		const pdf = pagePdf(messages);
 		if (pdf) {
+			const held = pageScripts.find((candidate) => candidate.hold && pdf.text.includes(candidate.match));
+			if (held) await released(held.match);
 			const { status, answer } = pageReply(body.model, pdf, pageScripts, attempts);
 			return c.json(answer, status as 200);
 		}

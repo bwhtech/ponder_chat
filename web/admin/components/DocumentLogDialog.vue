@@ -4,7 +4,7 @@ import { computed, ref, shallowRef, watch } from "vue";
 import { when } from "../../dates";
 import EmptyState from "../../EmptyState.vue";
 import { stepView } from "../../workspaces/document-log";
-import { fileSize, STATUS_LABELS, type LogEntry } from "../../workspaces/documents";
+import { fileSize, statusLabel, type LogEntry } from "../../workspaces/documents";
 import { admin, unwrap, type OrgDocument } from "../api";
 import { money } from "../lib/format";
 
@@ -29,9 +29,10 @@ watch(
 	{ immediate: true },
 );
 // The page reads the report again while a document is Indexing (Workspaces.vue): when this
-// one's status or cost changes, its steps are read again, in place.
+// one's status, cost or progress changes, its steps are read again, in place. The line at
+// the top says how far it is ("Indexing… page 12 of 40").
 watch(
-	() => [props.document?.status, props.document?.costUsd],
+	() => [props.document?.status, props.document?.costUsd, props.document?.progress?.done],
 	() => open.value && props.document && void load({ quiet: true }),
 );
 
@@ -53,7 +54,7 @@ async function load({ quiet = false } = {}) {
 	<Dialog v-model:open="open" :title="document?.name ?? 'Document'" size="lg">
 		<div v-if="document" class="space-y-4" data-slot="document-log">
 			<p class="text-p-sm text-ink-gray-6">
-				<span :class="{ 'text-ink-red-6': document.status === 'failed' }">{{ STATUS_LABELS[document.status] }}</span>
+				<span class="tabular-nums" :class="{ 'text-ink-red-6': document.status === 'failed' }" data-slot="document-progress">{{ statusLabel(document) }}</span>
 				<span> · {{ fileSize(document.size) }} · Uploaded {{ when(document.createdAt) }}</span>
 				<span v-if="document.costUsd !== null"> · {{ money(document.costUsd) }} to index</span>
 			</p>

@@ -80,6 +80,19 @@ export function fileSize(bytes: number) {
 
 export const STATUS_LABELS: Record<DocumentStatus, string> = { reading: "Indexing…", ready: "Ready", failed: "Failed" };
 
+/** How far an Indexing document is, in a few words: "page 12 of 40", or "45%" of its passages embedded. None when there is nothing to count. */
+export function progressText(progress: DocumentProgress | null) {
+	if (!progress || progress.total <= 0) return null;
+	if (progress.phase === "pages") return `page ${count(progress.done)} of ${count(progress.total)}`;
+	return `${count(Math.floor((progress.done / progress.total) * 100))}%`;
+}
+
+/** A status in words, with an Indexing document's progress: "Indexing… page 12 of 40", "Indexing… 45%", "Indexing…", "Ready". */
+export function statusLabel(document: Pick<WorkspaceDocument, "status" | "progress">) {
+	const progress = document.status === "reading" ? progressText(document.progress) : null;
+	return progress ? `${STATUS_LABELS.reading} ${progress}` : STATUS_LABELS[document.status];
+}
+
 /**
  * Why a document failed, in a few words: the row's status ("2.3 MB · Could not read page 3")
  * and the title of the step that failed in Details say the same. A page the model could not

@@ -65,17 +65,21 @@ async function load() {
 
 /**
  * While a document is Indexing, the workspace is read again, a little less often each time
- * (2 s up to 10 s), until none is. A failed poll changes nothing on the page; the next one
- * tries again, unless the workspace is gone. An answer asked for before a change in the
- * side panel is dropped: it may not have the new document yet. One chain of polls runs at a
- * time, and none once the page is left (poller.ts).
+ * (2 s up to 10 s), until none is. While one shows its progress (a model reads its pages, or
+ * its passages are embedded), the wait stays at 3 s at most, so the numbers move on the
+ * row. A failed poll changes nothing on the page; the next one tries again, unless the
+ * workspace is gone. An answer asked for before a change in the side panel is dropped: it
+ * may not have the new document yet. One chain of polls runs at a time, and none once the
+ * page is left (poller.ts).
  */
 const POLL_FIRST_MS = 2000;
 const POLL_MAX_MS = 10_000;
+const POLL_PROGRESS_MAX_MS = 3000;
 const poller = new Poller(poll);
 let pollDelay = POLL_FIRST_MS;
 let changes = 0;
 const reading = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading")));
+const counting = computed(() => Boolean(detail.value?.documents.some((document: WorkspaceDocument) => document.status === "reading" && document.progress)));
 watch(reading, (now) => (now ? startPolling() : poller.stop()));
 onBeforeUnmount(() => poller.stop());
 
@@ -96,7 +100,7 @@ async function poll(current: () => boolean) {
 		if (error instanceof ApiError && (error.status === 404 || error.status === 403)) return null;
 	}
 	if (!current() || mine !== asked || !reading.value) return null;
-	pollDelay = Math.min(POLL_MAX_MS, pollDelay * 1.5);
+	pollDelay = Math.min(counting.value ? POLL_PROGRESS_MAX_MS : POLL_MAX_MS, pollDelay * 1.5);
 	return pollDelay;
 }
 
