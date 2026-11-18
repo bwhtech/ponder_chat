@@ -201,12 +201,25 @@ Limits:
 
 Ponder's TypeScript has no `any`, in the web app, the server and the tests:
 
-- Do not write `any` (`: any`, `as any`, `any[]`). Do not use `@ts-ignore`, `@ts-expect-error` or `oxlint-disable`.
+- Do not write `any` (`: any`, `as any`, `any[]`). Do not turn a check off with a comment: no `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `oxlint-disable`, `eslint-disable` or `@vue-ignore`.
 - Do not let `any` in from untyped values: `response.json()`, `JSON.parse`, IndexedDB, raw SQL rows, a library's loose types. Give them the type `unknown` and narrow it. On the server, decode them with `Schema` ([`docs/effect.md`](docs/effect.md)).
 - Where a library gives `any`, wrap it once in a small typed function or declaration.
 - Tests read JSON answers with `jsonBody` and `parseJson` (`server/test-json.ts`) or `jsonOf` (`e2e/fixtures.ts`), typed as the shape the test expects.
+- Put types that other files use in `.ts` files, not in `.vue` files. For a component's `defineExpose`, write its type in a `.ts` file, check it with `defineExpose({ ... } satisfies Handle)` and type the parent's ref with it (`web/workspaces/handles.ts`).
 
-`npm run lint` checks this, with oxlint and its type-aware rules (`.oxlintrc.json`). It reads the types with each folder's `tsconfig.json`. It also stops code in `web/` from using Node's globals and modules, such as `process`, `Buffer` and `node:fs`: the browser has none. CI runs it on every pull request.
+`npm run lint` checks this. CI runs it on every pull request. It runs three checks:
+
+- oxlint (`.oxlintrc.json`) on every `.ts` and `.js` file and on the scripts of `.vue` files: no written `any`, and no `@ts-` comments (`ban-ts-comment`). In `.ts` files, its type-aware rules (oxlint-tsgolint) also stop `any` that flows in: `no-unsafe-assignment`, `-member-access`, `-call`, `-return` and `-argument`. They read the types with each folder's `tsconfig.json`.
+- ESLint (`eslint.config.js`, `npm run lint:vue`) runs the same six rules on the `<script>` of each `.vue` file, which tsgolint cannot read. typescript-eslint needs TypeScript 5's JS API, so it loads the copy that frappe-ui has (`scripts/typescript5.cjs`), like vue-tsc. It reads the types with `web/browser-check/tsconfig.eslint.json`.
+- `scripts/no-suppressions.ts` fails on `oxlint-` and `eslint-` disable and enable comments, inline rule settings, and `@vue-ignore`, `@vue-expect-error` and `@vue-skip`, in every file git tracks or would track. oxlint has no setting to ignore them.
+
+`npm run typecheck` also checks that `web/` uses only what the browser has. Its second step (`npm run typecheck:browser`) runs vue-tsc with the browser's types and without Node's (`web/browser-check/tsconfig.json`). Then `process`, `Buffer`, `globalThis.process`, `node:fs`, `net` and `timer.unref()` are type errors there. A timer is a `number`, and `ReturnType<typeof setTimeout>` is `number` too. The web app's types include the server's API types (`web/api.ts`), and the server's code brings Node's types. So this check reads declarations of the API's types (`npm run api-types`, `server/tsconfig.api-types.json`, written to `node_modules/.cache/ponder-api-types`). `web/browser-check/pg.d.ts` stands in for pg's types, which bring Node's: the API's types name pg's `Pool` only as a server option. `scripts/typecheck-browser.ts` fails if Node's types get into that program some other way.
+
+What these checks do not catch:
+
+- An `any` in a `.vue` template (`{{ }}`, `v-if`, an `@click` handler). The unsafe rules read only the `<script>`. vue-tsc checks the template's types, but it lets an `any` through. Keep logic in the `<script>`.
+- A type assertion from `any`, such as `(await response.json()) as Thing`. The unsafe rules allow it. Narrow the `unknown` value instead.
+- An `any` that flows in from Deno globals or `npm:` imports in `sandbox/pyodide`. tsgolint cannot read Deno's types, so only a written `any` fails there. Plain `.js`, `.mjs` and `.cjs` files have no types, so the unsafe rules are off for them too.
 
 ## How it works
 
