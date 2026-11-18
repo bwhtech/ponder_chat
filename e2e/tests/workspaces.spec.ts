@@ -851,7 +851,7 @@ test("the newest workspace is first in the sidebar; a person pins one from its r
 	// Workspaces open to everyone, made by other tests at the same time, may sit between this person's own.
 	const names = () => workspaceRows(page).locator('[data-slot="sidebar-item"]').allInnerTexts();
 	const mine = async () => (await names()).filter((name) => name.endsWith(tag));
-	const row = (name: string) => workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ has: page.getByRole("button", { name, exact: true }) });
+	const row = (name: string) => rowOf(page, name);
 	const menuButton = (name: string) => row(name).getByRole("button", { name: `Actions for “${name}”` });
 
 	await page.goto("/");
@@ -866,13 +866,17 @@ test("the newest workspace is first in the sidebar; a person pins one from its r
 		await expect(page).not.toHaveURL(/[?&]w=/);
 	});
 
-	await test.step("Pin moves it to the top, above every workspace, and it stays there after a reload", async () => {
+	await test.step("Pin moves it to the top, above every workspace, marked pinned, and it stays there after a reload", async () => {
+		await expect(row(oldest).locator('[data-slot="workspace-pin"]')).toHaveCount(0);
 		await page.getByRole("menuitem", { name: "Pin" }).click();
 		await expect.poll(async () => (await names())[0]).toBe(oldest);
 		await expect.poll(mine).toEqual([oldest, newest, middle]);
+		await expectPinned(page, oldest, true);
+		await expectPinned(page, newest, false);
 		await page.reload();
 		await expect.poll(async () => (await names())[0]).toBe(oldest);
 		await expect.poll(mine).toEqual([oldest, newest, middle]);
+		await expectPinned(page, oldest, true);
 	});
 
 	await test.step("Unpin puts it back in the order the workspaces were made", async () => {
@@ -881,8 +885,10 @@ test("the newest workspace is first in the sidebar; a person pins one from its r
 		await expect(page.getByRole("menuitem")).toHaveText(["Unpin"]);
 		await page.getByRole("menuitem", { name: "Unpin" }).click();
 		await expect.poll(mine).toEqual([newest, middle, oldest]);
+		await expectPinned(page, oldest, false);
 		await page.reload();
 		await expect.poll(mine).toEqual([newest, middle, oldest]);
+		await expectPinned(page, oldest, false);
 	});
 
 	await test.step("a row's main click still opens the workspace", async () => {
@@ -1020,6 +1026,41 @@ test.describe("pins that race", () => {
 		await expect.poll(() => mine(page, tag)).toEqual([names[2], first.name, second.name]);
 	});
 
+	test("pinned here, unpinned in another tab: once this tab's list shows it unpinned, Pin is sent again", async ({ page, person, context }) => {
+		const tag = person.id.slice(0, 6);
+		const [older, newer] = [`Pin tabs old ${tag}`, `Pin tabs new ${tag}`];
+		const { id } = await createWorkspace(page, older);
+		await createWorkspace(page, newer);
+		await page.goto("/");
+		await expect.poll(() => mine(page, tag)).toEqual([newer, older]);
+		const pinned = pinAnswer(page, "PUT");
+		await chooseFromMenu(page, older, "Pin");
+		expect((await pinned).ok()).toBe(true);
+		await expect.poll(() => mine(page, tag)).toEqual([older, newer]);
+
+		const other = await context.newPage();
+		await other.goto("/");
+		await expect.poll(() => mine(other, tag)).toEqual([older, newer]);
+		const unpinned = pinAnswer(other, "DELETE");
+		await chooseFromMenu(other, older, "Unpin");
+		expect((await unpinned).ok()).toBe(true);
+		await other.close();
+
+		// This tab reads its list again when it makes a workspace.
+		await page.getByRole("button", { name: "New workspace" }).click();
+		const dialog = page.getByRole("dialog", { name: "New workspace" });
+		await dialog.getByLabel("Name").fill(`Pin tabs newest ${tag}`);
+		await dialog.getByRole("button", { name: "Create workspace" }).click();
+		await expect.poll(() => mine(page, tag)).toEqual([`Pin tabs newest ${tag}`, newer, older]);
+		await expectPinned(page, older, false);
+
+		const pinnedAgain = pinAnswer(page, "PUT");
+		await chooseFromMenu(page, older, "Pin");
+		expect((await pinnedAgain).ok()).toBe(true);
+		const listed = await jsonOf<{ workspaces: { id: string; pinned: boolean }[] }>(await page.request.get("/api/workspaces"));
+		expect(listed.workspaces.find((workspace) => workspace.id === id)?.pinned).toBe(true);
+	});
+
 	test("a person pins a workspace with the keyboard alone", async ({ page, person }) => {
 		const tag = person.id.slice(0, 6);
 		const [older, newer] = [`Pin keys old ${tag}`, `Pin keys new ${tag}`];
@@ -1046,9 +1087,22 @@ async function mine(page: Page, tag: string) {
 	return (await workspaceRows(page).locator('[data-slot="sidebar-item"]').allInnerTexts()).filter((name) => name.endsWith(tag));
 }
 
+/** A workspace's row in the sidebar, by its name: a pinned row's button says so after it. */
+function rowOf(page: Page, name: string) {
+	return workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ has: page.getByRole("button", { name: new RegExp(`^${escape(name)}(, pinned)?$`) }) });
+}
+
+/** The row shows a pin after the name, and its name says "pinned", or neither. */
+async function expectPinned(page: Page, name: string, pinned: boolean) {
+	const row = rowOf(page, name);
+	await expect(row.getByRole("button", { name: pinned ? `${name}, pinned` : name, exact: true })).toBeVisible();
+	if (pinned) await expect(row.locator('[data-slot="workspace-pin"]')).toBeVisible();
+	else await expect(row.locator('[data-slot="workspace-pin"]')).toHaveCount(0);
+}
+
 /** Opens a sidebar row's menu with the pointer, and chooses an item. */
 async function chooseFromMenu(page: Page, name: string, item: "Pin" | "Unpin") {
-	const row = workspaceRows(page).locator('[data-slot="sidebar-item"]').filter({ has: page.getByRole("button", { name, exact: true }) });
+	const row = rowOf(page, name);
 	await row.hover();
 	await row.getByRole("button", { name: `Actions for “${name}”` }).click();
 	await page.getByRole("menuitem", { name: item }).click();

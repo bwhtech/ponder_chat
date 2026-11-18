@@ -7,9 +7,9 @@ import WorkspaceRowsSkeleton from "./WorkspaceRowsSkeleton.vue";
  * The sidebar's workspaces, above the chats (ChatsPanel.vue): the ones the person pinned
  * first, then the newest made first, each with the icon of its kind. Each row has a menu,
  * as a chat row has (ThreadList.vue), with Pin or Unpin; a pinned row moves to the top as
- * a chat does when it is active again. The + makes a new one; with no workspace yet, a
- * "New workspace" row takes its place. WorkspaceRowsPlaceholder.vue draws the same rows
- * while this chunk loads.
+ * a chat does when it is active again, and shows a pin after its name. The + makes a new one;
+ * with no workspace yet, a "New workspace" row takes its place. WorkspaceRowsPlaceholder.vue
+ * draws the same rows while this chunk loads.
  */
 const props = defineProps<{ highlight: boolean }>();
 const emit = defineEmits<{ select: [slug: string]; create: [] }>();
@@ -56,11 +56,15 @@ const isOpen = (workspace: WorkspaceSummary) => props.highlight && workspace.id 
 				:key="workspace.id"
 				class="!h-7 [@media(pointer:coarse)]:!h-11"
 				:label="workspace.name"
+				:aria-label="workspace.pinned ? `${workspace.name}, pinned` : workspace.name"
 				:active="isOpen(workspace)"
 				:title="`${workspace.name} · ${sharedWith(workspace)}`"
 				@click="emit('select', workspace.slug)"
 			>
 				<template #prefix><span :class="[accessIcon(workspace), 'size-4 text-ink-gray-6']" aria-hidden="true" /></template>
+				<!-- The name gives way before the pin, so the pin stays in view; the row's name says "pinned" for screen readers. -->
+				<span class="truncate text-sm leading-tighter">{{ workspace.name }}</span>
+				<span v-if="workspace.pinned" class="lucide-pin ml-1.5 size-3.5 shrink-0 text-ink-gray-4" aria-hidden="true" data-slot="workspace-pin" />
 				<template #suffix>
 					<Dropdown :options="menu(workspace)" align="end">
 						<template #trigger>

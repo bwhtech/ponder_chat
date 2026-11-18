@@ -49,6 +49,7 @@ export async function loadWorkspaces() {
 	try {
 		const fresh = fromBoot("workspaces") ?? (await unwrap(client.api.workspaces.$get())).workspaces;
 		workspaces.value = withPinsMadeSince(fresh, asked);
+		settlePins(asked);
 		workspacesLoaded.value = true;
 	} catch {
 		// Offline: keep the list the page has. The rows stay skeletons until one load works.
@@ -186,6 +187,16 @@ function withPinsMadeSince(list: WorkspaceSummary[], asked: number) {
 		return newer ? { ...workspace, pinned: state.wanted } : workspace;
 	});
 	return overlaid.some((workspace, index) => workspace !== list[index]) ? overlaid.sort(listOrder) : list;
+}
+
+/**
+ * A list asked for after a pin's last choice and answer is newer than this tab's record of
+ * it: another tab may have pinned or unpinned it since. That record goes, so the next Pin or
+ * Unpin starts from the list and is sent. A pin still writing, or changed after the list was
+ * asked for, keeps its record.
+ */
+function settlePins(asked: number) {
+	for (const [id, state] of pinStates) if (!state.writing && state.changedAt <= asked) pinStates.delete(id);
 }
 
 /**

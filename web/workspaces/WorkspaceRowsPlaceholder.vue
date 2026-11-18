@@ -21,9 +21,10 @@ import WorkspaceRowsSkeleton from "./WorkspaceRowsSkeleton.vue";
 			<span class="ml-2 truncate text-sm leading-tighter">New workspace</span>
 		</div>
 		<template v-else>
-			<div v-for="workspace in workspaces" :key="workspace.id" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 [@media(pointer:coarse)]:h-11">
+			<div v-for="workspace in workspaces" :key="workspace.id" class="flex h-7 items-center rounded-4 pl-2 pr-6 text-ink-gray-6 [@media(pointer:coarse)]:h-11">
 				<span :class="[accessIcon(workspace), 'size-4 shrink-0']" aria-hidden="true" />
 				<span class="ml-2 truncate text-sm leading-tighter">{{ workspace.name }}</span>
+				<span v-if="workspace.pinned" class="lucide-pin ml-1.5 size-3.5 shrink-0 text-ink-gray-4" aria-hidden="true" />
 			</div>
 		</template>
 	</div>
