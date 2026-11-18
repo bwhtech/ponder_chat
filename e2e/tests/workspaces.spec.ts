@@ -158,6 +158,21 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 	await c.context.close();
 });
 
+test("an admin shares a new private workspace with everyone from its setup, and a screen reader hears it", async ({ page, admin }) => {
+	const workspace = await createWorkspace(page, `Rota ${admin.id.slice(0, 6)}`);
+	await page.goto(`/?w=${workspace.slug}`);
+	await expect(setupCount(page)).toHaveText("0 of 3 done");
+	await setup(page).getByRole("button", { name: "Share workspace" }).click();
+	const dialog = page.getByRole("dialog", { name: /Share/ });
+	await dialog.getByLabel("Who can use it").click();
+	await page.getByRole("option", { name: "Everyone in the organisation" }).click();
+	await dialog.getByRole("button", { name: "Save" }).click();
+	// The People step goes rather than turns done, and no toast covers the setup: the status line says it.
+	await expect(setupCount(page)).toHaveText("0 of 2 done");
+	await expect(setupStatus(page)).toHaveText("Workspace shared with everyone in the organisation. 0 of 2 done.");
+	await expect(page.getByText("Sharing saved")).toHaveCount(0);
+});
+
 test("an admin makes a workspace for everyone, and every person sees it", async ({ page, admin, fake, db, browser }) => {
 	const name = `Company handbook ${admin.id.slice(0, 6)}`;
 	await page.goto("/");

@@ -64,7 +64,7 @@ const descriptionId = computed(() => `${titleId.value}-description`);
 			<button
 				type="button"
 				class="absolute inset-0 cursor-pointer rounded-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-gray-3"
-				:aria-label="step.action"
+				:aria-label="`${step.title}: ${step.action}`"
 				:aria-describedby="descriptionId"
 				:disabled="busy"
 				@click="emit('act')"

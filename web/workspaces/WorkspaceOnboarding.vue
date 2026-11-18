@@ -37,8 +37,10 @@ const fresh = computed(() => steps.value.every((step) => !step.done));
 const ADDED: Record<SetupStepKey, string> = { instructions: "Instructions added.", documents: "Sources added.", people: "Workspace shared." };
 const doneKeys = computed(() => steps.value.filter((step) => step.done).map((step) => step.key));
 const announcement = ref("");
-watch([doneKeys, toDo], ([now, wanted], [before, wanted0]) => {
+watch([doneKeys, toDo, () => props.workspace.kind], ([now, wanted, kind], [before, wanted0, kind0]) => {
 	const parts = now.filter((key) => !before.includes(key)).map((key) => ADDED[key]);
+	// Shared with the whole organisation: its People step goes rather than turns done, and no toast says so.
+	if (kind0 === "private" && kind === "org") parts.unshift("Workspace shared with everyone in the organisation.");
 	if (wanted0 && !wanted) parts.push("Workspace set up.");
 	else if (parts.length) parts.push(`${count(now.length)} of ${count(steps.value.length)} done.`);
 	if (parts.length) announcement.value = parts.join(" ");
