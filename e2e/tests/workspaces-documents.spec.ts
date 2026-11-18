@@ -342,6 +342,95 @@ test("10. the page stops reading an Indexing document again once Details close, 
 	});
 });
 
+test("10b. Details closed while Try again is on its way do not read the log again, and an older log never undoes the row's Ready", async ({ page, person }) => {
+	test.setTimeout(90_000);
+	const tag = person.id.slice(0, 6);
+	const { id } = await createWorkspace(page, `Races ${tag}`);
+	const documentId = await uploadReady(page, id, textFile("notes.md", "Notes."));
+	const logPath = `/api/workspaces/${id}/documents/${documentId}/log`;
+	const retryPath = `/api/workspaces/${id}/documents/${documentId}/retry`;
+	const notes = row(page, "notes.md");
+
+	// What the page is told about the document, whatever the server says: set by each step.
+	const told: { status: string; error: string | null } = { status: "failed", error: "upstream exploded" };
+	let holdLog: Promise<void> | null = null;
+	let logHeld = false;
+	await page.route(
+		(url) => url.pathname === `/api/workspaces/${id}`,
+		async (route) => {
+			if (route.request().method() !== "GET") return route.fallback();
+			const response = await route.fetch();
+			const body = await jsonOf<{ workspace: { documents: { status: string; error: string | null }[] } }>(response);
+			for (const document of body.workspace.documents) Object.assign(document, told);
+			await route.fulfill({ response, json: body });
+		},
+	);
+	await page.route(
+		(url) => url.pathname === logPath,
+		async (route) => {
+			const said = { ...told };
+			const wait = holdLog;
+			holdLog = null;
+			if (wait) logHeld = true;
+			const response = await route.fetch();
+			const body = await jsonOf<{ document: { status: string; error: string | null } }>(response);
+			Object.assign(body.document, said);
+			await wait;
+			await route.fulfill({ response, json: body });
+		},
+	);
+	let logs = 0;
+	page.on("request", (request) => new URL(request.url()).pathname === logPath && logs++);
+
+	await page.goto(`/?w=${id}`);
+	await expect(notes).toHaveAttribute("data-status", "failed");
+
+	await test.step("Try again, then Details close before its answer: no more reads of the log", async () => {
+		let answerRetry = () => {};
+		const retryAnswered = new Promise<void>((resolve) => (answerRetry = resolve));
+		await page.route(
+			(url) => url.pathname === retryPath,
+			async (route) => {
+				await retryAnswered;
+				const document = (await jsonOf<{ document: Record<string, unknown> }>(await route.fetch({ method: "GET", url: new URL(logPath, page.url()).href }))).document;
+				await route.fulfill({ json: { document: { ...document, status: "reading", error: null } } });
+			},
+		);
+		const { details } = await openDetails(page, "notes.md");
+		await expect(details.locator('[data-slot="document-status"]')).toHaveText("Could not read it");
+		await details.getByRole("button", { name: "Try again" }).click();
+		await details.getByRole("button", { name: "Close" }).click();
+		await expect(details).toHaveCount(0);
+		const before = logs;
+		answerRetry();
+		await expect(notes).toHaveAttribute("data-status", "reading");
+		await page.waitForTimeout(5000);
+		expect(logs, "log reads after Details closed").toBe(before);
+		await page.unroute((url) => url.pathname === retryPath);
+	});
+
+	await test.step("a log read on its way when the row sees Ready does not turn it back to Indexing", async () => {
+		Object.assign(told, { status: "reading", error: null });
+		const { details } = await openDetails(page, "notes.md");
+		const progress = details.locator('[data-slot="document-progress"]');
+		await expect(progress).toHaveText("Indexing…");
+		// The next log read waits, still saying Indexing, while the page's own poll says Ready.
+		let releaseLog = () => {};
+		holdLog = new Promise<void>((resolve) => (releaseLog = resolve));
+		await expect.poll(() => logHeld, { timeout: 10_000 }).toBe(true);
+		told.status = "ready";
+		await expect(notes).toHaveAttribute("data-status", "ready", { timeout: 15_000 });
+		await expect(progress).toHaveText(/^Ready/, { timeout: 10_000 });
+		releaseLog();
+		// Not even for a moment: the next poll would put Ready back, so look often.
+		for (let elapsed = 0; elapsed < 3000; elapsed += 100) {
+			expect(await notes.getAttribute("data-status"), "the row's status after the older log came").toBe("ready");
+			expect(await progress.textContent(), "Details after the older log came").toMatch(/^\s*Ready/);
+			await page.waitForTimeout(100);
+		}
+	});
+});
+
 test("11. a person who can only ask opens a document in the side viewer; a person outside the workspace can't get the file", async ({ page, person, fake, db, browser }) => {
 	test.setTimeout(90_000);
 	const tag = person.id.slice(0, 6);

@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { panelItem } from "../side-panel/panel";
-import DocumentSummary from "./DocumentSummary.vue";
+import { Skeleton } from "frappe-ui";
 
 /**
- * A document's Details (DocumentDetails.vue) while their code arrives: the summary as far as
- * the row knows it, its buttons off, and skeletons where the log's numbers go. The same
- * padding as Details, so nothing moves when they take its place.
+ * A document's Details (DocumentDetails.vue) while their code arrives: skeletons in the places
+ * of the summary's lines and buttons (DocumentSummary.vue), with the same padding. Only plain
+ * markup: this loads with the page (stand-ins.ts), so it must not bring the summary's code.
  */
-const document = computed(() => (panelItem.value?.type === "details" ? panelItem.value.details.document : null));
 </script>
 
 <template>
-	<div v-if="document" class="space-y-6 px-4 pb-10 pt-5 sm:px-5" aria-busy="true">
-		<DocumentSummary :document="document" :log="null" stand-in />
+	<div class="space-y-6 px-4 pb-10 pt-5 sm:px-5" aria-busy="true" aria-label="Loading the details">
+		<div class="space-y-4">
+			<div class="flex h-[1lh] items-center text-p-sm"><Skeleton class="h-2.5 w-40 rounded-4" /></div>
+			<div class="flex h-[1lh] items-center text-base"><Skeleton class="h-3 w-48 rounded-4" /></div>
+			<div class="flex h-[1lh] items-center text-p-sm"><Skeleton class="h-2.5 w-56 max-w-full rounded-4" /></div>
+			<Skeleton class="h-7 w-24 rounded-4" />
+		</div>
 	</div>
 </template>

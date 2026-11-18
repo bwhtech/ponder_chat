@@ -30,16 +30,25 @@ const loadError = ref("");
 const retrying = ref(false);
 const steps = computed(() => log.value && plainSteps(log.value));
 const poller = new Poller(load);
+/** False once the panel is closed or shows something else: then nothing here reads the log again. */
+let active = true;
 
 poller.start(0);
 // Closed, or showing something else: the panel keeps this mounted while it slides out.
-watch(panelItem, (item) => item?.key !== key && poller.stop());
+watch(panelItem, (item) => item?.key !== key && deactivate());
+// A change the row saw first. A log read already on its way is older, so it must not undo
+// the change: a new read takes its place, and it reads the log once more if the document settled.
 watch(props.request.current, (next) => {
 	if (!next || (next.status === doc.value.status && next.error === doc.value.error)) return;
 	doc.value = next;
-	if (next.status === "reading") poller.start(0);
+	if (active) poller.start(0);
 });
-onBeforeUnmount(() => poller.stop());
+onBeforeUnmount(deactivate);
+
+function deactivate() {
+	active = false;
+	poller.stop();
+}
 
 /** Reads the log; the wait before reading it again, or null. */
 async function load(current: () => boolean) {
@@ -68,8 +77,10 @@ function changed(next: WorkspaceDocument) {
 async function retry() {
 	retrying.value = true;
 	try {
-		changed(await retryDocument(props.request.workspaceId, doc.value.id));
-		poller.start(0);
+		const next = await retryDocument(props.request.workspaceId, doc.value.id);
+		// The row hears of it even when Details closed meanwhile; Details read the log again only while open.
+		changed(next);
+		if (active) poller.start(0);
 	} catch (error) {
 		toast.error((error as Error).message);
 	} finally {
@@ -79,7 +90,7 @@ async function retry() {
 
 function retryFirstLoad() {
 	loadError.value = "";
-	poller.start(0);
+	if (active) poller.start(0);
 }
 
 /** The file takes the panel's place; one the panel can't show opens in a new tab. */
