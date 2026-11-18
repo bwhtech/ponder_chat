@@ -15,7 +15,7 @@ const workspace = computed(() => workspaceByKey(props.slugOrId));
 
 <template>
 	<header data-slot="chat-header" class="flex min-h-12 shrink-0 border-b border-outline-gray-1">
-		<div class="workspace-gutter-match flex min-w-0 items-center gap-2">
+		<div class="scroll-gutter-match flex min-w-0 items-center gap-2">
 			<slot name="start" />
 			<template v-if="workspace">
 				<span class="flex size-6 shrink-0 items-center justify-center rounded-4 bg-surface-gray-2 text-ink-gray-7" aria-hidden="true">
@@ -27,9 +27,9 @@ const workspace = computed(() => workspaceByKey(props.slugOrId));
 			<slot name="end" />
 		</div>
 	</header>
-	<!-- The page's frame (WorkspacePage.vue): its message box at the bottom of the chats' column. -->
+	<!-- The page's frame (WorkspacePage.vue): its message box at the bottom of its column, the chat's. -->
 	<div class="flex min-h-0 flex-1 flex-col overflow-hidden sm:[scrollbar-gutter:stable_both-edges]" aria-busy="true">
-		<div class="mx-auto mt-auto grid w-full max-w-[1120px] px-4 sm:px-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:gap-12">
+		<div class="mx-auto mt-auto w-full max-w-[720px] px-4 sm:px-5">
 			<div class="min-w-0 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:pb-5">
 				<!-- The box's height with its placeholder on one line. -->
 				<Skeleton class="h-[5.625rem] w-full rounded-7" />

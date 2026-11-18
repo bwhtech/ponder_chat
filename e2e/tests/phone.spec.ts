@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { chat, expect, test } from "../fixtures.ts";
 import { addChats, createWorkspace, textFile, uploadReady, workspacePage } from "../workspaces.ts";
 
-const aside = (page: Page) => page.locator('[data-slot="workspace-aside"]');
+const about = (page: Page) => page.locator('[data-slot="workspace-about"]');
 
 test("chats on a phone, and finds the chat in the chat list", async ({ page, person }) => {
 	void person;
@@ -26,14 +26,14 @@ test("on a phone, a workspace's message box sits where the chat's does: the page
 	await page.goto(`/?w=${slug}`);
 	const box = workspacePage.box(page);
 	await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(12);
-	await expect(aside(page).locator('[data-slot="document-name"]')).toHaveCount(2);
+	await expect(about(page).locator('[data-slot="document-name"]')).toHaveCount(2);
 	const top = (await box.boundingBox())!.y;
 
-	// Under the chats come the side panel's sections; at the end, the last document is clear of the box.
+	// Under the chats come the workspace's sections; at the end, the last document is clear of the box.
 	await workspacePage.scrollToEnd(page);
 	await expect(box).toBeInViewport({ ratio: 1 });
 	expect((await box.boundingBox())!.y).toBeCloseTo(top, 0);
-	const lastDocument = aside(page).locator('[data-slot="document-name"]').last();
+	const lastDocument = about(page).locator('[data-slot="document-name"]').last();
 	expect(await workspacePage.reachable(lastDocument)).toBe(true);
 	await lastDocument.click();
 	await expect(page.locator('[data-slot="side-panel"]')).toContainText("Check the exit sites at 22:00.");
@@ -49,7 +49,7 @@ test("on a phone, a workspace's message box sits where the chat's does: the page
 	expect(Math.abs((await page.locator('[data-slot="prompt-input"]').boundingBox())!.y - top)).toBeLessThanOrEqual(2);
 });
 
-test("on a phone, a new workspace's setup steps come first, over its side panel, and the box covers none of it", async ({ page, person }) => {
+test("on a phone, a new workspace's setup cards come first, over its sections, and the box covers none of it", async ({ page, person }) => {
 	const tag = person.id.slice(0, 6);
 	const name = `Theatre lists ${tag}`;
 	const { id, slug } = await createWorkspace(page, name, "Answer from the theatre lists.");
@@ -57,13 +57,13 @@ test("on a phone, a new workspace's setup steps come first, over its side panel,
 	await uploadReady(page, id, textFile("Tuesday list.md", "# Tuesday\n\nKnee arthroscopy at 10:30."));
 	await page.goto(`/?w=${slug}`);
 	const setup = page.locator('[data-slot="workspace-setup"]');
-	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("2 of 3");
-	// One column: the steps, then the side panel's sections that have something in them.
-	expect((await setup.boundingBox())!.y + (await setup.boundingBox())!.height).toBeLessThan((await aside(page).boundingBox())!.y);
-	await expect(aside(page).locator('[data-slot="document-name"]')).toHaveCount(2);
+	await expect(setup.locator('[data-slot="workspace-setup-count"]')).toHaveText("2 of 3 done");
+	// One column: the setup card, then the workspace's sections that have something in them.
+	expect((await setup.boundingBox())!.y + (await setup.boundingBox())!.height).toBeLessThan((await about(page).boundingBox())!.y);
+	await expect(about(page).locator('[data-slot="document-name"]')).toHaveCount(2);
 
 	await workspacePage.scrollToEnd(page);
-	expect(await workspacePage.reachable(aside(page).locator('[data-slot="document-name"]').last())).toBe(true);
+	expect(await workspacePage.reachable(about(page).locator('[data-slot="document-name"]').last())).toBe(true);
 	await setup.getByRole("button", { name: "Share workspace" }).click();
 	await expect(page.getByRole("dialog", { name: `Share “${name}”` })).toBeVisible();
 });

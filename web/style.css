@@ -70,21 +70,6 @@
   }
 }
 
-/* The workspace page's header: the same, for the page's wider frame (its chats and its side panel), whose
-   scroller reserves the gutter on both sides as the transcript does (workspaces/WorkspacePage.vue). */
-.workspace-gutter-match {
-  margin-inline: auto;
-  width: 100%;
-  max-width: 1120px;
-  padding-inline: 1rem;
-}
-@media (min-width: 640px) {
-  .workspace-gutter-match {
-    max-width: calc(1120px + 2 * var(--scroll-gutter, 0px));
-    padding-inline: calc(1.25rem + var(--scroll-gutter, 0px));
-  }
-}
-
 /* A memory note that arrives after a reply rises in; notes already there on load do not. */
 @keyframes memory-saved-in {
   from {

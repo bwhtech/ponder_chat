@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 import { e2e } from "../env.ts";
 import { chat, expect, test } from "../fixtures.ts";
 import { addChats, createSkill, createWorkspace, newPerson, textFile, uploadReady, workspacePage } from "../workspaces.ts";
@@ -11,10 +11,10 @@ import { addChats, createSkill, createWorkspace, newPerson, textFile, uploadRead
  * a workspace by its title, and adds or edits its instructions, in Markdown, from their own
  * section. A person who can only ask sees no controls there, and no empty sections.
  *
- * While the person has no chat in a workspace, its page guides them where the chats will be:
- * setup steps for whoever can edit it, each opening the same dialog, file picker or Share as
- * the side panel and the header, then first questions made from its documents, which fill
- * the message box.
+ * While the person has no chat in a workspace, the workspace's sections are its page. Whoever
+ * can edit it also sees a setup card for each step still to do, over them; each card opens the
+ * same dialog, file picker or Share as the sections and the header, and leaves once its step
+ * is done.
  *
  * The fake model echoes the first line of a workspace's instructions (fake/server.ts), so a
  * reply shows that they reached the model.
@@ -48,9 +48,9 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		workspaceUrl = a.page.url();
 		await expect(a.page.getByRole("heading", { name, level: 1 })).toBeVisible();
 		await expect(workspaceRows(a.page).getByRole("button", { name })).toBeVisible();
-		await expect(aside(a.page).getByText(marker)).toBeVisible();
+		await expect(about(a.page).getByText(marker)).toBeVisible();
 		// Only its owner uses it so far.
-		await expect(aside(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
+		await expect(about(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
 
 		await a.page.getByRole("button", { name: "Share", exact: true }).click();
 		const share = a.page.getByRole("dialog", { name: `Share “${name}”` });
@@ -61,7 +61,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(share.locator('[data-slot="workspace-member"]')).toContainText(b.person.email);
 		await share.getByRole("button", { name: "Save" }).click();
 		await expect(share).toHaveCount(0);
-		await expect(aside(a.page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
+		await expect(about(a.page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
 	});
 
 	await test.step("2. B sees it in the sidebar and asks with its instructions", async () => {
@@ -69,7 +69,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await workspaceRows(b.page).getByRole("button", { name }).click();
 		await expect(b.page).toHaveURL(workspaceUrl);
 		await expect(b.page.getByRole("heading", { name, level: 1 })).toBeVisible();
-		await expect(aside(b.page).getByText("Can ask", { exact: true })).toBeVisible();
+		await expect(about(b.page).getByText("Can ask", { exact: true })).toBeVisible();
 		// Only the owner shares or deletes; B can only ask, so B changes nothing.
 		await expect(b.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
 		await expect(b.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
@@ -78,11 +78,11 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(instructionsSection(b.page)).toContainText(marker);
 		await expect(instructionsSection(b.page).getByRole("button")).toHaveCount(0);
 		// No documents, and nothing to add them with: no Documents.
-		await expect(aside(b.page).locator('[data-slot="workspace-documents"]')).toHaveCount(0);
-		// No chat of B's in it yet: no "Your chats". B can only ask: no setup steps, and with no documents, no first questions either.
+		await expect(about(b.page).locator('[data-slot="workspace-documents"]')).toHaveCount(0);
+		// No chat of B's in it yet: no "Your chats". B can only ask: no setup cards; the workspace's sections are the page.
 		await expect(b.page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
-		await expect(b.page.locator('[data-slot="workspace-starters"]')).toHaveText(`Ask a question about ${name} below.`);
 		await expect(setup(b.page)).toHaveCount(0);
+		await expect(about(b.page).getByRole("region", { name: "People" })).toBeVisible();
 
 		await chat.send(b.page, question);
 		await expect(b.page).toHaveURL(/[?&]t=/);
@@ -119,7 +119,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 
 	await test.step("4. A cannot open B's chat in the workspace", async () => {
 		await a.page.goto(workspaceUrl);
-		await expect(aside(a.page).getByText(marker)).toBeVisible();
+		await expect(about(a.page).getByText(marker)).toBeVisible();
 		await expect(a.page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
 		await a.page.goto(`/?t=${chatId}`);
 		await expect(a.page.locator('[data-slot="prompt-input"]')).toBeVisible();
@@ -137,7 +137,7 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		await expect(share.locator('[data-slot="workspace-member"]')).toHaveCount(0);
 		await share.getByRole("button", { name: "Save" }).click();
 		await expect(share).toHaveCount(0);
-		await expect(aside(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
+		await expect(about(a.page).locator('[data-slot="workspace-member"]')).toHaveCount(0);
 
 		await b.page.goto(`/?t=${chatId}`);
 		await expect(b.page.locator('[data-slot="message"][data-role="user"]')).toHaveText(question);
@@ -169,13 +169,12 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 	await page.getByRole("option", { name: "Everyone in the organisation" }).click();
 	await dialog.getByRole("button", { name: "Create workspace" }).click();
 	await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
-	await expect(aside(page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
+	await expect(about(page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
 	// Everyone uses it already: its People step is done from the start, and the instructions from the dialog too.
+	// The one card left is Documents.
 	await expect(setup(page).getByRole("heading", { name: `Set up ${name}` })).toBeVisible();
-	await expect(setupCount(page)).toHaveText("2 of 3");
-	await expect(step(page, "people")).toHaveAttribute("data-done", "true");
-	await expect(step(page, "people")).toContainText("Everyone in the organisation");
-	await expect(step(page, "documents")).not.toHaveAttribute("data-done");
+	await expect(setupCount(page)).toHaveText("2 of 3 done");
+	await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Documents"]);
 	const workspaceUrl = page.url();
 
 	for (const title of ["first person", "second person"]) {
@@ -184,26 +183,27 @@ test("an admin makes a workspace for everyone, and every person sees it", async 
 		await workspaceRows(other.page).getByRole("button", { name }).click();
 		await expect(other.page).toHaveURL(workspaceUrl);
 		await expect(other.page.getByRole("heading", { name, level: 1 })).toBeVisible();
-		await expect(aside(other.page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
+		await expect(about(other.page).getByText("Everyone in the organisation", { exact: true })).toBeVisible();
 		// Everyone asks; only admins change it.
 		await expect(other.page.getByRole("button", { name: "Share", exact: true })).toHaveCount(0);
 		await expect(other.page.getByRole("button", { name: "Workspace actions" })).toHaveCount(0);
-		// Nor do they see its setup steps: one line points to the box.
-		await expect(other.page.locator('[data-slot="workspace-starters"]')).toHaveText(`Ask a question about ${name} below.`);
+		// Nor do they see its setup cards: its instructions and people are the page.
 		await expect(setup(other.page)).toHaveCount(0);
+		await expect(instructionsSection(other.page)).toContainText("Answer from the handbook.");
 		await other.context.close();
 	}
 });
 
-test("a new workspace guides its owner: setup steps tick one by one, then first questions fill the box, until the first chat", async ({ page, person, fake, db, browser }) => {
+test("a new workspace guides its owner: a card for each setup step leaves once it is done, then its sections are the page, until the first chat", async ({ page, person, fake, db, browser }) => {
 	test.setTimeout(90_000);
 	const tag = person.id.slice(0, 6);
 	const name = `HR Policies ${tag}`;
 	const marker = `Answer from the HR handbook, ref ${tag}.`;
+	const question = `How many days of leave do staff get, ${tag}?`;
 	const other = await newPerson(browser, db, fake, "joins hr");
 	const field = workspacePage.field(page);
 
-	await test.step("A new private workspace shows its three steps, none done, where the chats will be", async () => {
+	await test.step("A new private workspace shows a card for each of its three steps, none done", async () => {
 		await page.goto("/");
 		await page.getByRole("button", { name: "New workspace", exact: true }).click();
 		const dialog = page.getByRole("dialog", { name: "New workspace" });
@@ -211,76 +211,75 @@ test("a new workspace guides its owner: setup steps tick one by one, then first 
 		await dialog.getByRole("button", { name: "Create workspace" }).click();
 		await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
 		await expect(setup(page).getByRole("heading", { name: `Set up ${name}` })).toBeVisible();
-		await expect(setupCount(page)).toHaveText("0 of 3");
-		await expect(setup(page).getByRole("button")).toHaveText([/^Instructions/, /^Documents/, /^People/]);
-		// The steps add what the side panel's empty areas would, so the panel shows none of them.
-		await expect(aside(page).getByRole("button", { name: "Add instructions" })).toHaveCount(0);
-		await expect(aside(page).locator('[data-slot="document-upload-area"]')).toHaveCount(0);
+		await expect(setupCount(page)).toHaveText("0 of 3 done");
+		await expect(setup(page).getByRole("heading", { level: 3 })).toHaveText(["Instructions", "Documents", "People"]);
+		await expect(setup(page).getByRole("button")).toHaveText(["Add instructions", "Upload documents", "Share workspace"]);
+		// The cards add what the sections' empty areas would, so no empty section shows under them.
+		await expect(about(page).getByRole("button", { name: "Add instructions" })).toHaveCount(0);
+		await expect(about(page).locator('[data-slot="document-upload-area"]')).toHaveCount(0);
 		await expect(page.locator('[data-slot="workspace-chats"]')).toHaveCount(0);
 	});
 
-	await test.step("Add instructions, from its step with the keyboard: the step ticks, and shows what was added", async () => {
+	await test.step("Add instructions, from its card with the keyboard: the card leaves, the instructions show below, and focus moves to the next card", async () => {
 		await setup(page).getByRole("button", { name: "Add instructions" }).focus();
 		await page.keyboard.press("Enter");
 		const dialog = page.getByRole("dialog", { name: "Instructions" });
 		await dialog.getByRole("textbox", { name: "Instructions" }).fill(`${marker}\nKeep answers short.`);
 		await dialog.getByRole("button", { name: "Save" }).click();
 		await expect(dialog).toHaveCount(0);
-		await expect(step(page, "instructions")).toHaveAttribute("data-done", "true");
-		await expect(step(page, "instructions")).toContainText(marker);
-		await expect(setupCount(page)).toHaveText("1 of 3");
-		await expect(setup(page).getByRole("button", { name: "Edit instructions" })).toBeVisible();
+		await expect(step(page, "instructions")).toHaveCount(0);
+		await expect(setupCount(page)).toHaveText("1 of 3 done");
 		await expect(instructionsSection(page)).toContainText(marker);
+		await expect(setup(page).getByRole("button", { name: "Upload documents" })).toBeFocused();
 	});
 
-	await test.step("Upload documents, from its step: the step ticks, and the document shows in the side panel", async () => {
+	await test.step("Upload documents, from its card: the card leaves, and the document shows below", async () => {
 		const chooser = page.waitForEvent("filechooser");
 		await setup(page).getByRole("button", { name: "Upload documents" }).click();
 		await (await chooser).setFiles(textFile("Leave policy.md", `# Leave policy\n\nStaff get 27 days of paid leave a year, ${tag}.`));
-		await expect(step(page, "documents")).toHaveAttribute("data-done", "true");
-		await expect(step(page, "documents")).toContainText("1 document");
-		await expect(setupCount(page)).toHaveText("2 of 3");
-		await expect(aside(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
+		await expect(step(page, "documents")).toHaveCount(0);
+		await expect(setupCount(page)).toHaveText("2 of 3 done");
+		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
 	});
 
-	await test.step("Share, from its step: once shared, first questions made from the document take the steps' place", async () => {
+	await test.step("Share, from its card: the last card leaves with the setup, and the workspace's sections are the page", async () => {
 		await setup(page).getByRole("button", { name: "Share workspace" }).click();
 		const share = page.getByRole("dialog", { name: `Share “${name}”` });
 		await share.getByRole("combobox", { name: "Add people by name or email" }).fill(other.person.email);
 		await page.getByRole("option", { name: new RegExp(escape(other.person.email)) }).click();
 		await share.getByRole("button", { name: "Save" }).click();
 		await expect(share).toHaveCount(0);
-		await expect(starters(page)).toHaveText(["Summarise “Leave policy.md”", `What can I ask about in ${name}?`]);
 		await expect(setup(page)).toHaveCount(0);
+		await expect(about(page).getByRole("region")).toHaveText([/^Instructions/, /^Documents/, /^People/]);
+		await expect(about(page).locator('[data-slot="workspace-member"]')).toContainText("Can ask");
+		// The instructions show once, in their own section.
+		await expect(page.getByText(marker)).toHaveCount(1);
 	});
 
-	await test.step("A first question fills the box, and nothing is sent until the person sends it", async () => {
-		await starters(page).first().click();
-		await expect(field).toBeFocused();
-		await expect(field).toHaveValue("Summarise “Leave policy.md”");
-		expect(await field.evaluate((element: HTMLTextAreaElement) => element.selectionStart === element.value.length)).toBe(true);
-		await expect(page).not.toHaveURL(/[?&]t=/);
+	await test.step("A question in the box opens a chat that follows the instructions", async () => {
+		await field.fill(question);
 		await field.press("Enter");
 		await expect(page).toHaveURL(/[?&]t=/);
-		await expect(chat.reply(page)).toContainText("Leave policy");
+		await expect(chat.reply(page)).toContainText(marker);
 		await chat.idle(page);
-		const [call] = await fake.calls("Summarise “Leave policy.md”");
+		const [call] = await fake.calls(question);
 		expect(call.system).toContain(marker);
 	});
 
-	await test.step("Back on the workspace: its chats, no guide, and the side panel's own Upload and Instructions", async () => {
+	await test.step("Back on the workspace: its chats first, no setup, and the sections' own Upload and Instructions under them", async () => {
 		await page.getByRole("navigation", { name: "Breadcrumb" }).getByRole("link", { name }).click();
-		await expect(page.locator('[data-slot="workspace-chats"]')).toContainText("Leave policy");
+		await expect(page.locator('[data-slot="workspace-chats"]')).toContainText("How many days of leave");
 		await expect(setup(page)).toHaveCount(0);
-		await expect(page.locator('[data-slot="workspace-starters"]')).toHaveCount(0);
 		await expect(instructionsSection(page).getByRole("button", { name: "Edit instructions" })).toBeVisible();
-		await expect(aside(page).locator('[data-slot="workspace-documents"]').getByRole("button", { name: "Upload", exact: true })).toBeVisible();
+		await expect(about(page).locator('[data-slot="workspace-documents"]').getByRole("button", { name: "Upload", exact: true })).toBeVisible();
+		const chats = (await page.locator('[data-slot="workspace-chats"]').boundingBox())!;
+		expect(chats.y + chats.height).toBeLessThan((await about(page).boundingBox())!.y);
 	});
 
 	await other.context.close();
 });
 
-test("a new workspace keeps what is set up while it still loads, and a refused file's reason stays once first questions come", async ({ page, person, fake, db, browser }) => {
+test("a new workspace keeps what is set up while it still loads, and a refused file's reason stays once the last card leaves", async ({ page, person, fake, db, browser }) => {
 	test.setTimeout(90_000);
 	const tag = person.id.slice(0, 6);
 	const name = `Rota rules ${tag}`;
@@ -306,29 +305,30 @@ test("a new workspace keeps what is set up while it still loads, and a refused f
 		const dialog = page.getByRole("dialog", { name: "New workspace" });
 		await dialog.getByLabel("Name").fill(name);
 		await dialog.getByRole("button", { name: "Create workspace" }).click();
-		await expect(setupCount(page)).toHaveText("0 of 3");
+		await expect(setupCount(page)).toHaveText("0 of 3 done");
 		await expect.poll(() => armed).toBe(false);
 
 		const chooser = page.waitForEvent("filechooser");
 		await setup(page).getByRole("button", { name: "Upload documents" }).click();
 		await (await chooser).setFiles(textFile("Rota.md", `# Rota\n\nNights rotate every four weeks, ${tag}.`));
-		await expect(step(page, "documents")).toHaveAttribute("data-done", "true");
+		await expect(step(page, "documents")).toHaveCount(0);
+		await expect(setupCount(page)).toHaveText("1 of 3 done");
 
 		release();
 		for (let elapsed = 0; elapsed < 2500; elapsed += 100) {
-			expect(await step(page, "documents").getAttribute("data-done"), "the documents step after the older answer").toBe("true");
+			expect(await step(page, "documents").count(), "the documents card after the older answer").toBe(0);
 			await page.waitForTimeout(100);
 		}
-		await expect(aside(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
+		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
 		await page.unroute((url) => /^\/api\/workspaces\/[^/]+$/.test(url.pathname));
 	});
 
-	await test.step("With the last step done by an upload, a file the server refused still says why after first questions come", async () => {
+	await test.step("With the last step done by files dropped on its card, a file the server refused still says why after the card left", async () => {
 		await page.getByRole("button", { name: "New workspace", exact: true }).click();
 		const made = page.getByRole("dialog", { name: "New workspace" });
 		await made.getByLabel("Name").fill(`${name} b`);
 		await made.getByRole("button", { name: "Create workspace" }).click();
-		await expect(setupCount(page)).toHaveText("0 of 3");
+		await expect(setupCount(page)).toHaveText("0 of 3 done");
 		await setup(page).getByRole("button", { name: "Add instructions" }).click();
 		const instructions = page.getByRole("dialog", { name: "Instructions" });
 		await instructions.getByRole("textbox", { name: "Instructions" }).fill("Answer from the rota only.");
@@ -340,17 +340,15 @@ test("a new workspace keeps what is set up while it still loads, and a refused f
 		await page.getByRole("option", { name: new RegExp(escape(other.person.email)) }).click();
 		await share.getByRole("button", { name: "Save" }).click();
 		await expect(share).toHaveCount(0);
-		await expect(setupCount(page)).toHaveText("2 of 3");
+		await expect(setupCount(page)).toHaveText("2 of 3 done");
 
-		// One file the server takes, which ticks the last step, and one it refuses.
-		const chooser = page.waitForEvent("filechooser");
-		await setup(page).getByRole("button", { name: "Upload documents" }).click();
-		await (await chooser).setFiles([
-			textFile("Handover.md", `# Handover\n\nHand over at seven, ${tag}.`),
-			{ name: "tool.exe", mimeType: "application/x-msdownload", buffer: Buffer.from("MZ not a document") },
-		]);
-		// First questions, or the one line while the document is still Indexing.
-		await expect(page.locator('[data-slot="workspace-starters"]')).toBeVisible({ timeout: 30_000 });
+		// Dragged over the cards, the Documents card says it takes them. One file the server takes,
+		// which does the last step, and one it refuses.
+		const handover = { name: "Handover.md", type: "text/markdown", text: `# Handover\n\nHand over at seven, ${tag}.` };
+		await dropFiles(step(page, "documents"), "dragenter", [handover]);
+		await expect(step(page, "documents").locator('[data-slot="document-drop"]')).toBeVisible();
+		await dropFiles(step(page, "documents"), "drop", [handover, { name: "tool.exe", type: "application/x-msdownload", text: "MZ not a document" }]);
+		await expect(about(page).locator('[data-slot="workspace-document"]')).toHaveCount(1);
 		await expect(setup(page)).toHaveCount(0);
 		const refused = page.locator('[data-slot="document-upload-errors"]');
 		await expect(refused).toBeVisible();
@@ -411,7 +409,7 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 		const editor = dialog.getByRole("textbox", { name: "Instructions" });
 		const save = dialog.getByRole("button", { name: "Save" });
 		const box = instructionsSection(page).getByRole("button", { name: "Edit instructions" });
-		// No chat here yet: the side panel has no empty Instructions; the setup step adds them.
+		// No chat here yet: the page has no empty Instructions; the setup card adds them.
 		await expect(instructionsSection(page)).toHaveCount(0);
 		await setup(page).getByRole("button", { name: "Add instructions" }).click();
 		await expect(editor).toBeFocused();
@@ -475,7 +473,7 @@ test("the owner renames a workspace by its title or its menu, and adds and edits
 	});
 });
 
-test("the message box floats at the bottom of a workspace page, beside the side panel; a question there, with a skill, opens its chat", async ({ page, admin, db, fake }) => {
+test("the message box floats at the bottom of a workspace page's column, where the chat's box will be; a question there, with a skill, opens its chat", async ({ page, admin, db, fake }) => {
 	const tag = admin.id.slice(0, 6);
 	const name = `Renal ward ${tag}`;
 	const question = `How often is the exit site cleaned, ${tag}?`;
@@ -489,12 +487,13 @@ test("the message box floats at the bottom of a workspace page, beside the side 
 	const box = workspacePage.box(page);
 	await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(20);
 
-	await test.step("Scrolled to the end, the box is in view, clear of the side panel, and the last chat can be clicked", async () => {
+	await test.step("Scrolled to the end, the box is in view, on the column's edges, and the last chat can be clicked", async () => {
 		await workspacePage.scrollToEnd(page);
 		await expect(box).toBeInViewport({ ratio: 1 });
 		const boxRect = (await box.boundingBox())!;
-		const asideRect = (await aside(page).boundingBox())!;
-		expect(boxRect.x + boxRect.width).toBeLessThanOrEqual(asideRect.x);
+		const aboutRect = (await about(page).boundingBox())!;
+		expect(Math.abs(boxRect.x - aboutRect.x)).toBeLessThanOrEqual(1);
+		expect(Math.abs(boxRect.x + boxRect.width - (aboutRect.x + aboutRect.width))).toBeLessThanOrEqual(1);
 		const last = page.locator('[data-slot="workspace-chats"] li button').last();
 		expect(await workspacePage.reachable(last)).toBe(true);
 	});
@@ -535,6 +534,7 @@ test("the message box floats at the bottom of a workspace page, beside the side 
 			Object.assign(window, { seen });
 			new MutationObserver(() => (seen.greeting ||= Boolean(document.querySelector('[data-slot="conversation-empty-state"]')))).observe(document.body, { childList: true, subtree: true });
 		});
+		const pageBox = (await box.boundingBox())!;
 		await workspacePage.field(page).fill(question);
 		await workspacePage.field(page).press("Enter");
 		await expect(page).toHaveURL(/[?&]t=/);
@@ -544,6 +544,10 @@ test("the message box floats at the bottom of a workspace page, beside the side 
 		await expect(chat.reply(page)).toContainText(question);
 		await chat.idle(page);
 		expect(await page.evaluate(() => (window as unknown as { seen: { greeting: boolean } }).seen.greeting)).toBe(false);
+		// The chat's box takes the page's box's place, across the same column.
+		const chatBox = (await page.locator('[data-slot="prompt-input"]').boundingBox())!;
+		expect(Math.abs(chatBox.x - pageBox.x)).toBeLessThanOrEqual(2);
+		expect(Math.abs(chatBox.width - pageBox.width)).toBeLessThanOrEqual(2);
 		const [call] = await fake.calls(question);
 		expect(JSON.stringify(call.messages)).toContain(marker);
 	});
@@ -567,10 +571,22 @@ test("an older link by a workspace's id opens it, with the slug in its place", a
 });
 
 const workspaceRows = (page: Page) => page.locator('[data-slot="workspace-rows"]');
-const aside = (page: Page) => page.locator('[data-slot="workspace-aside"]');
-const instructionsSection = (page: Page) => aside(page).getByRole("region", { name: "Instructions" });
+const about = (page: Page) => page.locator('[data-slot="workspace-about"]');
+const instructionsSection = (page: Page) => about(page).getByRole("region", { name: "Instructions" });
 const setup = (page: Page) => page.locator('[data-slot="workspace-setup"]');
 const setupCount = (page: Page) => page.locator('[data-slot="workspace-setup-count"]');
 const step = (page: Page, key: "instructions" | "documents" | "people") => page.locator(`[data-slot="workspace-setup-step"][data-step="${key}"]`);
-const starters = (page: Page) => page.locator('[data-slot="workspace-starter"]');
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Drags files over an element (dragenter), or drops them on it. */
+async function dropFiles(target: Locator, type: "dragenter" | "drop", files: { name: string; type: string; text: string }[]) {
+	await target.evaluate(
+		(element, { type, files }) => {
+			const data = new DataTransfer();
+			for (const file of files) data.items.add(new File([file.text], file.name, { type: file.type }));
+			const events = type === "drop" ? ["dragover", "drop"] : ["dragenter", "dragover"];
+			for (const name of events) element.dispatchEvent(new DragEvent(name, { dataTransfer: data, bubbles: true, cancelable: true }));
+		},
+		{ type, files },
+	);
+}

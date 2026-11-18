@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Skeleton } from "frappe-ui";
+import { Button } from "frappe-ui";
 import { useFileViewer } from "frappe-ui-ai-elements";
 import { closeDocumentDetails, closeFile, viewDocumentDetails } from "../side-panel/panel";
 import { ref } from "vue";
@@ -12,16 +12,16 @@ import type { DocumentsHandle } from "./handles";
 import { pickedFiles, useDocumentUpload } from "./upload";
 
 /**
- * The workspace's documents, in its side panel. Everyone who
+ * The workspace's documents, on its page. Everyone who
  * can ask sees each document's name, and its status while it is not Ready, and opens its file
  * by the name. People who can edit also see its size and why it failed, upload (the "Upload
  * documents" area while there are none, then Upload by the heading, or files dropped on the
- * panel: WorkspaceAside.vue calls `upload` and sets `dropping`), delete, open its Details (its
+ * workspace's sections: WorkspaceAbout.vue calls `upload` and sets `dropping`), delete, open its Details (its
  * status and indexing log, in the side panel) and "Try again" a document that failed. The file picker offers only the types
  * the server reads; a file it refuses gets the server's reason. The page polls while one is
  * Indexing (WorkspacePage.vue); `changed` hands it the new list after each change here.
  */
-const props = defineProps<{ workspaceId: string; documents?: WorkspaceDocument[]; editable: boolean; dropping: boolean }>();
+const props = defineProps<{ workspaceId: string; documents: WorkspaceDocument[]; editable: boolean; dropping: boolean }>();
 const emit = defineEmits<{ changed: [documents: WorkspaceDocument[]] }>();
 
 const picker = ref<HTMLInputElement>();
@@ -37,7 +37,7 @@ const viewFile = useFileViewer();
 defineExpose({ upload } satisfies DocumentsHandle);
 
 function current() {
-	return props.documents ?? [];
+	return props.documents;
 }
 
 /** In the chat's side viewer (Shell.vue); a type it can't show opens in a new tab. */
@@ -48,7 +48,7 @@ function open(document: WorkspaceDocument) {
 
 /** In the side panel (DocumentDetails.vue), which follows the document in this list. */
 function details(document: WorkspaceDocument, menu: HTMLElement | null) {
-	const current = () => props.documents?.find((other) => other.id === document.id);
+	const current = () => props.documents.find((other) => other.id === document.id);
 	viewDocumentDetails({ workspaceId: props.workspaceId, document, current, onChanged: replace }, menu);
 }
 
@@ -92,25 +92,13 @@ function askDelete(document: WorkspaceDocument) {
 	<section class="space-y-3" aria-labelledby="workspace-documents-heading" data-slot="workspace-documents">
 		<div class="flex h-7 items-center justify-between">
 			<h2 id="workspace-documents-heading" class="text-base-semibold text-ink-gray-9">Documents</h2>
-			<!-- Once the list is here: while the workspace loads, the section may still give way to the setup steps (WorkspaceAside.vue). -->
-			<template v-if="editable && documents">
-				<Button v-if="documents?.length" variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" @click="picker?.click()" />
+			<template v-if="editable">
+				<Button v-if="documents.length" variant="ghost" icon-left="lucide-upload" label="Upload" class="touch-target -mr-2" :loading="uploading > 0" @click="picker?.click()" />
 				<input ref="picker" type="file" class="hidden" multiple :accept="DOCUMENT_TYPES" aria-label="Upload documents" data-slot="document-picker" @change="picked" />
 			</template>
 		</div>
 
-		<ul v-if="!documents" class="space-y-1" aria-busy="true" aria-label="Loading documents">
-			<!-- DocumentRow.vue's shape: the icon in the middle of the name and its line. -->
-			<li v-for="width in ['w-40', 'w-32']" :key="width" class="flex items-center gap-2.5 py-1 [@media(pointer:coarse)]:min-h-11">
-				<span class="flex w-5 shrink-0 items-center justify-center"><Skeleton class="size-4 rounded-4" /></span>
-				<div class="min-w-0 flex-1">
-					<div class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></div>
-					<div class="flex h-[1lh] items-center text-p-sm"><Skeleton class="h-2.5 w-16 rounded-4" /></div>
-				</div>
-			</li>
-		</ul>
-
-		<div v-else class="relative">
+		<div class="relative">
 			<WorkspaceEmptyArea
 				v-if="!documents.length"
 				icon="lucide-upload"
@@ -133,7 +121,7 @@ function askDelete(document: WorkspaceDocument) {
 					@delete="askDelete(document)"
 				/>
 			</ul>
-			<!-- Files dragged over the panel: the empty area says so where its label was; over the list, in the middle. -->
+			<!-- Files dragged over the sections: the empty area says so where its label was; over the list, in the middle. -->
 			<div
 				v-if="dropping"
 				class="pointer-events-none absolute inset-0 flex items-center gap-2 rounded-4 border border-outline-gray-3 bg-surface-gray-2 px-3 text-base text-ink-gray-8"

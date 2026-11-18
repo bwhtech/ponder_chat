@@ -22,7 +22,7 @@ const documents = (page: Page) => page.locator('[data-slot="workspace-documents"
 const rows = (page: Page) => documents(page).locator('[data-slot="workspace-document"]');
 const row = (page: Page, name: string) => rows(page).filter({ has: page.locator('[data-slot="document-name"]', { hasText: name }) });
 const picker = (page: Page) => page.locator('[data-slot="document-picker"]');
-const dropState = (page: Page) => page.locator('[data-slot="workspace-aside"] [data-slot="document-drop"]');
+const dropState = (page: Page) => page.locator('[data-slot="workspace-about"] [data-slot="document-drop"]');
 
 /** Opens a document's Details from its row's menu: they show in the side panel. */
 async function openDetails(page: Page, name: string) {
@@ -38,7 +38,7 @@ test("7. an editor uploads documents; they go from Indexing to Ready, and answer
 	test.setTimeout(120_000);
 	const tag = person.id.slice(0, 6);
 	const { id, slug } = await createWorkspace(page, `Office handbook ${tag}`);
-	// A chat here already: the page shows its chats, not the setup steps, so the side panel has its own empty areas.
+	// A chat here already: no setup cards, so the workspace's sections have their own empty areas.
 	await addChats(db, person.id, id, 1);
 	await page.goto(`/?w=${slug}`);
 	await expect(page.locator('[data-slot="workspace-chats"] li')).toHaveCount(1);
@@ -53,7 +53,7 @@ test("7. an editor uploads documents; they go from Indexing to Ready, and answer
 	});
 
 	const leave = `Staff get 27 days of paid leave a year, code LV-${tag}.`;
-	await test.step("a file dropped on the side panel goes from Indexing to Ready", async () => {
+	await test.step("a file dropped on the workspace's sections goes from Indexing to Ready", async () => {
 		await drag(page, "dragenter");
 		await expect(dropState(page)).toBeVisible();
 		await drag(page, "drop", { name: "leave-policy.md", text: `# Leave policy\n\n${leave}\n\nAsk your manager before you book a trip.` });
@@ -149,9 +149,8 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 		// No instructions, and nothing to add them with: no Instructions.
 		await expect(asker.page.getByRole("region", { name: "Instructions" })).toHaveCount(0);
 		await expect(asker.page.locator('[data-slot="document-picker"]')).toHaveCount(0);
-		// No chat of theirs here yet: no setup steps, but first questions made from the Ready document.
+		// No chat of theirs here yet, and no setup cards: they can only ask.
 		await expect(asker.page.locator('[data-slot="workspace-setup"]')).toHaveCount(0);
-		await expect(asker.page.locator('[data-slot="workspace-starter"]')).toHaveText(["Summarise “manual.pdf”", `What can I ask about in Dialysis manual ${tag}?`]);
 
 		const document = (await documentOf(page, id, "manual.pdf"))!;
 		expect((await asker.page.request.get(`/api/workspaces/${id}/documents/${document.id}/log`)).status()).toBe(403);
