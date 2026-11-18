@@ -88,8 +88,14 @@ test("a private workspace: made, shared, asked in, hidden from others, and taken
 		const [call] = await fake.calls(question);
 		expect(call.system).toContain(marker);
 
+		// The header's breadcrumb: the workspace, then the chat, which is the page's heading.
+		const breadcrumb = b.page.getByRole("navigation", { name: "Breadcrumb" });
+		await expect(breadcrumb.getByRole("link", { name })).toHaveAttribute("href", `/?w=${new URL(workspaceUrl).searchParams.get("w")}`);
+		await expect(breadcrumb).toContainText("How many days of leave");
+		await expect(b.page.getByRole("heading", { name: /How many days of leave/, level: 1 })).toHaveCount(1);
+
 		// Back to the workspace by the header: its page lists B's own chat.
-		await b.page.locator('[data-slot="chat-breadcrumb"]').getByRole("link", { name }).click();
+		await breadcrumb.getByRole("link", { name }).click();
 		await expect(b.page).toHaveURL(workspaceUrl);
 		await expect(b.page.locator('[data-slot="workspace-chats"]')).toContainText("How many days of leave");
 	});

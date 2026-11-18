@@ -99,8 +99,8 @@ function widePreload(files: string[]) {
 const LATER = ["chat-sdk.ts", "transcript.ts", "api-client.ts", "thinking.ts", "attention.ts"];
 /**
  * The modules that a first tap waits for, most used first: the model menu (web/models.ts), a
- * confirm dialog (web/dialogs.ts), settings, the side panel and memory (web/Shell.vue), a
- * workspace's page, its dialogs and the composer's workspace menu (web/workspaces/), a toast,
+ * confirm dialog (web/dialogs.ts), settings, the side panel, memory and a chat's workspace
+ * breadcrumb (web/Shell.vue), a workspace's page, its dialogs and the composer's workspace menu (web/workspaces/), a toast,
  * the $ menu, the alerts, the Markdown export and a tooltip. Not the sign-in page, which
  * a signed-in page never draws, nor PDF pages and code languages, which are large and rare.
  */
@@ -110,6 +110,7 @@ const ON_TAP = [
 	"settings/SettingsModal.vue",
 	"side-panel/SidePanel.vue",
 	"MemoryView.vue",
+	"breadcrumbs.ts",
 	"workspaces/WorkspacePage.vue",
 	"workspaces/WorkspaceDialogs.vue",
 	"workspaces/WorkspacePicker.vue",
