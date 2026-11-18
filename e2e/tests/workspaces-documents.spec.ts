@@ -592,7 +592,8 @@ test("Sources and People sit side by side on a wide page, and one under the othe
 	const people = page.locator('[data-slot="workspace-sharing"]');
 	await expect(people).toBeVisible();
 	const top = async (locator: Locator) => (await locator.boundingBox())!.y;
-	expect(Math.abs((await top(people)) - (await top(documents(page))))).toBeLessThan(2);
+	// The sections rise a few pixels as they come in: measured once they have settled.
+	await expect.poll(async () => Math.abs((await top(people)) - (await top(documents(page))))).toBeLessThan(1);
 
 	// Details take the right of the page: the column is too narrow for two, so People goes under Sources.
 	await openDetails(page, "Shift roles and duties.md");
