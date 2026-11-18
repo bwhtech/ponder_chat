@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Option from "effect/Option";
 import * as TestClock from "effect/testing/TestClock";
+import type { Services } from "../../runtime/layer.ts";
 import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
 import { chooseInline, inlineBudget, MAX_INLINE_CHARS } from "./budget.ts";
 import { EMBED_COST, meaning, startFakeOpenRouter } from "./fake-openrouter.ts";
@@ -225,7 +226,7 @@ describe.skipIf(!base)("workspace search", () => {
 		return arrived;
 	}
 	/** Runs `effect` on the test clock, and moves it by `duration` once the hung call came. */
-	const afterHang = <A, E>(effect: Effect.Effect<A, E, any>, duration: Duration.Input) =>
+	const afterHang = <A, E>(effect: Effect.Effect<A, E, Services>, duration: Duration.Input) =>
 		runPromise(
 			Effect.gen(function* () {
 				const arrived = hangEmbedding();

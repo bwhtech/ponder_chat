@@ -91,7 +91,7 @@ test("a code is checked only by signing in with it", async ({ page, db, fake }) 
 
 test("stores no code of a type other than sign-in", async ({ page, db, fake }) => {
 	const { email } = await signIn(page, db, fake, uniqueEmail("code types"));
-	const stored = async () => (await db`select identifier from verifications where identifier like ${`%${email}`}`).map((row) => row.identifier);
+	const stored = async () => (await db<{ identifier: string }[]>`select identifier from verifications where identifier like ${`%${email}`}`).map((row) => row.identifier);
 
 	// A stored code would show, by how wrong guesses are answered, that the email has an account.
 	for (const type of ["email-verification", "forget-password"]) {

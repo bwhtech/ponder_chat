@@ -5,7 +5,7 @@ import postgres from "postgres";
 import { e2e } from "./env.ts";
 import type { McpCall } from "./mcp/calls.ts";
 import { newDatabase, PonderServer } from "./ponder.ts";
-import { chat, expect, signIn, test, uniqueEmail, type Fake, type Person } from "./fixtures.ts";
+import { chat, expect, jsonOf, signIn, test, uniqueEmail, type Fake, type Person } from "./fixtures.ts";
 
 /**
  * Replies that outlive their server and their model's errors (README, "Durable replies").
@@ -92,13 +92,13 @@ export function durableServer(slot: number, name: string) {
 
 	/** The person's model calls in `runs`, oldest first, and whether credits count each. */
 	async function modelCalls(person: Person) {
-		return db`
+		return db<{ finish_reason: string | null; cost_usd: number | null; charged: boolean }[]>`
 			select finish_reason, cost_usd::float8 as cost_usd, exists (select 1 from charged_runs c where c.id = r.id) as charged
 			from runs r where "user" = ${person.id} and function_id = 'chat' order by created_at`;
 	}
 
 	async function serverCalls(page: Page, order: string): Promise<McpCall[]> {
-		return (await page.request.get(`${e2e.mcpUrl}/__mcp/calls?match=${order}`)).json();
+		return jsonOf(await page.request.get(`${e2e.mcpUrl}/__mcp/calls?match=${order}`));
 	}
 
 	return { server, setUp, startSlowReply, endRun, runOf, expectWholeReply, modelCalls, serverCalls };

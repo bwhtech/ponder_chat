@@ -16,7 +16,10 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../../auth.ts";
+import { jsonBody } from "../../test-json.ts";
+import type { DocumentLog } from "../admin.ts";
 import { base, USERS_TABLE, useTestSchema } from "../test-env.ts";
+import type { WorkspaceDetail } from "../Workspaces.ts";
 import { EMBED_COST, LATE_COST, PAGE_COST, startFakeOpenRouter } from "./fake-openrouter.ts";
 import type { Documents as DocumentsService } from "./Documents.ts";
 import type { IndexRequest } from "./Indexer.ts";
@@ -74,9 +77,9 @@ const app = new Hono<SignedInEnv>()
 		await next();
 	})
 	.route("/api/workspaces", workspacesApi);
-async function call(person: Who, method: string, path: string, body?: BodyInit) {
+async function call<Body = unknown>(person: Who, method: string, path: string, body?: BodyInit) {
 	const response = await app.request(path, { method, headers: { "x-test-user": who[person] }, body });
-	return { status: response.status, body: (await response.json()) as any };
+	return { status: response.status, body: await jsonBody<Body>(response) };
 }
 
 /** A Markdown manual of `sections` sections of about 900 characters: one passage each. */
@@ -139,9 +142,9 @@ describe.skipIf(!base)("workspace documents", () => {
 			[96, 24],
 		);
 		// Everyone who can ask sees it ready.
-		const answer = await call("bob", "GET", `/api/workspaces/${ids.workspace}`);
+		const answer = await call<{ workspace: WorkspaceDetail }>("bob", "GET", `/api/workspaces/${ids.workspace}`);
 		assert.deepStrictEqual(
-			answer.body.workspace.documents.map((document: { id: string; status: string }) => [document.id, document.status]),
+			answer.body.workspace.documents.map((document) => [document.id, document.status]),
 			[[uploaded.id, "ready"]],
 		);
 		assert.deepStrictEqual(Object.keys(answer.body.workspace.documents[0]).sort(), ["createdAt", "error", "id", "mediaType", "name", "size", "status"]);
@@ -235,8 +238,8 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.deepStrictEqual(steps.find((step) => step.step === "reindexed")?.detail, { reason: "asked", by: who.ana });
 		assert.strictEqual(steps.at(-1)!.step, "ready");
 		// Only a failed document can be tried again.
-		const refused = await documents((service) => service.retry(actor("ana"), ids.workspace, ids.failing)).catch((error) => error);
-		assert.strictEqual(refused._tag, "DocumentNotFailed");
+		const refused = await documents((service) => service.retry(actor("ana"), ids.workspace, ids.failing)).catch((error: unknown) => error);
+		assert.propertyVal(refused, "_tag", "DocumentNotFailed");
 	});
 
 	it("fails a table that is too wide, with a reason the person can act on", async () => {
@@ -462,8 +465,8 @@ describe.skipIf(!base)("workspace documents", () => {
 
 		// Try again: refused while the run is live or the document has only just started.
 		for (const id of [runLive, justUploaded]) {
-			const refused = await documents((service) => service.retry(actor("ana"), ids.workspace, id)).catch((error) => error);
-			assert.strictEqual(refused._tag, "DocumentNotFailed");
+			const refused = await documents((service) => service.retry(actor("ana"), ids.workspace, id)).catch((error: unknown) => error);
+			assert.propertyVal(refused, "_tag", "DocumentNotFailed");
 		}
 		// Once the run ended, an editor may start it again.
 		ended.add(runIdOf({ documentId: runLive, generation: 1 }));
@@ -519,7 +522,7 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.strictEqual((await call("dan", "GET", `/api/workspaces/${ids.workspace}`)).status, 404);
 
 		// An editor reads the log; a document of another workspace is not found in this one.
-		const log = await call("cy", "GET", paths.log);
+		const log = await call<DocumentLog>("cy", "GET", paths.log);
 		assert.strictEqual(log.status, 200);
 		assert.deepStrictEqual(Object.keys(log.body).sort(), ["document", "steps"]);
 		assert.deepStrictEqual(Object.keys(log.body.steps[0]).sort(), ["at", "costUsd", "detail", "generation", "step"]);
@@ -529,7 +532,7 @@ describe.skipIf(!base)("workspace documents", () => {
 		assert.strictEqual((await call("cy", "POST", paths.retry)).status, 409);
 		const image = new FormData();
 		image.set("file", file("photo.png", new Uint8Array([137, 80, 78, 71]), "image/png"));
-		const refused = await call("cy", "POST", paths.upload, image);
+		const refused = await call<{ error: string }>("cy", "POST", paths.upload, image);
 		assert.deepStrictEqual([refused.status, refused.body.error], [400, '“photo.png” can\'t be read. Upload a PDF, or a text, Markdown, CSV, TSV or JSON file.']);
 	});
 

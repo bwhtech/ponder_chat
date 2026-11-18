@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ReceivedSpan } from "../fake/script.ts";
-import { expect, test } from "../fixtures.ts";
+import { expect, jsonOf, test, type Thread } from "../fixtures.ts";
 
 /**
  * Saving a reply (server/workflow/reply.ts) replays the run's stream. A tool call's input
@@ -37,9 +37,9 @@ test("a reply with a 400 KB tool input in 10,000 pieces, then a long answer, sav
 
 	// The reply is saved whole: the artifact's input and the answer after it.
 	await expect
-		.poll(async () => JSON.stringify((await (await page.request.get(`/api/threads/${threadId}`)).json()).messages ?? []), { timeout: 60_000 })
+		.poll(async () => JSON.stringify((await jsonOf<Thread>(await page.request.get(`/api/threads/${threadId}`))).messages ?? []), { timeout: 60_000 })
 		.toContain("SAVE-DONE");
-	const saved = JSON.stringify((await (await page.request.get(`/api/threads/${threadId}`)).json()).messages);
+	const saved = JSON.stringify((await jsonOf<Thread>(await page.request.get(`/api/threads/${threadId}`))).messages);
 	expect(saved).toContain(content.slice(-200));
 	expect(saved).toContain("word19999 SAVE-END");
 

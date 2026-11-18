@@ -1,10 +1,11 @@
 import { randomBytes } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { e2e } from "../env.ts";
+import type { ConnectorView } from "../../shared/connectors.ts";
 import type { McpCall } from "../mcp/calls.ts";
 import { SHOP_KEY } from "../mcp/server.ts";
 import type { Step } from "../fake/script.ts";
-import { chat, expect, randomIp, signIn, test, uniqueEmail, type Fake } from "../fixtures.ts";
+import { chat, expect, jsonOf, randomIp, signIn, test, uniqueEmail, type Fake } from "../fixtures.ts";
 
 /**
  * Connectors (Settings, Connectors) against the test MCP servers in e2e/mcp/server.ts:
@@ -16,12 +17,14 @@ const OPEN = `${e2e.mcpUrl}/open/mcp`;
 const KEY = `${e2e.mcpUrl}/key/mcp`;
 const OAUTH = `${e2e.mcpOAuthUrl}/mcp`;
 
+type Connectors = { connectors: ConnectorView[] };
+
 /** An order number no other test uses: the servers are shared, and their calls are found by it. */
 const orderNumber = () => `A${randomBytes(3).toString("hex")}`;
 
 /** The tool calls that the test servers ran with this order. */
 async function serverCalls(page: Page, order: string): Promise<McpCall[]> {
-	return (await page.request.get(`${e2e.mcpUrl}/__mcp/calls?match=${order}`)).json();
+	return jsonOf(await page.request.get(`${e2e.mcpUrl}/__mcp/calls?match=${order}`));
 }
 
 /** A model's call to a connector tool, through connector_call. */
@@ -281,7 +284,7 @@ test("an approved chat sent again after its reply finished runs nothing again", 
 	await chat.send(page, `Add a gift-wrap note to order ${order}`);
 	const answer = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/chat");
 	await page.getByRole("button", { name: "Allow once" }).click();
-	const approved = (await answer).postDataJSON();
+	const approved: unknown = (await answer).postDataJSON();
 	await expect(chat.reply(page)).toContainText("I added the note.");
 	const thread = await replySaved(page);
 
@@ -426,8 +429,8 @@ test("stops asking for a tool that the person always allows", async ({ page, fak
 	await expect(page.getByRole("button", { name: "Always allow" })).toHaveCount(0);
 	expect(await serverCalls(page, order)).toHaveLength(2);
 	// "Always allow" saved the rule of the tool behind connector_call.
-	const [shop] = (await (await page.request.get("/api/connectors")).json()).connectors;
-	expect(shop.tools.find((tool: { name: string }) => tool.name === "add_note").rule).toBe("allow");
+	const [shop] = (await jsonOf<Connectors>(await page.request.get("/api/connectors"))).connectors;
+	expect(shop.tools.find((tool) => tool.name === "add_note")?.rule).toBe("allow");
 });
 
 test("does not run a call that the person allows after turning its tool off", async ({ page, fake }) => {
@@ -439,7 +442,7 @@ test("does not run a call that the person allows after turning its tool off", as
 	await chat.send(page, `Add a late note to order ${order}`);
 	await expect(page.getByText("Allow Ponder to use Shop: Add note?")).toBeVisible();
 	// While the approval waits, the person turns the tool off in another tab.
-	const [shop] = (await (await page.request.get("/api/connectors")).json()).connectors;
+	const [shop] = (await jsonOf<Connectors>(await page.request.get("/api/connectors"))).connectors;
 	const off = await page.request.patch(`/api/connectors/${shop.id}`, { data: { rules: { add_note: "off" } } });
 	expect(off.ok(), await off.text()).toBe(true);
 	await page.getByRole("button", { name: "Allow once" }).click();
@@ -504,7 +507,7 @@ test(`does not run an "Ask first" tool called by a padded name`, async ({ page, 
 
 test("does not run a tool that the person turned off", async ({ page, fake }) => {
 	await addShop(page);
-	const [shop] = (await (await page.request.get("/api/connectors")).json()).connectors;
+	const [shop] = (await jsonOf<Connectors>(await page.request.get("/api/connectors"))).connectors;
 	const off = await page.request.patch(`/api/connectors/${shop.id}`, { data: { rules: { find_order: "off" } } });
 	expect(off.ok(), await off.text()).toBe(true);
 	const order = orderNumber();

@@ -129,7 +129,7 @@ describe.skipIf(!base)("workspace document lifecycle", () => {
 
 		// The process stops while the first file is deleted.
 		bucket.crashOnRemove = true;
-		const stopped = await run(Workspaces.Workspaces.use((workspaces) => workspaces.remove(ana, workspaceId))).catch((error) => error);
+		const stopped = await run(Workspaces.Workspaces.use((workspaces) => workspaces.remove(ana, workspaceId))).catch((error: unknown) => error);
 		bucket.crashOnRemove = false;
 		assert.instanceOf(stopped, Error);
 		// The delete committed: no document is left whose file is gone.

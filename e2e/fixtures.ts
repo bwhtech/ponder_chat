@@ -1,5 +1,6 @@
 import { test as base, expect, type APIRequestContext, type Page } from "@playwright/test";
 import { randomBytes } from "node:crypto";
+import type { UIMessage } from "ai";
 import postgres from "postgres";
 import { e2e } from "./env.ts";
 import type { ChatScript, MemoryScript, PageScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
@@ -44,21 +45,21 @@ export class Fake {
 
 	/** The summary calls whose transcript contains `match`. */
 	async summaries(match: string): Promise<ReceivedSummary[]> {
-		return (await this.api.get(`/__fake/summaries?match=${encodeURIComponent(match)}&since=${this.since}`)).json();
+		return jsonOf(await this.api.get(`/__fake/summaries?match=${encodeURIComponent(match)}&since=${this.since}`));
 	}
 
 	/** The chat calls whose person's latest message contains `match`. */
 	async calls(match: string): Promise<ReceivedCall[]> {
-		return (await this.api.get(`/__fake/calls?match=${encodeURIComponent(match)}&since=${this.since}`)).json();
+		return jsonOf(await this.api.get(`/__fake/calls?match=${encodeURIComponent(match)}&since=${this.since}`));
 	}
 
 	/** Every span Ponder exported (server/tracing/), and each export request as it came. */
 	async spans(): Promise<{ spans: ReceivedSpan[]; exports: string[] }> {
-		return (await this.api.get("/__fake/spans")).json();
+		return jsonOf(await this.api.get("/__fake/spans"));
 	}
 
 	async emails(to: string): Promise<SentEmail[]> {
-		return (await this.api.get(`/__fake/emails?to=${encodeURIComponent(to)}&since=${this.since}`)).json();
+		return jsonOf(await this.api.get(`/__fake/emails?to=${encodeURIComponent(to)}&since=${this.since}`));
 	}
 
 	/** The newest email to `to`, once it has come. */
@@ -115,6 +116,17 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
 export { expect };
 
 /** A made-up address for a browser, so Ponder's limits per address apply to one test only. */
+/** A saved thread, as GET /api/threads/:id answers it. */
+export type Thread = { messages: UIMessage[]; running: boolean; failed?: boolean; workspaceId?: string };
+
+/**
+ * A JSON answer's body, typed as the shape the test expects. Playwright types it as `any`;
+ * the test's assertions check it, and a body of another shape fails them.
+ */
+export async function jsonOf<T>(response: { json(): Promise<unknown> }): Promise<T> {
+	return (await response.json()) as T;
+}
+
 export function randomIp() {
 	return [10, ...randomBytes(3)].join(".");
 }

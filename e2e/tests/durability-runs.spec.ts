@@ -53,7 +53,7 @@ test("an approval sent again after the runtime failed its run in the middle of t
 	await chat.send(page, `Add a note to order ${order}`);
 	const answer = page.waitForRequest((request) => request.method() === "POST" && new URL(request.url()).pathname === "/api/chat");
 	await page.getByRole("button", { name: "Allow once" }).click();
-	const approved = (await answer).postDataJSON();
+	const approved: unknown = (await answer).postDataJSON();
 	// The test server takes 6 seconds over a SLOW order, and records the call first (e2e/mcp/server.ts).
 	await expect.poll(() => serverCalls(page, order)).toHaveLength(1);
 

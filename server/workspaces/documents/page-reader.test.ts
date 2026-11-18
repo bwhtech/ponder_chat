@@ -15,6 +15,7 @@ import * as PonderConfig from "../../config.ts";
 import * as OpenRouter from "../../openrouter/OpenRouter.ts";
 import * as OpenRouterKey from "../../openrouter/OpenRouterKey.ts";
 import * as PageReader from "./page-reader.ts";
+import { parseJson } from "../../test-json.ts";
 
 type Sent = { url: string; authorization: string | undefined; body: Record<string, unknown> };
 type Answer = { status: number; body: unknown };
@@ -28,7 +29,7 @@ function fakeOpenRouter(answers: Answer[]) {
 	const client = HttpClient.make((request: HttpClientRequest.HttpClientRequest, url) =>
 		Effect.sync(() => {
 			const text = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "{}";
-			sent.push({ url: url.href, authorization: request.headers.authorization, body: JSON.parse(text) });
+			sent.push({ url: url.href, authorization: request.headers.authorization, body: parseJson<Sent["body"]>(text) });
 			const answer = answers[Math.min(sent.length - 1, answers.length - 1)];
 			return HttpClientResponse.fromWeb(request, new Response(JSON.stringify(answer.body), { status: answer.status }));
 		}),

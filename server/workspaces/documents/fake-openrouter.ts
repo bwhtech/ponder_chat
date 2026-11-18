@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
+import { parseJson } from "../../test-json.ts";
 
 /**
  * A stand-in for OpenRouter in the document tests: the outside system, so the real
@@ -38,11 +39,14 @@ export type FakeOpenRouter = {
 	close: () => Promise<void>;
 };
 
+/** What the fake reads of a request: an embedding's input, or a page's messages. */
+type FakeRequest = { model?: string; input?: string[]; messages?: unknown };
+
 export async function startFakeOpenRouter(): Promise<FakeOpenRouter> {
 	const fake: FakeOpenRouter = { url: "", pages: new Map(), embedded: [], oneAtATime: false, emptyOnce: new Set(), close: async () => undefined };
 	const { pages, embedded } = fake;
 	const server = createServer(async (request, response) => {
-		const body = request.method === "POST" ? JSON.parse(await read(request)) : {};
+		const body: FakeRequest = request.method === "POST" ? parseJson(await read(request)) : {};
 		const send = (status: number, json: unknown) => {
 			response.writeHead(status, { "Content-Type": "application/json" });
 			response.end(JSON.stringify(json));

@@ -72,7 +72,9 @@ const marksOf = (messages: LanguageModelV4Prompt) =>
 	]);
 assert.deepEqual(marksOf(prompt), [0, 3, 5, 9]);
 // Only one result of a tool message carries the mark: a mark per result would pass Anthropic's four.
-assert.deepEqual(withCacheMarks(prompt)[9].content.map((part) => isMarked(part as { providerOptions?: Record<string, unknown> })), [false, true]);
+const toolResults = withCacheMarks(prompt)[9].content;
+assert.ok(Array.isArray(toolResults));
+assert.deepEqual(toolResults.map((part) => isMarked(part)), [false, true]);
 // Two turns: nothing is trimmed yet, so only the end of the first turn is marked.
 assert.deepEqual(marksOf(prompt.slice(0, 6)), [0, 3, 5]);
 assert.deepEqual(marksOf([prompt[1]]), [0]);

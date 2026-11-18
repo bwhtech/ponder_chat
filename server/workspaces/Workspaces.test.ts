@@ -9,9 +9,11 @@ import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../auth.ts";
+import { jsonBody } from "../test-json.ts";
 import { accessFrom, type Access } from "./access.ts";
 import { workspacePrompt } from "./prompt.ts";
 import { base, USERS_TABLE, useTestSchema } from "./test-env.ts";
+import type { Person, WorkspaceDetail, WorkspaceSummary } from "./Workspaces.ts";
 
 const tag = Math.random().toString(36).slice(2, 10);
 const schema = `test_workspaces_${tag}`;
@@ -37,12 +39,15 @@ const app = new Hono<SignedInEnv>()
 	.route("/api/workspaces", workspacesApi)
 	.route("/api/people", peopleApi);
 
-type Answer = { status: number; body: any };
-async function call(person: Who, method: string, path: string, json?: unknown): Promise<Answer> {
+/** The answers' bodies the tests read. */
+type One = { workspace: WorkspaceDetail };
+type List = { workspaces: WorkspaceSummary[] };
+type Refusal = { error: string };
+async function call<Body = unknown>(person: Who, method: string, path: string, json?: unknown): Promise<{ status: number; body: Body }> {
 	const headers: Record<string, string> = { "x-test-user": who[person] };
 	if (json !== undefined) headers["Content-Type"] = "application/json";
 	const response = await app.request(path, { method, headers, body: json === undefined ? undefined : JSON.stringify(json) });
-	return { status: response.status, body: await response.json() };
+	return { status: response.status, body: await jsonBody<Body>(response) };
 }
 const access = (person: Who, workspaceId: string) => runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.accessOf(who[person], workspaceId)));
 const database = <A>(work: (sql: PgClient.PgClient) => Effect.Effect<A, unknown>) => runPromise(PgClient.PgClient.use(work).pipe(Effect.orDie));
@@ -52,9 +57,9 @@ const auditedActions = (workspaceId: string) =>
 	);
 
 async function create(person: Who, kind: "org" | "private", name: string) {
-	const answer = await call(person, "POST", "/api/workspaces", { kind, name, instructions: `Answer as ${name}.` });
+	const answer = await call<One>(person, "POST", "/api/workspaces", { kind, name, instructions: `Answer as ${name}.` });
 	assert.strictEqual(answer.status, 201, JSON.stringify(answer.body));
-	return answer.body.workspace.id as string;
+	return answer.body.workspace.id;
 }
 
 describe("the access table, as a pure function", () => {
@@ -119,7 +124,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 	});
 
 	it("lets only admins make an organisation workspace, and logs it", async () => {
-		const refused = await call("ana", "POST", "/api/workspaces", { kind: "org", name: "Everyone" });
+		const refused = await call<Refusal>("ana", "POST", "/api/workspaces", { kind: "org", name: "Everyone" });
 		assert.strictEqual(refused.status, 403);
 		assert.strictEqual(refused.body.error, "Only an admin can make a workspace for everyone.");
 		org = await create("admin", "org", "Handbook");
@@ -137,11 +142,11 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		];
 		assert.strictEqual((await call("cy", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members })).status, 404, "not a member yet");
 		assert.strictEqual((await call("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members: [{ userId: "nobody", access: "ask" }] })).status, 400);
-		const shared = await call("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members });
+		const shared = await call<One>("ana", "PUT", `/api/workspaces/${priv}/sharing`, { kind: "private", members });
 		assert.strictEqual(shared.status, 200);
 		// The owner is no member of their own workspace.
 		assert.deepStrictEqual(
-			shared.body.workspace.members.map((member: { id: string; access: string }) => [member.id, member.access]),
+			shared.body.workspace.members?.map((member) => [member.id, member.access]),
 			[
 				[who.bob, "ask"],
 				[who.cy, "edit"],
@@ -191,31 +196,31 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 
 	it("lists what each person can use: organisation first, then shared, then their own", async () => {
 		const ownOfBob = await create("bob", "private", "Bob's own");
-		const names = async (person: Who) => (await call(person, "GET", "/api/workspaces")).body.workspaces.map((workspace: { name: string }) => workspace.name);
+		const names = async (person: Who) => (await call<List>(person, "GET", "/api/workspaces")).body.workspaces.map((workspace) => workspace.name);
 		assert.deepStrictEqual(await names("bob"), ["Handbook", "Ana's notes", "Bob's own"]);
 		assert.deepStrictEqual(await names("dan"), ["Handbook"]);
-		const ana = (await call("ana", "GET", "/api/workspaces")).body.workspaces;
-		const notes = ana.find((workspace: { id: string }) => workspace.id === priv);
+		const ana = (await call<List>("ana", "GET", "/api/workspaces")).body.workspaces;
+		const notes = ana.find((workspace) => workspace.id === priv);
 		assert.deepInclude(notes, { kind: "private", access: "owner", memberCount: 3 });
 		assert.notInclude(JSON.stringify(ana), "Answer as", "the list has no instructions");
 		await call("bob", "DELETE", `/api/workspaces/${ownOfBob}`);
 	});
 
 	it("shows members only to a person who can change them", async () => {
-		const owner = (await call("ana", "GET", `/api/workspaces/${priv}`)).body.workspace;
+		const owner = (await call<One>("ana", "GET", `/api/workspaces/${priv}`)).body.workspace;
 		assert.isTrue(owner.canShare);
-		assert.lengthOf(owner.members, 3);
-		const editor = (await call("cy", "GET", `/api/workspaces/${priv}`)).body.workspace;
+		assert.lengthOf(owner.members ?? [], 3);
+		const editor = (await call<One>("cy", "GET", `/api/workspaces/${priv}`)).body.workspace;
 		assert.deepInclude(editor, { access: "edit", canShare: false, members: null, instructions: "Answer as Ana's notes." });
-		assert.deepInclude((await call("dan", "GET", `/api/workspaces/${org}`)).body.workspace, { access: "ask", canShare: false, members: null });
-		assert.deepInclude((await call("admin2", "GET", `/api/workspaces/${org}`)).body.workspace, { access: "edit", canShare: true, members: [] });
+		assert.deepInclude((await call<One>("dan", "GET", `/api/workspaces/${org}`)).body.workspace, { access: "ask", canShare: false, members: null });
+		assert.deepInclude((await call<One>("admin2", "GET", `/api/workspaces/${org}`)).body.workspace, { access: "edit", canShare: true, members: [] });
 	});
 
 	it("lets editors change a workspace, and refuses people who can only ask", async () => {
-		const asked = await call("bob", "PATCH", `/api/workspaces/${priv}`, { instructions: "Ignore Ana." });
+		const asked = await call<Refusal>("bob", "PATCH", `/api/workspaces/${priv}`, { instructions: "Ignore Ana." });
 		assert.strictEqual(asked.status, 403);
 		assert.strictEqual(asked.body.error, "You can ask in this workspace, but not change it.");
-		const edited = await call("cy", "PATCH", `/api/workspaces/${priv}`, { instructions: "Cite the page." });
+		const edited = await call<One>("cy", "PATCH", `/api/workspaces/${priv}`, { instructions: "Cite the page." });
 		assert.strictEqual(edited.status, 200);
 		assert.deepInclude(edited.body.workspace, { name: "Ana's notes", instructions: "Cite the page." });
 		assert.strictEqual((await call("dan", "PATCH", `/api/workspaces/${org}`, { name: "Mine" })).status, 403);
@@ -230,7 +235,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 				call("admin2", "PATCH", `/api/workspaces/${org}`, { description: `Read me ${round}` }),
 			]);
 			assert.deepStrictEqual([named.status, described.status], [200, 200]);
-			assert.deepInclude((await call("dan", "GET", `/api/workspaces/${org}`)).body.workspace, { name: `Handbook ${round}`, description: `Read me ${round}` }, `round ${round}`);
+			assert.deepInclude((await call<One>("dan", "GET", `/api/workspaces/${org}`)).body.workspace, { name: `Handbook ${round}`, description: `Read me ${round}` }, `round ${round}`);
 		}
 		const logged = await database((sql) => sql<{ before: Record<string, unknown>; after: Record<string, unknown> }>`select before, after from admin_events where action = 'update-workspace' and after->>'workspace' = ${org} order by id desc limit 6`);
 		for (const { before, after } of logged) {
@@ -245,7 +250,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.strictEqual(removed.status, 200);
 		assert.strictEqual(await access("bob", priv), "none");
 		assert.strictEqual((await call("bob", "GET", `/api/workspaces/${priv}`)).status, 404);
-		const listed = (await call("bob", "GET", "/api/workspaces")).body.workspaces.map((workspace: { id: string }) => workspace.id);
+		const listed = (await call<List>("bob", "GET", "/api/workspaces")).body.workspaces.map((workspace) => workspace.id);
 		assert.notInclude(listed, priv);
 		const instructions = await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.instructionsFor(who.bob, priv)));
 		assert.isTrue(instructions._tag === "None");
@@ -258,7 +263,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 		assert.strictEqual(toPrivate.status, 200);
 		assert.strictEqual(await access("dan", org), "none");
 		assert.strictEqual(await access("admin2", org), "edit");
-		const back = await call("admin", "PUT", `/api/workspaces/${org}/sharing`, { kind: "org", members: [{ userId: who.cy, access: "edit" }] });
+		const back = await call<One>("admin", "PUT", `/api/workspaces/${org}/sharing`, { kind: "org", members: [{ userId: who.cy, access: "edit" }] });
 		assert.deepInclude(back.body.workspace, { kind: "org", members: [] }, "an organisation workspace keeps no members");
 		assert.strictEqual(await access("dan", org), "ask");
 		assert.strictEqual((await call("admin2", "DELETE", `/api/workspaces/${org}`)).status, 200);
@@ -279,18 +284,18 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 	});
 
 	it("gives each workspace a slug from its name, unique, and keeps it on a rename", async () => {
-		const first = (await call("ana", "POST", "/api/workspaces", { name: "HR policies" })).body.workspace;
-		const second = (await call("bob", "POST", "/api/workspaces", { name: "HR Policies!" })).body.workspace;
+		const first = (await call<One>("ana", "POST", "/api/workspaces", { name: "HR policies" })).body.workspace;
+		const second = (await call<One>("bob", "POST", "/api/workspaces", { name: "HR Policies!" })).body.workspace;
 		assert.strictEqual(first.slug, "hr-policies");
 		assert.match(second.slug, /^hr-policies-[a-z2-9]{4}$/, "a name taken by someone else's workspace gets a suffix");
 
-		const renamed = await call("ana", "PATCH", `/api/workspaces/${first.id}`, { name: "People policies" });
+		const renamed = await call<One>("ana", "PATCH", `/api/workspaces/${first.id}`, { name: "People policies" });
 		assert.deepInclude(renamed.body.workspace, { name: "People policies", slug: "hr-policies" });
-		const bySlug = await call("ana", "GET", "/api/workspaces/hr-policies");
+		const bySlug = await call<One>("ana", "GET", "/api/workspaces/hr-policies");
 		assert.deepInclude(bySlug.body.workspace, { id: first.id, slug: "hr-policies" });
-		assert.strictEqual((await call("ana", "GET", `/api/workspaces/${first.id}`)).body.workspace.slug, "hr-policies", "the id still works");
-		const listed = (await call("ana", "GET", "/api/workspaces")).body.workspaces.find((workspace: { id: string }) => workspace.id === first.id);
-		assert.strictEqual(listed.slug, "hr-policies");
+		assert.strictEqual((await call<One>("ana", "GET", `/api/workspaces/${first.id}`)).body.workspace.slug, "hr-policies", "the id still works");
+		const listed = (await call<List>("ana", "GET", "/api/workspaces")).body.workspaces.find((workspace) => workspace.id === first.id);
+		assert.strictEqual(listed?.slug, "hr-policies");
 	});
 
 	it("answers someone else's slug as it answers a slug that does not exist", async () => {
@@ -301,11 +306,11 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 	});
 
 	it("never gives a deleted workspace's slug again", async () => {
-		const gone = (await call("cy", "POST", "/api/workspaces", { name: "Dialysis unit" })).body.workspace;
+		const gone = (await call<One>("cy", "POST", "/api/workspaces", { name: "Dialysis unit" })).body.workspace;
 		assert.strictEqual(gone.slug, "dialysis-unit");
 		await call("cy", "DELETE", `/api/workspaces/${gone.id}`);
 		assert.strictEqual((await call("cy", "GET", "/api/workspaces/dialysis-unit")).status, 404);
-		const again = (await call("cy", "POST", "/api/workspaces", { name: "Dialysis unit" })).body.workspace;
+		const again = (await call<One>("cy", "POST", "/api/workspaces", { name: "Dialysis unit" })).body.workspace;
 		assert.match(again.slug, /^dialysis-unit-[a-z2-9]{4}$/);
 	});
 
@@ -334,7 +339,7 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 				yield* sql`insert into users (id, name, email, role, banned) values (${`blocked-${tag}`}, 'Blocked Ana', ${`blocked-${tag}@example.invalid`}, 'user', true)`;
 			}),
 		);
-		const search = async (q: string) => (await call("dan", "GET", `/api/people?q=${encodeURIComponent(q)}`)).body.people as { id: string; name: string; email: string }[];
+		const search = async (q: string) => (await call<{ people: Person[] }>("dan", "GET", `/api/people?q=${encodeURIComponent(q)}`)).body.people;
 		assert.deepStrictEqual(await search("ANA"), [{ id: who.ana, name: "ana", email: `ana-${tag}@example.invalid` }]);
 		assert.deepStrictEqual((await search(`bob-${tag}@EXAMPLE`)).map((person) => person.id), [who.bob]);
 		assert.lengthOf(await search("many "), 20);

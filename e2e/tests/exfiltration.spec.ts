@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import type { Page } from "@playwright/test";
 import { e2e } from "../env.ts";
 import type { McpCall } from "../mcp/calls.ts";
-import { chat, expect, test, type Fake } from "../fixtures.ts";
+import { chat, expect, jsonOf, test, type Fake } from "../fixtures.ts";
 import { createWorkspace, newPerson, share, textFile, uploadReady } from "../workspaces.ts";
 
 /**
@@ -153,7 +153,7 @@ ${injection}`));
 
 /** The tool calls that the test MCP servers ran with this order (e2e/mcp/server.ts). */
 async function serverCalls(page: Page, order: string): Promise<McpCall[]> {
-	return (await page.request.get(`${e2e.mcpUrl}/__mcp/calls?match=${order}`)).json();
+	return jsonOf(await page.request.get(`${e2e.mcpUrl}/__mcp/calls?match=${order}`));
 }
 
 /** A reply that writes an HTML artifact, shown in the side panel as its running page. */

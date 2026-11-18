@@ -1,7 +1,8 @@
 import type { Browser } from "@playwright/test";
 import type postgres from "postgres";
 import { e2e } from "../env.ts";
-import { expect, randomIp, signIn, test, uniqueEmail, type Fake } from "../fixtures.ts";
+import type { ActivityPage } from "../../server/admin/AdminReports.ts";
+import { expect, jsonOf, randomIp, signIn, test, uniqueEmail, type Fake } from "../fixtures.ts";
 
 /** Another person with an account, signed in from their own browser. */
 async function otherPerson(browser: Browser, db: postgres.Sql, fake: Fake, title: string) {
@@ -82,6 +83,6 @@ test("a change made on /admin is logged once", async ({ page, admin, browser, db
 	expect(events[0].after).toEqual({ role: "admin" });
 	expect(events[1].after).toEqual({ credits: 25 });
 
-	const { events: listed } = await (await page.request.get(`/api/admin/activity?person=${encodeURIComponent(person.id)}`)).json();
-	expect(listed.map((event: { action: string }) => event.action)).toEqual(["grant-credits", "set-role"]);
+	const { events: listed } = await jsonOf<ActivityPage>(await page.request.get(`/api/admin/activity?person=${encodeURIComponent(person.id)}`));
+	expect(listed.map((event) => event.action)).toEqual(["grant-credits", "set-role"]);
 });

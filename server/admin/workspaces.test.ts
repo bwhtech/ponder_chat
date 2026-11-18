@@ -11,7 +11,10 @@ import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../auth.ts";
+import { parseJson } from "../test-json.ts";
+import type { DocumentLog, WorkspacesReport } from "../workspaces/admin.ts";
 import { base, USERS_TABLE, useTestSchema } from "../workspaces/test-env.ts";
+import type { ActivityPage } from "./AdminReports.ts";
 
 const tag = Math.random().toString(36).slice(2, 10);
 const schema = `test_admin_workspaces_${tag}`;
@@ -45,10 +48,16 @@ async function call(person: Who, path: string, method = "GET") {
 	const response = await app.request(path, { method, headers: { "x-test-user": who[person] } });
 	return { status: response.status, text: await response.text() };
 }
-const json = async (person: Who, path: string) => {
+const json = async <Body>(person: Who, path: string) => {
 	const answer = await call(person, path);
 	assert.strictEqual(answer.status, 200, answer.text);
-	return JSON.parse(answer.text);
+	return parseJson<Body>(answer.text);
+};
+/** The parts of the Overview page (GET /api/admin/overview) that the tests read. */
+type Overview = {
+	people: { id: string; credits: number; replies: number }[];
+	system: { usd: number; calls: number; byFunction: { functionId: string; usd: number }[] };
+	today: { credits: number };
 };
 const database = <A>(work: (sql: PgClient.PgClient) => Effect.Effect<A, unknown>) => runPromise(PgClient.PgClient.use(work).pipe(Effect.orDie));
 
@@ -139,22 +148,22 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 	});
 
 	it("shows organisation workspaces with their owner, documents, statuses and cost", async () => {
-		const report = await json("admin", "/api/admin/workspaces");
+		const report = await json<WorkspacesReport>("admin", "/api/admin/workspaces");
 		assert.lengthOf(report.org, 1);
 		const [handbook] = report.org;
 		assert.deepInclude(handbook, { id: ids.org, name: "Handbook", description: "For everyone", costUsd: 0.002 });
 		assert.deepStrictEqual(handbook.owner, { id: who.admin, name: "Admin", email: actor("admin").email });
 		assert.deepStrictEqual(
-			handbook.documents.map((doc: { id: string; name: string; status: string; error: null; costUsd: number }) => [doc.id, doc.name, doc.status, doc.error, doc.costUsd]),
+			handbook.documents.map((doc) => [doc.id, doc.name, doc.status, doc.error, doc.costUsd]),
 			[[ids.orgDocument, "handbook.md", "ready", null, 0.002]],
 		);
 	});
 
 	it("gives an organisation document's full log, with the cost of each step from runs", async () => {
-		const log = await json("admin", `/api/admin/workspaces/${ids.org}/documents/${ids.orgDocument}/log`);
+		const log = await json<DocumentLog>("admin", `/api/admin/workspaces/${ids.org}/documents/${ids.orgDocument}/log`);
 		assert.deepInclude(log.document, { id: ids.orgDocument, name: "handbook.md", status: "ready" });
 		assert.deepStrictEqual(
-			log.steps.map((step: { step: string; costUsd: number | null }) => [step.step, step.costUsd]),
+			log.steps.map((step) => [step.step, step.costUsd]),
 			[
 				["uploaded", null],
 				["embedded", 0.002],
@@ -174,7 +183,7 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 
 	it("sums private workspaces up, without a name, a document, an owner or an id", async () => {
 		const answer = await call("admin", "/api/admin/workspaces");
-		const report = JSON.parse(answer.text);
+		const report = parseJson<WorkspacesReport>(answer.text);
 		assert.deepStrictEqual(report.private, {
 			workspaces: 1,
 			documents: { reading: 0, ready: 1, failed: 1 },
@@ -188,7 +197,7 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 
 	it("shows the System line per function id for the range, apart from replies, and leaves each person's credits as they were", async () => {
 		const people = async () =>
-			((await json("admin", "/api/admin/overview?days=7")).people as { id: string; credits: number; replies: number }[]).map(({ id, credits, replies }) => ({ id, credits, replies }));
+			(await json<Overview>("admin", "/api/admin/overview?days=7")).people.map(({ id, credits, replies }) => ({ id, credits, replies }));
 		await runPromise(run(`chat-${tag}`, who.ana, "chat", 0.01));
 		const before = await people();
 		assert.deepInclude(before, { id: who.ana, credits: 10, replies: 1 });
@@ -204,16 +213,16 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		// Before the range: 8 days ago, for 7 days.
 		await database((sql) => sql`update runs set created_at = now() - interval '8 days' where id = ${`search-${tag}`}`);
 
-		const overview = await json("admin", "/api/admin/overview?days=7");
-		const cost = Object.fromEntries(overview.system.byFunction.map((line: { functionId: string; usd: number }) => [line.functionId, line.usd]));
+		const overview = await json<Overview>("admin", "/api/admin/overview?days=7");
+		const cost = Object.fromEntries(overview.system.byFunction.map((line) => [line.functionId, line.usd]));
 		assert.deepStrictEqual(cost, { "thread-title": 0.0005, "memory-embed": 0.00002, "workspace-index": 0.005, "workspace-pdf": 0.004, "workspace-search": 0 });
 		assert.strictEqual(overview.system.usd, 0.00952);
 		assert.strictEqual(overview.system.calls, 5, "two index runs, a title, a page and a memory embedding: not the reply");
 		assert.deepStrictEqual(await people(), before);
 		assert.strictEqual(overview.today.credits, 10);
 
-		const month = await json("admin", "/api/admin/overview?days=30");
-		assert.strictEqual(month.system.byFunction.find((line: { functionId: string }) => line.functionId === "workspace-search").usd, 0.0001);
+		const month = await json<Overview>("admin", "/api/admin/overview?days=30");
+		assert.strictEqual(month.system.byFunction.find((line) => line.functionId === "workspace-search")?.usd, 0.0001);
 	});
 
 	it("logs an organisation workspace's changes with the length of its instructions, not their text", async () => {
@@ -221,14 +230,14 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.update(actor("admin"), ids.org, { instructions: long })));
 		await runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.share(actor("admin"), ids.org, { kind: "org", members: [] })));
 		const answer = await call("admin", "/api/admin/activity");
-		const { events } = JSON.parse(answer.text);
+		const { events } = parseJson<ActivityPage>(answer.text);
 		assert.notInclude(answer.text, long);
-		const update = events.find((event: { action: string }) => event.action === "update-workspace");
-		assert.deepInclude(update.before, { name: "Handbook", instructionsLength: "Be brief.".length });
-		assert.deepInclude(update.after, { name: "Handbook", instructionsLength: long.length, instructionsChanged: true });
-		assert.notProperty(update.after, "instructions");
-		const share = events.find((event: { action: string }) => event.action === "share-workspace");
-		assert.deepInclude(share.after, { workspace: ids.org, kind: "org", name: "Handbook" });
+		const update = events.find((event) => event.action === "update-workspace");
+		assert.deepInclude(update?.before, { name: "Handbook", instructionsLength: "Be brief.".length });
+		assert.deepInclude(update?.after, { name: "Handbook", instructionsLength: long.length, instructionsChanged: true });
+		assert.notProperty(update?.after, "instructions");
+		const share = events.find((event) => event.action === "share-workspace");
+		assert.deepInclude(share?.after, { workspace: ids.org, kind: "org", name: "Handbook" });
 	});
 
 	it("names no workspace that is private now, also one deleted while private, and keeps the name of one deleted while for everyone", async () => {
@@ -257,8 +266,7 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 		for (const secret of ["Obsidian", "Lighthouse", "Velvet", "Quarry", hidden.id, gone.id, who.bob]) {
 			assert.notInclude(answer.text, secret, `"${secret}" is in the answer`);
 		}
-		type Event = { action: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null };
-		const { events } = JSON.parse(answer.text) as { events: Event[] };
+		const { events } = parseJson<ActivityPage>(answer.text);
 		const of = (action: string) => events.filter((event) => event.action === action);
 		assert.include(
 			of("create-workspace").map((event) => event.after?.name),

@@ -34,6 +34,7 @@ import { Catalog } from "./mcp/catalog.ts";
 import { MAX_RESULT_CHARS, modelToolName, resultText, slugFor, toToolInfo } from "./mcp/tools.ts";
 import * as NetGuard from "./net/NetGuard.ts";
 import { dispose, runPromise } from "./runtime/runtime.ts";
+import { parseJson } from "./test-json.ts";
 import * as Secrets from "./secrets/Secrets.ts";
 
 // The test servers are on 127.0.0.1, over http. The app's runtime reads this when it
@@ -204,7 +205,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
 			return send(response, 401, { error: "unauthorized" }, { "www-authenticate": `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource/oauth/mcp"` });
 		if (request.method === "DELETE") return send(response, 200);
 		if (request.method !== "POST") return send(response, 405);
-		const message = JSON.parse(body);
+		const message = parseJson<Parameters<typeof rpc>[0]>(body);
 		if (message.id === undefined) return send(response, 202);
 		return send(response, 200, rpc(message));
 	}
