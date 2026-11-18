@@ -7,9 +7,10 @@ import { createWorkspace, documentOf, newPerson, share, textFile, uploadReady, t
 /**
  * Workspace documents (docs/workspaces-plan.md, "Tests", 7 to 9): an editor uploads a document,
  * it goes from Indexing to Ready, and answers use it, whole when it fits the model's window and
- * as searched passages when it does not; the indexing log in Details, for editors only; a
- * document that fails, then reads on "Try again"; a PDF whose pages are counted on its row and
- * in Details while the model reads them; and a document opened in the side viewer.
+ * as searched passages when it does not; a document's Details in the side panel, for editors
+ * only, with a summary first and the indexing log behind Log; a document that fails, then
+ * reads on "Try again"; a PDF whose pages are counted on its row and in Details while the
+ * model reads them, and then shown as one step; and a document opened in the side viewer.
  *
  * The fake model quotes the line of the workspace's text that best matches the question, and
  * says whether it came from a whole document or an excerpt (fake/server.ts). Its embeddings
@@ -22,6 +23,16 @@ const rows = (page: Page) => documents(page).locator('[data-slot="workspace-docu
 const row = (page: Page, name: string) => rows(page).filter({ has: page.locator('[data-slot="document-name"]', { hasText: name }) });
 const picker = (page: Page) => page.locator('[data-slot="document-picker"]');
 const dropState = (page: Page) => page.locator('[data-slot="workspace-aside"] [data-slot="document-drop"]');
+
+/** Opens a document's Details from its row's menu: they show in the side panel. */
+async function openDetails(page: Page, name: string) {
+	const menu = row(page, name).getByRole("button", { name: `Actions for “${name}”` });
+	await menu.click();
+	await page.getByRole("menuitem", { name: "Details" }).click();
+	const details = page.getByRole("complementary", { name: `Details of “${name}”` });
+	await expect(details).toBeVisible();
+	return { details, menu };
+}
 
 test("7. an editor uploads documents; they go from Indexing to Ready, and answers use them whole or searched", async ({ page, person, fake }) => {
 	test.setTimeout(120_000);
@@ -96,24 +107,31 @@ test("8. an editor sees a document's steps in Details; a person who can only ask
 	const asker = await newPerson(browser, db, fake, "asks only");
 	await share(page, id, [{ userId: asker.person.id, access: "ask" }]);
 
-	await test.step("the editor uploads a PDF with a scan, and its Details show each step", async () => {
+	await test.step("the editor uploads a PDF with a scan; its Details show a summary, and its steps behind Log", async () => {
 		await page.goto(`/?w=${slug}`);
 		await picker(page).setInputFiles({ name: "manual.pdf", mimeType: "application/pdf", buffer: scanPdf("Peritoneal dialysis manual", `PAGEKEY-ok-${tag}`) });
 		const manual = row(page, "manual.pdf");
 		await expect(manual).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
 
-		await manual.getByRole("button", { name: "Actions for “manual.pdf”" }).click();
-		await page.getByRole("menuitem", { name: "Details" }).click();
-		const details = page.getByRole("dialog", { name: "manual.pdf" });
+		const { details, menu } = await openDetails(page, "manual.pdf");
+		// The summary: what the file is, its status, and the pages a model read.
+		await expect(details.locator('[data-slot="document-facts"]')).toHaveText(/^PDF · 2 pages · [\d.,]+ (bytes|KB|MB)$/);
+		await expect(details.locator('[data-slot="document-progress"]')).toHaveText(/^Ready · /);
+		await expect(details.locator('[data-slot="document-page-reads"]')).toHaveText("1 page was read from a picture");
 		const steps = details.locator('[data-slot="document-step"]');
+		await expect(steps).toHaveCount(0);
+
+		await details.getByRole("button", { name: "Log" }).click();
+		await expect(details.getByRole("button", { name: "Log" })).toHaveAttribute("aria-expanded", "true");
 		// Plain steps: the scanned page was read from a picture. Models and costs are the admin's.
 		await expect(steps).toHaveText(["Uploaded · PDF, 2 pages", "Read page 2 from a picture", "Ready"]);
 		await expect(details).not.toContainText("$");
 		await expect(details.getByRole("button", { name: "Try again" })).toHaveCount(0);
 		// No text of the document is in the log.
 		await expect(details).not.toContainText("Exit site care");
-		await details.getByRole("button", { name: "Close" }).first().click();
+		await details.getByRole("button", { name: "Close" }).click();
 		await expect(details).toHaveCount(0);
+		await expect(menu).toBeFocused();
 	});
 
 	await test.step("a person who can only ask sees the name and status, and no Details, upload or delete", async () => {
@@ -153,40 +171,40 @@ test("9. a document that fails shows its error, and Try again makes it Ready", a
 	await expect(scan).toHaveAttribute("data-status", "failed", { timeout: 60_000 });
 	await expect(scan.locator('[data-slot="document-status"]')).toContainText("Could not read page 2");
 
+	const { details } = await openDetails(page, "scan.pdf");
 	await test.step("Details name the page, in the row's words", async () => {
-		await scan.getByRole("button", { name: "Actions for “scan.pdf”" }).click();
-		await page.getByRole("menuitem", { name: "Details" }).click();
-		const details = page.getByRole("dialog", { name: "scan.pdf" });
+		await expect(details.locator('[data-slot="document-status"]')).toHaveText("Could not read page 2");
+		// Said once: the page that stopped the run is the status, not a second line.
+		await expect(details.locator('[data-slot="document-page-reads"]')).toHaveCount(0);
+		await details.getByRole("button", { name: "Log" }).click();
 		await expect(details.locator('[data-step="page-read"]')).toContainText("Could not read page 2");
 		// The model's own error has no plain words: the admin's log keeps it.
 		await expect(details.locator('[data-step="page-read"] [data-slot="document-step-error"]')).toHaveCount(0);
 		// Said once: no second step for the run that failed on that page.
 		await expect(details.locator('[data-step="failed"]')).toHaveCount(0);
-		await expect(details.getByRole("button", { name: "Try again" })).toBeVisible();
-		await details.getByRole("button", { name: "Close" }).first().click();
-		await expect(details).toHaveCount(0);
 	});
 
-	await test.step("Try again reads it again, and it is Ready", async () => {
-		await scan.getByRole("button", { name: "Try again" }).click();
+	await test.step("Try again in Details reads it again; the row and Details follow it to Ready", async () => {
+		await details.getByRole("button", { name: "Try again" }).click();
 		await expect(scan).toHaveAttribute("data-status", "reading");
 		await expect(scan.locator('[data-slot="document-status"]')).not.toContainText("Could not read");
+		await expect(details.locator('[data-slot="document-progress"]')).toContainText("Indexing…");
 		await expect(scan).toHaveAttribute("data-status", "ready", { timeout: 60_000 });
 		await expect(scan.locator('[data-slot="document-status"]')).not.toContainText("Could not read");
 
-		await scan.getByRole("button", { name: "Actions for “scan.pdf”" }).click();
-		await page.getByRole("menuitem", { name: "Details" }).click();
-		const details = page.getByRole("dialog", { name: "scan.pdf" });
+		await expect(details.locator('[data-slot="document-progress"]')).toHaveText(/^Ready/, { timeout: 15_000 });
+		await expect(details.getByRole("button", { name: "Try again" })).toHaveCount(0);
+		// The log stays open, with the new run under the old one.
 		await expect(details.locator('[data-step="reindexed"]')).toContainText("An editor asked to try again");
 		await expect(details.locator('[data-slot="document-step"]').last()).toContainText("Ready");
 	});
 
-	await test.step("an editor deletes it", async () => {
-		await page.keyboard.press("Escape");
+	await test.step("an editor deletes it, and its Details close", async () => {
 		await scan.getByRole("button", { name: "Actions for “scan.pdf”" }).click();
 		await page.getByRole("menuitem", { name: "Delete" }).click();
 		await page.getByRole("dialog", { name: "Delete this document?" }).getByRole("button", { name: "Delete" }).click();
 		await expect(rows(page)).toHaveCount(0);
+		await expect(details).toHaveCount(0);
 		expect(await documentOf(page, id, "scan.pdf")).toBeUndefined();
 	});
 });
@@ -208,30 +226,42 @@ test("9b. while a model reads a PDF's pages, its row and its Details count them,
 		await expect(forms).toHaveAttribute("data-status", "reading");
 	});
 
-	await test.step("Details show the pages, each page once it is read, and the same count", async () => {
-		await forms.getByRole("button", { name: "Actions for “forms.pdf”" }).click();
-		await page.getByRole("menuitem", { name: "Details" }).click();
-		const details = page.getByRole("dialog", { name: "forms.pdf" });
-		const steps = details.locator('[data-slot="document-step"]');
-		const progress = details.locator('[data-slot="document-progress"]');
-		await expect(steps).toHaveText(["Uploaded · PDF, 4 pages"]);
+	const { details, menu } = await openDetails(page, "forms.pdf");
+	const steps = details.locator('[data-slot="document-step"]');
+	const progress = details.locator('[data-slot="document-progress"]');
+	const reads = details.locator('[data-slot="document-page-reads"]');
+
+	await test.step("Details show the same count, with a bar, and each page once it is read", async () => {
 		await expect(progress).toHaveText("Indexing… page 1 of 4");
+		await expect(details.getByRole("progressbar")).toBeVisible();
+		await expect(details.locator('[data-slot="document-facts"]')).toContainText("PDF · 4 pages · ");
+		await details.getByRole("button", { name: "Log" }).click();
+		await expect(steps).toHaveText(["Uploaded · PDF, 4 pages"]);
 
 		await fake.releasePage(key);
 		await expect(progress).toHaveText("Indexing… page 2 of 4", { timeout: 15_000 });
+		await expect(reads).toHaveText("1 page read from a picture so far");
 		await expect(steps).toHaveCount(2);
 		await expect(steps.nth(1)).toHaveText(/^Read page [234] from a picture$/);
-		await details.getByRole("button", { name: "Close" }).first().click();
-		await expect(details).toHaveCount(0);
 	});
 
-	await test.step("the row follows each page, then says Ready", async () => {
+	await test.step("the row and Details follow each page, then say Ready; the log has the pages in one step", async () => {
 		await expect(status).toContainText("Indexing… page 2 of 4", { timeout: 15_000 });
 		await fake.releasePage(key);
 		await expect(status).toContainText("Indexing… page 3 of 4", { timeout: 15_000 });
 		await fake.releasePage(key);
 		await expect(forms).toHaveAttribute("data-status", "ready", { timeout: 30_000 });
 		await expect(status).not.toContainText("Indexing");
+
+		await expect(progress).toHaveText(/^Ready · /, { timeout: 15_000 });
+		await expect(details.getByRole("progressbar")).toHaveCount(0);
+		await expect(reads).toHaveText("3 pages were read from pictures");
+		await expect(steps).toHaveText(["Uploaded · PDF, 4 pages", /^Read 3 pages from pictures\s*Pages 2–4$/, "Ready"]);
+		await expect(details.locator('[data-step="page-read"] [data-slot="document-step-pages"]')).toHaveText("Pages 2–4");
+
+		await page.keyboard.press("Escape");
+		await expect(details).toHaveCount(0);
+		await expect(menu).toBeFocused();
 	});
 });
 
@@ -279,19 +309,13 @@ test("10. the page stops reading an Indexing document again once Details close, 
 		expect(sent[kind], `${kind} requests after it should stop`).toBe(before);
 	};
 	const notes = row(page, "notes.md");
-	const openDetails = async () => {
-		await notes.getByRole("button", { name: "Actions for “notes.md”" }).click();
-		await page.getByRole("menuitem", { name: "Details" }).click();
-		return page.getByRole("dialog", { name: "notes.md" });
-	};
-
 	await page.goto(`/?w=${id}`);
 	await expect(notes).toHaveAttribute("data-status", "reading");
 
 	await test.step("closing Details stops reading the log", async () => {
-		const details = await openDetails();
+		const { details } = await openDetails(page, "notes.md");
 		await expect.poll(() => sent.log, { timeout: 10_000 }).toBeGreaterThanOrEqual(2);
-		await details.getByRole("button", { name: "Close" }).first().click();
+		await details.getByRole("button", { name: "Close" }).click();
 		await expect(details).toHaveCount(0);
 		await quiet("log", 5000);
 	});
@@ -308,9 +332,9 @@ test("10. the page stops reading an Indexing document again once Details close, 
 
 	await test.step("a deleted document's log is not asked for again", async () => {
 		await page.goto(`/?w=${id}`);
-		const details = await openDetails();
+		const { details } = await openDetails(page, "notes.md");
 		await expect.poll(() => sent.log, { timeout: 10_000 }).toBeGreaterThanOrEqual(1);
-		await expect(details.locator('[data-slot="document-step"]').first()).toBeVisible();
+		await expect(details.locator('[data-slot="document-progress"]')).toHaveText("Indexing…");
 		const gone = page.waitForResponse((response) => new URL(response.url()).pathname === logPath && response.status() === 404, { timeout: 10_000 });
 		expect((await page.request.delete(`/api/workspaces/${id}/documents/${documentId}`)).ok()).toBe(true);
 		await gone;

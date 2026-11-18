@@ -12,18 +12,24 @@ import { closePanel, fileKind, panelItem } from "./panel";
 import PdfPagesPlaceholder from "./PdfPagesPlaceholder.vue";
 import TableView from "./TableView.vue";
 import TextView from "./TextView.vue";
+import DocumentDetailsPlaceholder from "../workspaces/DocumentDetailsPlaceholder.vue";
 import "./slide.css";
 
 /**
- * The panel at the right of the chat, for a file or an artifact. On a wide screen it sits
- * beside the chat; on a narrower one it covers the page. Mount it once, in the shell's row.
- * pdf.js loads the first time a PDF opens, not with the app. The first time, the panel slides
- * in, unless its stand-in (PanelPlaceholder.vue) already has while this code loaded. While
- * pdf.js loads, a page-shaped skeleton shows at once (no delay).
+ * The panel at the right of the chat, for a file, an artifact or a workspace document's
+ * Details. On a wide screen it sits beside the chat; on a narrower one it covers the page.
+ * Mount it once, in the shell's row. pdf.js loads the first time a PDF opens, not with the
+ * app, and Details' code the first time they open. The first time, the panel slides in,
+ * unless its stand-in (PanelPlaceholder.vue) already has while this code loaded. While pdf.js
+ * or Details load, their skeleton shows at once (no delay).
  */
 const PdfPages = defineAsyncComponent({ loader: () => import("./PdfPages.vue"), loadingComponent: PdfPagesPlaceholder, delay: 0 });
+const DocumentDetails = defineAsyncComponent({ loader: () => import("../workspaces/DocumentDetails.vue"), loadingComponent: DocumentDetailsPlaceholder, delay: 0 });
 
 const item = panelItem;
+const details = computed(() => (item.value?.type === "details" ? item.value.details : null));
+// Details show their log when the Log button in the header is on; each item starts with it off.
+const logOpen = ref(false);
 const artifact = computed(() => (item.value?.type === "artifact" ? item.value.artifact.value : null));
 const file = computed(() => (item.value?.type === "file" ? item.value.file : null));
 const kind = computed(() => (file.value ? fileKind(file.value.mediaType, file.value.name) : null));
@@ -48,6 +54,7 @@ watch(item, () => {
 	rows.value = null;
 	presenting.value = false;
 	pageView.value = "preview";
+	logOpen.value = false;
 });
 const canPresent = computed(() => artifact.value?.kind === "slides" && !artifact.value.writing && slideCount(artifact.value.content) > 0);
 
@@ -84,7 +91,7 @@ onBeforeUnmount(() => {
 			v-if="item"
 			ref="aside"
 			data-slot="side-panel"
-			:aria-label="header.title"
+			:aria-label="header.label"
 			tabindex="-1"
 			class="outline-none fixed inset-0 z-30 flex flex-col bg-surface-base pt-[env(safe-area-inset-top)] lg:static lg:z-auto lg:w-[clamp(380px,46vw,880px)] lg:shrink-0 lg:border-l lg:border-outline-gray-1 lg:pt-0"
 		>
@@ -95,6 +102,16 @@ onBeforeUnmount(() => {
 				<div class="ml-auto flex shrink-0 items-center gap-0.5 pl-2 [@media(pointer:coarse)]:gap-4">
 					<TabButtons v-if="artifact?.kind === 'html' && !artifact.writing" v-model="pageView" :options="pageViews" class="mr-1" />
 					<Button v-if="canPresent" variant="ghost" icon-left="lucide-play" label="Present" class="mr-1" @click="presenting = true" />
+					<Button
+						v-if="details"
+						:variant="logOpen ? 'subtle' : 'ghost'"
+						icon-left="lucide-scroll-text"
+						label="Log"
+						:aria-expanded="logOpen"
+						class="touch-target mr-1"
+						data-slot="document-log-toggle"
+						@click="logOpen = !logOpen"
+					/>
 					<Button v-if="artifact" variant="ghost" :icon="copied ? 'lucide-check' : 'lucide-copy'" :tooltip="copied ? 'Copied' : header.copyLabel" :aria-label="header.copyLabel" :disabled="artifact.writing" class="touch-target" @click="copy" />
 					<a v-if="header.download" :href="header.download.url" :download="header.download.name" :aria-label="`Download ${header.download.name}`" title="Download" class="panel-icon touch-target">
 						<span class="lucide-download size-4" aria-hidden="true" />
@@ -107,7 +124,8 @@ onBeforeUnmount(() => {
 			</header>
 
 			<div :key="item.key" class="min-h-0 flex-1 overflow-auto overscroll-contain" :class="header.inset ? 'bg-surface-gray-1' : ''">
-				<DocumentView v-if="artifact?.kind === 'document'" :artifact="artifact" />
+				<DocumentDetails v-if="details" :request="details" :log-open="logOpen" />
+				<DocumentView v-else-if="artifact?.kind === 'document'" :artifact="artifact" />
 				<SlidesView v-else-if="artifact?.kind === 'slides'" :artifact="artifact" class="p-4 sm:p-6" />
 				<HtmlView v-else-if="artifact" :artifact="artifact" :view="pageView" />
 				<PdfPages v-else-if="file && kind === 'pdf'" :url="file.url" :name="file.name" />

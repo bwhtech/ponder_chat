@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { Button, Skeleton } from "frappe-ui";
 import { useFileViewer } from "frappe-ui-ai-elements";
-import { closeFile } from "../side-panel/panel";
+import { closeDocumentDetails, closeFile, viewDocumentDetails } from "../side-panel/panel";
 import { ref } from "vue";
 import { dialog } from "../dialogs";
 import { toast } from "../toasts";
 import DocumentRow from "./DocumentRow.vue";
 import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, uploadDocument, type WorkspaceDocument } from "./documents";
-import { openWorkspaceDialog } from "./dialogs";
 import WorkspaceEmptyArea from "./WorkspaceEmptyArea.vue";
 import type { DocumentsHandle } from "./handles";
 
@@ -16,8 +15,8 @@ import type { DocumentsHandle } from "./handles";
  * can ask sees each document's name, and its status while it is not Ready, and opens its file
  * by the name. People who can edit also see its size and why it failed, upload (the "Upload
  * documents" area while there are none, then Upload by the heading, or files dropped on the
- * panel: WorkspaceAside.vue calls `upload` and sets `dropping`), delete, open its Details (the
- * indexing log) and "Try again" a document that failed. The file picker offers only the types
+ * panel: WorkspaceAside.vue calls `upload` and sets `dropping`), delete, open its Details (its
+ * status and indexing log, in the side panel) and "Try again" a document that failed. The file picker offers only the types
  * the server reads; a file it refuses gets the server's reason. The page polls while one is
  * Indexing (WorkspacePage.vue); `changed` hands it the new list after each change here.
  */
@@ -65,8 +64,10 @@ function open(document: WorkspaceDocument) {
 	if (!viewFile(file)) window.open(file.url, "_blank", "noopener");
 }
 
-function details(document: WorkspaceDocument) {
-	openWorkspaceDialog({ kind: "document", workspaceId: props.workspaceId, document, onChanged: replace });
+/** In the side panel (DocumentDetails.vue), which follows the document in this list. */
+function details(document: WorkspaceDocument, menu: HTMLElement | null) {
+	const current = () => props.documents?.find((other) => other.id === document.id);
+	viewDocumentDetails({ workspaceId: props.workspaceId, document, current, onChanged: replace }, menu);
 }
 
 function replace(document: WorkspaceDocument) {
@@ -94,6 +95,7 @@ function askDelete(document: WorkspaceDocument) {
 		onConfirm: async () => {
 			await deleteDocument(props.workspaceId, document.id);
 			closeFile(documentFile(props.workspaceId, document).url);
+			closeDocumentDetails(document.id);
 			emit(
 				"changed",
 				current().filter((other) => other.id !== document.id),
@@ -143,7 +145,7 @@ function askDelete(document: WorkspaceDocument) {
 					:editable="editable"
 					:retrying="retrying.has(document.id)"
 					@open="open(document)"
-					@details="details(document)"
+					@details="details(document, $event)"
 					@retry="retry(document)"
 					@delete="askDelete(document)"
 				/>

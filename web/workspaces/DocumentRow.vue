@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Button, Dropdown } from "frappe-ui";
-import { computed } from "vue";
+import { computed, useTemplateRef } from "vue";
 import { documentIcon, failureReason, fileSize, statusLabel, type WorkspaceDocument } from "./documents";
 
 /**
@@ -13,7 +13,9 @@ import { documentIcon, failureReason, fileSize, statusLabel, type WorkspaceDocum
  * Try again in a row of its own under the text.
  */
 const props = defineProps<{ document: WorkspaceDocument; editable: boolean; retrying: boolean }>();
-const emit = defineEmits<{ open: []; details: []; retry: []; delete: [] }>();
+/** `details` gives the menu's button: focus goes back to it when Details close. */
+const emit = defineEmits<{ open: []; details: [menu: HTMLElement | null]; retry: []; delete: [] }>();
+const row = useTemplateRef<HTMLLIElement>("row");
 
 const status = computed(() => props.document.status);
 const size = computed(() => (props.editable ? fileSize(props.document.size) : ""));
@@ -21,13 +23,14 @@ const size = computed(() => (props.editable ? fileSize(props.document.size) : ""
 const oneLine = computed(() => !size.value && status.value === "ready");
 const statusText = computed(() => (status.value === "failed" ? failureReason(props.document.error) : statusLabel(props.document)));
 const menu = computed(() => [
-	{ label: "Details", icon: "lucide-info", onClick: () => emit("details") },
+	{ label: "Details", icon: "lucide-info", onClick: () => emit("details", row.value?.querySelector<HTMLElement>("[data-slot=document-menu]") ?? null) },
 	{ label: "Delete", icon: "lucide-trash-2", theme: "red" as const, onClick: () => emit("delete") },
 ]);
 </script>
 
 <template>
 	<li
+		ref="row"
 		class="relative grid grid-cols-[1.25rem_minmax(0,1fr)_auto] content-center items-center gap-x-2.5 rounded-4 px-2 py-1 transition-colors duration-150 ease-out-strong has-[[data-slot=document-name]:hover]:bg-surface-gray-2 has-[[data-slot=document-name]:active]:bg-surface-gray-3 motion-reduce:transition-none [@media(pointer:coarse)]:min-h-11"
 		:class="{ 'min-h-7': oneLine }"
 		data-slot="workspace-document"
@@ -57,7 +60,7 @@ const menu = computed(() => [
 			</p>
 		</div>
 		<Dropdown v-if="editable" :options="menu" align="end">
-			<Button variant="ghost" icon="lucide-ellipsis" :aria-label="`Actions for “${document.name}”`" class="touch-target relative -mr-1 shrink-0" />
+			<Button variant="ghost" icon="lucide-ellipsis" :aria-label="`Actions for “${document.name}”`" class="touch-target relative -mr-1 shrink-0" data-slot="document-menu" />
 		</Dropdown>
 		<!-- Under the text, so the icon and the menu stay in the middle of the name and its line. -->
 		<Button

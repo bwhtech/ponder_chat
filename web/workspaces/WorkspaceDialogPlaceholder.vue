@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Skeleton } from "frappe-ui";
+import { Button } from "frappe-ui";
 import { displayName } from "../../shared/display-name";
 import { computed } from "vue";
 import { me } from "../account";
@@ -61,11 +61,6 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 				<div v-else-if="instructions !== null" class="h-[min(22rem,55dvh)]">
 					<MarkdownEditorPlaceholder :text="instructions" :placeholder="INSTRUCTIONS_PLACEHOLDER" />
 				</div>
-				<template v-else-if="request.kind === 'document'">
-					<ol class="space-y-3" aria-busy="true">
-						<li v-for="width in ['w-36', 'w-44', 'w-20']" :key="width" class="flex h-[1lh] items-center text-sm"><Skeleton :class="['h-3 rounded-4', width]" /></li>
-					</ol>
-				</template>
 				<template v-else-if="sharing">
 					<div v-if="isAdmin" class="space-y-1.5">
 						<div class="text-sm leading-tighter text-ink-gray-6">Who can use it</div>
@@ -83,10 +78,7 @@ const ownerIsMe = computed(() => sharing.value?.owner.id === me.value?.user.id);
 						</ul>
 					</div>
 				</template>
-				<div v-if="request.kind === 'document'" class="flex justify-end gap-2 pt-2">
-					<Button label="Close" @click="closeWorkspaceDialog" />
-				</div>
-				<div v-else class="flex justify-end gap-2 pt-2">
+				<div class="flex justify-end gap-2 pt-2">
 					<Button label="Cancel" @click="closeWorkspaceDialog" />
 					<Button variant="solid" theme="gray" :label="request.kind === 'new' ? 'Create workspace' : 'Save'" disabled />
 				</div>

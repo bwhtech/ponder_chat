@@ -87,6 +87,12 @@ export function progressText(progress: DocumentProgress | null) {
 	return `${count(Math.floor((progress.done / progress.total) * 100))}%`;
 }
 
+/** How far an Indexing document is, from 0 to 100, for a progress bar; null when there is nothing to count. */
+export function progressPercent(progress: DocumentProgress | null) {
+	if (!progress || progress.total <= 0) return null;
+	return Math.min(100, Math.max(0, (progress.done / progress.total) * 100));
+}
+
 /** A status in words, with an Indexing document's progress: "Indexing… page 12 of 40", "Indexing… 45%", "Indexing…", "Ready". */
 export function statusLabel(document: Pick<WorkspaceDocument, "status" | "progress">) {
 	const progress = document.status === "reading" ? progressText(document.progress) : null;

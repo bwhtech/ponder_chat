@@ -1,19 +1,18 @@
 import { nextTick, onMounted, reactive, ref } from "vue";
-import type { WorkspaceDocument } from "./documents";
 import type { WorkspaceDetail } from "./store";
 
 /**
- * The workspace dialogs: New workspace, Instructions, Share and a document's Details (WorkspaceDialogs.vue). Their
+ * The workspace dialogs: New workspace, Instructions and Share (WorkspaceDialogs.vue). Their
  * code loads the first time one opens; meanwhile the shell draws the dialog's frame and fields
  * (WorkspaceDialogPlaceholder.vue), as it does for Settings. `request` stays after closing, so
- * the dialog can play its closing transition.
+ * the dialog can play its closing transition. A document's Details open in the side panel
+ * (DocumentDetails.vue).
  */
 export type WorkspaceDialogRequest =
 	/** `onMade` opens the new workspace as the sidebar does. */
 	| { kind: "new"; onMade: (slug: string) => void }
 	| { kind: "instructions"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
-	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void }
-	| { kind: "document"; workspaceId: string; document: WorkspaceDocument; onChanged: (document: WorkspaceDocument) => void };
+	| { kind: "share"; workspace: WorkspaceDetail; onSaved: (workspace: WorkspaceDetail) => void };
 
 /** `serial` goes up with each request, so a dialog opened again starts from its workspace, not from what was typed before. */
 export const workspaceDialog = reactive({ open: false, serial: 0, request: null as WorkspaceDialogRequest | null });
@@ -32,7 +31,7 @@ export function closeWorkspaceDialog() {
 }
 
 /**
- * A dialog with no field to start in (Details; Share on a phone) rests on its frame, as reka-ui
+ * A dialog with no field to start in (Share on a phone) rests on its frame, as reka-ui
  * does when there is nothing to focus, not on ×: opened from a menu, × would wear its focus
  * ring as if chosen. Tab still reaches ×. It runs after frappe-ui's own focus on open, which
  * waits a tick and a frame too.
@@ -66,6 +65,5 @@ export const INSTRUCTIONS_DIALOG_WIDTH = "max-w-2xl";
 export function dialogTitle(request: WorkspaceDialogRequest) {
 	if (request.kind === "new") return "New workspace";
 	if (request.kind === "instructions") return "Instructions";
-	if (request.kind === "document") return request.document.name;
 	return `Share “${request.workspace.name}”`;
 }
