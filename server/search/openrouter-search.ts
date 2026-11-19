@@ -6,7 +6,7 @@ import * as Schema from "effect/Schema";
 import * as PonderConfig from "../config.ts";
 import * as OpenRouter from "../openrouter/OpenRouter.ts";
 import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
-import { SearchFailed, type SearchBackend, type SearchDepth, type SearchReply, type SearchResult } from "./backend.ts";
+import { SearchFailed, type SearchBackend, type SearchReply, type SearchResult } from "./backend.ts";
 
 /**
  * Searches with OpenRouter's web_search server tool, so it needs no other API key.
@@ -14,19 +14,13 @@ import { SearchFailed, type SearchBackend, type SearchDepth, type SearchReply, t
  * `url_citation` annotations are the results. The chat model never sees this tool.
  * OpenRouter's `cost` includes the search fee ($0.007 for Exa).
  *
- * A deep search sets Exa's `mode` to "deep": Exa widens the query and reads more pages. It
- * takes 4 to 15 seconds and its fee is $0.012.
- *
  * Calls Chat Completions directly, so the annotations come back as OpenRouter sends them.
  * The model is PONDER_SEARCH_MODEL.
  */
 const NAME = "openrouter";
+const MAX_RESULTS = 6;
 const MAX_TEXT = 3_000;
-/** Per depth: how many results, Exa's mode (none: its default, "auto"), and how long the call may take. */
-const DEPTHS = {
-	quick: { maxResults: 6, mode: undefined, timeout: "45 seconds" },
-	deep: { maxResults: 10, mode: "deep", timeout: "90 seconds" },
-} as const;
+const TIMEOUT = "45 seconds";
 
 /** Lenient: a field OpenRouter leaves out, or sends as null, changes nothing. */
 const text = Schema.optional(Schema.NullOr(Schema.String));
@@ -61,8 +55,7 @@ export const make = Effect.gen(function* () {
 	const model = config.searchModel;
 	const failed = (cause: unknown) => new SearchFailed({ backend: NAME, cause });
 
-	const complete = Effect.fnUntraced(function* (query: string, depth: SearchDepth) {
-		const { maxResults, mode, timeout } = DEPTHS[depth];
+	const complete = Effect.fnUntraced(function* (query: string) {
 		const request = HttpClientRequest.post(openRouter.url("v1/chat/completions")).pipe(
 			HttpClientRequest.bearerToken(yield* keys.key),
 			HttpClientRequest.bodyJsonUnsafe({
@@ -71,7 +64,7 @@ export const make = Effect.gen(function* () {
 					{ role: "system", content: "Search the web once for the user's query, with the query as written. Then reply with only: done." },
 					{ role: "user", content: query },
 				],
-				tools: [{ type: "openrouter:web_search", parameters: { engine: "exa", max_results: maxResults, max_uses: 1, ...(mode && { mode }) } }],
+				tools: [{ type: "openrouter:web_search", parameters: { engine: "exa", max_results: MAX_RESULTS, max_uses: 1 } }],
 				provider: OpenRouter.privateRoutingBody,
 				usage: { include: true },
 			}),
@@ -81,13 +74,13 @@ export const make = Effect.gen(function* () {
 			const response = yield* client.execute(request);
 			const json = yield* response.json.pipe(Effect.option);
 			return { status: response.status, body: Option.getOrElse(Option.flatMap(json, decodeCompletion), (): Completion => ({})) };
-		}).pipe(Effect.timeout(timeout), Effect.catchTags({ HttpClientError: (error) => Effect.fail(failed(error.reason.cause)), TimeoutError: (error) => Effect.fail(failed(error)) }));
+		}).pipe(Effect.timeout(TIMEOUT), Effect.catchTags({ HttpClientError: (error) => Effect.fail(failed(error.reason.cause)), TimeoutError: (error) => Effect.fail(failed(error)) }));
 		if (status < 200 || status >= 300 || body.error) return yield* new SearchFailed({ backend: NAME, status });
 		return body;
 	});
 
-	const search = Effect.fn("OpenRouterSearch.search")(function* (query: string, depth: SearchDepth) {
-		const body = yield* complete(query, depth);
+	const search = Effect.fn("OpenRouterSearch.search")(function* (query: string) {
+		const body = yield* complete(query);
 		return {
 			results: results(body),
 			costUsd: body.usage?.cost ?? null,

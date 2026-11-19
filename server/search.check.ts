@@ -74,17 +74,10 @@ if (live) {
 	});
 
 	await check("a search returns results with addresses and text, and a cost", async () => {
-		const reply = await runPromise(SearchBackend.SearchBackend.use((backend) => backend.search("Vercel AI SDK latest release", "quick")));
+		const reply = await runPromise(SearchBackend.SearchBackend.use((backend) => backend.search("Vercel AI SDK latest release")));
 		assert.ok(reply.results.length >= 2, `${reply.results.length} results`);
 		assert.ok(reply.results.every((result) => result.url.startsWith("http") && result.text.length > 0));
 		assert.ok((reply.costUsd ?? 0) > 0, "no cost");
-		console.log(`     ${reply.results.length} results, $${reply.costUsd?.toFixed(4)}: ${reply.results.map((result) => new URL(result.url).hostname).join(", ")}`);
-	});
-
-	await check("a deep search returns results too, and costs more than a quick one", async () => {
-		const reply = await runPromise(SearchBackend.SearchBackend.use((backend) => backend.search("What changed in the latest Vercel AI SDK release, and what breaks?", "deep")));
-		assert.ok(reply.results.length >= 2, `${reply.results.length} results`);
-		assert.ok((reply.costUsd ?? 0) > 0.007, `cost $${reply.costUsd}`);
 		console.log(`     ${reply.results.length} results, $${reply.costUsd?.toFixed(4)}: ${reply.results.map((result) => new URL(result.url).hostname).join(", ")}`);
 	});
 }

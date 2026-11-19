@@ -124,12 +124,11 @@ export async function runPythonStep(input: RunPythonInput, threadId: string, own
 	return runStep(RunPython.RunPython.use((python) => python.execute(input, { threadId, owner })));
 }
 
-/** `deep`: a deep search, for deep research (shared/web-mode.ts). */
-export async function webSearchStep(input: WebSearchInput, threadId: string, owner: string, deep = false) {
+export async function webSearchStep(input: WebSearchInput, threadId: string, owner: string) {
 	"use step";
 	const { runStep } = await import("../runtime/step.ts");
 	const { executeWebSearch } = await import("../search/tool.ts");
-	return runStep(executeWebSearch(input, { threadId, owner, depth: deep ? "deep" : "quick" }));
+	return runStep(executeWebSearch(input, { threadId, owner }));
 }
 
 /** The pages web_fetch may read in this thread without asking the person (search/trusted-pages.ts). */

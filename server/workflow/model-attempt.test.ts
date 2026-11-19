@@ -35,7 +35,7 @@ import * as ModelCalls from "../telemetry/ModelCalls.ts";
 import * as Runs from "../telemetry/Runs.ts";
 import type { ModelCall } from "./model-call.ts";
 import * as ModelAttempt from "./model-attempt.ts";
-import { FIRST_CHUNK_MS, NEXT_CHUNK_MS } from "./model-errors.ts";
+import { FIRST_CHUNK_MS, RESEARCH_FIRST_CHUNK_MS, NEXT_CHUNK_MS } from "./model-errors.ts";
 import * as ChatModels from "./model.ts";
 import * as WorkflowRuns from "./WorkflowRuns.ts";
 
@@ -135,6 +135,25 @@ describe("a model call's stall timeout", () => {
 			assert.isTrue(options.abortSignal?.aborted, "the request was not aborted");
 			// Only the reset: streamText's own start parts are not the model's output.
 			assert.deepStrictEqual(written, [{ type: "reset-step" }]);
+		}),
+	);
+
+	it.effect("gives deep research RESEARCH_FIRST_CHUNK_MS for its first part: it searches for minutes first", () =>
+		Effect.gen(function* () {
+			const fake = fakeModel();
+			const { writable } = fakeWritable("none");
+			const attempt = yield* ModelAttempt.run({ ...call("wrun_stall_research"), research: true }, writable, { stepId: "step_1", attempt: 1 }).pipe(
+				Effect.provide(layerWith(fake.model)),
+				Effect.flip,
+				Effect.forkChild,
+			);
+			yield* Deferred.await(fake.called);
+			yield* TestClock.adjust(Duration.millis(RESEARCH_FIRST_CHUNK_MS - 1));
+			assert.isUndefined(attempt.pollUnsafe(), "the research stalled before its time");
+			yield* TestClock.adjust(Duration.millis(1));
+			const error = yield* Fiber.join(attempt);
+			assert.instanceOf(error, ModelAttempt.ModelCallRetry);
+			assert.strictEqual(error.message, "The model sent nothing for 1800 seconds.");
 		}),
 	);
 

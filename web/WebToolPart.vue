@@ -4,10 +4,9 @@ import { getToolName, getToolPhase, Source, Tool, ToolContent, ToolHeader, ToolO
 
 /**
  * A web_search or web_fetch call (server/search/tool.ts) as one Tool line: what was
- * searched or read, and the pages it found, folded below. A deep search (deep research) says so
- * once it has answered: its input is the same as a quick search's.
+ * searched or read, and the pages it found, folded below.
  */
-type Output = { results?: { title: string; url: string }[]; url?: string; title?: string; error?: string; deep?: boolean };
+type Output = { results?: { title: string; url: string }[]; url?: string; title?: string; error?: string };
 
 const props = defineProps<{ part: ToolMessagePart; streaming?: boolean }>();
 const search = computed(() => getToolName(props.part) === "web_search");
@@ -24,8 +23,7 @@ const title = computed(() => {
 	if (phase.value === "preparing" || phase.value === "running") return `${search.value ? "Searching" : "Reading"} ${subject.value}`;
 	if (phase.value === "stopped") return `Did not finish ${subject.value}`;
 	if (phase.value === "failed") return `Could not ${search.value ? "search" : "read"} ${subject.value}`;
-	if (search.value) return `${output.value?.deep ? "Researched" : "Searched"} ${subject.value}`;
-	return `Read ${subject.value}`;
+	return `${search.value ? "Searched" : "Read"} ${subject.value}`;
 });
 const pages = computed(() => {
 	if (!output.value) return [];
@@ -48,7 +46,7 @@ function hostname(url: string) {
 			:state="part.state"
 			:tool-name="getToolName(part)"
 			:title="title"
-			:icon="search ? (output?.deep ? 'lucide-telescope' : 'lucide-search') : 'lucide-globe'"
+			:icon="search ? 'lucide-search' : 'lucide-globe'"
 			:streaming="streaming"
 			:approved="part.approval?.approved"
 			:failed="outputFailed"

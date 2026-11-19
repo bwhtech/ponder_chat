@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import type { UIMessage } from "ai";
 import postgres from "postgres";
 import { e2e } from "./env.ts";
-import type { ChatScript, MemoryScript, PageScript, ReceivedCall, ReceivedSearch, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
+import type { ChatScript, MemoryScript, PageScript, ReceivedCall, ReceivedSpan, ReceivedSummary, SearchScript, SentEmail, SummaryScript } from "./fake/script.ts";
 import { jsonBody } from "../server/test-json.ts";
 
 /**
@@ -57,11 +57,6 @@ export class Fake {
 	/** The chat calls whose person's latest message contains `match`. */
 	async calls(match: string): Promise<ReceivedCall[]> {
 		return jsonOf(await this.api.get(`/__fake/calls?match=${encodeURIComponent(match)}&since=${this.since}`));
-	}
-
-	/** The web searches whose query contains `match`, with the depth each asked for. */
-	async searches(match: string): Promise<ReceivedSearch[]> {
-		return jsonOf(await this.api.get(`/__fake/searches?match=${encodeURIComponent(match)}&since=${this.since}`));
 	}
 
 	/** Every span Ponder exported (server/tracing/), and each export request as it came. */

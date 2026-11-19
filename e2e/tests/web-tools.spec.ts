@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { RESEARCH_MODEL } from "../../shared/web-mode.ts";
 import { chat, expect, test } from "../fixtures.ts";
 import { createWorkspace, textFile, uploadReady, workspacePage } from "../workspaces.ts";
 
@@ -116,11 +117,21 @@ test("a workspace chat answers from Sources only; when they fall short it says s
 	});
 });
 
-test("Research is for one message: its searches are deep, the reply says so, and the chat goes back to how it was", async ({ page, person, fake }) => {
+test("Deep research is for one message: Perplexity's research model writes it, its numbers link to its pages, and the chat goes back to how it was", async ({ page, person, fake }) => {
 	const tag = person.id.slice(0, 6);
 	const question = `Why do volunteers leave ${tag}?`;
-	const query = `volunteer retention ${tag}`;
-	await fake.chat({ match: question, steps: [{ toolCalls: [{ name: "web_search", input: { query } }] }, { text: "Most leave in the first three months." }] });
+	await fake.chat({
+		match: question,
+		steps: [
+			{
+				sources: [
+					{ url: "https://research.example/retention", title: "Retention study" },
+					{ url: "https://research.example/survey", title: "Volunteer survey" },
+				],
+				text: "Most leave in the first three months.[1] Flexible shifts help.[2]",
+			},
+		],
+	});
 	await page.goto("/");
 	await pick(page, "No web");
 	await pick(page, "Deep research");
@@ -138,11 +149,14 @@ test("Research is for one message: its searches are deep, the reply says so, and
 	await expect(chat.reply(page)).toContainText("Most leave in the first three months.");
 	await chat.idle(page);
 	const [first] = await fake.calls(question);
-	expect(first.tools).toEqual(expect.arrayContaining(["web_search", "web_fetch"]));
-	expect(first.system).toContain("The person asked for deep research on this message");
-	expect(await fake.searches(query)).toMatchObject([{ mode: "deep", maxResults: 10 }]);
-	await expect(chat.reply(page)).toContainText(`Researched “${query}”`);
+	expect(first.model).toBe(RESEARCH_MODEL.id);
+	expect(first.tools).toEqual([]);
+	expect(first.system).toContain("You are Ponder's deep research");
+	await expect(chat.reply(page).getByRole("link", { name: "[1]" })).toHaveAttribute("href", "https://research.example/retention");
+	await expect(chat.reply(page).getByRole("link", { name: "[2]" })).toHaveAttribute("href", "https://research.example/survey");
 	await expect(replyWeb(page)).toHaveText("Deep research");
+	// The chat's model did not write it, so its name is not under it.
+	await expect(chat.reply(page).locator('[data-slot="reply-model"]')).toHaveCount(0);
 
 	// Research went off with the message, and Web is off as it was before.
 	await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: No web");
@@ -150,19 +164,26 @@ test("Research is for one message: its searches are deep, the reply says so, and
 	await chat.send(page, `And then ${tag}?`);
 	await chat.idle(page);
 	const [next] = await fake.calls(`And then ${tag}?`);
+	expect(next.model).not.toBe(RESEARCH_MODEL.id);
 	expect(next.tools).not.toContain("web_search");
 	expect(next.system).not.toContain("deep research");
 });
 
-test("a quick search asks for no depth", async ({ page, person, fake }) => {
+test("Deep research in a workspace gets the workspace's documents, and is told to start from them", async ({ page, person, fake }) => {
 	const tag = person.id.slice(0, 6);
-	const query = `vue release ${tag}`;
-	await fake.chat({ match: `Which Vue ${tag}`, steps: [{ toolCalls: [{ name: "web_search", input: { query } }] }, { text: "Vue 9." }] });
-	await page.goto("/");
-	await chat.send(page, `Which Vue ${tag}?`);
-	await expect(chat.reply(page)).toContainText("Vue 9.");
-	const [search] = await fake.searches(query);
-	expect(search.mode).toBeUndefined();
-	expect(search.maxResults).toBe(6);
-	await expect(chat.reply(page)).toContainText(`Searched “${query}”`);
+	const question = `What do our Sources say about shifts ${tag}?`;
+	const { id, slug } = await createWorkspace(page, `Rota ${tag}`);
+	await uploadReady(page, id, textFile("Shifts.md", `# Shifts\n\nMorning shifts start at 7:45 ${tag}.`));
+	await fake.chat({ match: question, steps: [{ text: "Morning shifts start at 7:45 (Shifts.md)." }] });
+	await page.goto(`/?w=${slug}`);
+	await pick(page, "Deep research");
+	await workspacePage.field(page).fill(question);
+	await workspacePage.field(page).press("Enter");
+	await expect(page).toHaveURL(/[?&]t=/);
+	await expect(chat.reply(page)).toContainText("Morning shifts start at 7:45");
+	await chat.idle(page);
+	const [call] = await fake.calls(question);
+	expect(call.model).toBe(RESEARCH_MODEL.id);
+	expect(call.system).toContain("Start from its documents");
+	expect(JSON.stringify([call.system, call.messages])).toContain(`Morning shifts start at 7:45 ${tag}`);
 });

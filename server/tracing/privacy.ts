@@ -96,7 +96,6 @@ const TEXT_KEYS = new Set([
 	"ponder.content_type",
 	"ponder.python.status",
 	"ponder.search.backend",
-	"ponder.search.depth",
 ]);
 
 /** Attributes kept with a number or a boolean value: counts, sizes, times and flags. */

@@ -38,6 +38,8 @@ export type Step = {
 	breakAfter?: number;
 	/** What the call cost in US dollars, as OpenRouter reports it. Credits are charged from it. */
 	cost?: number;
+	/** Pages the model used, sent as url_citation annotations before the text, as deep research's model sends them. */
+	sources?: { url: string; title: string }[];
 };
 
 /**
@@ -54,9 +56,6 @@ export type ChatScript = {
 
 /** A web search's results (search/openrouter-search.ts), for queries that contain `match`. */
 export type SearchScript = { match: string; results: { url: string; title: string; content: string }[] };
-
-/** A web search as the fake received it: the query, and Exa's mode ("deep" for deep research, none for a quick search). */
-export type ReceivedSearch = { query: string; mode?: string; maxResults?: number; at: number };
 
 /**
  * Memory, for turns whose person's message contains `match`. `save` is the gate's

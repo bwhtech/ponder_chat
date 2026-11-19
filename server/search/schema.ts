@@ -34,12 +34,6 @@ export const WEB_FETCH_DESCRIPTION =
 	"Read one web page: returns its title and main text. Use it for an address the person gives, " +
 	"or to read a search result in full when its excerpt is not enough.";
 
-/** web_search under deep research (shared/web-mode.ts): the same tool and input, a slower and wider search. */
-export const DEEP_SEARCH_DESCRIPTION =
-	"Search the web in depth. Returns numbered results, each with a title, an address and text from the page. " +
-	"Each search takes several seconds and reads more of the web than a quick search, so ask a full question, not two or three keywords. " +
-	"Search again for another part of the question, or with other words if the results do not answer it.";
-
 export const offerWebSearchInput = z.object({
 	missing: z.string().min(1).max(200).describe("What the workspace's documents do not cover, in a few words, like city permits for street events."),
 });

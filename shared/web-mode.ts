@@ -52,3 +52,11 @@ export function webModeFor(messages: ReadonlyArray<{ role: string; metadata?: un
 export function keptMode(choice: WebChoice, fallback: KeptWebMode): KeptWebMode {
 	return choice.keep ?? (choice.web === "research" ? fallback : choice.web);
 }
+
+/**
+ * Deep research runs on Perplexity's research model, through OpenRouter on a Zero Data
+ * Retention endpoint like every model call. It plans, searches and reads the web for minutes
+ * before its first word (server/workflow/model-errors.ts gives it 30 minutes), and returns
+ * the pages it used as sources, which its text cites as [1], [2] (web/citations.ts links them).
+ */
+export const RESEARCH_MODEL = { id: "perplexity/sonar-deep-research", name: "Deep research" };

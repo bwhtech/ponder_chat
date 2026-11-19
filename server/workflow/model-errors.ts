@@ -11,6 +11,12 @@ export const MODEL_CALL_ATTEMPTS = 3;
 export const FIRST_CHUNK_MS = 10 * 60_000;
 /** No chunk for this long after the first one: the stream has stalled. */
 export const NEXT_CHUNK_MS = 2 * 60_000;
+/**
+ * The same for deep research (chat.ts): Perplexity's model searches and reads for minutes, with
+ * nothing on the stream but OpenRouter's keep-alive comments, before its first word.
+ */
+export const RESEARCH_FIRST_CHUNK_MS = 30 * 60_000;
+export const RESEARCH_NEXT_CHUNK_MS = 10 * 60_000;
 
 /** Waits before the 2nd and the 3rd attempt. */
 const BACKOFF_MS = [2_000, 8_000];

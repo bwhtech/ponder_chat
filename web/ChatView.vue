@@ -23,6 +23,7 @@ import { once } from "./once";
 import { isRecord } from "./json";
 import { preloadChat } from "./preload";
 import { useChatWorkspace, WorkspacePicker } from "./workspaces/chat-workspace";
+import { withCitationLinks } from "./citations";
 import { askedWith, offersWebSearch, savedWebChoice, useWebTools, webLabel, withWebOnce } from "./web-tools";
 import WebTools from "./WebTools.vue";
 // The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
@@ -552,8 +553,10 @@ function replyText(message: UIMessage) {
 }
 
 /** The model that wrote a reply, from the metadata the server attaches. None under Auto. */
+/** The chat's model, under a reply it wrote. Not under deep research's, which Perplexity's research model wrote: its line says "Deep research". */
 function replyModel(message: UIMessage) {
 	const id = replyModelId(message);
+	if (askedWith(messages.value, message)?.web === "research") return undefined;
 	return id && !isAuto(id) ? (modelName(id) ?? id) : undefined;
 }
 
@@ -611,7 +614,7 @@ function replyModelId(message: UIMessage) {
 								<!-- The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). -->
 								<div class="contents" :data-cite-source="message.role === 'assistant' && !isStreaming(message) ? message.id : undefined">
 								<MessageParts
-									:message="message"
+									:message="withCitationLinks(message)"
 									:streaming="isStreaming(message)"
 									@approve="answerApproval($event, true)"
 									@deny="answerApproval($event, false)"
