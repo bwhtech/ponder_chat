@@ -5,6 +5,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as Auth from "../auth/Auth.ts";
+import type { InvalidSettings, MicrosoftSettings, MicrosoftStatus } from "../auth/microsoft.ts";
+import * as SignInProviders from "../auth/SignInProviders.ts";
 import * as Branding from "../branding/Branding.ts";
 import * as Credits from "../credits/Credits.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
@@ -19,7 +21,7 @@ import * as AdminReports from "./AdminReports.ts";
 
 /**
  * What admins change on /admin (admin/routes.ts): people's limits and roles, bans, invites,
- * requests for more credits, the settings and the logo.
+ * requests for more credits, the settings, the logo and sign-in with Microsoft.
  *
  * Role, ban and sign-out go through Better Auth's admin plugin (auth.api), which checks
  * the admin's session again (the request's headers) and ends a banned person's sessions.
@@ -108,6 +110,15 @@ export class AdminActions extends Context.Service<
 		readonly setLogo: (actor: Actor, theme: Branding.Theme, upload: Buffer) => Effect.Effect<Branding.LogoVersions, Branding.LogoRefused | SqlError>;
 		/** Back to Ponder's logo for a theme. Which logos are set, after it. */
 		readonly removeLogo: (actor: Actor, theme: Branding.Theme) => Effect.Effect<Branding.LogoVersions, SqlError>;
+		/** Sign in with Microsoft, as the Settings page shows it: without the client secret. */
+		readonly microsoftSignIn: Effect.Effect<MicrosoftStatus, SqlError>;
+		/** Checks and saves Microsoft sign-in (auth/microsoft.ts). Without a client secret, the saved one stays. The settings after it. */
+		readonly setMicrosoftSignIn: (actor: Actor, settings: MicrosoftSettings, clientSecret: string | undefined) => Effect.Effect<MicrosoftStatus, InvalidSettings | SqlError>;
+		/**
+		 * Forgets which Microsoft account a person signs in with: for a person whose account the
+		 * directory made again, whom sign-in refuses as "linked to another account".
+		 */
+		readonly unlinkMicrosoft: (actor: Actor, userId: string) => Effect.Effect<void, NoOne | SqlError>;
 		/** Answers a request for more credits, then emails the person, with a link to `origin`. A failed email does not undo the answer. */
 		readonly answer: (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) => Effect.Effect<void, AnsweredAlready | SqlError>;
 	}
@@ -127,6 +138,7 @@ const make = Effect.gen(function* () {
 	const extraCredits = yield* ExtraCredits.ExtraCredits;
 	const settings = yield* Settings.Settings;
 	const branding = yield* Branding.Branding;
+	const signInProviders = yield* SignInProviders.SignInProviders;
 	const openRouterKey = yield* OpenRouterKey.OpenRouterKey;
 	const models = yield* Models.Models;
 	const mailer = yield* Mailer.Mailer;
@@ -283,6 +295,25 @@ const make = Effect.gen(function* () {
 		return yield* branding.versions;
 	});
 
+	// The log keeps what was set and that the secret changed, never the secret.
+	const setMicrosoftSignIn = Effect.fn("AdminActions.setMicrosoftSignIn")(function* (actor: Actor, input: MicrosoftSettings, clientSecret: string | undefined) {
+		const shown = ({ enabled, tenantId, clientId, signUps, allowedDomains }: MicrosoftStatus) => ({ enabled, tenantId, clientId, signUps, allowedDomains });
+		const before = yield* signInProviders.microsoft;
+		const after = yield* signInProviders.saveMicrosoft(input, clientSecret, actor.id);
+		// A new tenant unlinks everyone (SignInProviders.ts): the log says so.
+		const unlinked = before.tenantId !== "" && before.tenantId !== after.tenantId;
+		yield* record(actor, "set-microsoft-sign-in", {
+			before: shown(before),
+			after: { ...shown(after), ...(clientSecret?.trim() && { secretChanged: true }), ...(unlinked && { unlinkedEveryone: true }) },
+		});
+		return after;
+	});
+
+	const unlinkMicrosoft = Effect.fn("AdminActions.unlinkMicrosoft")(function* (actor: Actor, userId: string) {
+		if (!(yield* signInProviders.unlink(userId))) return yield* new NoOne();
+		yield* record(actor, "unlink-microsoft", { target: userId });
+	});
+
 	const answer = Effect.fn("AdminActions.answer")(function* (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) {
 		const userId = yield* extraCredits.decide(requestId, decision, actor.id);
 		if (Option.isNone(userId)) return yield* new AnsweredAlready();
@@ -310,6 +341,9 @@ const make = Effect.gen(function* () {
 		setOpenRouterKey,
 		setLogo,
 		removeLogo,
+		microsoftSignIn: signInProviders.microsoft,
+		setMicrosoftSignIn,
+		unlinkMicrosoft,
 		answer,
 	});
 });

@@ -46,6 +46,11 @@ export class PonderConfig extends Context.Service<
 		readonly allowedEmails: ReadonlyArray<string>;
 		/** NODE_ENV === "development" (web-build.ts). Nitro writes NODE_ENV into the build, so in production it is false. */
 		readonly development: boolean;
+		/**
+		 * PONDER_MICROSOFT_AUTHORITY: where Microsoft's sign-in endpoints are, by default https://login.microsoftonline.com
+		 * (auth/Auth.ts). The e2e tests point it at the fake; an Entra External ID tenant has its own. Empty = missing.
+		 */
+		readonly microsoftAuthority: Option.Option<string>;
 
 		// --- OpenRouter and models
 		/** OPENROUTER_API_KEY, used when no key is saved in /admin (openrouter/OpenRouterKey.ts). Empty = missing. */
@@ -165,6 +170,7 @@ const make = Effect.gen(function* () {
 		CHAT_OPEN_SIGNUP: raw("CHAT_OPEN_SIGNUP"),
 		CHAT_ALLOWED_EMAILS: raw("CHAT_ALLOWED_EMAILS"),
 		NODE_ENV: raw("NODE_ENV"),
+		PONDER_MICROSOFT_AUTHORITY: raw("PONDER_MICROSOFT_AUTHORITY"),
 		OPENROUTER_API_KEY: raw("OPENROUTER_API_KEY"),
 		OPENROUTER_BASE_URL: raw("OPENROUTER_BASE_URL"),
 		CHAT_DEFAULT_MODEL: raw("CHAT_DEFAULT_MODEL"),
@@ -218,6 +224,7 @@ const make = Effect.gen(function* () {
 		openSignup: env.CHAT_OPEN_SIGNUP === "1",
 		allowedEmails: list(env.CHAT_ALLOWED_EMAILS ?? "").map((email) => email.toLowerCase()),
 		development: env.NODE_ENV === "development",
+		microsoftAuthority: Option.map(nonEmpty(env.PONDER_MICROSOFT_AUTHORITY), withoutTrailingSlash),
 
 		openRouterApiKey: secret(env.OPENROUTER_API_KEY),
 		openRouterBaseUrl: withoutTrailingSlash(env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api"),

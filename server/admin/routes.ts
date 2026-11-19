@@ -6,7 +6,9 @@ import * as Option from "effect/Option";
 import { z } from "zod";
 import type { SignedInEnv } from "../auth.ts";
 import * as Auth from "../auth/Auth.ts";
+import { CALLBACK_PATH, SIGN_UPS } from "../auth/microsoft.ts";
 import * as Branding from "../branding/Branding.ts";
+import * as PonderConfig from "../config.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { route } from "../runtime/route.ts";
@@ -64,6 +66,16 @@ const skillBody = z.object({
 	enabled: z.boolean().default(false),
 	/** When the admin's copy was loaded; absent for a new skill. */
 	expectedUpdatedAt: z.string().datetime().optional(),
+});
+
+// The server checks the values (auth/microsoft.ts); this only bounds them. No client secret: the saved one stays.
+const microsoftBody = z.object({
+	enabled: z.boolean(),
+	tenantId: z.string().max(100),
+	clientId: z.string().max(100),
+	clientSecret: z.string().max(500).optional(),
+	signUps: z.enum(SIGN_UPS),
+	allowedDomains: z.array(z.string().max(260)).max(100),
 });
 
 // A little over the logo's limit, for the form around it. Larger is refused before it is read.
@@ -174,6 +186,11 @@ export const adminApi = new Hono<Env>()
 		});
 	})
 
+	// Their next sign-in with Microsoft links the account it shows (auth/microsoft.ts).
+	.delete("/people/:id/microsoft", (c) =>
+		route(c, Effect.map(actions((service) => service.unlinkMicrosoft(actorOf(c), c.req.param("id"))), ok(c)), { NoOne: notFound }),
+	)
+
 	.post("/people/:id/unban", (c) =>
 		route(c, Effect.map(actions((service) => service.unban(c.req.raw.headers, c.req.param("id"))), ok(c)), { AuthRefused: refused }),
 	)
@@ -260,6 +277,29 @@ export const adminApi = new Hono<Env>()
 		const theme = c.req.param("theme");
 		if (!Branding.isTheme(theme)) return c.json({ error: "Not found" }, 404);
 		return route(c, Effect.map(actions((service) => service.removeLogo(actorOf(c), theme)), (logos) => c.json({ logos })));
+	})
+
+	// Sign in with Microsoft (auth/microsoft.ts). `redirectUris` are what the admin registers in Entra:
+	// one for each address Ponder answers on, the one the admin uses now first.
+	.get("/sign-in", (c) =>
+		route(
+			c,
+			Effect.gen(function* () {
+				const microsoft = yield* actions((service) => service.microsoftSignIn);
+				const hosts = yield* PonderConfig.PonderConfig.useSync((config) => config.hosts);
+				const origins = [yield* originOf(c), ...hosts.map((host) => Auth.originFor([host], new Headers({ host })))];
+				return c.json({ microsoft, redirectUris: [...new Set(origins)].map((origin) => `${origin}${CALLBACK_PATH}`) });
+			}),
+		),
+	)
+
+	// Saved at once, with its own button: turning sign-in on or off is not part of the credits form.
+	.put("/sign-in/microsoft", body(microsoftBody), (c) => {
+		const { clientSecret, ...settings } = c.req.valid("json");
+		return route(c, Effect.map(actions((service) => service.setMicrosoftSignIn(actorOf(c), settings, clientSecret)), (microsoft) => c.json({ microsoft })), {
+			// The problem's name goes along, so the form shows the message at its field.
+			InvalidSettings: (error, c) => c.json({ error: error.message, errors: [error.problem] }, 400),
+		});
 	})
 
 	// Skills (skills.ts): Markdown files of instructions, on for everyone or off.

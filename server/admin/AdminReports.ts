@@ -207,14 +207,15 @@ function makePeopleRows({ sql }: Reads) {
 					u."createdAt" as joined_at, a.note, a.created_at as invited_at,
 					coalesce(nullif(inviter.name, ''), split_part(inviter.email, '@', 1)) as inviter, null::int as invite_credits,
 					coalesce((select max(r.created_at) from runs r where r."user" = u.id),
-						(select max(s."updatedAt") from sessions s where s."userId" = u.id)) as last_active
+						(select max(s."updatedAt") from sessions s where s."userId" = u.id)) as last_active,
+					exists (select 1 from accounts linked where linked."userId" = u.id and linked."providerId" = 'microsoft') as microsoft
 				from users u
 				left join allowed_emails a on a.email = lower(u.email)
 				left join users inviter on inviter.id = a.invited_by
 				${oneUser}
 				union all
 				select null, null, a.email, null, null, null, null, null, a.note, a.created_at,
-					coalesce(nullif(inviter.name, ''), split_part(inviter.email, '@', 1)), a.daily_credits, null
+					coalesce(nullif(inviter.name, ''), split_part(inviter.email, '@', 1)), a.daily_credits, null, false
 				from allowed_emails a
 				left join users inviter on inviter.id = a.invited_by
 				where not exists (select 1 from users u where lower(u.email) = a.email) ${oneInvite}`;

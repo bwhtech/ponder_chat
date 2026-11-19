@@ -1,6 +1,7 @@
 import * as Layer from "effect/Layer";
 import * as AdminAuthEvents from "../auth/AdminAuthEvents.ts";
 import * as Auth from "../auth/Auth.ts";
+import * as SignInProviders from "../auth/SignInProviders.ts";
 import * as Credits from "../credits/Credits.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
 import * as RateLimits from "../limits/RateLimits.ts";
@@ -13,15 +14,15 @@ import * as AdminEvents from "./AdminEvents.ts";
 import * as AdminReports from "./AdminReports.ts";
 
 /**
- * People and admin: sign-in (Better Auth), accounts and invites, credits, rate limits, the
+ * People and admin: sign-in (Better Auth, and the providers admins set up), accounts and invites, credits, rate limits, the
  * admin activity log and the admin API's services (with workspaces as admins see them),
  * and the web build for the chat page.
  * Each tier is provided by the ones below it. What they need from the platform (the
- * database, the config, Settings, Mailer, Notify, OpenRouterKey, Models, ObjectStore) comes from the
+ * database, the config, Secrets, Settings, Mailer, Notify, OpenRouterKey, Models, ObjectStore) comes from the
  * app's layer (runtime/layer.ts).
  */
 export const layer = AdminActions.layer.pipe(
 	Layer.provideMerge(Auth.layer),
 	Layer.provideMerge(Layer.mergeAll(Credits.layer, AdminAuthEvents.layer, AdminReports.layer, AdminWorkspaces.layer)),
-	Layer.provideMerge(Layer.mergeAll(ExtraCredits.layer, Invites.layer, Accounts.layer, AdminEvents.layer, RateLimits.layer, WebBuild.layer)),
+	Layer.provideMerge(Layer.mergeAll(ExtraCredits.layer, Invites.layer, Accounts.layer, AdminEvents.layer, RateLimits.layer, WebBuild.layer, SignInProviders.layer)),
 );

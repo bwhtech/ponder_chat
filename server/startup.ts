@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as AdminEvents from "./admin/AdminEvents.ts";
 import * as Auth from "./auth/Auth.ts";
+import * as SignInProviders from "./auth/SignInProviders.ts";
 import * as Branding from "./branding/Branding.ts";
 import * as Credits from "./credits/Credits.ts";
 import * as Files from "./files.ts";
@@ -90,6 +91,8 @@ const migrateAll = Effect.gen(function* () {
 	yield* threads.migrate;
 	// After threads: its tables reference them.
 	yield* CompactionStore.CompactionStore.use((store) => store.migrate);
+	// Before Auth: Better Auth is made with the sign-in providers that are set up.
+	yield* SignInProviders.SignInProviders.use((providers) => providers.migrate);
 	yield* Auth.Auth.use((auth) => auth.migrate);
 	// After Auth and Threads: its tables reference users, and threads.workspace_id references it.
 	yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);

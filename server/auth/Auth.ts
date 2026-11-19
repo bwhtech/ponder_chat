@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
 import * as Redacted from "effect/Redacted";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import type { SqlError } from "effect/sql/SqlError";
@@ -22,7 +23,9 @@ import * as Mailer from "../email/Mailer.ts";
 import { isLocalHost } from "../hosts.ts";
 import * as Invites from "../people/Invites.ts";
 import * as AdminAuthEvents from "./AdminAuthEvents.ts";
+import { emailOf, MICROSOFT, refusal, type MicrosoftProvider } from "./microsoft.ts";
 import { SessionCache, sessionKey } from "./session-cache.ts";
+import * as SignInProviders from "./SignInProviders.ts";
 
 /**
  * Sign-in: Better Auth with no passwords. One email holds a link and a 6-digit code, and
@@ -32,8 +35,13 @@ import { SessionCache, sessionKey } from "./session-cache.ts";
  * Ponder's own domain, cached in the cookie for five minutes so most requests skip the
  * session lookup.
  *
+ * An organisation's people can also sign in with Microsoft, once an admin sets it up on
+ * /admin (microsoft.ts, SignInProviders.ts). Better Auth's own Microsoft provider does the
+ * OAuth work. Better Auth takes its providers when it is made, so it is made again after
+ * the settings change. Its pool stays.
+ *
  * The admin plugin gives each person a role ("user" or "admin", see people/Accounts.ts) and
- * refuses a new session to a banned person, by link or by code.
+ * refuses a new session to a banned person, by link, by code or with Microsoft.
  *
  * BETTER_AUTH_SECRET signs the cookies. PONDER_HOSTS lists the hosts Ponder answers on
  * (comma-separated, such as "chat.example.org"); links in emails use the host the
@@ -62,11 +70,20 @@ export class AuthRefused extends Schema.TaggedError<AuthRefused>()("AuthRefused"
 
 const SIGN_IN_EXPIRES_IN = 15 * 60;
 const NOT_INVITED = "This email is not invited to Ponder Chat.";
+const LINKED_TO_ANOTHER = "This Ponder account is linked to another Microsoft account.";
+/**
+ * Where a sign-in with Microsoft that failed before Better Auth read its state goes: the sign-in
+ * page, which shows a fixed sentence for the error's code (web/SignIn.vue). The same address
+ * as the page gives for the failures after that (web/account.ts).
+ */
+const MICROSOFT_FAILED = "/?sign-in=failed&with=microsoft";
 
 /** What Better Auth calls back, run on the runtime's services. */
 type Callbacks = {
 	readonly isAllowed: (email: string) => Promise<boolean>;
 	readonly applyInvite: (user: { id: string; email: string }) => Promise<void>;
+	/** Whether the person has an account of this provider linked already. */
+	readonly hasProviderAccount: (userId: string, providerId: string) => Promise<boolean>;
 	readonly beforeCall: (ctx: AdminAuthEvents.HookContext) => Promise<void>;
 	readonly afterCall: (ctx: AdminAuthEvents.HookContext) => Promise<void>;
 	readonly forgetSessions: () => void;
@@ -74,7 +91,11 @@ type Callbacks = {
 	readonly log: (line: string) => Promise<void>;
 };
 
-function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefined, run: Callbacks) {
+/** Microsoft sign-in, when an admin turned it on, and where Microsoft's endpoints are (PONDER_MICROSOFT_AUTHORITY). */
+type Providers = { readonly microsoft: Option.Option<MicrosoftProvider>; readonly authority: string | undefined };
+
+function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefined, providers: Providers, run: Callbacks) {
+	const microsoft = Option.getOrUndefined(providers.microsoft);
 	const auth = betterAuth({
 		appName: "Ponder Chat",
 		secret,
@@ -83,7 +104,8 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 		trustedOrigins: hosts.flatMap((host) => [`https://${host}`, `http://${host}`]),
 		// Tailscale Serve, Caddy and the Cloudflare Worker in front pass on the host the person used.
 		// Cloudflare names the visitor in cf-connecting-ip; Caddy's x-forwarded-for holds Cloudflare's address.
-		advanced: { trustedProxyHeaders: true, ipAddress: { ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"] } },
+		// Better Auth turns its origin checks off under a test runner. On always, so the tests run what production runs.
+		advanced: { trustedProxyHeaders: true, ipAddress: { ipAddressHeaders: ["cf-connecting-ip", "x-forwarded-for"] }, disableOriginCheck: false },
 		// Better Auth limits only in production by default. On always, with tighter limits on
 		// what sends an email or checks a code, per address.
 		rateLimit: {
@@ -95,10 +117,51 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 				"/email-otp/send-verification-otp": { window: 10 * 60, max: 5 },
 				"/sign-in/email-otp": { window: 10 * 60, max: 10 },
 				"/magic-link/verify": { window: 10 * 60, max: 10 },
+				// Better Auth lets an address start 3 sign-ins in 10 seconds. A whole office shares one address,
+				// and a start with Microsoft sends no email and checks no code: the general limit is enough.
+				"/sign-in/social": { window: 60, max: 100 },
 			},
 		},
-		user: { modelName: "users" },
-		account: { modelName: "accounts" },
+		// Sign in with Microsoft (microsoft.ts). Off until an admin sets it up: Better Auth then has no such provider.
+		socialProviders: {
+			microsoft: {
+				enabled: microsoft !== undefined,
+				clientId: microsoft?.clientId ?? "",
+				clientSecret: microsoft?.clientSecret,
+				// The tenant's own endpoints, which sign in only that tenant's accounts. The token's tenant is checked too (validateUserInfo below).
+				tenantId: microsoft?.tenantId,
+				authority: providers.authority,
+				// Only who the person is. The defaults also ask for the profile photo, and for a refresh token.
+				disableDefaultScope: true,
+				scope: ["openid", "profile", "email"],
+				disableProfilePhoto: true,
+				// The page signs in by redirect only: it never posts an id_token.
+				disableIdTokenSignIn: true,
+				// Lets the person choose the account, on a browser that is signed in to several.
+				prompt: "select_account",
+				// An Entra token has no "email_verified". The tenant is the organisation's own (above) and
+				// the email is of its domains (validateUserInfo below), so its directory is trusted for it.
+				mapProfileToUser: (profile) => {
+					const email = emailOf({ email: profile.email, preferred_username: profile.preferred_username });
+					return email ? { email, emailVerified: true } : {};
+				},
+			},
+		},
+		// A failed sign-in with Microsoft comes back to the sign-in page, not to Better Auth's own error page.
+		onAPIError: { errorURL: MICROSOFT_FAILED },
+		user: {
+			modelName: "users",
+			// Runs before an account is made or linked for a provider's sign-in, and at each later
+			// sign-in with it: the tenant and the organisation's domains (microsoft.ts). Not for links and codes.
+			validateUserInfo: ({ user, source }) => {
+				if (source.method !== "oauth") return;
+				if (!microsoft || source.oauth?.providerId !== MICROSOFT) return { error: "PROVIDER_UNAVAILABLE" };
+				const error = refusal(source.oauth.profile ?? {}, user.email ?? undefined, microsoft);
+				return error && { error };
+			},
+		},
+		// The provider's tokens are not kept: Ponder only asks Microsoft who the person is.
+		account: { modelName: "accounts", updateAccountOnSignIn: false },
 		verification: { modelName: "verifications" },
 		session: {
 			modelName: "sessions",
@@ -111,10 +174,23 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 		databaseHooks: {
 			user: {
 				create: {
-					before: async (user) => {
+					before: async (user, ctx) => {
+						// Set to "everyone", Microsoft sign-in needs no invite: the tenant and the domains are checked (validateUserInfo).
+						if (microsoft?.signUps === "everyone" && callbackProvider(ctx) === MICROSOFT) return;
 						if (!(await run.isAllowed(user.email))) throw new APIError("FORBIDDEN", { code: "NOT_INVITED", message: NOT_INVITED });
 					},
 					after: async (user) => run.applyInvite(user),
+				},
+			},
+			account: {
+				create: {
+					before: async (account) => {
+						// One Microsoft account for a Ponder account. A second one that shows the same email is not
+						// the person who signed in first, however the email checks out (frappe/frappe#42500).
+						if (await run.hasProviderAccount(account.userId, account.providerId))
+							throw new APIError("FORBIDDEN", { code: "LINKED_TO_ANOTHER_ACCOUNT", message: LINKED_TO_ANOTHER });
+						return { data: { ...account, accessToken: null, refreshToken: null, idToken: null, accessTokenExpiresAt: null, refreshTokenExpiresAt: null, scope: null } };
+					},
 				},
 			},
 		},
@@ -160,6 +236,13 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 			"/admin/create-user",
 			"/admin/remove-user",
 			"/admin/set-user-password",
+			// A person signs in with Microsoft or not: nobody links or unlinks an account by hand,
+			// and Ponder keeps no provider tokens to read or refresh.
+			"/link-social",
+			"/unlink-account",
+			"/refresh-token",
+			"/get-access-token",
+			"/account-info",
 		],
 		plugins: [
 			magicLink({
@@ -224,6 +307,7 @@ const make = Effect.gen(function* () {
 	const config = yield* PonderConfig.PonderConfig;
 	const sql = yield* PgClient.PgClient;
 	const invites = yield* Invites.Invites;
+	const signInProviders = yield* SignInProviders.SignInProviders;
 	const mailer = yield* Mailer.Mailer;
 	const adminAuthEvents = yield* AdminAuthEvents.AdminAuthEvents;
 	const scope = yield* Effect.scope;
@@ -235,6 +319,8 @@ const make = Effect.gen(function* () {
 	const callbacks: Callbacks = {
 		isAllowed: (email) => run(invites.isAllowed(email)),
 		applyInvite: (user) => run(invites.applyInvite(user)),
+		hasProviderAccount: (userId, providerId) =>
+			run(Effect.map(sql`select 1 from accounts where "userId" = ${userId} and "providerId" = ${providerId} limit 1`, (rows) => rows.length > 0)),
 		beforeCall: (ctx) => run(adminAuthEvents.before(ctx)),
 		afterCall: (ctx) => run(adminAuthEvents.after(ctx)),
 		forgetSessions: () => sessions.clear(),
@@ -246,11 +332,24 @@ const make = Effect.gen(function* () {
 		Effect.sync(() => new Pool({ connectionString: Option.getOrUndefined(Option.map(config.databaseUrl, Redacted.value)), max: 5 })),
 		// The process is stopping (startup.ts): a query still running does not hold it up.
 		(pool) => Effect.promise(() => pool.end()).pipe(Effect.timeout(Duration.seconds(3)), Effect.ignore),
-	).pipe(
-		Effect.map((pool) => build(pool, config.hosts, Option.getOrUndefined(Option.map(config.betterAuthSecret, Redacted.value)), callbacks)),
-		Scope.provide(scope),
-	);
-	const instance = yield* Effect.cached(open);
+	).pipe(Scope.provide(scope));
+	const pool = yield* Effect.cached(open);
+	const secret = Option.getOrUndefined(Option.map(config.betterAuthSecret, Redacted.value));
+	const authority = Option.getOrUndefined(config.microsoftAuthority);
+
+	// Better Auth, made for the sign-in providers of one version (SignInProviders.ts), and made again when an
+	// admin changes them. The one before answers the requests it has; both use the same pool and the same secret.
+	const made = yield* Ref.make(Option.none<{ version: number; auth: BetterAuth }>());
+	const instance = Effect.gen(function* () {
+		// Without the database, Better Auth answers nothing either: a defect, as its own failed query is.
+		const active = yield* Effect.orDie(signInProviders.active);
+		const connections = yield* pool;
+		return yield* Ref.modify(made, (now) => {
+			if (Option.isSome(now) && now.value.version === active.version) return [now.value.auth, now];
+			const auth = build(connections, config.hosts, secret, { microsoft: active.microsoft, authority }, callbacks);
+			return [auth, Option.some({ version: active.version, auth })];
+		});
+	});
 
 	const migrate = Effect.gen(function* () {
 		const auth = yield* instance;
@@ -261,6 +360,11 @@ const make = Effect.gen(function* () {
 		yield* sql`update users set role = 'user' where role is null`;
 		// Ponder matches emails without case (invites, /admin, scripts/admin.ts); the unique index on email can't serve lower(email).
 		yield* sql`create index if not exists users_email_lower on users (lower(email))`;
+		// One Ponder account for a provider's account, and one account of a provider for a Ponder account
+		// (the hook in `build` says why). The hook checks first and gives the error its words; two
+		// sign-ins at the same moment both pass that check, and these stop the second.
+		yield* sql`create unique index if not exists accounts_provider_account on accounts ("providerId", "accountId")`;
+		yield* sql`create unique index if not exists accounts_user_provider on accounts ("userId", "providerId")`;
 	});
 
 	const handler = (request: Request) => Effect.flatMap(instance, (auth) => Effect.promise(() => auth.handler(request)));
@@ -311,4 +415,10 @@ export const appOrigin = (headers: Headers) => PonderConfig.PonderConfig.useSync
 /** The type of code a request to send one asks for. Better Auth types a hook's body as `any`. */
 function codeType(body: unknown) {
 	return Predicate.hasProperty(body, "type") ? body.type : undefined;
+}
+
+/** The provider whose sign-in this request ends (GET /callback/<provider>), for a database hook. None for any other request. */
+function callbackProvider(ctx: unknown) {
+	if (!Predicate.hasProperty(ctx, "path") || ctx.path !== "/callback/:id") return undefined;
+	return Predicate.hasProperty(ctx, "params") && Predicate.hasProperty(ctx.params, "id") ? ctx.params.id : undefined;
 }

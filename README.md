@@ -153,6 +153,7 @@ A person's page shows their numbers for 30 days and the devices they are signed 
 
 ### Also in Ponder
 
+- **Sign in with Microsoft.** An admin can let the organisation's people sign in with their Microsoft 365 work accounts, beside sign-in by email. See "Sign in with Microsoft".
 - **Files in a side panel.** Attached PDFs, images, CSV, text, Markdown and JSON files open beside the chat, and a workspace's documents beside its page. A PDF draws each page as it comes near the screen. A CSV shows as a table, and Markdown as a reply does.
 - **Search and export.** The search box above the chat list finds chats by the words in their titles and messages. Each chat's menu exports it as a Markdown file.
 
@@ -177,7 +178,7 @@ Then, with the app's environment:
 2. Sign in at http://127.0.0.1:3500. Without email settings, the sign-in email is printed in the server log.
 3. Make yourself an admin: `npx tsx scripts/admin.ts grant you@example.org`.
 
-Two settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL` (every OpenRouter call; default `https://openrouter.ai/api`) and `CLOUDFLARE_API_URL` (the email API). Production sets neither.
+Three settings point Ponder at other servers, for the tests: `OPENROUTER_BASE_URL` (every OpenRouter call; default `https://openrouter.ai/api`), `CLOUDFLARE_API_URL` (the email API) and `PONDER_MICROSOFT_AUTHORITY` (Microsoft's sign-in; default `https://login.microsoftonline.com`). Production sets none of them.
 
 Tests: `npm run e2e` builds Ponder and runs the end-to-end tests in a browser, with a fake OpenRouter in place of the real one, and test MCP servers for connectors. They need Docker for Postgres. See [`e2e/README.md`](e2e/README.md). CI runs them, the type checks, the lint, `server/trusted-pages.check.ts`, `server/connector-catalog.check.ts`, `server/tracing.check.ts`, `server/workflow/loop.check.ts` and `server/mcp.check.ts` on every pull request.
 
@@ -257,6 +258,7 @@ Ponder started as a copy of the Seva platform with its Frappe parts removed. Pyt
 ### People, models and chats
 
 - Sign-in by email (Better Auth), for invited people only (`scripts/invite.ts`). One email holds a 6-digit code and a link. Either one signs the person in, so a mail scanner that opens the link first does not lock them out. Both expire in 15 minutes. A code takes 3 wrong tries. A code is checked only by signing in with it: Better Auth's route that checks a code alone is off, and so are codes of any type other than sign-in.
+- Sign-in with Microsoft, once an admin sets it up: see "Sign in with Microsoft".
 - Admins: Better Auth's admin plugin gives each person a role, "user" or "admin", and stops a banned person from signing in. Run on the server with the app's environment: `npx tsx scripts/admin.ts grant someone@example.org`, `revoke <email>` or `list`.
 - Models: the list is in `server/models/Models.ts`, and it is also the allowlist. A request for any other model gets the default, Auto (`CHAT_DEFAULT_MODEL` changes it). Every new chat starts on Auto; an old chat keeps the model of its last reply.
 - Auto (`server/models/AutoRouter.ts`): `openrouter/auto` with the `auto-router` plugin. `allowed_models` holds only the models on the list with a ZDR endpoint, and `cost_tier` is the cost level that admins set in Settings, Auto (low, medium or high; medium by default). The chat's id goes as `session_id`, so OpenRouter keeps a chat on one model where it can. Its window is the smallest window of those models, every PDF gets the free parser, and the call carries Anthropic's cache marks. The replies of an Auto chat drop their reasoning on the next call, because the next model may differ. OpenRouter's decision model, which reads each message to pick the model, is not covered by the ZDR rule as far as its docs say.
@@ -340,7 +342,7 @@ Documents (`server/workspaces/documents/`):
 | Requests | Requests for more credits that wait, with Approve and Decline. Below: the answers of the last 30 days. |
 | People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
 | Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
-| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the summary model for long chats (see "Long chats"), the OpenRouter key and the list of admins. Its Branding tab sets the organisation's logo, for light and dark mode (see "Logo"). On a phone, Settings is a page in the tab bar, with Branding under General. |
+| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the summary model for long chats (see "Long chats"), the OpenRouter key and the list of admins. Its Branding tab sets the organisation's logo, for light and dark mode (see "Logo"). Its Sign-in tab sets up sign-in with Microsoft (see "Sign in with Microsoft"). On a phone, Settings is a page in the tab bar, with Branding and Sign-in under General. |
 | Workspaces | Workspaces open to everyone: owner, people added, documents, status, errors and what indexing cost. A click on a document opens its indexing log. Private workspaces as totals only (see below). On a phone, it is in the account menu. |
 | Activity | Each change an admin made, newest first: who did it, to whom, what changed and when. A click on a name shows that person's events only. Read only. On a phone, it is in the account menu. |
 
@@ -353,6 +355,34 @@ Documents (`server/workspaces/documents/`):
 - Role changes, bans and "sign out everywhere" go through Better Auth's admin plugin. A banned or signed-out person can keep using an open page for up to five minutes, because the session is cached in the cookie.
 - The admin activity log is the `admin_events` table (`server/admin/AdminEvents.ts`). Only the server writes it, and nothing updates or deletes a row. Better Auth's admin endpoints are logged in its hooks (`server/auth/AdminAuthEvents.ts`), because an admin can call them at `/api/auth/admin/*` as well as through `/api/admin`. The other `/api/admin` routes log their own changes. The OpenRouter key's event says only that the key changed. The scripts in `scripts/` change the database directly and are not logged.
 - An admin can change a person's email with Better Auth's `/api/auth/admin/update-user`. The admin can then sign in to that account with the new address. So each email change is logged, and the old address gets an email that names the new address and the admin.
+
+### Sign in with Microsoft
+
+An organisation's people can sign in with their Microsoft 365 (Entra ID) work accounts. Sign-in by email stays on. An admin sets it up in Settings, Sign-in:
+
+1. In the [Microsoft Entra admin center](https://entra.microsoft.com), open App registrations, then New registration. Choose "Accounts in this organizational directory only". Add the redirect URI that Settings shows, of type Web: `https://<your host>/api/auth/callback/microsoft`. Ponder shows one for each host in `PONDER_HOSTS`.
+2. Copy the Directory (tenant) ID and the Application (client) ID from the app's Overview page.
+3. In Certificates & secrets, make a client secret and copy its Value. Entra shows it once. The Secret ID beside it does not work, and Ponder says so if you paste it.
+4. In Ponder's Settings, enter these, your organisation's email domains, and who gets a new account: invited people only, or everyone in the organisation.
+
+Better Auth's own Microsoft provider does the OAuth work: the state (bound to the browser that started, used once), PKCE, and the token exchange. Ponder asks only for `openid profile email`, and keeps none of Microsoft's tokens. Better Auth takes its providers when it is made, so Ponder makes it again when an admin saves the settings: a change works at once, with no restart.
+
+The rules that Ponder adds follow Frappe's Social Login Key for Office 365:
+
+- **One tenant.** The tenant ID is required, and it must be the ID, not `common` or a domain name. Ponder uses that tenant's endpoints, which sign in only its accounts, and also refuses a token whose `tid` is another tenant.
+- **The organisation's email domains.** Inside a tenant, an account's email is what the directory says, not a mailbox that Microsoft checked. So only emails of the domains the admin lists sign in. A directory entry that shows someone else's address does not open their Ponder account, and the tenant's guests stay out.
+- **The email.** The `email` claim, else `preferred_username` (an account with no mailbox has no `email`). The same email is the same Ponder account, by code, by link or with Microsoft.
+- **One Microsoft account for a Ponder account.** The Microsoft account's object ID is saved at the first sign-in. Another Microsoft account that later shows the same email is refused. When the directory made a person's account again, an admin unlinks the old one from the person's menu in People, and their next sign-in links the new one. A new tenant ID unlinks everyone.
+- **New accounts.** "Invited people only" is Ponder's own rule: the email must be invited. "Everyone in the organisation" makes an account at a person's first sign-in with no invite. Such a person signs in with Microsoft only: no sign-in email goes to an address that is not invited.
+- **A banned person** is refused, as by email.
+
+A sign-in that fails comes back to the sign-in page, which shows a fixed sentence for the reason.
+
+The settings are in the `sign_in_providers` table. The client secret is sealed, as connector credentials are (see "Connectors"), and is never sent back to the page. A new `BETTER_AUTH_SECRET` (or `PONDER_ENCRYPTION_KEY`) makes it unreadable: Microsoft sign-in then turns off, Settings says so, and sign-in by email goes on until an admin enters the secret again. Each change is in the admin activity log, without the secret.
+
+Limits: Better Auth reads the id_token that Microsoft's token endpoint answers over TLS, and does not check its signature. OpenID Connect allows this for a token that comes this way. A person whom the directory removes keeps the sessions they have, and a session lasts for as long as it is used at least once in 30 days: sign them out, or ban them, in People.
+
+Code: `server/auth/microsoft.ts` (the rules), `server/auth/SignInProviders.ts` (the settings), `server/auth/Auth.ts` (Better Auth), `web/admin/components/SignInSettings.vue` and `MicrosoftSignInDialog.vue`, `web/SignIn.vue`. Tests: `server/auth/microsoft.test.ts`, `SignInProviders.test.ts`, `microsoft-sign-in.test.ts` (whole sign-ins against a stand-in for Microsoft, `e2e/microsoft/server.ts`) and `e2e/tests/microsoft-sign-in.spec.ts`.
 
 ### Logo
 
@@ -587,7 +617,7 @@ A chat can grow longer than its model can read. `server/compaction/` and `server
 | Part | Where |
 | --- | --- |
 | HTTP API | `server/app.ts` |
-| Sign-in, invites and admins | `server/auth/Auth.ts`, `server/people/Invites.ts`, `server/people/Accounts.ts`, `web/SignIn.vue` |
+| Sign-in, invites and admins | `server/auth/Auth.ts`, `server/auth/microsoft.ts`, `server/auth/SignInProviders.ts`, `server/people/Invites.ts`, `server/people/Accounts.ts`, `web/SignIn.vue` |
 | Admin pages | `server/admin/`, `web/admin.html`, `web/admin/` |
 | Chat workflow | `server/workflow/` |
 | Python tool and sandbox | `server/python/`, `sandbox/pyodide/` |

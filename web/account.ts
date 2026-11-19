@@ -6,7 +6,7 @@ import { once } from "./once";
 /**
  * Who is signed in, and their credits for today. Sign-in is by email (server/auth/Auth.ts):
  * the person types their email, then types the code from the email, or opens its link
- * and lands back here. Either way they get a session cookie.
+ * and lands back here. Or with Microsoft, when an admin set it up. Either way they get a session cookie.
  */
 export type Me = Answer<typeof client.api.me.$get>;
 /** Today's credits (CreditStatus in server/credits/Credits.ts). */
@@ -82,6 +82,18 @@ export async function signInWithCode(email: string, code: string, stillWanted = 
 	if (error) throw new Error(codeErrors[error.code ?? ""] ?? (error.status === 429 ? TOO_FAST : (error.message ?? "Could not sign in.")));
 	// The code worked, but who is signed in could not be read: say so, rather than stay on this page with no word.
 	if (!(await loadMe())) throw new Error(meError.value ? `${meError.value} Then reload the page.` : "Could not sign in. Reload the page and try again.");
+}
+
+/** Where a Microsoft sign-in that failed comes back to: the sign-in page, which says why (SignIn.vue). */
+const MICROSOFT_FAILED = "/?sign-in=failed&with=microsoft";
+
+/**
+ * Sends the person to Microsoft to sign in (server/auth/microsoft.ts). They come back signed in,
+ * to the page they were on. It throws only when Ponder could not send them.
+ */
+export async function signInWithMicrosoft() {
+	const { error } = await (await auth()).signIn.social({ provider: "microsoft", callbackURL: location.pathname + location.search, errorCallbackURL: MICROSOFT_FAILED });
+	if (error) throw new Error(error.status === 429 ? TOO_FAST : "Microsoft sign-in is not available now. Try again, or sign in by email.");
 }
 
 // Better Auth's codes for a code that did not work (plugins/email-otp/error-codes).

@@ -40,11 +40,13 @@ export function personActions(person: Person, handlers: Handlers) {
 			? { label: "Unban", icon: "lucide-undo-2", onClick: () => void unban(person, handlers) }
 			: { label: "Ban", icon: "lucide-ban", theme: "red" as const, onClick: () => ban(person, handlers) };
 	const giveExtra = handlers.giveExtra;
+	const unlinkAction = person.microsoft ? [{ label: "Unlink Microsoft account", icon: "lucide-unlink", onClick: () => unlinkMicrosoft(person, handlers) }] : [];
 	return [
 		setCredits,
 		...(giveExtra ? [{ label: "Give extra credits today", icon: "lucide-plus", onClick: () => giveExtra(person) }] : []),
 		roleAction,
 		{ label: "Sign out everywhere", icon: "lucide-log-out", onClick: () => signOutEverywhere(person, handlers) },
+		...unlinkAction,
 		...activityAction,
 		banAction,
 	];
@@ -106,6 +108,20 @@ function signOutEverywhere(person: Person, handlers: Handlers) {
 		onConfirm: async () => {
 			await unwrap(one["sign-out"].$post(byId(person)));
 			toast.success(`${person.name} is signed out`);
+			handlers.changed();
+		},
+	});
+}
+
+/** For a person whose Microsoft account the directory made again: sign-in refuses the new one until the old one is unlinked (server/auth/microsoft.ts). */
+function unlinkMicrosoft(person: Person, handlers: Handlers) {
+	dialog.confirm({
+		title: `Unlink ${person.name}'s Microsoft account?`,
+		message: `Their next sign-in with Microsoft links the account that shows ${person.email}. Do this when their Microsoft account was made again and Ponder refuses it.`,
+		confirmLabel: "Unlink",
+		onConfirm: async () => {
+			await unwrap(one.microsoft.$delete(byId(person)));
+			toast.success(`Unlinked ${person.name}'s Microsoft account`);
 			handlers.changed();
 		},
 	});
