@@ -13,7 +13,7 @@ export function scopeLabel({ web, research, inWorkspace }: ScopeState) {
 	return { label: inWorkspace ? "Sources only" : "No web", icon: inWorkspace ? SOURCES_ICON : "lucide-globe-lock" };
 }
 
-/** The menu's rows: the chat's two choices, then deep research, which takes in both, for the next message. */
+/** The menu's rows: the chat's two choices, then deep research, which takes in both, for the message being written only. */
 export function scopeRows(inWorkspace: boolean) {
 	return {
 		off: inWorkspace
@@ -24,7 +24,7 @@ export function scopeRows(inWorkspace: boolean) {
 			: { label: "Web", description: "Searches when facts may have changed", icon: "lucide-globe" },
 		research: {
 			label: "Deep research",
-			description: inWorkspace ? "Sources and a deep web search · next message · more credits" : "A deep web search · next message · more credits",
+			description: inWorkspace ? "Sources and a deep web search · this message only · more credits" : "A deep web search · this message only · more credits",
 			icon: "lucide-telescope",
 		},
 	};

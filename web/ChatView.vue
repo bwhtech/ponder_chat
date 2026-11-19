@@ -201,7 +201,7 @@ const {
 void loadSkills();
 // A chat in a workspace names it, as the workspace page does: the header's breadcrumb leads back to it.
 const askIn = computed(() => workspace.summary.value?.name);
-// Deep research on for the next message: the field says so, where the eye already is.
+// Deep research on for the message being written: the field says so, where the eye already is.
 const placeholder = computed(() => (webTools.research.value ? "Ask a research question" : withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat")));
 
 /** The skills the person asked for in the message this reply answers, for the line above the reply. */

@@ -9,7 +9,7 @@ import { isRecord } from "./json";
  *
  * Web stays as set for the chat. A chat in a workspace starts with it off, so replies come
  * from the workspace's Sources only; any other chat starts with it on. Research is for the
- * next message only: it is slow and costs more, so it goes off once that message is sent.
+ * message being written only: it is slow and costs more, so it goes off once that message is sent.
  */
 export function useWebTools(inWorkspace: () => boolean, saved?: WebChoice) {
 	const usual = (): KeptWebMode => (inWorkspace() ? "off" : "search");

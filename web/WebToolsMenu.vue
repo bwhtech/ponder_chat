@@ -7,7 +7,7 @@ import WebToolsChip from "./WebToolsChip.vue";
 /**
  * Where the answer comes from, chosen in the message box (web-tools.ts): one of three, with
  * one check. Web on or off stays for the chat. Deep research takes in both (Sources, then a
- * deep web search) and is for the next message only: after it, the chat is back on its choice. Its own chunk, because it brings
+ * deep web search) and is for the message being written only: after it, the chat is back on its choice. Its own chunk, because it brings
  * frappe-ui's Dropdown; WebToolsChip.vue stands in until it is here.
  */
 const props = defineProps<{ inWorkspace?: boolean; disabled?: boolean }>();

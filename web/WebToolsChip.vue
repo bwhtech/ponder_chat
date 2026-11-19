@@ -24,7 +24,6 @@ const scope = computed(() => scopeLabel(props));
 		data-web-menu
 		:data-research="research || undefined"
 		:aria-label="`Answer from: ${scope.label}`"
-		title="Web search and deep research"
 		:disabled="disabled"
 		v-bind="$attrs"
 		class="touch-target relative shrink-0 transition-[background-color,color] duration-150 ease-out-strong motion-reduce:transition-none"
