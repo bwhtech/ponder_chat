@@ -752,14 +752,18 @@ function replyModelId(message: UIMessage) {
 				</div>
 				<PromptInputTextarea :placeholder="placeholder" autofocus />
 				<PromptInputFooter>
-					<PromptInputTools>
+					<PromptInputTools class="shrink-0">
 						<PromptInputAttachButton />
 						<WebTools v-model:web="webTools.web.value" v-model:research="webTools.research.value" :in-workspace="Boolean(workspace.chosen.value)" :disabled="outOfCredits || workspace.lostAccess.value" />
-						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
 						<WorkspacePicker v-if="workspace.pickable.value" v-model="workspace.chosen.value" />
 						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-6">Uploading…</span>
 					</PromptInputTools>
-					<PromptInputSubmit />
+					<!-- The model by Send: what the message goes to, beside sending it. Its list opens from the right edge.
+					     The tools on the left keep their size; on a narrow phone a long model name is cut short instead. -->
+					<div class="flex min-w-0 items-center justify-end gap-1">
+						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" align="end" />
+						<PromptInputSubmit />
+					</div>
 				</PromptInputFooter>
 			</PromptInput>
 		</div>

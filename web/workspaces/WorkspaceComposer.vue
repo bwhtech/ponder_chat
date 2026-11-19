@@ -74,12 +74,15 @@ function ask({ text, files }: { text: string; files: File[] }) {
 				<!-- Keyed: the field sets its height from its text and placeholder when it mounts, and a rename changes the placeholder. -->
 				<PromptInputTextarea ref="field" :key="placeholder" :placeholder="placeholder" :aria-label="label" />
 				<PromptInputFooter>
-					<PromptInputTools>
+					<PromptInputTools class="shrink-0">
 						<PromptInputAttachButton />
 						<WebTools v-model:web="web" v-model:research="research" in-workspace :disabled="outOfCredits" />
-						<ModelSelector v-if="models.length" v-model="model" :models="models" label="Model" />
 					</PromptInputTools>
-					<PromptInputSubmit />
+					<!-- The model by Send, as in a chat's box (ChatView.vue). -->
+					<div class="flex min-w-0 items-center justify-end gap-1">
+						<ModelSelector v-if="models.length" v-model="model" :models="models" label="Model" align="end" />
+						<PromptInputSubmit />
+					</div>
 				</PromptInputFooter>
 			</PromptInput>
 		</div>

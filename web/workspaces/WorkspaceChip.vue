@@ -23,7 +23,8 @@ const shown = computed(() => props.workspace ?? workspaceById(props.modelValue))
 		:aria-label="`Workspace: ${shown?.name ?? 'none'}`"
 		class="relative min-w-0 max-w-48 !text-ink-gray-6 after:absolute after:inset-0 after:content-[''] hover:!text-ink-gray-8 [@media(pointer:coarse)]:after:-inset-y-2"
 	>
-		<!-- On a phone, the icon only: the footer also holds the Web menu and the model. -->
-		<span class="truncate max-sm:sr-only">{{ shown?.name ?? "Workspace" }}</span>
+		<!-- With no workspace chosen, the icon only: "Workspace" said nothing the icon does not. A chosen one
+		     shows its name, except on a phone, where the footer also holds the Web menu and the model. -->
+		<span class="truncate" :class="shown ? 'max-sm:sr-only' : 'sr-only'">{{ shown?.name ?? "Workspace" }}</span>
 	</Button>
 </template>
