@@ -127,6 +127,12 @@ test("Research is for one message: its searches are deep, the reply says so, and
 	await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: Deep research");
 	await expect(webMenu(page)).toHaveAttribute("data-research", "true");
 	await expect(chat.field(page)).toHaveAttribute("placeholder", "Ask a research question");
+	// One of three: Deep research takes in the rest, so it is the one row checked.
+	await webMenu(page).click();
+	const checked = page.getByRole("menuitem").filter({ has: page.locator(".lucide-check") });
+	await expect(checked).toHaveCount(1);
+	await expect(checked).toContainText("Deep research");
+	await page.keyboard.press("Escape");
 
 	await chat.send(page, question);
 	await expect(chat.reply(page)).toContainText("Most leave in the first three months.");

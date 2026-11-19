@@ -5,8 +5,9 @@ import { scopeRows } from "./web-scope";
 import WebToolsChip from "./WebToolsChip.vue";
 
 /**
- * Where the answer comes from, chosen in the message box (web-tools.ts): web search for the
- * chat, on or off, and deep research for the next message. Its own chunk, because it brings
+ * Where the answer comes from, chosen in the message box (web-tools.ts): one of three, with
+ * one check. Web on or off stays for the chat. Deep research takes in both (Sources, then a
+ * deep web search) and is for the next message only: after it, the chat is back on its choice. Its own chunk, because it brings
  * frappe-ui's Dropdown; WebToolsChip.vue stands in until it is here.
  */
 const props = defineProps<{ inWorkspace?: boolean; disabled?: boolean }>();
@@ -21,16 +22,16 @@ const label = (row: { label: string; description: string }) => () =>
 const options = computed<DropdownOptions>(() => {
 	const rows = scopeRows(Boolean(props.inWorkspace));
 	const row = (key: keyof typeof rows, on: boolean, onClick: () => void) => ({ label: rows[key].label, icon: rows[key].icon, onClick, slots: { label: label(rows[key]), suffix: check(on) } });
+	const choose = (on: boolean) => () => {
+		web.value = on;
+		research.value = false;
+	};
+	const off = row("off", !research.value && !web.value, choose(false));
+	const search = row("web", !research.value && web.value, choose(true));
 	return [
-		{
-			group: "This chat",
-			hideLabel: true,
-			// The chat's default first: off in a workspace, on elsewhere.
-			options: props.inWorkspace
-				? [row("off", !web.value, () => (web.value = false)), row("web", web.value, () => (web.value = true))]
-				: [row("web", web.value, () => (web.value = true)), row("off", !web.value, () => (web.value = false))],
-		},
-		{ group: "Next message", hideLabel: true, options: [row("research", research.value, () => (research.value = !research.value))] },
+		// The chat's default first: off in a workspace, on elsewhere.
+		...(props.inWorkspace ? [off, search] : [search, off]),
+		row("research", research.value, () => (research.value = true)),
 	];
 });
 </script>
