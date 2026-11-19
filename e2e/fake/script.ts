@@ -55,6 +55,9 @@ export type ChatScript = {
 /** A web search's results (search/openrouter-search.ts), for queries that contain `match`. */
 export type SearchScript = { match: string; results: { url: string; title: string; content: string }[] };
 
+/** A web search as the fake received it: the query, and Exa's mode ("deep" for deep research, none for a quick search). */
+export type ReceivedSearch = { query: string; mode?: string; maxResults?: number; at: number };
+
 /**
  * Memory, for turns whose person's message contains `match`. `save` is the gate's
  * probability that the turn holds something to keep (memory/decision-gate.ts), and

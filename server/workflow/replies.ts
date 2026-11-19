@@ -11,6 +11,7 @@ import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import { isAuto } from "../../shared/auto-model.ts";
+import { webModeFor } from "../../shared/web-mode.ts";
 import * as PonderConfig from "../config.ts";
 import * as Credits from "../credits/Credits.ts";
 import * as Memory from "../memory.ts";
@@ -289,6 +290,8 @@ const make = Effect.gen(function* () {
 				continued,
 				answeredBy,
 				workspaceId,
+				// The choice of the person's latest message: a Retry and a reply carried on after an approval read it again.
+				web: webModeFor(messages),
 			});
 		}).pipe(
 			// No run carries the answers out, so the page may send them again. The start's own

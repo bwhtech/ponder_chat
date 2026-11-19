@@ -19,16 +19,18 @@ import type { WebFetchInput, WebSearchInput } from "./schema.ts";
  */
 export const WEB_SEARCH_FUNCTION_ID = "web-search";
 
-type Context = { threadId: string; owner: string };
+type Context = { threadId: string; owner: string; depth?: SearchBackend.SearchDepth };
 
-export type WebSearchResult = { query: string; results: ({ n: number } & SearchBackend.SearchResult)[]; error?: string };
+/** `deep`: a deep search, which the page names as one (web/WebToolPart.vue). */
+export type WebSearchResult = { query: string; results: ({ n: number } & SearchBackend.SearchResult)[]; error?: string; deep?: true };
 export type WebFetchResult = FetchedPage | { url: string; error: string };
 
-export const executeWebSearch = Effect.fn("WebSearch.execute")(function* ({ query }: WebSearchInput, { threadId, owner }: Context) {
+export const executeWebSearch = Effect.fn("WebSearch.execute")(function* ({ query }: WebSearchInput, { threadId, owner, depth = "quick" }: Context) {
+	const deep = depth === "deep" ? ({ deep: true } as const) : {};
 	const started = yield* Clock.currentTimeMillis;
 	const backend = yield* SearchBackend.SearchBackend;
 	const search = Effect.gen(function* () {
-		const reply = yield* searchQuery(backend, query);
+		const reply = yield* searchQuery(backend, query, depth);
 		// Credits are charged from `runs`, so a search costs the person what it cost us.
 		const run: Runs.RunRow = {
 			id: randomUUID(),
@@ -43,18 +45,19 @@ export const executeWebSearch = Effect.fn("WebSearch.execute")(function* ({ quer
 			cachedTokens: 0,
 			costUsd: reply.costUsd,
 			durationMs: (yield* Clock.currentTimeMillis) - started,
-			toolCalls: [{ name: `search:${backend.name}`, status: "ok" as const }],
+			toolCalls: [{ name: `search:${backend.name}${depth === "deep" ? ":deep" : ""}`, status: "ok" as const }],
 			finishReason: "stop",
 		};
 		yield* Runs.Runs.use((runs) => runs.insert(run));
-		if (!reply.results.length) return { query, results: [], error: "No results. Try other words." } satisfies WebSearchResult;
-		return { query, results: reply.results.map((result, index) => ({ n: index + 1, ...result })) } satisfies WebSearchResult;
+		if (!reply.results.length) return { query, results: [], error: "No results. Try other words.", ...deep } satisfies WebSearchResult;
+		return { query, results: reply.results.map((result, index) => ({ n: index + 1, ...result })), ...deep } satisfies WebSearchResult;
 	});
 	const failed = (problem: string) =>
 		Effect.as(Effect.logWarning(`web_search (${backend.name}):`, problem), {
 			query,
 			results: [],
 			error: "The search failed. Try again, or answer without it and say so.",
+			...deep,
 		} satisfies WebSearchResult);
 	return yield* search.pipe(
 		Effect.catchTags({
@@ -67,9 +70,9 @@ export const executeWebSearch = Effect.fn("WebSearch.execute")(function* ({ quer
 });
 
 // The backend and the count of results, never the query or the results.
-const searchQuery = Effect.fn("search.query")(function* (backend: SearchBackend.SearchBackend["Service"], query: string) {
-	yield* Tracing.annotate({ "ponder.search.backend": backend.name });
-	const found = yield* backend.search(query);
+const searchQuery = Effect.fn("search.query")(function* (backend: SearchBackend.SearchBackend["Service"], query: string, depth: SearchBackend.SearchDepth) {
+	yield* Tracing.annotate({ "ponder.search.backend": backend.name, "ponder.search.depth": depth });
+	const found = yield* backend.search(query, depth);
 	yield* Tracing.annotate({ "ponder.results": found.results.length, "gen_ai.request.model": found.model });
 	return found;
 });

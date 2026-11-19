@@ -19,6 +19,12 @@ import * as OpenRouterSearch from "./openrouter-search.ts";
  */
 export type SearchResult = { title: string; url: string; text: string };
 
+/**
+ * How far a search goes. Deep is for deep research (shared/web-mode.ts): slower, and it
+ * costs more. A backend with no deep search runs its usual one.
+ */
+export type SearchDepth = "quick" | "deep";
+
 /** One search: its results, and what it cost, so credits are charged for it. */
 export type SearchReply = { results: SearchResult[]; costUsd: number | null; model: string; inputTokens: number; outputTokens: number };
 
@@ -40,7 +46,7 @@ export class SearchBackend extends Context.Service<
 	SearchBackend,
 	{
 		readonly name: string;
-		readonly search: (query: string) => Effect.Effect<SearchReply, SearchFailed | NoOpenRouterKey | UnreadableSecret | SqlError>;
+		readonly search: (query: string, depth: SearchDepth) => Effect.Effect<SearchReply, SearchFailed | NoOpenRouterKey | UnreadableSecret | SqlError>;
 	}
 >()("ponder/search/SearchBackend") {}
 

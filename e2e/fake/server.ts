@@ -2,7 +2,7 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MODELS } from "../../server/models/Models.ts";
 import { jsonBody, parseJson } from "../../server/test-json.ts";
-import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type PageScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
+import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type PageScript, type ReceivedCall, type ReceivedSearch, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
 
 /**
  * A fake OpenRouter, and a fake Cloudflare email API, for the end-to-end tests. Ponder
@@ -35,6 +35,7 @@ export function fakeApp() {
 	const memories: MemoryScript[] = [];
 	const emails: SentEmail[] = [];
 	const calls: ReceivedCall[] = [];
+	const searched: ReceivedSearch[] = [];
 	const spans: ReceivedSpan[] = [];
 	// Each OTLP request as it came, so a test can look for text anywhere in it.
 	const exports: string[] = [];
@@ -81,6 +82,7 @@ export function fakeApp() {
 	app.get("/__fake/summaries", (c) =>
 		c.json(summaries.filter((call) => call.at >= since(c.req.query("since")) && call.prompt.includes(c.req.query("match") ?? ""))),
 	);
+	app.get("/__fake/searches", (c) => c.json(searched.filter((search) => search.at >= since(c.req.query("since")) && search.query.includes(c.req.query("match") ?? ""))));
 	app.get("/__fake/calls", (c) =>
 		c.json(calls.filter((call) => call.at >= since(c.req.query("since")) && latestUserText(call.messages as Message[]).includes(c.req.query("match") ?? ""))),
 	);
@@ -106,7 +108,12 @@ export function fakeApp() {
 			const { status, answer } = pageReply(body.model, pdf, pageScripts, attempts);
 			return c.json(answer, status as 200);
 		}
-		if (body.tools?.some((tool) => tool.type === "openrouter:web_search")) return c.json(searchReply(body.model, latestUserText(messages), searches));
+		const searchTool = body.tools?.find((tool) => tool.type === "openrouter:web_search");
+		if (searchTool) {
+			const query = latestUserText(messages);
+			searched.push({ query, mode: searchTool.parameters?.mode, maxResults: searchTool.parameters?.max_results, at: Date.now() });
+			return c.json(searchReply(body.model, query, searches));
+		}
 		const schema = body.response_format?.json_schema?.schema?.properties ?? {};
 		if ("title" in schema) return c.json(jsonReply(body.model, { title: titleOf(latestUserText(messages)) }));
 		if ("operations" in schema) return c.json(jsonReply(body.model, writerReply(latestUserText(messages), memories)));
@@ -202,7 +209,7 @@ type Completion = {
 	plugins?: unknown[];
 	session_id?: string;
 	messages?: Message[];
-	tools?: { type: string; function?: { name: string } }[];
+	tools?: { type: string; function?: { name: string }; parameters?: { mode?: string; max_results?: number } }[];
 	response_format?: { json_schema?: { schema?: { properties?: Record<string, unknown> } } };
 };
 
