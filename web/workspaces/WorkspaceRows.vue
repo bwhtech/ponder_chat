@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { Button, Dropdown, SidebarItem, SidebarLabel } from "frappe-ui";
+import { computed } from "vue";
 import { prefetchWorkspaceChats } from "../threads";
 import { accessIcon, openWorkspace, pinWorkspace, prefetchWorkspace, sharedWith, workspaces, workspacesLoaded, type WorkspaceSummary } from "./store";
+import { hideIntro, introHidden } from "./intro";
+import WorkspaceIntro from "./WorkspaceIntro.vue";
 import WorkspaceRowsSkeleton from "./WorkspaceRowsSkeleton.vue";
 
 /**
  * The sidebar's workspaces, above the chats (ChatsPanel.vue): the ones the person pinned
  * first, then the newest made first, each with the icon of its kind. Each row has a menu,
  * as a chat row has (ThreadList.vue), with Pin or Unpin; a pinned row moves to the top as
- * a chat does when it is active again, and shows a pin after its name. The + makes a new one;
- * with no workspace yet, a "New workspace" row takes its place. WorkspaceRowsPlaceholder.vue
+ * a chat does when it is active again, and shows a pin after its name. The + makes a new one.
+ * With no workspace yet, a card says what one is for (WorkspaceIntro.vue), under its own
+ * "Workspaces" title, so the section's label is not shown; once its × hides it, the label and
+ * a "New workspace" row take its place. When the card leaves, it folds up, so what is under
+ * it moves up with it, not at once. WorkspaceRowsPlaceholder.vue
  * draws the same rows while this chunk loads.
  *
  * Pointing at a row, focusing it or touching it fetches the workspace and the person's chats
@@ -24,6 +30,17 @@ function menu(workspace: WorkspaceSummary) {
 		: [{ label: "Pin", icon: "lucide-pin", onClick: () => void pinWorkspace(workspace.id, true) }];
 }
 
+const intro = computed(() => !workspaces.value.length && !introHidden.value);
+
+/**
+ * The card folds up as it fades, and the label and row unfold at the same time, so what is
+ * under them rises into place in one move, not down first and then up. Each folds in a grid
+ * row (0fr ↔ 1fr) around a `min-h-0` child.
+ */
+const FOLD_MOTION = "grid transition-[grid-template-rows,opacity] duration-200 ease-out-strong motion-reduce:transition-opacity [&>div]:overflow-hidden";
+const FOLD = { leaveActiveClass: FOLD_MOTION, leaveFromClass: "grid-rows-[1fr]", leaveToClass: "grid-rows-[0fr] opacity-0" };
+const UNFOLD = { enterActiveClass: FOLD_MOTION, enterFromClass: "grid-rows-[0fr] opacity-0", enterToClass: "grid-rows-[1fr]" };
+
 const isOpen = (workspace: WorkspaceSummary) => props.highlight && workspace.id === openWorkspace.value?.id;
 
 function prefetch(workspace: WorkspaceSummary) {
@@ -34,24 +51,43 @@ function prefetch(workspace: WorkspaceSummary) {
 
 <template>
 	<section aria-label="Workspaces" class="space-y-0.5" data-slot="workspace-rows">
-		<div class="flex h-7 items-center justify-between">
-			<SidebarLabel class="[&_h3]:text-xs-medium [&_h3]:text-ink-gray-6">Workspaces</SidebarLabel>
-			<Button
-				v-if="workspaces.length"
-				variant="ghost"
-				icon="lucide-plus"
-				aria-label="New workspace"
-				class="touch-target !text-ink-gray-6 hover:!text-ink-gray-8"
-				@click="emit('create')"
-			/>
-		</div>
+		<Transition v-bind="UNFOLD">
+			<div v-if="!workspacesLoaded || !intro">
+				<div class="min-h-0">
+					<div class="flex h-7 items-center justify-between">
+						<SidebarLabel class="[&_h3]:text-xs-medium [&_h3]:text-ink-gray-6">Workspaces</SidebarLabel>
+						<Button
+							v-if="workspaces.length"
+							variant="ghost"
+							icon="lucide-plus"
+							aria-label="New workspace"
+							class="touch-target !text-ink-gray-6 hover:!text-ink-gray-8"
+							@click="emit('create')"
+						/>
+					</div>
+				</div>
+			</div>
+		</Transition>
 		<WorkspaceRowsSkeleton v-if="!workspacesLoaded" />
-		<SidebarItem v-else-if="!workspaces.length" class="!h-7 [@media(pointer:coarse)]:!h-11" label="New workspace" data-slot="workspace-new" @click="emit('create')">
-			<template #prefix><span class="lucide-plus size-4 text-ink-gray-6" aria-hidden="true" /></template>
-		</SidebarItem>
+		<Transition v-bind="FOLD">
+			<div v-if="workspacesLoaded && intro">
+				<div class="min-h-0">
+					<div class="pb-1"><WorkspaceIntro @create="emit('create')" @hide="hideIntro" /></div>
+				</div>
+			</div>
+		</Transition>
+		<Transition v-bind="UNFOLD">
+			<div v-if="workspacesLoaded && !workspaces.length && !intro">
+				<div class="min-h-0">
+					<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="New workspace" data-slot="workspace-new" @click="emit('create')">
+						<template #prefix><span class="lucide-plus size-4 text-ink-gray-6" aria-hidden="true" /></template>
+					</SidebarItem>
+				</div>
+			</div>
+		</Transition>
 		<!-- A new or newly pinned workspace slides in at the top; the others move down: the chat rows' motion. -->
 		<TransitionGroup
-			v-else
+			v-if="workspacesLoaded && workspaces.length"
 			tag="div"
 			class="relative space-y-0.5"
 			leave-active-class="absolute inset-x-0 transition-opacity duration-150 ease-out-strong motion-reduce:transition-none"
