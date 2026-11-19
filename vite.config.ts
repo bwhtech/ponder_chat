@@ -69,7 +69,8 @@ function devServer() {
 	return {
 		host: "127.0.0.1",
 		allowedHosts: hosts.filter(Boolean),
-		proxy: Object.fromEntries(["/api", "/health", "/oauth"].map((path) => [path, { target: api, changeOrigin: false }])),
+		// Patterns, not prefixes: the prefix "/api" also took web/api.ts (/api.ts), and the page stayed blank.
+		proxy: Object.fromEntries(["^/api/", "^/health$", "^/oauth/"].map((path) => [path, { target: api, changeOrigin: false }])),
 	};
 }
 
