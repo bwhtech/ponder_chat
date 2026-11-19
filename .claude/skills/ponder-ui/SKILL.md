@@ -91,6 +91,7 @@ These rules took the chat and /admin from 6.5 to 10/10 in two design councils. F
 - **CSS order:** an arbitrary utility can lose to a later unlayered rule. `.scroll-fade-y` beat `[animation-range:…]`, for example. Use the CSS variable the rule reads, then check the computed style.
 - **MobileNavItem:** it treats a missing `active` as false. Pass `:active` on every item.
 - **Breadcrumbs:** the last crumb gets the current-page tone. While loading, draw "Parent / bar" yourself rather than passing a lone parent crumb or an empty one.
+- **`touch-target` and `absolute`:** on touch, `.touch-target` sets `position: relative` from an unlayered rule, which beats Tailwind's `absolute`, so the control drops into the flow. On an absolutely placed control, draw its area yourself: `after:absolute after:-inset-1 after:content-[''] [@media(pointer:coarse)]:after:-inset-2.5`.
 - **Hidden elements:** an `sr-only` element still takes margin inside `space-y-*`. Use `aria-label` on the container instead.
 - **Template whitespace:** Vue trims leading spaces inside elements, so use `ml-1`, not `" text"`.
 - **Fixed internals:** NumberCard takes text values and has a 2.4px-taller skeleton. DonutChart and ChartContainer fix their own sizes and title styles. Treat these as limits; do not override them.

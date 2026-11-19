@@ -24,7 +24,7 @@ const id = useId();
 		<WorkspaceIntroArt />
 		<button
 			type="button"
-			class="touch-target absolute right-3 top-3 z-10 flex size-6 items-center justify-center rounded-4 text-ink-gray-5 transition-colors duration-150 ease-out-strong hover:bg-surface-gray-3 hover:text-ink-gray-8 active:bg-surface-gray-4"
+			class="absolute right-3 top-3 z-10 flex size-6 items-center justify-center rounded-4 text-ink-gray-5 after:absolute after:-inset-1 after:content-[''] [@media(pointer:coarse)]:after:-inset-2.5 transition-colors duration-150 ease-out-strong hover:bg-surface-gray-3 hover:text-ink-gray-8 active:bg-surface-gray-4"
 			aria-label="Hide"
 			title="Hide"
 			@click="emit('hide')"
