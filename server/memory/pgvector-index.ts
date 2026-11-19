@@ -56,7 +56,9 @@ export const makePgvectorIndex = Effect.gen(function* () {
 	const migrate = migrating.withPermits(1)(
 		Effect.gen(function* () {
 			if (yield* Ref.get(migrated)) return;
-			yield* sql`create extension if not exists vector`;
+			// In public, whatever the search path: an extension is one per database, so one made in a test's own
+			// schema hid its type from every other schema, and went when that schema was dropped.
+			yield* sql`create extension if not exists vector schema public`;
 			yield* sql`
 				create table if not exists memory_vectors (
 					id text primary key,
