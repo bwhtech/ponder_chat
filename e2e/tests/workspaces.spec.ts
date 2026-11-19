@@ -463,6 +463,35 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 	await other.context.close();
 });
 
+test("once its owner has a chat in it, an empty workspace's sections are setup cards side by side, rows in one column, each opening what its step does", async ({ page, person, db }) => {
+	const workspace = await createWorkspace(page, "Empty with chats");
+	await addChats(db, person.id, workspace.id, 1);
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await page.goto(`/?w=${workspace.slug}`);
+	await expect(page.locator('[data-slot="workspace-chats"]')).toContainText("Question 1");
+	await expect(setup(page)).toHaveCount(0);
+
+	const add = about(page).locator('[data-slot="workspace-add-instructions"]');
+	const upload = about(page).locator('[data-slot="document-upload-area"]');
+	// The section's heading names the card: it has no title of its own, only its line and button.
+	await expect(add).toContainText("Tell Ponder how to answer here.");
+	await expect(add.getByRole("heading")).toHaveCount(0);
+	await expect(upload.getByRole("button", { name: "Upload files" })).toBeVisible();
+	const [left, right] = [(await add.boundingBox())!, (await upload.boundingBox())!];
+	expect(Math.abs(left.y - right.y)).toBeLessThanOrEqual(1);
+	expect(right.x).toBeGreaterThan(left.x + left.width);
+	await expect(add).toHaveAttribute("data-layout", "card");
+
+	// In one column, as on a phone, they are rows, as the setup's steps are there.
+	await page.setViewportSize({ width: 390, height: 900 });
+	await expect(add).toHaveAttribute("data-layout", "row");
+	await expect(upload).toHaveAttribute("data-layout", "row");
+	await expect(add).toContainText("Add instructions");
+
+	await add.getByRole("button", { name: "Add instructions" }).click();
+	await expect(page.getByRole("dialog", { name: "Instructions" })).toBeVisible();
+});
+
 test("saving instructions while a file still goes up moves focus to the next step that can take it", async ({ page, person }) => {
 	const { slug } = await createWorkspace(page, `Slow upload ${person.id.slice(0, 6)}`);
 	// The file's upload is held until the test lets it go.
