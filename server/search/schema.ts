@@ -7,6 +7,8 @@ import { z } from "zod";
  */
 export const WEB_SEARCH = "web_search";
 export const WEB_FETCH = "web_fetch";
+/** In a workspace chat with the web off: shows the person a button that searches the web for their question. */
+export const OFFER_WEB_SEARCH = "offer_web_search";
 
 export const webSearchInput = z.object({
 	query: z
@@ -31,3 +33,11 @@ export const WEB_SEARCH_DESCRIPTION =
 export const WEB_FETCH_DESCRIPTION =
 	"Read one web page: returns its title and main text. Use it for an address the person gives, " +
 	"or to read a search result in full when its excerpt is not enough.";
+
+export const offerWebSearchInput = z.object({
+	missing: z.string().min(1).max(200).describe("What the workspace's documents do not cover, in a few words, like city permits for street events."),
+});
+
+export const OFFER_WEB_SEARCH_DESCRIPTION =
+	"Show the person a button that searches the web for their question. Web search is off in this chat, and only they can turn it on. " +
+	"Call it once, before you answer, when the workspace's documents do not have the answer or have only part of it. It searches nothing by itself.";

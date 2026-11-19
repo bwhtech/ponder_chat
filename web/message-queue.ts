@@ -1,3 +1,4 @@
+import type { WebChoice } from "../shared/web-mode";
 import type { FileUIPart, UIMessage } from "ai";
 import { computed, reactive, ref, watch, type Ref } from "vue";
 import { citationLabel, type Citation } from "./cite/citations";
@@ -11,6 +12,8 @@ export interface Queued {
 	skills: string[];
 	/** Text quoted from earlier replies (cite/). */
 	citations: Citation[];
+	/** Web and Research as they were set when the message was written (web-tools.ts). */
+	web: WebChoice;
 }
 
 /**

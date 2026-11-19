@@ -16,6 +16,8 @@ export type ModelCall = {
 	tools: ToolSpec[];
 	/** Ponder's estimate of this call's input tokens (context-guard.ts), to measure the thread's ratio of real tokens to estimated ones. */
 	estimated?: Estimate;
+	/** Deep research (chat.ts): the model searches for minutes before its first word, so it may stay quiet longer (model-errors.ts). */
+	research?: boolean;
 };
 
 /**

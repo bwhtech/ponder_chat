@@ -49,7 +49,7 @@ Embedding model: `qwen/qwen3-embedding-8b`, from 18 November 2026. Through OpenR
 | Search store | Postgres: pgvector for meaning, `to_tsvector('simple', …)` for keywords, merged with reciprocal rank fusion. Not SQLite, as Flow uses. | Ponder already runs Postgres with pgvector for memory (`server/memory/pgvector-index.ts`). One database keeps backups, access checks and deletes in one place. |
 | Who pays to index | The system, not the uploader. Embeddings, picture pages read by a model, and the embedding of each search cost no credits. Each call is kept in `runs`, as titles are, and admins see the total as system spend. | The documents are a shared resource for many people. The uploader must not pay for the others. The spend must still be visible. |
 | Inline limit | Half of the model's context window, as in Flow. | Cost is not the main concern. Answers are better when the whole document is in the prompt. |
-| Web search | It stays on in workspace chats. The workspace guidance tells the model to answer from the documents first and to say when they do not have the answer. | Ponder has no web search switch now. A strict "workspace only" mode with a "Search the web" button is in "Later". |
+| Web search | Off at the start of a workspace chat, with a Web switch under the message box (README, "Web search"). With it off, the workspace guidance makes the documents the only source of facts, and a reply that lacks the answer offers "Search the web for this". With it on, the model answers from the documents first and says when they do not have the answer. | People ask in a workspace to get what its Sources say. An answer from the model's memory or the web looks the same and may be wrong for them. |
 
 ## Documents: what Frappe Flow does
 
@@ -330,7 +330,6 @@ Each pull request ships alone, and each one updates the README. The first one al
 - A General access role "Can edit", for everyone in the organisation (widen the `org_access` check).
 - A "Browse workspaces" list, if owners who are not admins should open their own workspaces to everyone.
 - DOCX, XLSX and HTML documents, as Flow reads them.
-- A strict "workspace only" mode, with a "Search the web" button when the workspace has no answer.
 - Source chips under an answer that name the document and the passage.
 - Asking all of a person's workspaces at once.
 

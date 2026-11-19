@@ -38,6 +38,8 @@ export type Step = {
 	breakAfter?: number;
 	/** What the call cost in US dollars, as OpenRouter reports it. Credits are charged from it. */
 	cost?: number;
+	/** Pages the model used, sent as url_citation annotations before the text, as deep research's model sends them. */
+	sources?: { url: string; title: string }[];
 };
 
 /**

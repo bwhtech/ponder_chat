@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { MODELS } from "../../server/models/Models.ts";
+import { RESEARCH_MODEL } from "../../shared/web-mode.ts";
 import { jsonBody, parseJson } from "../../server/test-json.ts";
 import { SMALL_WINDOW, SMALL_WINDOW_MODEL, type ChatScript, type MemoryScript, type PageScript, type ReceivedCall, type ReceivedSpan, type ReceivedSummary, type SearchScript, type SentEmail, type Step, type SummaryScript } from "./script.ts";
 
@@ -92,7 +93,13 @@ export function fakeApp() {
 		return c.json({ error: { code: 401, message: "No auth credentials found" } }, 401);
 	});
 	app.get("/api/v1/endpoints/zdr", (c) =>
-		c.json({ data: MODELS.map((model) => ({ model_id: model.id, provider_name: "Fake", context_length: model.id === SMALL_WINDOW_MODEL ? SMALL_WINDOW : 1_000_000 })) }),
+		c.json({
+			data: [
+				...MODELS.map((model) => ({ model_id: model.id, provider_name: "Fake", context_length: model.id === SMALL_WINDOW_MODEL ? SMALL_WINDOW : 1_000_000 })),
+				// Deep research's model, which is not on the chat's list (shared/web-mode.ts).
+				{ model_id: RESEARCH_MODEL.id, provider_name: "Fake", context_length: 128_000 },
+			],
+		}),
 	);
 	app.get("/api/v1/key", (c) => c.json({ data: { label: "fake" } }));
 
@@ -250,6 +257,8 @@ function streamReply(model: string, step: Step, signal: AbortSignal, prompt: num
 	const chunk = (delta: object, finish: string | null = null, usage?: object) =>
 		`data: ${JSON.stringify({ id, model, provider: "Fake", object: "chat.completion.chunk", created: Math.floor(Date.now() / 1000), choices: [{ index: 0, delta, finish_reason: finish }], ...(usage && { usage }) })}\n\n`;
 	const parts: string[] = [chunk({ role: "assistant", content: "" })];
+	// Pages the model used, as Perplexity's research model sends them before its text.
+	if (step.sources?.length) parts.push(chunk({ annotations: step.sources.map((source) => ({ type: "url_citation", url_citation: { url: source.url, title: source.title, start_index: 0, end_index: 0 } })) }));
 	for (const piece of pieces(step.reasoning)) parts.push(chunk({ reasoning: piece }));
 	for (const piece of pieces(step.text)) parts.push(chunk({ content: piece }));
 	for (const [index, call] of (step.toolCalls ?? []).entries()) {

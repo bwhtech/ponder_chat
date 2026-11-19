@@ -23,6 +23,9 @@ import { once } from "./once";
 import { isRecord } from "./json";
 import { preloadChat } from "./preload";
 import { useChatWorkspace, WorkspacePicker } from "./workspaces/chat-workspace";
+import { withCitationLinks } from "./citations";
+import { askedWith, offersWebSearch, savedWebChoice, useWebTools, webLabel, withWebOnce } from "./web-tools";
+import WebTools from "./WebTools.vue";
 // The replies, their parts and the quotes are their own chunk (transcript.ts): a new chat draws without them.
 import {
 	CitationChip,
@@ -96,6 +99,9 @@ const workspace = useChatWorkspace(
 	() => messages.value.some((message) => message.role === "user"),
 );
 if (workspace.firstMessage?.model) threadModel.value = workspace.firstMessage.model;
+// Web and Research (web-tools.ts): a saved chat starts as its last message was sent, a new one as its workspace says.
+const webTools = useWebTools(() => Boolean(workspace.chosen.value), savedWebChoice(props.initialMessages));
+if (workspace.firstMessage) webTools.restore(workspace.firstMessage.web);
 
 /** The server said the saved thread is ahead of this page (THREAD_CHANGED). */
 let threadChanged = false;
@@ -196,7 +202,8 @@ const {
 void loadSkills();
 // A chat in a workspace names it, as the workspace page does: the header's breadcrumb leads back to it.
 const askIn = computed(() => workspace.summary.value?.name);
-const placeholder = computed(() => withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat"));
+// Deep research on for the message being written: the field says so, where the eye already is.
+const placeholder = computed(() => (webTools.research.value ? "Ask a research question" : withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat")));
 
 /** The skills the person asked for in the message this reply answers, for the line above the reply. */
 function askedSkills(message: UIMessage) {
@@ -442,6 +449,7 @@ const queueEditing = queue.editing;
 /** While a reply streams, the message is queued; otherwise it goes out now. */
 async function send(text: string, files: File[] = []) {
 	const chosen = takeSkills();
+	const web = webTools.take();
 	const quoted = citeChips.value;
 	if (editingCite.value !== null) closeComment();
 	citeChips.value = [];
@@ -450,6 +458,7 @@ async function send(text: string, files: File[] = []) {
 		if (!input.value) input.value = text;
 		if (!skillChips.value.length) skillChips.value = chosen;
 		if (!citeChips.value.length) citeChips.value = quoted;
+		webTools.restore(web);
 	};
 	if ((!text.trim() && !files.length && !chosen.length && !quoted.length) || uploading.value || outOfCredits.value || workspace.lostAccess.value) {
 		if (outOfCredits.value) giveBack();
@@ -458,20 +467,41 @@ async function send(text: string, files: File[] = []) {
 	const attached = await upload(files);
 	// The field cleared on submit; give the text back so only the files need attaching again.
 	if (!attached) return giveBack();
-	await queue.send({ id: crypto.randomUUID(), text, files: attached, skills: chosen, citations: quoted });
+	await queue.send({ id: crypto.randomUUID(), text, files: attached, skills: chosen, citations: quoted, web });
 }
 
-function sendNow({ text, files, skills: chosen, citations: quoted }: Queued) {
+function sendNow({ text, files, skills: chosen, citations: quoted, web }: Queued) {
 	const closed = closeOpenCalls(messages.value);
 	if (closed) messages.value = closed;
 	// The first message: the thread shows in the list now, not once the reply ends.
 	if (!messages.value.some((message) => message.role === "user")) added(props.threadId, text || chosen.map(skillTitle).join(", ") || citationLabel(quoted[0]!), workspace.chosen.value ?? undefined);
-	if (!chosen.length && !quoted.length) return sendMessage(files.length ? { text, files } : { text });
+	// The web choice rides in the message's metadata, so it is saved with the thread (shared/web-mode.ts).
+	if (!chosen.length && !quoted.length) return sendMessage(files.length ? { text, files, metadata: web } : { text, metadata: web });
 	// The skills go first in the message, so their instructions come before the person's text (server/workflow/skills.ts).
 	// The quotes come next, so the text that follows can refer to them (server/workflow/citations.ts).
 	sendMessage({
 		parts: [...files, ...chosen.map(skillPart), ...quoted.map(citationPart), ...(text ? [{ type: "text" as const, text }] : [])],
+		metadata: web,
 	});
+}
+
+/** What a reply used, for the line under it: "Sources only", "Sources + web" or "Deep research". */
+function replyWeb(message: UIMessage) {
+	return webLabel(askedWith(messages.value, message), Boolean(workspace.chosen.value));
+}
+
+/**
+ * The newest reply found no answer in the workspace's Sources and offers the web
+ * (offer_web_search). Not once the chat's web search is on: the next message searches anyway.
+ */
+function offersWeb(message: UIMessage) {
+	return message.id === lastReplyId.value && message === lastMessage.value && !busy.value && !outOfCredits.value && !workspace.lostAccess.value && offersWebSearch(message);
+}
+
+/** "Search the web for this": the same question again, with one web search. The chat's own setting stays. */
+function searchWebOnce() {
+	messages.value = withWebOnce(messages.value, webTools.kept.value);
+	void regenerate();
 }
 
 /** The run outlives the request, so Stop tells the server, then drops the stream here. */
@@ -523,8 +553,10 @@ function replyText(message: UIMessage) {
 }
 
 /** The model that wrote a reply, from the metadata the server attaches. None under Auto. */
+/** The chat's model, under a reply it wrote. Not under deep research's, which Perplexity's research model wrote: its line says "Deep research". */
 function replyModel(message: UIMessage) {
 	const id = replyModelId(message);
+	if (askedWith(messages.value, message)?.web === "research") return undefined;
 	return id && !isAuto(id) ? (modelName(id) ?? id) : undefined;
 }
 
@@ -582,13 +614,16 @@ function replyModelId(message: UIMessage) {
 								<!-- The text a person can quote with Cite: a finished reply's parts (cite/selection.ts). -->
 								<div class="contents" :data-cite-source="message.role === 'assistant' && !isStreaming(message) ? message.id : undefined">
 								<MessageParts
-									:message="message"
+									:message="withCitationLinks(message)"
 									:streaming="isStreaming(message)"
 									@approve="answerApproval($event, true)"
 									@deny="answerApproval($event, false)"
 								/>
 								</div>
 								<Loader v-if="thinking && message === lastMessage && message.role === 'assistant'" :text="thinkingText" />
+								<div v-if="offersWeb(message)" data-slot="offer-web-search">
+									<Button variant="outline" size="sm" icon-left="lucide-globe" class="touch-target" @click="searchWebOnce">Search the web for this</Button>
+								</div>
 								<MessageActions
 									v-if="message.role === 'assistant' && !isStreaming(message) && replyText(message)"
 									data-reply-actions
@@ -598,6 +633,7 @@ function replyModelId(message: UIMessage) {
 										:class="{ 'opacity-0 transition-opacity duration-150 ease-out-strong focus-visible:opacity-100 group-hover/message:opacity-100 motion-reduce:transition-none [@media(pointer:coarse)]:opacity-100': message.id !== lastReplyId }"
 									/>
 									<span v-if="replyModel(message)" class="pr-1 text-p-sm text-ink-gray-6" data-slot="reply-model">{{ replyModel(message) }}</span>
+									<span v-if="replyWeb(message)" class="pr-1 text-p-sm text-ink-gray-6" data-slot="reply-web"><span v-if="replyModel(message)" aria-hidden="true">· </span>{{ replyWeb(message) }}</span>
 								</MessageActions>
 								<div
 									v-for="{ save, operations } in remembered.get(message.id) ?? []"
@@ -719,13 +755,18 @@ function replyModelId(message: UIMessage) {
 				</div>
 				<PromptInputTextarea :placeholder="placeholder" autofocus />
 				<PromptInputFooter>
-					<PromptInputTools>
+					<PromptInputTools class="shrink-0">
 						<PromptInputAttachButton />
-						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
+						<WebTools v-model:web="webTools.web.value" v-model:research="webTools.research.value" :in-workspace="Boolean(workspace.chosen.value)" :disabled="outOfCredits || workspace.lostAccess.value" />
 						<WorkspacePicker v-if="workspace.pickable.value" v-model="workspace.chosen.value" />
 						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-6">Uploading…</span>
 					</PromptInputTools>
-					<PromptInputSubmit />
+					<!-- The model by Send: what the message goes to, beside sending it. Its list opens from the right edge.
+					     The tools on the left keep their size; on a narrow phone a long model name is cut short instead. -->
+					<div class="flex min-w-0 items-center justify-end gap-1">
+						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" align="end" />
+						<PromptInputSubmit />
+					</div>
 				</PromptInputFooter>
 			</PromptInput>
 		</div>

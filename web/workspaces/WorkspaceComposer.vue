@@ -11,12 +11,14 @@ import { loadSkills, withSkillsHint } from "../skills/skills";
 import { SkillChip } from "../transcript-parts";
 import type { FirstMessage } from "./first-message";
 import type { ComposerHandle } from "./handles";
+import { useWebTools } from "../web-tools";
+import WebTools from "../WebTools.vue";
 
 /**
  * The workspace page's message box: a question here starts a new chat in this workspace
  * (Shell.vue hands it to the chat, first-message.ts). The same box as a chat's, with $ for
  * skills; the placeholder names the workspace. What was typed stays per workspace, as a
- * chat's draft does. The box floats at the bottom of the page, where the chat's own box is, so
+ * chat's draft does. Web starts off, so the chat answers from the workspace's Sources (web-tools.ts). The box floats at the bottom of the page, where the chat's own box is, so
  * the $ menu opens above it, as in a chat.
  */
 const props = defineProps<{ workspaceId: string; name: string }>();
@@ -30,8 +32,9 @@ const model = ref(defaultModel.value);
 // The page opened before the list of models came.
 watch(defaultModel, (fallback) => !model.value && (model.value = fallback));
 const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
+const { web, research, take: takeWeb } = useWebTools(() => true);
 const label = computed(() => (props.name ? `Ask in ${props.name}` : "Ask a question"));
-const placeholder = computed(() => withSkillsHint(label.value));
+const placeholder = computed(() => (research.value ? "Ask a research question" : withSkillsHint(label.value)));
 
 const composer = ref<HTMLElement | null>(null);
 const field = ref<ComposerHandle>();
@@ -47,7 +50,7 @@ function ask({ text, files }: { text: string; files: File[] }) {
 	// Where the box is now, before the page changes: the chat's box slides from here.
 	const box = composer.value?.getBoundingClientRect();
 	const from = box && { left: box.left, bottom: box.bottom };
-	emit("ask", { text, files, skills: skills.take(), model: model.value || defaultModel.value, workspaceId: props.workspaceId, from });
+	emit("ask", { text, files, skills: skills.take(), model: model.value || defaultModel.value, workspaceId: props.workspaceId, web: takeWeb(), from });
 }
 </script>
 
@@ -71,11 +74,15 @@ function ask({ text, files }: { text: string; files: File[] }) {
 				<!-- Keyed: the field sets its height from its text and placeholder when it mounts, and a rename changes the placeholder. -->
 				<PromptInputTextarea ref="field" :key="placeholder" :placeholder="placeholder" :aria-label="label" />
 				<PromptInputFooter>
-					<PromptInputTools>
+					<PromptInputTools class="shrink-0">
 						<PromptInputAttachButton />
-						<ModelSelector v-if="models.length" v-model="model" :models="models" label="Model" />
+						<WebTools v-model:web="web" v-model:research="research" in-workspace :disabled="outOfCredits" />
 					</PromptInputTools>
-					<PromptInputSubmit />
+					<!-- The model by Send, as in a chat's box (ChatView.vue). -->
+					<div class="flex min-w-0 items-center justify-end gap-1">
+						<ModelSelector v-if="models.length" v-model="model" :models="models" label="Model" align="end" />
+						<PromptInputSubmit />
+					</div>
 				</PromptInputFooter>
 			</PromptInput>
 		</div>

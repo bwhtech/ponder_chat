@@ -24,7 +24,7 @@ import * as ModelCalls from "../telemetry/ModelCalls.ts";
 import { tracingState } from "../tracing/state.ts";
 import { calledToolName } from "./connectors.ts";
 import type { ModelCall, ModelResponse, ModelToolCall } from "./model-call.ts";
-import { classifyModelError, FIRST_CHUNK_MS, ModelStalledError, NEXT_CHUNK_MS } from "./model-errors.ts";
+import { classifyModelError, FIRST_CHUNK_MS, ModelStalledError, NEXT_CHUNK_MS, RESEARCH_FIRST_CHUNK_MS, RESEARCH_NEXT_CHUNK_MS } from "./model-errors.ts";
 import * as ChatModels from "./model.ts";
 import { RESET_STEP, storedPart, toolCallOf } from "./stream-parts.ts";
 import * as WorkflowRuns from "./WorkflowRuns.ts";
@@ -159,7 +159,7 @@ const modelStream = Effect.fnUntraced(
 		});
 		const seen: { error?: unknown; finish?: Finish } = {};
 		const toolCalls: ModelToolCall[] = [];
-		const stall = stallDeadline(since);
+		const stall = stallDeadline(since, call.research ? { first: RESEARCH_FIRST_CHUNK_MS, next: RESEARCH_NEXT_CHUNK_MS } : { first: FIRST_CHUNK_MS, next: NEXT_CHUNK_MS });
 		// Per part: no span for each one.
 		const take = Effect.fnUntraced(function* (part: TextStreamPart<ToolSet>) {
 			if (part.type === "error") seen.error ??= part.error;
@@ -190,26 +190,27 @@ const modelStream = Effect.fnUntraced(
 
 /**
  * The stall timeout on the model's stream: `watch` fails with ModelStalledError when the
- * model sends nothing for too long, first FIRST_CHUNK_MS from `since`, then NEXT_CHUNK_MS
+ * model sends nothing for too long, first `limits.first` from `since`, then `limits.next`
  * after each part of the model's output (`moved`). It looks again at the deadline, or
- * after NEXT_CHUNK_MS when that comes first: a part may move the deadline while it sleeps,
- * and a moved deadline is never further than NEXT_CHUNK_MS from the time it moved.
+ * after `limits.next` when that comes first: a part may move the deadline while it sleeps,
+ * and a moved deadline is never further than `limits.next` from the time it moved.
+ * Deep research has longer limits (model-errors.ts).
  */
-function stallDeadline(since: number) {
-	let deadline = since + FIRST_CHUNK_MS;
-	let stalled = () => new ModelStalledError(`The model sent nothing for ${FIRST_CHUNK_MS / 1000} seconds.`);
+function stallDeadline(since: number, limits: { first: number; next: number }) {
+	let deadline = since + limits.first;
+	let stalled = () => new ModelStalledError(`The model sent nothing for ${limits.first / 1000} seconds.`);
 	const watch: Effect.Effect<never, ModelStalledError> = Effect.gen(function* () {
 		while (true) {
 			const now = yield* Clock.currentTimeMillis;
 			if (now >= deadline) return yield* Effect.fail(stalled());
-			yield* Effect.sleep(Duration.millis(Math.min(deadline - now, NEXT_CHUNK_MS)));
+			yield* Effect.sleep(Duration.millis(Math.min(deadline - now, limits.next)));
 		}
 	});
 	return {
 		watch,
 		moved(at: number) {
-			deadline = at + NEXT_CHUNK_MS;
-			stalled = () => new ModelStalledError(`The model's stream stopped for ${NEXT_CHUNK_MS / 1000} seconds.`);
+			deadline = at + limits.next;
+			stalled = () => new ModelStalledError(`The model's stream stopped for ${limits.next / 1000} seconds.`);
 		},
 	};
 }

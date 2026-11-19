@@ -30,7 +30,9 @@ import * as Effect from "effect/Effect";
  */
 export const migrateDocuments = (sql: PgClient.PgClient) =>
 	Effect.gen(function* () {
-		yield* sql`create extension if not exists vector`;
+		// In public, whatever the search path: an extension is one per database, so one made in a test's own
+		// schema hid its type from every other schema, and went when that schema was dropped.
+		yield* sql`create extension if not exists vector schema public`;
 		yield* sql`
 			create table if not exists workspace_documents (
 				id text primary key,

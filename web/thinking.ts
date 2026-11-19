@@ -2,6 +2,7 @@ import type { UIMessage } from "ai";
 import { computed, onScopeDispose, ref, watch, type Ref } from "vue";
 import { compacting } from "./compaction";
 import { waitingOnPerson } from "./message-queue";
+import { latestWebChoice } from "../shared/web-mode";
 
 /**
  * "Thinking" while a reply is on its way and nothing else on screen moves. Text and
@@ -45,10 +46,18 @@ export function useThinking(busy: Ref<boolean>, messages: Ref<UIMessage[]>) {
 	);
 	onScopeDispose(clear);
 
-	// While the reply summarizes a long chat first (compaction.ts), it says so.
-	const doing = computed(() => (compacting(messages.value.at(-1)) ? "Compacting earlier messages" : "Thinking"));
-	const text = computed(() => (seconds.value >= 5 ? `${doing.value} for ${seconds.value}s` : doing.value));
+	// While the reply summarizes a long chat first (compaction.ts), it says so. Deep research searches for minutes before its first word.
+	const doing = computed(() =>
+		compacting(messages.value.at(-1)) ? "Compacting earlier messages" : latestWebChoice(messages.value)?.web === "research" ? "Researching" : "Thinking",
+	);
+	const text = computed(() => (seconds.value >= 5 ? `${doing.value} for ${duration(seconds.value)}` : doing.value));
 	return { thinking, text };
+}
+
+/** 42s, then 4m 05s: research waits for minutes. */
+function duration(seconds: number) {
+	if (seconds < 60) return `${seconds}s`;
+	return `${Math.floor(seconds / 60)}m ${String(seconds % 60).padStart(2, "0")}s`;
 }
 
 /** The last message shows movement itself: text or reasoning that streams, or a tool that runs. */
