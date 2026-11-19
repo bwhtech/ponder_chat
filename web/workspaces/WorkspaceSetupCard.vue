@@ -13,8 +13,9 @@ import WorkspaceSetupArt from "./WorkspaceSetupArt.vue";
  * up. `dropping` while files are dragged over the setup: a dashed outline over the scene, and
  * the step says "Drop to upload".
  *
- * `untitled`: a card with no title, for an empty section of the workspace page
- * (WorkspaceAbout.vue), whose heading already names it: the scene, the line and the button.
+ * `untitled`: for an empty section of the workspace page (WorkspaceAbout.vue), whose heading
+ * already names the step. A card has no title: the scene, the line and the button. A row puts
+ * what it does ("Add instructions") where the title was, and is named for that alone.
  */
 const props = defineProps<{ step: SetupStep; busy?: boolean; dropping?: boolean; compact?: boolean; untitled?: boolean }>();
 const emit = defineEmits<{ act: [] }>();
@@ -58,7 +59,8 @@ const descriptionId = computed(() => `${titleId.value}-description`);
 
 		<template v-if="compact">
 			<div class="min-w-0 flex-1">
-				<h3 :id="titleId" class="text-base font-medium text-ink-gray-9">{{ step.title }}</h3>
+				<h3 v-if="!untitled" :id="titleId" class="text-base font-medium text-ink-gray-9">{{ step.title }}</h3>
+				<p v-else class="text-base font-medium text-ink-gray-9">{{ step.action }}</p>
 				<p :id="descriptionId" class="mt-0.5 text-pretty text-p-sm text-ink-gray-6">{{ busy || dropping ? label : step.description }}</p>
 			</div>
 			<LoadingIndicator v-if="busy" class="size-4 shrink-0 text-ink-gray-5" />
@@ -67,7 +69,7 @@ const descriptionId = computed(() => `${titleId.value}-description`);
 			<button
 				type="button"
 				class="absolute inset-0 cursor-pointer rounded-6 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-outline-gray-3"
-				:aria-label="`${step.title}: ${step.action}`"
+				:aria-label="untitled ? step.action : `${step.title}: ${step.action}`"
 				:aria-describedby="descriptionId"
 				:disabled="busy"
 				@click="emit('act')"

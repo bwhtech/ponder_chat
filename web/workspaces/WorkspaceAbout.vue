@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import type { WorkspaceDocument } from "./documents";
 import { useFileDrop } from "./file-drop";
 import type { DocumentsHandle, UploadHandle } from "./handles";
@@ -14,7 +14,8 @@ import WorkspacePeople from "./WorkspacePeople.vue";
  * than its owner) side by side when the column is 600px or wider. Under the person's chats, or,
  * while they have none, it is the page, under the setup cards for editors. For people who can
  * edit, an empty section is its setup card, without the title its heading gives; the cards take
- * a column each, as the setup's do, so empty Instructions sits beside Sources. Files dropped
+ * a column each, as the setup's do, so empty Instructions sits beside Sources. In one column (a
+ * phone, or the side panel open beside the page), they are rows, as the setup's are there. Files dropped
  * anywhere here are uploaded, with "Drop to upload" over the documents while they are dragged
  * over it. While the setup cards
  * show (`setup`), they fill the empty sections, so only the sections that have something in
@@ -47,7 +48,26 @@ const documentsWide = computed(() => props.workspace.documents.length > 0 && !sh
  * with the section or row around it, which is new as well. With reduced motion, a fade only.
  */
 const opened = ref(false);
+
+/** Two columns from this width of the section (the container query in the template); under it, one, and empty cards are rows. */
+const TWO_COLUMNS_PX = 600;
+const section = ref<HTMLElement>();
+const width = ref(0);
+const widthObserver = new ResizeObserver(([entry]) => (width.value = entry?.contentRect.width ?? 0));
+const oneColumn = computed(() => width.value < TWO_COLUMNS_PX);
 onMounted(() => (opened.value = true));
+// The section comes and goes with what it shows; its width is read before it first paints.
+watch(
+	section,
+	(now, before) => {
+		if (before) widthObserver.unobserve(before);
+		if (!now) return;
+		width.value = now.clientWidth;
+		widthObserver.observe(now);
+	},
+	{ flush: "post" },
+);
+onBeforeUnmount(() => widthObserver.disconnect());
 const COME_IN = {
 	enterFromClass: "translate-y-1 opacity-0 motion-reduce:translate-y-0",
 	enterActiveClass: "transition-[opacity,transform] duration-200 ease-out-strong",
@@ -65,6 +85,7 @@ defineExpose<UploadHandle>({ upload: async (files) => documents.value?.upload(fi
 <template>
 	<section
 		v-if="showInstructions || showDocuments || shared"
+		ref="section"
 		class="[container-type:inline-size]"
 		aria-label="About this workspace"
 		data-slot="workspace-about"
@@ -80,6 +101,7 @@ defineExpose<UploadHandle>({ upload: async (files) => documents.value?.upload(fi
 					:class="{ 'col-span-full': instructionsWide }"
 					:instructions="instructions"
 					:editable="editable"
+					:compact="oneColumn"
 					@edit="emit('instructions')"
 				/>
 			</Transition>
@@ -93,6 +115,7 @@ defineExpose<UploadHandle>({ upload: async (files) => documents.value?.upload(fi
 					:documents="workspace.documents"
 					:editable="editable"
 					:dropping="drop.active.value"
+					:compact="oneColumn"
 					@changed="emit('documents', $event)"
 				/>
 			</Transition>

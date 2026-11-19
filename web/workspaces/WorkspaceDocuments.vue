@@ -23,7 +23,8 @@ import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
  * the server reads; a file it refuses gets the server's reason. The page polls while one is
  * Indexing (WorkspacePage.vue); `changed` hands it the new list after each change here.
  */
-const props = defineProps<{ workspaceId: string; documents: WorkspaceDocument[]; editable: boolean; dropping: boolean }>();
+/** `compact`: the empty card is a row, in a one-column page (WorkspaceAbout.vue). */
+const props = defineProps<{ workspaceId: string; documents: WorkspaceDocument[]; editable: boolean; dropping: boolean; compact?: boolean }>();
 const emit = defineEmits<{ changed: [documents: WorkspaceDocument[]] }>();
 
 const picker = ref<HTMLInputElement>();
@@ -106,6 +107,7 @@ function askDelete(document: WorkspaceDocument) {
 				v-if="!documents.length"
 				:step="UPLOAD"
 				untitled
+				:compact="compact"
 				:busy="uploading > 0"
 				:dropping="dropping"
 				data-slot="document-upload-area"

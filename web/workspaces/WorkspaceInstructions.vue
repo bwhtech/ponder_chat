@@ -13,7 +13,8 @@ import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
  * them whole: past a length, behind "Show all". Until the Markdown renderer is here
  * (markdown.ts), the text shows as it is.
  */
-const props = defineProps<{ instructions: string; editable: boolean }>();
+/** `compact`: the empty card is a row, in a one-column page (WorkspaceAbout.vue). */
+const props = defineProps<{ instructions: string; editable: boolean; compact?: boolean }>();
 const emit = defineEmits<{ edit: [] }>();
 
 const LONG = 600;
@@ -32,7 +33,7 @@ watch(
 		<div class="flex h-7 items-center">
 			<h2 id="workspace-instructions-heading" class="text-base-semibold text-ink-gray-9">Instructions</h2>
 		</div>
-		<WorkspaceSetupCard v-if="!instructions" :step="ADD" untitled data-slot="workspace-add-instructions" @act="emit('edit')" />
+		<WorkspaceSetupCard v-if="!instructions" :step="ADD" untitled :compact="compact" data-slot="workspace-add-instructions" @act="emit('edit')" />
 		<!-- The whole box is the Edit button. The text under it is inert: its links, copy buttons and tables take no
 		     focus and no click, so Tab and Enter reach only the button. A screen reader reads the text as the button's description. -->
 		<div v-else-if="editable" class="group relative">

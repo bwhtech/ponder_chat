@@ -463,7 +463,7 @@ test("a new workspace guides its owner: a card for each setup step leaves once i
 	await other.context.close();
 });
 
-test("once its owner has a chat in it, an empty workspace's sections are setup cards side by side, each opening what its step does", async ({ page, person, db }) => {
+test("once its owner has a chat in it, an empty workspace's sections are setup cards side by side, rows in one column, each opening what its step does", async ({ page, person, db }) => {
 	const workspace = await createWorkspace(page, "Empty with chats");
 	await addChats(db, person.id, workspace.id, 1);
 	await page.setViewportSize({ width: 1280, height: 900 });
@@ -480,6 +480,13 @@ test("once its owner has a chat in it, an empty workspace's sections are setup c
 	const [left, right] = [(await add.boundingBox())!, (await upload.boundingBox())!];
 	expect(Math.abs(left.y - right.y)).toBeLessThanOrEqual(1);
 	expect(right.x).toBeGreaterThan(left.x + left.width);
+	await expect(add).toHaveAttribute("data-layout", "card");
+
+	// In one column, as on a phone, they are rows, as the setup's steps are there.
+	await page.setViewportSize({ width: 390, height: 900 });
+	await expect(add).toHaveAttribute("data-layout", "row");
+	await expect(upload).toHaveAttribute("data-layout", "row");
+	await expect(add).toContainText("Add instructions");
 
 	await add.getByRole("button", { name: "Add instructions" }).click();
 	await expect(page.getByRole("dialog", { name: "Instructions" })).toBeVisible();
