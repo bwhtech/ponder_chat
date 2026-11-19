@@ -22,9 +22,12 @@ const shown = computed(() => props.workspace ?? workspaceById(props.modelValue))
 		icon-right="lucide-chevron-down"
 		:aria-label="`Workspace: ${shown?.name ?? 'none'}`"
 		class="relative min-w-0 max-w-48 !text-ink-gray-6 after:absolute after:inset-0 after:content-[''] hover:!text-ink-gray-8 [@media(pointer:coarse)]:after:-inset-y-2"
+		:class="shown ? 'max-sm:!gap-1 max-sm:[&>.truncate]:hidden' : '!gap-1 [&>.truncate]:hidden'"
 	>
 		<!-- With no workspace chosen, the icon only: "Workspace" said nothing the icon does not. A chosen one
-		     shows its name, except on a phone, where the footer also holds the Web menu and the model. -->
-		<span class="truncate" :class="shown ? 'max-sm:sr-only' : 'sr-only'">{{ shown?.name ?? "Workspace" }}</span>
+		     shows its name, except on a phone, where the footer also holds the Web menu and the model. Icon only,
+		     Button's label box goes (the class above), not just its text, or a gap stays on each side of it; the
+		     aria-label names the button. -->
+		{{ shown?.name ?? "Workspace" }}
 	</Button>
 </template>

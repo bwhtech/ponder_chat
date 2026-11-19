@@ -5,8 +5,9 @@ import { scopeLabel } from "./web-scope";
 
 /**
  * The button of the message box's Web menu (WebToolsMenu.vue), drawn as the model menu's
- * button is, with its icon only, so the model's name has the room: the icon tells where the
- * answer comes from (Sources, the web, deep research), and its name is for screen readers. Deep research, which is slow, costs more
+ * button is: its icon and name tell where the answer comes from (Sources, the web, deep
+ * research). On a phone, the icon only, so the model's name has the room; its aria-label still
+ * names it. Deep research, which is slow, costs more
  * and turns itself off after the next message, gets a gray fill so it is seen before sending.
  * It also stands in for the menu while the menu's code loads (WebTools.vue), with its props.
  */
@@ -27,9 +28,10 @@ const scope = computed(() => scopeLabel(props));
 		:aria-label="`Answer from: ${scope.label}`"
 		:disabled="disabled"
 		v-bind="$attrs"
-		class="touch-target relative shrink-0 transition-[background-color,color] duration-150 ease-out-strong motion-reduce:transition-none"
+		class="touch-target relative shrink-0 transition-[background-color,color] duration-150 ease-out-strong motion-reduce:transition-none max-sm:!gap-1 max-sm:[&>.truncate]:hidden"
 		:class="research ? '!text-ink-gray-8' : web ? '!text-ink-gray-7 hover:!text-ink-gray-8' : '!text-ink-gray-6 hover:!text-ink-gray-8'"
 	>
-		<span class="sr-only">{{ scope.label }}</span>
+		<!-- On a phone, Button's label box goes (above), not just its text: hidden text would leave the box, and a gap on each side of it. -->
+		{{ scope.label }}
 	</Button>
 </template>
