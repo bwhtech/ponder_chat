@@ -1,0 +1,31 @@
+/**
+ * Where a reply's answer comes from, as the message box's menu names it (WebTools.vue):
+ * the label and icon of its button, and the menu's rows. One word for the workspace's
+ * files everywhere: Sources, with the same icon as the reply's "Not in Sources" line.
+ */
+export type ScopeState = { web: boolean; research: boolean; inWorkspace?: boolean };
+
+export const SOURCES_ICON = "lucide-file-search";
+
+export function scopeLabel({ web, research, inWorkspace }: ScopeState) {
+	if (research) return { label: "Deep research", icon: "lucide-telescope" };
+	if (web) return { label: inWorkspace ? "Sources + web" : "Web", icon: "lucide-globe" };
+	return { label: inWorkspace ? "Sources only" : "No web", icon: inWorkspace ? SOURCES_ICON : "lucide-globe-lock" };
+}
+
+/** The menu's rows: the chat's choice first, then deep research for the next message. */
+export function scopeRows(inWorkspace: boolean) {
+	return {
+		off: inWorkspace
+			? { label: "Sources only", description: "This chat · only what the workspace's files say", icon: SOURCES_ICON }
+			: { label: "No web", description: "This chat · what the model already knows", icon: "lucide-globe-lock" },
+		web: inWorkspace
+			? { label: "Sources + web", description: "This chat · Sources first, then a web search", icon: "lucide-globe" }
+			: { label: "Web", description: "This chat · searches when facts may have changed", icon: "lucide-globe" },
+		research: {
+			label: "Deep research",
+			description: inWorkspace ? "Next message · Sources, then a deep web search · uses more credits" : "Next message only · up to a minute · uses more credits",
+			icon: "lucide-telescope",
+		},
+	};
+}

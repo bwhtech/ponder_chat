@@ -32,15 +32,15 @@ const model = ref(defaultModel.value);
 // The page opened before the list of models came.
 watch(defaultModel, (fallback) => !model.value && (model.value = fallback));
 const outOfCredits = computed(() => (me.value?.credits.remaining ?? 1) <= 0);
+const { web, research, take: takeWeb } = useWebTools(() => true);
 const label = computed(() => (props.name ? `Ask in ${props.name}` : "Ask a question"));
-const placeholder = computed(() => withSkillsHint(label.value));
+const placeholder = computed(() => (research.value ? "Ask a research question" : withSkillsHint(label.value)));
 
 const composer = ref<HTMLElement | null>(null);
 const field = ref<ComposerHandle>();
 defineExpose<ComposerHandle>({ focus: () => field.value?.focus() });
 const skills = useSkillPicker(input, composer);
 const skillQuery = skills.typed;
-const { web, research, take: takeWeb } = useWebTools(() => true);
 void loadSkills();
 
 function ask({ text, files }: { text: string; files: File[] }) {
@@ -76,7 +76,7 @@ function ask({ text, files }: { text: string; files: File[] }) {
 				<PromptInputFooter>
 					<PromptInputTools>
 						<PromptInputAttachButton />
-						<WebTools v-model:web="web" v-model:research="research" :disabled="outOfCredits" />
+						<WebTools v-model:web="web" v-model:research="research" in-workspace :disabled="outOfCredits" />
 						<ModelSelector v-if="models.length" v-model="model" :models="models" label="Model" />
 					</PromptInputTools>
 					<PromptInputSubmit />

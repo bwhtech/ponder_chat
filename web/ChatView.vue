@@ -201,7 +201,8 @@ const {
 void loadSkills();
 // A chat in a workspace names it, as the workspace page does: the header's breadcrumb leads back to it.
 const askIn = computed(() => workspace.summary.value?.name);
-const placeholder = computed(() => withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat"));
+// Deep research on for the next message: the field says so, where the eye already is.
+const placeholder = computed(() => (webTools.research.value ? "Ask a research question" : withSkillsHint(askIn.value ? `Ask in ${askIn.value}` : "Message Ponder Chat")));
 
 /** The skills the person asked for in the message this reply answers, for the line above the reply. */
 function askedSkills(message: UIMessage) {
@@ -753,7 +754,7 @@ function replyModelId(message: UIMessage) {
 				<PromptInputFooter>
 					<PromptInputTools>
 						<PromptInputAttachButton />
-						<WebTools v-model:web="webTools.web.value" v-model:research="webTools.research.value" :disabled="outOfCredits || workspace.lostAccess.value" />
+						<WebTools v-model:web="webTools.web.value" v-model:research="webTools.research.value" :in-workspace="Boolean(workspace.chosen.value)" :disabled="outOfCredits || workspace.lostAccess.value" />
 						<ModelSelector v-if="models.length" v-model="threadModel" :models="models" label="Model" />
 						<WorkspacePicker v-if="workspace.pickable.value" v-model="workspace.chosen.value" />
 						<span v-if="uploading" class="px-1.5 text-xs text-ink-gray-6">Uploading…</span>

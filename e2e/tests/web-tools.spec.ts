@@ -6,16 +6,19 @@ import { createWorkspace, textFile, uploadReady, workspacePage } from "../worksp
  * Web and Research under the message box (web/web-tools.ts): what the model is given, and
  * told, for each choice, and what the page shows of it.
  */
-const webToggle = (page: Page) => page.locator('[data-slot="web-toggle"]');
-const researchToggle = (page: Page) => page.locator('[data-slot="research-toggle"]');
+/** The message box's Web menu: its button names where the answer comes from. */
+const webMenu = (page: Page) => page.locator('[data-web-menu]').last();
+async function pick(page: Page, row: string) {
+	await webMenu(page).click();
+	await page.getByRole("menuitem", { name: new RegExp(`^${row.replace("+", "\\+")}`) }).click();
+}
 const replyWeb = (page: Page) => chat.reply(page).locator('[data-slot="reply-web"]');
 const offer = (page: Page) => page.getByRole("button", { name: "Search the web for this" });
 
 test("a chat searches the web until Web is turned off; then the model has no web tool, and the chat stays off after a reload", async ({ page, person, fake }) => {
 	const tag = person.id.slice(0, 6);
 	await page.goto("/");
-	await expect(webToggle(page)).toHaveAttribute("aria-pressed", "true");
-	await expect(researchToggle(page)).toHaveAttribute("aria-pressed", "false");
+	await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: Web");
 
 	await chat.send(page, `With the web ${tag}`);
 	await chat.idle(page);
@@ -25,8 +28,8 @@ test("a chat searches the web until Web is turned off; then the model has no web
 	// The usual chat says nothing under its reply.
 	await expect(replyWeb(page)).toHaveCount(0);
 
-	await webToggle(page).click();
-	await expect(webToggle(page)).toHaveAttribute("aria-pressed", "false");
+	await pick(page, "No web");
+	await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: No web");
 	await chat.send(page, `Without the web ${tag}`);
 	await chat.idle(page);
 	const [without] = await fake.calls(`Without the web ${tag}`);
@@ -39,7 +42,7 @@ test("a chat searches the web until Web is turned off; then the model has no web
 
 	await page.reload();
 	await expect(chat.reply(page)).toContainText(`Without the web ${tag}`);
-	await expect(webToggle(page)).toHaveAttribute("aria-pressed", "false");
+	await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: No web");
 	await expect(replyWeb(page)).toHaveText("Web search off");
 });
 
@@ -56,8 +59,7 @@ test("a workspace chat answers from Sources only; when they fall short it says s
 	});
 
 	await page.goto(`/?w=${slug}`);
-	const pageToggle = page.locator('[data-slot="workspace-composer"] [data-slot="web-toggle"]');
-	await expect(pageToggle).toHaveAttribute("aria-pressed", "false");
+	await expect(page.locator('[data-slot="workspace-composer"] [data-web-menu]')).toHaveAttribute("aria-label", "Answer from: Sources only");
 	await workspacePage.field(page).fill(question);
 	await workspacePage.field(page).press("Enter");
 	await expect(chat.reply(page)).toContainText("Sources don't cover city permits.");
@@ -76,7 +78,7 @@ test("a workspace chat answers from Sources only; when they fall short it says s
 	await test.step("The reply says what is missing, names what it used, and offers the web", async () => {
 		await expect(chat.reply(page)).toContainText("Not in Sources · city permits");
 		await expect(replyWeb(page)).toHaveText("Sources only");
-		await expect(webToggle(page)).toHaveAttribute("aria-pressed", "false");
+		await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: Sources only");
 		await expect(offer(page)).toBeVisible();
 	});
 
@@ -99,13 +101,13 @@ test("a workspace chat answers from Sources only; when they fall short it says s
 		await expect(chat.messages(page)).toHaveCount(2);
 		await expect(replyWeb(page)).toHaveText("Sources + web");
 		await expect(offer(page)).toHaveCount(0);
-		await expect(webToggle(page)).toHaveAttribute("aria-pressed", "false");
+		await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: Sources only");
 	});
 
 	await test.step("After a reload the chat is still on Sources only, and the next question has no web tool", async () => {
 		await page.reload();
 		await expect(chat.reply(page)).toContainText("The city needs a permit");
-		await expect(webToggle(page)).toHaveAttribute("aria-pressed", "false");
+		await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: Sources only");
 		await chat.send(page, `And for tables ${tag}?`);
 		await chat.idle(page);
 		const [next] = await fake.calls(`And for tables ${tag}?`);
@@ -120,9 +122,11 @@ test("Research is for one message: its searches are deep, the reply says so, and
 	const query = `volunteer retention ${tag}`;
 	await fake.chat({ match: question, steps: [{ toolCalls: [{ name: "web_search", input: { query } }] }, { text: "Most leave in the first three months." }] });
 	await page.goto("/");
-	await webToggle(page).click();
-	await researchToggle(page).click();
-	await expect(researchToggle(page)).toHaveAttribute("aria-pressed", "true");
+	await pick(page, "No web");
+	await pick(page, "Deep research");
+	await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: Deep research");
+	await expect(webMenu(page)).toHaveAttribute("data-research", "true");
+	await expect(chat.field(page)).toHaveAttribute("placeholder", "Ask a research question");
 
 	await chat.send(page, question);
 	await expect(chat.reply(page)).toContainText("Most leave in the first three months.");
@@ -135,8 +139,8 @@ test("Research is for one message: its searches are deep, the reply says so, and
 	await expect(replyWeb(page)).toHaveText("Deep research");
 
 	// Research went off with the message, and Web is off as it was before.
-	await expect(researchToggle(page)).toHaveAttribute("aria-pressed", "false");
-	await expect(webToggle(page)).toHaveAttribute("aria-pressed", "false");
+	await expect(webMenu(page)).toHaveAttribute("aria-label", "Answer from: No web");
+	await expect(webMenu(page)).not.toHaveAttribute("data-research");
 	await chat.send(page, `And then ${tag}?`);
 	await chat.idle(page);
 	const [next] = await fake.calls(`And then ${tag}?`);

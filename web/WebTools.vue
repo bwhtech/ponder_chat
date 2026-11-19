@@ -1,50 +1,20 @@
 <script setup lang="ts">
-import { Button } from "frappe-ui";
+import { defineAsyncComponent } from "vue";
+import { once } from "./once";
+import WebToolsChip from "./WebToolsChip.vue";
 
 /**
- * Web and Research in a message box (web-tools.ts). Two switches drawn as the model menu's
- * button is, so the row reads as one. On a phone they are icons only: the row also holds the
- * model and the workspace.
+ * Web search and deep research in a message box (web-tools.ts): one menu, drawn as the model
+ * menu is, whose button names where the answer comes from. The menu loads as its own chunk;
+ * its button stands in until it is here, with the same props, so the box does not move.
  */
-defineProps<{ disabled?: boolean }>();
-/** Web search for the chat. */
+const loadMenu = once(() => import("./WebToolsMenu.vue").then((module) => module.default));
+const WebToolsMenu = defineAsyncComponent({ loader: loadMenu, loadingComponent: WebToolsChip, delay: 0 });
+defineProps<{ inWorkspace?: boolean; disabled?: boolean }>();
 const web = defineModel<boolean>("web", { required: true });
-/** Deep research for the next message. */
 const research = defineModel<boolean>("research", { required: true });
-
-const base = "relative shrink-0 after:absolute after:inset-0 after:content-[''] [@media(pointer:coarse)]:after:-inset-y-2";
-const off = "!text-ink-gray-6 hover:!text-ink-gray-8";
 </script>
 
 <template>
-	<Button
-		:variant="web ? 'subtle' : 'ghost'"
-		:theme="web ? 'blue' : 'gray'"
-		size="sm"
-		icon-left="lucide-globe"
-		data-slot="web-toggle"
-		:aria-pressed="web"
-		aria-label="Web search"
-		:title="web ? 'Web search is on for this chat' : 'Search the web in this chat'"
-		:disabled="disabled"
-		:class="[base, !web && off]"
-		@click="web = !web"
-	>
-		<span class="max-sm:hidden">Web</span>
-	</Button>
-	<Button
-		:variant="research ? 'subtle' : 'ghost'"
-		:theme="research ? 'blue' : 'gray'"
-		size="sm"
-		icon-left="lucide-telescope"
-		data-slot="research-toggle"
-		:aria-pressed="research"
-		aria-label="Deep research"
-		:title="research ? 'Deep research is on for your next message' : 'Deep research for your next message: many searches, up to a minute, more credits'"
-		:disabled="disabled"
-		:class="[base, !research && off]"
-		@click="research = !research"
-	>
-		<span class="max-sm:hidden">Research</span>
-	</Button>
+	<WebToolsMenu v-model:web="web" v-model:research="research" :in-workspace="inWorkspace" :disabled="disabled" />
 </template>
