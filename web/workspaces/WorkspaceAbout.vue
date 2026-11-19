@@ -11,10 +11,12 @@ import WorkspacePeople from "./WorkspacePeople.vue";
 /**
  * What the workspace is, in the page's column (WorkspacePage.vue): the instructions that every
  * chat here follows, across the column, then its documents and its people (once it has more
- * than its owner) side by side from Tailwind's sm. Under the person's chats, or, while they
- * have none, it is the page, under the setup cards for editors. For people who can edit, an
- * empty section is one area that fills it, and files dropped anywhere here are uploaded, with
- * "Drop to upload" over the documents while they are dragged over it. While the setup cards
+ * than its owner) side by side when the column is 600px or wider. Under the person's chats, or,
+ * while they have none, it is the page, under the setup cards for editors. For people who can
+ * edit, an empty section is its setup card, without the title its heading gives; the cards take
+ * a column each, as the setup's do, so empty Instructions sits beside Sources. Files dropped
+ * anywhere here are uploaded, with "Drop to upload" over the documents while they are dragged
+ * over it. While the setup cards
  * show (`setup`), they fill the empty sections, so only the sections that have something in
  * them show, as for people who can only ask.
  *
@@ -33,6 +35,12 @@ const shared = computed(() => isShared(props.workspace));
 const showEmpty = computed(() => editable.value && !props.setup);
 const showInstructions = computed(() => Boolean(instructions.value) || showEmpty.value);
 const showDocuments = computed(() => props.workspace.documents.length > 0 || showEmpty.value);
+/**
+ * Filled instructions are text, across the column. A list of sources is too, unless People or
+ * the Instructions card sits beside it.
+ */
+const instructionsWide = computed(() => Boolean(instructions.value));
+const documentsWide = computed(() => props.workspace.documents.length > 0 && !shared.value && instructionsWide.value);
 
 /**
  * Each section's Transition plays on `appear` too, once the page is open: a section can come
@@ -57,23 +65,30 @@ defineExpose<UploadHandle>({ upload: async (files) => documents.value?.upload(fi
 <template>
 	<section
 		v-if="showInstructions || showDocuments || shared"
-		class="flex flex-col gap-8 [container-type:inline-size]"
+		class="[container-type:inline-size]"
 		aria-label="About this workspace"
 		data-slot="workspace-about"
 		v-on="drop.listeners"
 	>
-		<Transition :appear="opened" v-bind="COME_IN">
-			<WorkspaceInstructions v-if="showInstructions" :instructions="instructions" :editable="editable" @edit="emit('instructions')" />
-		</Transition>
-
-		<!-- Side by side only when the column itself is wide enough, not the window: with the side panel open, the
+		<!-- Two columns only when the column itself is wide enough, not the window: with the side panel open, the
 		     column is narrow on a wide screen, and two columns would cut every name short. -->
-		<div v-if="showDocuments || shared" class="grid gap-8" :class="{ '[@container(min-width:600px)]:grid-cols-2': showDocuments && shared }">
+		<div class="grid gap-8 [@container(min-width:600px)]:grid-cols-2">
+			<Transition :appear="opened" v-bind="COME_IN">
+				<WorkspaceInstructions
+					v-if="showInstructions"
+					class="min-w-0"
+					:class="{ 'col-span-full': instructionsWide }"
+					:instructions="instructions"
+					:editable="editable"
+					@edit="emit('instructions')"
+				/>
+			</Transition>
 			<Transition :appear="opened" v-bind="COME_IN">
 				<WorkspaceDocuments
 					v-if="showDocuments"
 					ref="documents"
 					class="min-w-0"
+					:class="{ 'col-span-full': documentsWide }"
 					:workspace-id="workspace.id"
 					:documents="workspace.documents"
 					:editable="editable"

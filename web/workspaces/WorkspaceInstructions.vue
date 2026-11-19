@@ -2,11 +2,12 @@
 import { Button } from "frappe-ui";
 import { ref, watch } from "vue";
 import { loadMarkdown, Markdown } from "../markdown";
-import WorkspaceEmptyArea from "./WorkspaceEmptyArea.vue";
+import { setupStep } from "./onboarding";
+import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
 
 /**
  * The instructions every chat in the workspace follows, on its page, drawn as Markdown,
- * as replies are. For a person who can edit, empty ones are an "Add instructions" area, and
+ * as replies are. For a person who can edit, empty ones are the setup card's ("Add instructions"), and
  * filled ones show their first three lines in a box that opens the instructions dialog: a
  * pencil shows in its corner on hover, and always on touch. A person who can only ask reads
  * them whole: past a length, behind "Show all". Until the Markdown renderer is here
@@ -16,6 +17,7 @@ const props = defineProps<{ instructions: string; editable: boolean }>();
 const emit = defineEmits<{ edit: [] }>();
 
 const LONG = 600;
+const ADD = setupStep("instructions");
 const expanded = ref(false);
 
 watch(
@@ -30,7 +32,7 @@ watch(
 		<div class="flex h-7 items-center">
 			<h2 id="workspace-instructions-heading" class="text-base-semibold text-ink-gray-9">Instructions</h2>
 		</div>
-		<WorkspaceEmptyArea v-if="!instructions" icon="lucide-plus" label="Add instructions" data-slot="workspace-add-instructions" @click="emit('edit')" />
+		<WorkspaceSetupCard v-if="!instructions" :step="ADD" untitled data-slot="workspace-add-instructions" @act="emit('edit')" />
 		<!-- The whole box is the Edit button. The text under it is inert: its links, copy buttons and tables take no
 		     focus and no click, so Tab and Enter reach only the button. A screen reader reads the text as the button's description. -->
 		<div v-else-if="editable" class="group relative">

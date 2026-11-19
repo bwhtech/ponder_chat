@@ -12,8 +12,11 @@ import WorkspaceSetupArt from "./WorkspaceSetupArt.vue";
  * description. Either way, focus shows on the button. `busy` while the files picked from it go
  * up. `dropping` while files are dragged over the setup: a dashed outline over the scene, and
  * the step says "Drop to upload".
+ *
+ * `untitled`: a card with no title, for an empty section of the workspace page
+ * (WorkspaceAbout.vue), whose heading already names it: the scene, the line and the button.
  */
-const props = defineProps<{ step: SetupStep; busy?: boolean; dropping?: boolean; compact?: boolean }>();
+const props = defineProps<{ step: SetupStep; busy?: boolean; dropping?: boolean; compact?: boolean; untitled?: boolean }>();
 const emit = defineEmits<{ act: [] }>();
 
 const label = computed(() => (props.busy ? "Uploading…" : props.dropping ? "Drop to upload" : props.step.action));
@@ -29,7 +32,7 @@ const descriptionId = computed(() => `${titleId.value}-description`);
 				? 'items-center gap-3 pe-3 transition-colors duration-150 ease-out-strong hover:bg-surface-gray-1 has-[button:active]:bg-surface-gray-2'
 				: 'flex-col'
 		"
-		:aria-labelledby="titleId"
+		:aria-labelledby="untitled ? undefined : titleId"
 		data-slot="workspace-setup-step"
 		:data-step="step.key"
 		:data-layout="compact ? 'row' : 'card'"
@@ -71,8 +74,8 @@ const descriptionId = computed(() => `${titleId.value}-description`);
 			/>
 		</template>
 		<div v-else class="flex flex-1 flex-col px-2 pb-2 pt-3">
-			<h3 :id="titleId" class="text-base font-medium text-ink-gray-9">{{ step.title }}</h3>
-			<p class="mt-1 text-pretty text-p-sm text-ink-gray-6">{{ step.description }}</p>
+			<h3 v-if="!untitled" :id="titleId" class="text-base font-medium text-ink-gray-9">{{ step.title }}</h3>
+			<p class="text-pretty text-p-sm text-ink-gray-6" :class="{ 'mt-1': !untitled }">{{ step.description }}</p>
 			<div class="mt-auto pt-4">
 				<!-- Its click area stretches over the card (the card is `relative`, the button is not). -->
 				<Button :label="label" :loading="busy" class="after:absolute after:inset-0 after:rounded-6 after:content-['']" @click="emit('act')" />

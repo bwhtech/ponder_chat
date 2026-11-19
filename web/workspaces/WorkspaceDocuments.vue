@@ -7,16 +7,17 @@ import { dialog } from "../dialogs";
 import { toast } from "../toasts";
 import DocumentRow from "./DocumentRow.vue";
 import { deleteDocument, documentFile, DOCUMENT_TYPES, retryDocument, type WorkspaceDocument } from "./documents";
-import WorkspaceEmptyArea from "./WorkspaceEmptyArea.vue";
 import type { DocumentsHandle } from "./handles";
+import { setupStep } from "./onboarding";
 import { pickedFiles, useDocumentUpload } from "./upload";
+import WorkspaceSetupCard from "./WorkspaceSetupCard.vue";
 
 /**
  * The workspace's documents, on its page, in the section "Sources" (the files are one kind of
  * source; each one is still a document). Everyone who
  * can ask sees each document's name, and its status while it is not Ready, and opens its file
  * by the name. People who can edit also see its size and why it failed, upload (the "Upload
- * files" area while there are none, then Upload by the heading, or files dropped on the
+ * files" card while there are none, as on the setup, then Upload by the heading, or files dropped on the
  * workspace's sections: WorkspaceAbout.vue calls `upload` and sets `dropping`), delete, open its Details (its
  * status and indexing log, in the side panel) and "Try again" a document that failed. The file picker offers only the types
  * the server reads; a file it refuses gets the server's reason. The page polls while one is
@@ -34,6 +35,7 @@ const { uploading, errors, upload } = useDocumentUpload(
 const picked = (event: Event) => void upload(pickedFiles(event));
 const retrying = ref(new Set<string>());
 const viewFile = useFileViewer();
+const UPLOAD = setupStep("documents");
 
 defineExpose({ upload } satisfies DocumentsHandle);
 
@@ -100,13 +102,14 @@ function askDelete(document: WorkspaceDocument) {
 		</div>
 
 		<div class="relative">
-			<WorkspaceEmptyArea
+			<WorkspaceSetupCard
 				v-if="!documents.length"
-				icon="lucide-upload"
-				label="Upload files"
+				:step="UPLOAD"
+				untitled
 				:busy="uploading > 0"
+				:dropping="dropping"
 				data-slot="document-upload-area"
-				@click="picker?.click()"
+				@act="picker?.click()"
 			/>
 			<!-- Pulled out by the rows' padding, so the hover background reaches past the text, as in the chats. -->
 			<ul v-else class="-mx-2 space-y-1" data-slot="document-list">
@@ -122,11 +125,10 @@ function askDelete(document: WorkspaceDocument) {
 					@delete="askDelete(document)"
 				/>
 			</ul>
-			<!-- Files dragged over the sections: the empty area says so where its label was; over the list, in the middle. -->
+			<!-- Files dragged over the sections: over the list, in the middle; the card says so itself. -->
 			<div
-				v-if="dropping"
-				class="pointer-events-none absolute inset-0 flex items-center gap-2 rounded-4 border border-outline-gray-3 bg-surface-gray-2 px-3 text-base text-ink-gray-8"
-				:class="{ 'justify-center': documents.length }"
+				v-if="dropping && documents.length"
+				class="pointer-events-none absolute inset-0 flex items-center justify-center gap-2 rounded-4 border border-outline-gray-3 bg-surface-gray-2 px-3 text-base text-ink-gray-8"
 				data-slot="document-drop"
 				aria-hidden="true"
 			>
