@@ -83,6 +83,8 @@ export class SignInProviders extends Context.Service<
 		readonly saveEmail: (enabled: boolean, by: string) => Effect.Effect<boolean, EmailNeeded | SqlError>;
 		/** Whether the person signed in with Microsoft on its settings as they are saved now. */
 		readonly signedInSinceSaved: (userId: string) => Effect.Effect<boolean, SqlError>;
+		/** Whether `revision` is that of Microsoft's settings as they are saved now, read from the database. */
+		readonly isSaved: (revision: number) => Effect.Effect<boolean, SqlError>;
 		/** Notes a sign-in with Microsoft on the settings of `revision` (Auth.ts), for signedInSinceSaved. */
 		readonly signedIn: (userId: string, revision: number) => Effect.Effect<void, SqlError>;
 		/** What sign-in runs on now: Microsoft, when it is on and complete, and email unless it is off. Kept in memory. */
@@ -191,6 +193,9 @@ const make = Effect.gen(function* () {
 	// In a transaction that holds Microsoft's row (`for update`): two saves at once, or a save and
 	// email turned off, go one after the other, each from what the one before saved.
 	const saveLocked = Effect.fnUntraced(function* (input: MicrosoftSettings, clientSecret: string | undefined, by: string) {
+		// The first save has no row to hold yet: an empty one is made first, as no settings. A second
+		// save at the same moment waits on it.
+		yield* sql`insert into sign_in_providers (id) values (${MICROSOFT}) on conflict (id) do nothing`;
 		yield* sql`select 1 from sign_in_providers where id = ${MICROSOFT} for update`;
 		const secret = clientSecret?.trim() || undefined;
 		const before = yield* microsoft;
@@ -241,6 +246,10 @@ const make = Effect.gen(function* () {
 			Effect.catchTags({ SqlError: (error) => (pgCode(error) === "42P01" ? Effect.succeed([]) : Effect.fail(error)) }),
 		);
 		return rows.length > 0;
+	});
+
+	const isSaved = Effect.fn("SignInProviders.isSaved")(function* (revision: number) {
+		return Option.exists(yield* row, (saved) => saved.revision === revision);
 	});
 
 	const signedIn = Effect.fn("SignInProviders.signedIn")(function* (userId: string, revision: number) {
@@ -301,7 +310,7 @@ const make = Effect.gen(function* () {
 		return rows.length > 0;
 	});
 
-	return SignInProviders.of({ migrate, microsoft, saveMicrosoft, saveEmail, signedInSinceSaved, signedIn, active, isLinked, unlink });
+	return SignInProviders.of({ migrate, microsoft, saveMicrosoft, saveEmail, signedInSinceSaved, isSaved, signedIn, active, isLinked, unlink });
 });
 
 export const layer = Layer.effect(SignInProviders, make);

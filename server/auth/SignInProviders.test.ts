@@ -173,6 +173,9 @@ describe.skipIf(!base)("SignInProviders", () => {
 				assert.isTrue((yield* providers.active).email);
 				// A sign-in on the settings before the last save, such as one that started before it and finished after.
 				const revision = yield* revisionNow;
+				// Such a sign-in links no account either (Auth.ts).
+				assert.isTrue(yield* providers.isSaved(revision));
+				assert.isFalse(yield* providers.isSaved(revision - 1));
 				yield* providers.signedIn("cy", revision - 1);
 				assert.isFalse(yield* providers.signedInSinceSaved("cy"));
 				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "cy"))).reason, "not-signed-in");

@@ -22,6 +22,7 @@ const linkErrors: Record<string, string> = {
 	WRONG_TENANT: "That Microsoft account is not of this organisation. Sign in with your work account.",
 	EMAIL_DOMAIN_NOT_ALLOWED: "That Microsoft account's email is not of this organisation. Sign in with your work account.",
 	LINKED_TO_ANOTHER_ACCOUNT: "Your Ponder Chat account is linked to another Microsoft account. Ask an admin for help.",
+	SETTINGS_CHANGED: "An admin changed the sign-in settings just now. Try again.",
 	account_not_linked: "Sign in by email once. After that, you can sign in with Microsoft.",
 	email_not_found: "That Microsoft account has no email address. Sign in by email.",
 	access_denied: "The Microsoft sign-in was cancelled.",

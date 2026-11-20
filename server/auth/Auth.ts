@@ -84,6 +84,8 @@ type Callbacks = {
 	readonly applyInvite: (user: { id: string; email: string }) => Promise<void>;
 	/** Whether the person has an account of this provider linked already. */
 	readonly hasProviderAccount: (userId: string, providerId: string) => Promise<boolean>;
+	/** Whether Microsoft's settings of `revision` are the ones saved now (SignInProviders.isSaved). */
+	readonly isSavedMicrosoft: (revision: number) => Promise<boolean>;
 	/** Notes that the person signed in with Microsoft, on the settings of `revision` (SignInProviders.signedIn). */
 	readonly signedInWithMicrosoft: (userId: string, revision: number) => Promise<void>;
 	readonly beforeCall: (ctx: AdminAuthEvents.HookContext) => Promise<void>;
@@ -202,6 +204,10 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 			account: {
 				create: {
 					before: async (account) => {
+						// A sign-in that started before an admin saved other settings, such as another tenant, links
+						// nothing: the save removed the old tenant's links, and this one would stay. The person signs in again.
+						if (account.providerId === MICROSOFT && (!microsoft || !(await run.isSavedMicrosoft(microsoft.revision))))
+							throw new APIError("CONFLICT", { code: "SETTINGS_CHANGED", message: "The sign-in settings changed. Try again." });
 						// One Microsoft account for a Ponder account. A second one that shows the same email is not
 						// the person who signed in first, however the email checks out (frappe/frappe#42500).
 						if (await run.hasProviderAccount(account.userId, account.providerId))
@@ -339,6 +345,7 @@ const make = Effect.gen(function* () {
 		applyInvite: (user) => run(invites.applyInvite(user)),
 		hasProviderAccount: (userId, providerId) =>
 			run(Effect.map(sql`select 1 from accounts where "userId" = ${userId} and "providerId" = ${providerId} limit 1`, (rows) => rows.length > 0)),
+		isSavedMicrosoft: (revision) => run(signInProviders.isSaved(revision)),
 		signedInWithMicrosoft: (userId, revision) => run(signInProviders.signedIn(userId, revision)),
 		beforeCall: (ctx) => run(adminAuthEvents.before(ctx)),
 		afterCall: (ctx) => run(adminAuthEvents.after(ctx)),
