@@ -2,6 +2,7 @@
 import { Button, SettingsRow, Skeleton, Switch, toast } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import EmptyState from "../../EmptyState.vue";
+import MicrosoftLogo from "../../MicrosoftLogo.vue";
 import { admin, unwrap, type MicrosoftSignIn, type SignInData } from "../api";
 import MicrosoftSignInDialog from "./MicrosoftSignInDialog.vue";
 
@@ -117,23 +118,33 @@ function saved(next: Pick<SignInData, "microsoft" | "email">) {
 		<section v-else class="space-y-1">
 			<h2 v-if="heading" class="text-base-semibold text-ink-gray-9">Sign-in</h2>
 			<div class="divide-y divide-outline-gray-1">
-				<SettingsRow title="Email" :description="emailDescription">
-					<Skeleton v-if="email === undefined" class="h-5 w-8 rounded-full" />
-					<Switch
-						v-else
-						:model-value="email"
-						:disabled="savingEmail || (email && !emailCanGoOff)"
-						aria-label="Sign in by email"
-						@update:model-value="setEmail"
-					/>
-				</SettingsRow>
-				<SettingsRow title="Microsoft" :description="microsoft ? describe(microsoft) : INTRO">
-					<Skeleton v-if="!microsoft" class="h-5 w-8 rounded-full" />
-					<div v-else class="flex items-center gap-3">
-						<Button v-if="microsoft.enabled" class="touch-target" label="Configure" @click="dialogOpen = true" />
-						<Switch :model-value="microsoftOn" :disabled="savingMicrosoft" aria-label="Sign in with Microsoft" @update:model-value="setMicrosoft" />
-					</div>
-				</SettingsRow>
+				<div class="flex items-center gap-4">
+					<span class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-2" aria-hidden="true">
+						<span class="lucide-mail size-[18px] text-ink-gray-6" />
+					</span>
+					<SettingsRow class="min-w-0 flex-1" title="Email" :description="emailDescription">
+						<Skeleton v-if="email === undefined" class="h-5 w-8 rounded-full" />
+						<Switch
+							v-else
+							:model-value="email"
+							:disabled="savingEmail || (email && !emailCanGoOff)"
+							aria-label="Sign in by email"
+							@update:model-value="setEmail"
+						/>
+					</SettingsRow>
+				</div>
+				<div class="flex items-center gap-4">
+					<span class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-outline-gray-2" aria-hidden="true">
+						<MicrosoftLogo class="size-4" />
+					</span>
+					<SettingsRow class="min-w-0 flex-1" title="Microsoft" :description="microsoft ? describe(microsoft) : INTRO">
+						<Skeleton v-if="!microsoft" class="h-5 w-8 rounded-full" />
+						<div v-else class="flex items-center gap-3">
+							<Button v-if="microsoft.enabled" class="touch-target" label="Configure" @click="dialogOpen = true" />
+							<Switch :model-value="microsoftOn" :disabled="savingMicrosoft" aria-label="Sign in with Microsoft" @update:model-value="setMicrosoft" />
+						</div>
+					</SettingsRow>
+				</div>
 			</div>
 			<MicrosoftSignInDialog
 				v-if="data"

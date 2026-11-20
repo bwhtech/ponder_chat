@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import BrandLogo from "./BrandLogo.vue";
+import MicrosoftLogo from "./MicrosoftLogo.vue";
 import { Alert, Button, FormControl } from "frappe-ui";
 import { nextTick, onBeforeUnmount, ref, watch } from "vue";
 import { sendSignInLink, signInWithCode, signInWithMicrosoft } from "./account";
@@ -166,13 +167,7 @@ function useAnotherEmail() {
 				<template v-if="signInWith.microsoft">
 					<Button variant="outline" size="md" class="[@media(pointer:coarse)]:h-11" :loading="leaving" data-slot="sign-in-microsoft" @click="withMicrosoft">
 						<template #prefix>
-							<!-- Microsoft's mark: four squares, in its own colours. -->
-							<svg class="size-4 shrink-0" viewBox="0 0 16 16" aria-hidden="true">
-								<rect width="7.5" height="7.5" fill="#f25022" />
-								<rect x="8.5" width="7.5" height="7.5" fill="#7fba00" />
-								<rect y="8.5" width="7.5" height="7.5" fill="#00a4ef" />
-								<rect x="8.5" y="8.5" width="7.5" height="7.5" fill="#ffb900" />
-							</svg>
+							<MicrosoftLogo class="size-4 shrink-0" />
 						</template>
 						Sign in with Microsoft
 					</Button>
