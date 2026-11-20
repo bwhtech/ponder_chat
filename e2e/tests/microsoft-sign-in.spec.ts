@@ -88,9 +88,14 @@ test("an admin sets up Microsoft in Settings, and an invited person signs in wit
 		await form.getByRole("button", { name: "Turn on" }).click();
 		await expect(form.getByText("That is the secret's ID.", { exact: false })).toBeVisible();
 
+		// Ponder asks Microsoft whether the tenant, the app and the secret work before it saves them.
+		await form.getByLabel("Client secret").fill("Abc8Q~a-wrong-client-secret");
+		await form.getByRole("button", { name: "Turn on" }).click();
+		await expect(form.getByText("Microsoft does not accept this secret.", { exact: false })).toBeVisible();
+
 		await form.getByLabel("Client secret").fill(MICROSOFT_CLIENT_SECRET);
 		await form.getByRole("button", { name: "Turn on" }).click();
-		await expect(page.getByRole("region", { name: /Notifications/ }).getByText("People can sign in with Microsoft")).toBeVisible();
+		await expect(page.getByRole("region", { name: /Notifications/ }).getByText("Microsoft accepted the settings. People can sign in with it.")).toBeVisible();
 		await expect(form).toHaveCount(0);
 		await expect(settingsDialog.getByText(`For emails of ${DOMAIN}. A person still needs an invite.`)).toBeVisible();
 		await expect(settingsDialog.getByRole("switch", { name: "Sign in with Microsoft" })).toBeChecked();

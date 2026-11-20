@@ -4,11 +4,12 @@
  *
  * The test runs in a schema of its own (search_path), which the last test drops.
  */
-import { assert, describe, it } from "@effect/vitest";
+import { afterAll, assert, describe, it } from "@effect/vitest";
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import { EXPIRED_SECRET, listenMicrosoft, MICROSOFT_CLIENT_SECRET, UNKNOWN_ID } from "../../e2e/microsoft/server.ts";
 import * as PonderConfig from "../config.ts";
 import * as Database from "../runtime/Database.ts";
 import * as Secrets from "../secrets/Secrets.ts";
@@ -20,14 +21,18 @@ const schema = `test_sign_in_${run}`;
 const base = process.env.TEST_DATABASE_URL;
 const url = base && `${base}${base.includes("?") ? "&" : "?"}options=${encodeURIComponent(`-csearch_path=${schema}`)}`;
 
+// Microsoft, as far as the check of the settings asks it (e2e/microsoft/server.ts).
+const microsoft = base ? await listenMicrosoft() : undefined;
+afterAll(() => microsoft?.close());
+
 const providersLayer = (secret: string) =>
 	SignInProviders.layer.pipe(
 		Layer.provideMerge(Secrets.layer),
 		Layer.provideMerge(Database.layer),
-		Layer.provide(PonderConfig.layerFromEnv({ ...(url ? { DATABASE_URL: url } : {}), BETTER_AUTH_SECRET: secret })),
+		Layer.provide(PonderConfig.layerFromEnv({ ...(url ? { DATABASE_URL: url } : {}), BETTER_AUTH_SECRET: secret, PONDER_MICROSOFT_AUTHORITY: microsoft?.url ?? "" })),
 	);
 
-const SECRET = "Abc8Q~the-client-secret-value";
+const SECRET = MICROSOFT_CLIENT_SECRET;
 const settings: MicrosoftSettings = {
 	enabled: true,
 	tenantId: "11111111-2222-4333-8444-555555555555",
@@ -35,6 +40,8 @@ const settings: MicrosoftSettings = {
 	signUps: "everyone",
 	allowedDomains: ["example.org"],
 };
+
+const problemOf = (error: { _tag: string; problem?: string }) => error.problem ?? error._tag;
 
 describe.skipIf(!base)("SignInProviders", () => {
 	it.layer(providersLayer("test-secret-for-sign-in-providers-0123456789"), { excludeTestServices: true })((it) => {
@@ -68,6 +75,24 @@ describe.skipIf(!base)("SignInProviders", () => {
 				const refused = yield* Effect.flip(providers.saveMicrosoft(settings, undefined, "admin"));
 				assert.strictEqual(refused._tag, "InvalidSettings");
 				assert.strictEqual(refused.message, "Enter the client secret.");
+				assert.isFalse((yield* providers.microsoft).enabled);
+			}),
+		);
+
+		it.effect("asks Microsoft whether the tenant, the client ID and the secret work, and saves nothing it refuses", () =>
+			Effect.gen(function* () {
+				const providers = yield* SignInProviders.SignInProviders;
+				const refused = (change: Partial<MicrosoftSettings>, secret: string) =>
+					Effect.map(Effect.flip(providers.saveMicrosoft({ ...settings, ...change }, secret, "admin")), (error) => (error._tag === "InvalidSettings" ? error.problem : error._tag));
+				assert.strictEqual(yield* refused({ tenantId: UNKNOWN_ID }, SECRET), "tenant-unknown");
+				assert.strictEqual(yield* refused({ clientId: UNKNOWN_ID }, SECRET), "client-id-unknown");
+				assert.strictEqual(yield* refused({}, "Abc8Q~a-wrong-client-secret"), "client-secret-wrong");
+				assert.strictEqual(yield* refused({}, EXPIRED_SECRET), "client-secret-expired");
+				assert.isFalse((yield* providers.microsoft).hasSecret);
+				// Off, nothing is asked: the settings wait.
+				assert.isTrue((yield* providers.saveMicrosoft({ ...settings, enabled: false }, "Abc8Q~a-wrong-client-secret", "admin")).hasSecret);
+				// And the saved secret is checked when it is turned on again.
+				assert.strictEqual(problemOf(yield* Effect.flip(providers.saveMicrosoft(settings, undefined, "admin"))), "client-secret-wrong");
 				assert.isFalse((yield* providers.microsoft).enabled);
 			}),
 		);

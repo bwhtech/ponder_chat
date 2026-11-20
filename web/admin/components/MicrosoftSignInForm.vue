@@ -6,7 +6,8 @@ import { admin, ApiError, unwrap, type MicrosoftSignIn, type SignInData } from "
 /**
  * The settings of sign-in with Microsoft (server/auth/microsoft.ts), in MicrosoftSignInDialog:
  * what to do in Entra beside the fields. Saving turns Microsoft on; the switch on the Sign-in tab
- * turns it off. The server checks the values and says which field is wrong. It keeps the client
+ * turns it off. The server checks the values, and asks Microsoft whether the tenant, the client ID
+ * and the secret work, before it saves them; it says which field is wrong. It keeps the client
  * secret encrypted and never sends it back, so that field starts empty; left empty, the saved
  * secret stays. Mounted each time the dialog opens, so it starts from the saved settings.
  */
@@ -31,6 +32,10 @@ const FIELD_OF: Record<string, Field> = {
 	"secret-is-id": "clientSecret",
 	domains: "domains",
 	"domain-format": "domains",
+	"tenant-unknown": "tenantId",
+	"client-id-unknown": "clientId",
+	"client-secret-wrong": "clientSecret",
+	"client-secret-expired": "clientSecret",
 };
 
 const tenantId = ref(props.microsoft.tenantId);
@@ -67,7 +72,7 @@ async function save() {
 			...(clientSecret.value.trim() && { clientSecret: clientSecret.value.trim() }),
 		};
 		emit("saved", await unwrap(admin["sign-in"].microsoft.$put({ json }), "The sign-in settings could not be saved. Try again."));
-		toast.success(props.turningOn ? "People can sign in with Microsoft" : "Saved the Microsoft settings");
+		toast.success(props.turningOn ? "Microsoft accepted the settings. People can sign in with it." : "Microsoft accepted the settings");
 	} catch (e) {
 		const field = e instanceof ApiError ? FIELD_OF[e.errors[0] ?? ""] : undefined;
 		if (field) problem.value = { field, message: (e as Error).message };
@@ -115,7 +120,7 @@ function copy(uri: string) {
 
 		<div class="flex gap-2 md:col-span-2 md:justify-end [&>*]:flex-1 md:[&>*]:flex-none">
 			<Button class="touch-target" label="Cancel" @click="emit('cancel')" />
-			<Button type="submit" class="touch-target" variant="solid" theme="gray" :label="turningOn ? 'Turn on' : 'Save'" :loading="saving" />
+			<Button type="submit" class="touch-target" variant="solid" theme="gray" :label="saving ? 'Checking with Microsoft' : turningOn ? 'Turn on' : 'Save'" :loading="saving" />
 		</div>
 	</form>
 </template>

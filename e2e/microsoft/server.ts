@@ -14,7 +14,9 @@ import { Hono } from "hono";
  *   Microsoft's asks for an account. Its form goes to /<tenant>/sign-in, which sends the
  *   browser back to Ponder with a code. A test without a browser asks /<tenant>/sign-in itself.
  * - POST /<tenant>/oauth2/v2.0/token checks the client secret, the redirect URI and the
- *   PKCE verifier, and answers an id_token signed with this server's key (RS256).
+ *   PKCE verifier, and answers an id_token signed with this server's key (RS256). With the
+ *   client-credentials grant (Ponder's check of the settings), it answers a token, or Microsoft's
+ *   error codes: UNKNOWN_ID as the tenant or the client, EXPIRED_SECRET, or another wrong secret.
  * - GET /<tenant>/discovery/v2.0/keys publishes that key.
  *
  * The person is whoever the email says. Their object id comes from the email, so the same
@@ -25,6 +27,10 @@ import { Hono } from "hono";
  * person cancels).
  */
 export const MICROSOFT_CLIENT_SECRET = "fake-microsoft-client-secret-value";
+/** A tenant or client ID that Microsoft does not know. */
+export const UNKNOWN_ID = "00000000-0000-4000-8000-000000000000";
+/** A client secret that was right, and has expired. */
+export const EXPIRED_SECRET = "fake-microsoft-expired-secret-value";
 
 type Pending = { tenant: string; clientId: string; redirectUri: string; challenge: string; claims: Record<string, unknown> };
 
@@ -81,6 +87,16 @@ function microsoftApp() {
 		const [basicId, basicSecret] = basic ? Buffer.from(basic, "base64").toString().split(":").map(decodeURIComponent) : [];
 		const clientId = form.get("client_id") ?? basicId;
 		const clientSecret = form.get("client_secret") ?? basicSecret;
+		if (form.get("grant_type") === "client_credentials") {
+			// As Microsoft answers: https://learn.microsoft.com/entra/identity-platform/reference-error-codes
+			const refuse = (status: 400 | 401, error: string, code: number) => c.json({ error, error_description: `AADSTS${code}: refused.`, error_codes: [code] }, status);
+			if (c.req.param("tenant") === UNKNOWN_ID) return refuse(400, "invalid_request", 90002);
+			if (clientId === UNKNOWN_ID) return refuse(400, "unauthorized_client", 700016);
+			if (clientSecret === EXPIRED_SECRET) return refuse(401, "invalid_client", 7000222);
+			if (clientSecret !== MICROSOFT_CLIENT_SECRET) return refuse(401, "invalid_client", 7000215);
+			if (!form.get("scope")?.endsWith("/.default")) return refuse(400, "invalid_scope", 1002012);
+			return c.json({ token_type: "Bearer", expires_in: 3599, access_token: "fake-app-token" });
+		}
 		if (clientSecret !== MICROSOFT_CLIENT_SECRET) return c.json({ error: "invalid_client", error_description: "The client secret is wrong." }, 401);
 		if (!sent || sent.tenant !== c.req.param("tenant") || sent.clientId !== clientId || sent.redirectUri !== form.get("redirect_uri")) return c.json({ error: "invalid_grant" }, 400);
 		const challenge = createHash("sha256").update(form.get("code_verifier") ?? "").digest("base64url");

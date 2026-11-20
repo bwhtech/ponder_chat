@@ -134,6 +134,8 @@ const signedInAs = Effect.fn("test.signedInAs")(function* (jar: Jar) {
 const errorOf = (landed: URL) => landed.searchParams.get("error");
 const person = (name: string) => `${name}-${run}@${DOMAIN}`;
 
+const problemOf = (error: { _tag: string; problem?: string }) => error.problem ?? error._tag;
+
 describe.skipIf(!base)("Sign in with Microsoft", () => {
 	it.layer(layer, { excludeTestServices: true })((it) => {
 		it.effect("makes the tables", () =>
@@ -444,9 +446,17 @@ describe.skipIf(!base)("Sign in with Microsoft", () => {
 			}),
 		);
 
-		it.effect("fails the sign-in when the client secret is wrong", () =>
+		it.effect("fails the sign-in when the client secret no longer works", () =>
 			Effect.gen(function* () {
-				yield* save({}, "a-wrong-client-secret-value");
+				const sql = yield* PgClient.PgClient;
+				const secrets = yield* Secrets.Secrets;
+				// Saving checks the secret with Microsoft first, so a wrong one is never saved.
+				assert.strictEqual(problemOf(yield* Effect.flip(save({}, "a-wrong-client-secret-value"))), "client-secret-wrong");
+				// As after the secret was deleted in Entra: written past the check.
+				const sealed = yield* secrets.seal("sign_in_providers:microsoft:client_secret", "a-wrong-client-secret-value");
+				yield* sql`update sign_in_providers set client_secret = ${sealed} where id = 'microsoft'`;
+				// Any save clears what the server keeps in memory: email on, as it is.
+				yield* SignInProviders.SignInProviders.use((providers) => providers.saveEmail(true, "test-admin"));
 				const { jar, landed } = yield* signIn(person("ana"));
 				assert.strictEqual(errorOf(landed), "invalid_code");
 				assert.isUndefined(yield* signedInAs(jar));

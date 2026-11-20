@@ -64,7 +64,23 @@ export const MICROSOFT = "microsoft";
 /** The path of the redirect URI that the admin registers in Entra, after the site's address. */
 export const CALLBACK_PATH = `/api/auth/callback/${MICROSOFT}`;
 
-const PROBLEMS = ["tenant", "tenant-format", "client-id", "client-id-format", "client-secret", "secret-is-id", "domains", "domain-format"] as const;
+const PROBLEMS = [
+	"tenant",
+	"tenant-format",
+	"client-id",
+	"client-id-format",
+	"client-secret",
+	"secret-is-id",
+	"domains",
+	"domain-format",
+	// What Microsoft said when Ponder checked the tenant, the client and the secret (credentialsProblem).
+	"tenant-unknown",
+	"client-id-unknown",
+	"client-secret-wrong",
+	"client-secret-expired",
+	"microsoft-refused",
+	"microsoft-unreachable",
+] as const;
 export type SettingsProblem = (typeof PROBLEMS)[number];
 
 const MESSAGES: Record<SettingsProblem, string> = {
@@ -76,13 +92,49 @@ const MESSAGES: Record<SettingsProblem, string> = {
 	"secret-is-id": "That is the secret's ID. Paste the secret's Value, which Entra shows once, when the secret is made.",
 	domains: "Enter your organisation's email domain, such as example.org.",
 	"domain-format": "Enter domains such as example.org, with no @ and no spaces.",
+	"tenant-unknown": "Microsoft knows no directory with this ID.",
+	"client-id-unknown": "This directory has no app with this ID.",
+	"client-secret-wrong": "Microsoft does not accept this secret. Paste the secret's Value.",
+	"client-secret-expired": "This secret has expired. Make a new one in Entra.",
+	"microsoft-refused": "Microsoft refused these settings. Check the IDs and the secret.",
+	"microsoft-unreachable": "Ponder could not reach Microsoft to check these settings. Try again.",
 };
 
-/** Settings that can't be saved as they are. The message is fixed for each problem. */
-export class InvalidSettings extends Schema.TaggedError<InvalidSettings>()("InvalidSettings", { problem: Schema.Literals(PROBLEMS) }) {
+/**
+ * Settings that can't be saved as they are. The message is fixed for each problem; for one
+ * Microsoft refused with no fixed message, its error code goes along, to look up.
+ */
+export class InvalidSettings extends Schema.TaggedError<InvalidSettings>()("InvalidSettings", { problem: Schema.Literals(PROBLEMS), code: Schema.optional(Schema.String) }) {
 	override get message() {
-		return MESSAGES[this.problem];
+		return this.code ? `${MESSAGES[this.problem]} Microsoft said ${this.code}.` : MESSAGES[this.problem];
 	}
+}
+
+/**
+ * Microsoft's error codes (AADSTS…) that say which setting is wrong. Ponder asks the tenant's
+ * token endpoint for a token of the app itself (client credentials): that needs the tenant,
+ * the client ID and the secret to be right, and nobody to sign in. Nor does it need any API
+ * permission. The redirect URI and the domains show only when a person signs in.
+ */
+const MICROSOFT_ERRORS: Record<number, SettingsProblem> = {
+	90002: "tenant-unknown",
+	900023: "tenant-unknown",
+	700016: "client-id-unknown",
+	7000215: "client-secret-wrong",
+	7000222: "client-secret-expired",
+};
+
+/** The scope of that request: any resource's /.default does, with no permission granted. */
+export const CHECK_SCOPE = "https://graph.microsoft.com/.default";
+
+/** What the token endpoint's answer says about the settings: nothing when it gave a token. */
+export function credentialsProblem(status: number, body: unknown): InvalidSettings | undefined {
+	if (status === 200 && Predicate.hasProperty(body, "access_token")) return undefined;
+	const codes = Predicate.hasProperty(body, "error_codes") && Array.isArray(body.error_codes) ? body.error_codes.filter(Predicate.isNumber) : [];
+	const known = codes.map((code) => MICROSOFT_ERRORS[code]).find(Predicate.isNotUndefined);
+	if (known) return new InvalidSettings({ problem: known });
+	const code = codes[0];
+	return new InvalidSettings({ problem: "microsoft-refused", ...(code !== undefined && { code: `AADSTS${code}` }) });
 }
 
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;

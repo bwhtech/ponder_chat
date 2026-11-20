@@ -7,9 +7,10 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as SqlSchema from "effect/sql/SqlSchema";
+import * as PonderConfig from "../config.ts";
 import { pgCode } from "../runtime/Database.ts";
 import * as Secrets from "../secrets/Secrets.ts";
-import { checkedSettings, InvalidSettings, MICROSOFT, NO_SETTINGS, SIGN_UPS, type MicrosoftProvider, type MicrosoftSettings, type MicrosoftStatus } from "./microsoft.ts";
+import { CHECK_SCOPE, checkedSettings, credentialsProblem, InvalidSettings, MICROSOFT, NO_SETTINGS, SIGN_UPS, type MicrosoftProvider, type MicrosoftSettings, type MicrosoftStatus } from "./microsoft.ts";
 
 /**
  * The ways to sign in that admins set on /admin, in `sign_in_providers`: Microsoft
@@ -64,8 +65,9 @@ export class SignInProviders extends Context.Service<
 		/** Microsoft's settings, as /admin shows them: without the client secret. */
 		readonly microsoft: Effect.Effect<MicrosoftStatus, SqlError>;
 		/**
-		 * Checks the settings (microsoft.ts) and saves them. Without a client secret, the saved one
-		 * stays. A new tenant has other accounts: the links to the old tenant's accounts go.
+		 * Checks the settings (microsoft.ts) and saves them. To turn Microsoft on, or keep it on, its
+		 * tenant, client ID and secret must work: Microsoft is asked (checkWithMicrosoft). Without a
+		 * client secret, the saved one stays. A new tenant has other accounts: the links to the old tenant's accounts go.
 		 */
 		readonly saveMicrosoft: (
 			settings: MicrosoftSettings,
@@ -99,6 +101,7 @@ const SEAL_CONTEXT = `sign_in_providers:${MICROSOFT}:client_secret`;
 const make = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
 	const secrets = yield* Secrets.Secrets;
+	const authority = Option.getOrElse((yield* PonderConfig.PonderConfig).microsoftAuthority, () => "https://login.microsoftonline.com");
 	// What sign-in runs on, in memory, with a version that each change makes new. A read keeps
 	// its answer only if no change came while it ran: else it could put back a provider just turned off.
 	const cached = yield* Ref.make({ version: 0, ways: Option.none<Ways>() });
@@ -143,6 +146,35 @@ const make = Effect.gen(function* () {
 		return statusOf(found, !readable);
 	}).pipe(Effect.withSpan("SignInProviders.microsoft"));
 
+	/**
+	 * Asks the tenant's token endpoint for a token of the app itself (client credentials): it gives
+	 * one only when the tenant, the client ID and the secret are right (microsoft.ts says what else it can answer).
+	 */
+	const checkWithMicrosoft = (tenantId: string, clientId: string, clientSecret: string) =>
+		Effect.tryPromise({
+			try: async (signal) => {
+				const body = new URLSearchParams({ grant_type: "client_credentials", client_id: clientId, client_secret: clientSecret, scope: CHECK_SCOPE });
+				const response = await fetch(`${authority}/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`, {
+					method: "POST",
+					body,
+					signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+				});
+				const answer: unknown = await response.json().catch(() => null);
+				return credentialsProblem(response.status, answer);
+			},
+			catch: () => new InvalidSettings({ problem: "microsoft-unreachable" }),
+		}).pipe(
+			Effect.flatMap((problem) => (problem ? Effect.fail(problem) : Effect.void)),
+			Effect.withSpan("SignInProviders.checkWithMicrosoft"),
+		);
+
+	/** The saved client secret, if it can be read. */
+	const savedSecret = Effect.gen(function* () {
+		const sealed = Option.getOrNull(Option.flatMap(yield* row, (provider) => Option.fromNullishOr(provider.client_secret)));
+		if (sealed === null) return undefined;
+		return yield* secrets.unseal(SEAL_CONTEXT, sealed).pipe(Effect.catchTags({ UnreadableSecret: () => Effect.succeed(undefined) }));
+	});
+
 	const forget = Ref.update(cached, (now) => ({ version: now.version + 1, ways: Option.none<Ways>() }));
 
 	const saveMicrosoft = Effect.fn("SignInProviders.saveMicrosoft")(function* (input: MicrosoftSettings, clientSecret: string | undefined, by: string) {
@@ -151,6 +183,9 @@ const make = Effect.gen(function* () {
 		// A saved secret that can't be read is no secret: turning sign-in on needs a new one.
 		const settings = checkedSettings(input, { clientSecret: secret, hasSecret: before.hasSecret && !before.secretUnreadable });
 		if (settings instanceof InvalidSettings) return yield* settings;
+		// checkedSettings made sure there is a secret, new or saved, when it is on.
+		const working = secret ?? (yield* savedSecret);
+		if (settings.enabled && working !== undefined) yield* checkWithMicrosoft(settings.tenantId, settings.clientId, working);
 		// Sealing fails only with no key at all (BETTER_AUTH_SECRET), and the server does not start without one.
 		const sealed = secret === undefined ? null : yield* secrets.seal(SEAL_CONTEXT, secret).pipe(Effect.catchTags({ UnreadableSecret: Effect.die }));
 		const write = sql`

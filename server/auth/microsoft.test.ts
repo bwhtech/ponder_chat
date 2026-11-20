@@ -3,7 +3,7 @@
  * reads from a token, and who is refused. The whole sign-in is in microsoft-sign-in.test.ts.
  */
 import { assert, describe, it } from "@effect/vitest";
-import { checkedSettings, emailOf, InvalidSettings, refusal, type MicrosoftSettings } from "./microsoft.ts";
+import { checkedSettings, credentialsProblem, emailOf, InvalidSettings, refusal, type MicrosoftSettings } from "./microsoft.ts";
 
 const TENANT = "11111111-2222-4333-8444-555555555555";
 const CLIENT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
@@ -101,5 +101,32 @@ describe("refusal", () => {
 
 	it("refuses everyone when no domain is set", () => {
 		assert.strictEqual(refusal({ tid: TENANT }, "ana@example.org", { tenantId: TENANT, allowedDomains: [] }), "EMAIL_DOMAIN_NOT_ALLOWED");
+	});
+});
+
+describe("credentialsProblem", () => {
+	const answer = (code: number) => ({ error: "invalid_client", error_description: `AADSTS${code}: ...`, error_codes: [code] });
+
+	it("is nothing when Microsoft gives a token", () => {
+		assert.isUndefined(credentialsProblem(200, { token_type: "Bearer", access_token: "token" }));
+	});
+
+	it("names the setting that Microsoft's error code is about", () => {
+		assert.strictEqual(credentialsProblem(400, answer(90002))?.problem, "tenant-unknown");
+		assert.strictEqual(credentialsProblem(400, answer(900023))?.problem, "tenant-unknown");
+		assert.strictEqual(credentialsProblem(400, answer(700016))?.problem, "client-id-unknown");
+		assert.strictEqual(credentialsProblem(401, answer(7000215))?.problem, "client-secret-wrong");
+		assert.strictEqual(credentialsProblem(401, answer(7000222))?.problem, "client-secret-expired");
+	});
+
+	it("gives another code along, to look up", () => {
+		const refused = credentialsProblem(400, answer(7000112));
+		assert.strictEqual(refused?.problem, "microsoft-refused");
+		assert.strictEqual(refused?.message, "Microsoft refused these settings. Check the IDs and the secret. Microsoft said AADSTS7000112.");
+	});
+
+	it("refuses an answer that is not Microsoft's", () => {
+		assert.strictEqual(credentialsProblem(502, null)?.message, "Microsoft refused these settings. Check the IDs and the secret.");
+		assert.strictEqual(credentialsProblem(200, { error: "odd" })?.problem, "microsoft-refused");
 	});
 });
