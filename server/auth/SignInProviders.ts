@@ -12,17 +12,31 @@ import * as Secrets from "../secrets/Secrets.ts";
 import { checkedSettings, InvalidSettings, MICROSOFT, NO_SETTINGS, SIGN_UPS, type MicrosoftProvider, type MicrosoftSettings, type MicrosoftStatus } from "./microsoft.ts";
 
 /**
- * The sign-in providers that admins set up on /admin, in `sign_in_providers`: now
- * Microsoft (microsoft.ts). A provider's client secret is sealed (secrets/Secrets.ts), so
- * a copy of the database alone does not give it away.
+ * The ways to sign in that admins set on /admin, in `sign_in_providers`: Microsoft
+ * (microsoft.ts), and whether sign-in by email is on. A provider's client secret is sealed
+ * (secrets/Secrets.ts), so a copy of the database alone does not give it away.
+ *
+ * Sign-in by email is on unless an admin turned it off, and it can be off only while
+ * Microsoft is on and works. When Microsoft goes off (an admin turns it off, or its secret
+ * can't be read), email is on again by itself: there is always a way in.
  *
  * Better Auth takes its providers when it is made, so Auth.ts makes it again after a
  * change: `active` carries a version for that. Every sign-in request asks for `active`, so
  * it is kept in memory. A change from /admin shows at once in this process.
  */
 
-/** The providers that sign-in runs on now, and a number that is new after each change. */
-export type Active = { version: number; microsoft: Option.Option<MicrosoftProvider> };
+/** The ways to sign in now, and a number that is new after each change. */
+export type Active = { version: number; microsoft: Option.Option<MicrosoftProvider>; email: boolean };
+type Ways = Omit<Active, "version">;
+
+/** Email sign-in can't go off while Microsoft is off: nobody could sign in. */
+export class EmailNeeded extends Schema.TaggedError<EmailNeeded>()("EmailNeeded", {}) {
+	override get message() {
+		return "Turn on sign-in with Microsoft first. Without it, nobody could sign in.";
+	}
+}
+
+const EMAIL = "email";
 
 const ProviderRow = Schema.Struct({
 	enabled: Schema.Boolean,
@@ -51,7 +65,12 @@ export class SignInProviders extends Context.Service<
 			clientSecret: string | undefined,
 			by: string,
 		) => Effect.Effect<MicrosoftStatus, InvalidSettings | SqlError>;
-		/** What sign-in runs on now: Microsoft, when it is on and complete. Kept in memory. */
+		/**
+		 * Turns sign-in by email on or off. Off only while Microsoft is on and works (EmailNeeded).
+		 * Whether it is on after.
+		 */
+		readonly saveEmail: (enabled: boolean, by: string) => Effect.Effect<boolean, EmailNeeded | SqlError>;
+		/** What sign-in runs on now: Microsoft, when it is on and complete, and email unless it is off. Kept in memory. */
 		readonly active: Effect.Effect<Active, SqlError>;
 		/** Whether the person has a Microsoft account linked. */
 		readonly isLinked: (userId: string) => Effect.Effect<boolean, SqlError>;
@@ -70,7 +89,7 @@ const make = Effect.gen(function* () {
 	const secrets = yield* Secrets.Secrets;
 	// What sign-in runs on, in memory, with a version that each change makes new. A read keeps
 	// its answer only if no change came while it ran: else it could put back a provider just turned off.
-	const cached = yield* Ref.make({ version: 0, microsoft: Option.none<Option.Option<MicrosoftProvider>>() });
+	const cached = yield* Ref.make({ version: 0, ways: Option.none<Ways>() });
 
 	const migrate = Effect.gen(function* () {
 		yield* sql`
@@ -93,13 +112,17 @@ const make = Effect.gen(function* () {
 		execute: (id) => sql`select enabled, client_id, client_secret, tenant_id, sign_ups, allowed_domains, updated_at from sign_in_providers where id = ${id}`,
 	});
 
-	const row = findProvider(MICROSOFT).pipe(
-		Effect.catchTags({
-			SchemaError: Effect.die,
-			// A script or a check on a database the server never started on has no table: no provider is set up.
-			SqlError: (error) => (pgCode(error) === "42P01" ? Effect.succeedNone : Effect.fail(error)),
-		}),
-	);
+	const rowOf = (id: string) =>
+		findProvider(id).pipe(
+			Effect.catchTags({
+				SchemaError: Effect.die,
+				// A script or a check on a database the server never started on has no table: no provider is set up.
+				SqlError: (error) => (pgCode(error) === "42P01" ? Effect.succeedNone : Effect.fail(error)),
+			}),
+		);
+	const row = rowOf(MICROSOFT);
+	// Email's row has only `enabled`. With no row, email is on.
+	const emailSetting = Effect.map(rowOf(EMAIL), (found) => Option.match(found, { onNone: () => true, onSome: (email) => email.enabled }));
 
 	const microsoft = Effect.gen(function* () {
 		const found = yield* row;
@@ -108,7 +131,7 @@ const make = Effect.gen(function* () {
 		return statusOf(found, !readable);
 	}).pipe(Effect.withSpan("SignInProviders.microsoft"));
 
-	const forget = Ref.update(cached, (now) => ({ version: now.version + 1, microsoft: Option.none<Option.Option<MicrosoftProvider>>() }));
+	const forget = Ref.update(cached, (now) => ({ version: now.version + 1, ways: Option.none<Ways>() }));
 
 	const saveMicrosoft = Effect.fn("SignInProviders.saveMicrosoft")(function* (input: MicrosoftSettings, clientSecret: string | undefined, by: string) {
 		const secret = clientSecret?.trim() || undefined;
@@ -133,10 +156,20 @@ const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					yield* write;
 					if (newTenant) yield* sql`delete from accounts where "providerId" = ${MICROSOFT}`;
+					// Microsoft off: email is the way in again, and its setting says so.
+					if (!settings.enabled) yield* sql`update sign_in_providers set enabled = true, updated_by = ${by}, updated_at = now() where id = ${EMAIL} and not enabled`;
 				}),
 			)
 			.pipe(Effect.ensuring(forget));
 		return yield* microsoft;
+	});
+
+	const saveEmail = Effect.fn("SignInProviders.saveEmail")(function* (enabled: boolean, by: string) {
+		if (!enabled && Option.isNone((yield* active).microsoft)) return yield* new EmailNeeded();
+		yield* sql`
+			insert into sign_in_providers (id, enabled, updated_by) values (${EMAIL}, ${enabled}, ${by})
+			on conflict (id) do update set enabled = excluded.enabled, updated_by = excluded.updated_by, updated_at = now()`.pipe(Effect.ensuring(forget));
+		return (yield* active).email;
 	});
 
 	const provider = Effect.gen(function* () {
@@ -155,12 +188,14 @@ const make = Effect.gen(function* () {
 	});
 
 	// No span: every sign-in request asks, nearly always from memory.
-	const active = Effect.gen(function* () {
+	const active: Effect.Effect<Active, SqlError> = Effect.gen(function* () {
 		const known = yield* Ref.get(cached);
-		if (Option.isSome(known.microsoft)) return { version: known.version, microsoft: known.microsoft.value };
+		if (Option.isSome(known.ways)) return { version: known.version, ...known.ways.value };
 		const found = yield* provider;
-		yield* Ref.update(cached, (now) => (now.version === known.version ? { version: now.version, microsoft: Option.some(found) } : now));
-		return { version: known.version, microsoft: found };
+		// Email is off only while Microsoft works: with Microsoft off, it is on whatever its row says.
+		const ways: Ways = { microsoft: found, email: Option.isNone(found) || (yield* emailSetting) };
+		yield* Ref.update(cached, (now) => (now.version === known.version ? { version: now.version, ways: Option.some(ways) } : now));
+		return { version: known.version, ...ways };
 	});
 
 	// Better Auth's table of linked accounts (Auth.ts): one row for a person's Microsoft account.
@@ -174,7 +209,7 @@ const make = Effect.gen(function* () {
 		return rows.length > 0;
 	});
 
-	return SignInProviders.of({ migrate, microsoft, saveMicrosoft, active, isLinked, unlink });
+	return SignInProviders.of({ migrate, microsoft, saveMicrosoft, saveEmail, active, isLinked, unlink });
 });
 
 export const layer = Layer.effect(SignInProviders, make);

@@ -1,18 +1,26 @@
 <script setup lang="ts">
-import { Badge, Button, SettingsRow, Skeleton } from "frappe-ui";
-import { computed, ref } from "vue";
+import { Button, SettingsRow, Skeleton, Switch, toast } from "frappe-ui";
+import { computed, ref, watch } from "vue";
 import EmptyState from "../../EmptyState.vue";
 import { admin, unwrap, type MicrosoftSignIn, type SignInData } from "../api";
 import MicrosoftSignInDialog from "./MicrosoftSignInDialog.vue";
 
 /**
- * How people sign in: by email, always, and with Microsoft once it is set up here
- * (server/auth/microsoft.ts). The row says how Microsoft is set; its dialog changes it.
- * Skeletons stand in for the values until they load; if they can't, the error replaces them.
+ * How people sign in: a switch for each way. Email is on unless turned off, which it can be
+ * only while Microsoft works (server/auth/SignInProviders.ts). Microsoft's switch opens its
+ * dialog when it has nothing to run on yet; once on, Configure changes its settings.
+ * Skeletons stand in for the switches until they load; if they can't, the error replaces them.
+ * `heading` on the phone's Settings page, where the tabs' title is not there.
  */
+defineProps<{ heading?: boolean }>();
+
 const data = ref<SignInData | null>(null);
 const loadError = ref("");
-const setupOpen = ref(false);
+const dialogOpen = ref(false);
+/** The switch was turned on and the dialog asks for what Microsoft needs: the switch shows on till then. */
+const turningOn = ref(false);
+const savingMicrosoft = ref(false);
+const savingEmail = ref(false);
 
 async function load() {
 	loadError.value = "";
@@ -26,17 +34,73 @@ async function load() {
 void load();
 
 const microsoft = computed(() => data.value?.microsoft);
-const isNew = computed(() => microsoft.value?.updatedAt === null);
+const microsoftOn = computed(() => turningOn.value || microsoft.value?.enabled === true);
+/** Whether Microsoft has what it needs to run: else turning it on opens the dialog. */
+const complete = (settings: MicrosoftSignIn) => settings.hasSecret && !settings.secretUnreadable && settings.tenantId !== "";
+const microsoftWorks = computed(() => microsoft.value?.enabled === true && complete(microsoft.value));
+const email = computed(() => data.value?.email.enabled);
 
-/** What Microsoft sign-in is, for the row before it is set up. It also stands there while the settings load, so the row keeps its height. */
-const INTRO = "People of your organisation sign in with their Microsoft 365 work accounts.";
+// Closed without saving: the switch goes back to off.
+watch(dialogOpen, (open) => !open && (turningOn.value = false));
 
-function describe(microsoft: MicrosoftSignIn) {
-	if (microsoft.updatedAt === null) return INTRO;
-	if (microsoft.secretUnreadable) return "The saved client secret can't be read, because BETTER_AUTH_SECRET changed on the server. Enter the secret again.";
-	if (!microsoft.enabled) return "Off. The settings are kept, so you can turn it on again.";
-	const who = microsoft.signUps === "everyone" ? "Everyone with such an email gets an account." : "A person still needs an invite.";
-	return `For emails of ${microsoft.allowedDomains.join(", ")}. ${who}`;
+const INTRO = "Microsoft 365 work accounts.";
+
+function describe(settings: MicrosoftSignIn) {
+	if (!settings.enabled) return INTRO;
+	if (settings.secretUnreadable) return "The client secret can't be read, because BETTER_AUTH_SECRET changed. Configure it again.";
+	const who = settings.signUps === "everyone" ? "Anyone with these domains gets an account." : "A person still needs an invite.";
+	return `For emails of ${settings.allowedDomains.join(", ")}. ${who}`;
+}
+
+const emailDescription = computed(() => {
+	if (email.value === false) return "Off. People sign in with Microsoft only.";
+	if (data.value && !microsoftWorks.value) return "A code and a link by email. Turn on Microsoft to switch this off.";
+	return "A code and a link by email.";
+});
+
+async function setMicrosoft(on: boolean) {
+	const settings = microsoft.value;
+	if (!data.value || !settings || savingMicrosoft.value) return;
+	// Nothing to run on yet: the dialog asks for it, and its Save turns Microsoft on.
+	if (on && !complete(settings)) {
+		turningOn.value = true;
+		dialogOpen.value = true;
+		return;
+	}
+	savingMicrosoft.value = true;
+	const emailBefore = data.value.email.enabled;
+	try {
+		const { tenantId, clientId, signUps, allowedDomains } = settings;
+		const json = { enabled: on, tenantId, clientId, signUps, allowedDomains: [...allowedDomains] };
+		const saved = await unwrap(admin["sign-in"].microsoft.$put({ json }), "Sign-in with Microsoft could not be changed. Try again.");
+		data.value.microsoft = saved.microsoft;
+		data.value.email = saved.email;
+		if (on) toast.success("People can sign in with Microsoft");
+		else toast.success(!emailBefore && saved.email.enabled ? "Microsoft is off. Sign-in by email is on again." : "Sign-in with Microsoft is off");
+	} catch (e) {
+		toast.error((e as Error).message);
+	} finally {
+		savingMicrosoft.value = false;
+	}
+}
+
+async function setEmail(on: boolean) {
+	if (!data.value || savingEmail.value) return;
+	savingEmail.value = true;
+	try {
+		const saved = await unwrap(admin["sign-in"].email.$put({ json: { enabled: on } }), "Sign-in by email could not be changed. Try again.");
+		data.value.email = saved.email;
+		toast.success(saved.email.enabled ? "People can sign in by email" : "Sign-in by email is off");
+	} catch (e) {
+		toast.error((e as Error).message);
+	} finally {
+		savingEmail.value = false;
+	}
+}
+
+function saved(next: MicrosoftSignIn) {
+	if (data.value) data.value.microsoft = next;
+	turningOn.value = false;
 }
 </script>
 
@@ -46,26 +110,33 @@ function describe(microsoft: MicrosoftSignIn) {
 			<Button label="Try again" @click="load" />
 		</EmptyState>
 		<section v-else class="space-y-1">
-			<h2 class="text-base-semibold text-ink-gray-9">Ways to sign in</h2>
+			<h2 v-if="heading" class="text-base-semibold text-ink-gray-9">Sign-in</h2>
 			<div class="divide-y divide-outline-gray-1">
-				<SettingsRow title="Email" description="A code and a link by email, for people you invite. No passwords.">
-					<span class="whitespace-nowrap text-base text-ink-gray-7">Always on</span>
+				<SettingsRow title="Email" :description="emailDescription">
+					<Skeleton v-if="email === undefined" class="h-5 w-8 rounded-full" />
+					<Switch
+						v-else
+						:model-value="email"
+						:disabled="savingEmail || (email && !microsoftWorks)"
+						aria-label="Sign in by email"
+						@update:model-value="setEmail"
+					/>
 				</SettingsRow>
 				<SettingsRow title="Microsoft" :description="microsoft ? describe(microsoft) : INTRO">
-					<Skeleton v-if="!microsoft" class="h-7 w-24 rounded-4" />
+					<Skeleton v-if="!microsoft" class="h-5 w-8 rounded-full" />
 					<div v-else class="flex items-center gap-3">
-						<Badge v-if="microsoft.secretUnreadable" theme="red" label="Can't be read" />
-						<Badge v-else-if="!isNew" :theme="microsoft.enabled ? 'green' : 'gray'" :label="microsoft.enabled ? 'On' : 'Off'" />
-						<Button class="touch-target" :label="isNew ? 'Set up' : 'Change'" @click="setupOpen = true" />
+						<Button v-if="microsoft.enabled" class="touch-target" label="Configure" @click="dialogOpen = true" />
+						<Switch :model-value="microsoftOn" :disabled="savingMicrosoft" aria-label="Sign in with Microsoft" @update:model-value="setMicrosoft" />
 					</div>
 				</SettingsRow>
 			</div>
 			<MicrosoftSignInDialog
 				v-if="data"
-				v-model:open="setupOpen"
+				v-model:open="dialogOpen"
 				:microsoft="data.microsoft"
 				:redirect-uris="data.redirectUris"
-				@saved="(next) => data && (data.microsoft = next)"
+				:turning-on="turningOn"
+				@saved="saved"
 			/>
 		</section>
 	</div>

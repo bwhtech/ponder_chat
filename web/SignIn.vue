@@ -132,7 +132,8 @@ function useAnotherEmail() {
 			<div class="flex flex-col items-center gap-3 text-center">
 				<BrandLogo class="mb-1 size-11" />
 				<h1 class="text-4xl-semibold text-ink-gray-9">Sign in to Ponder Chat</h1>
-				<p v-if="signInWith.microsoft" class="text-p-base text-ink-gray-6">Use your Microsoft work account, or get a code and a link by email.</p>
+				<p v-if="signInWith.microsoft && !signInWith.email" class="text-p-base text-ink-gray-6">Use your Microsoft work account.</p>
+				<p v-else-if="signInWith.microsoft" class="text-p-base text-ink-gray-6">Use your Microsoft work account, or get a code and a link by email.</p>
 				<p v-else class="text-p-base text-ink-gray-6">We'll email you a code and a link. No password needed.</p>
 			</div>
 
@@ -174,13 +175,13 @@ function useAnotherEmail() {
 						</template>
 						Sign in with Microsoft
 					</Button>
-					<div class="flex items-center gap-3 text-p-sm text-ink-gray-6">
+					<div v-if="signInWith.email" class="flex items-center gap-3 text-p-sm text-ink-gray-6">
 						<span class="h-px flex-1 bg-outline-gray-2" aria-hidden="true" />
 						or
 						<span class="h-px flex-1 bg-outline-gray-2" aria-hidden="true" />
 					</div>
 				</template>
-				<form class="flex flex-col gap-3" @submit.prevent="send">
+				<form v-if="signInWith.email || !signInWith.microsoft" class="flex flex-col gap-3" @submit.prevent="send">
 					<FormControl v-model="email" type="email" aria-label="Email" size="md" class="[@media(pointer:coarse)]:[&_input]:h-11" placeholder="Email address" autocomplete="email" :autofocus="!signInWith.microsoft" />
 					<Button type="submit" :variant="signInWith.microsoft ? 'subtle' : 'solid'" size="md" class="[@media(pointer:coarse)]:h-11" :loading="sending">Email me a link</Button>
 				</form>

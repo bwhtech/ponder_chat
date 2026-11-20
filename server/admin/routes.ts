@@ -77,6 +77,7 @@ const microsoftBody = z.object({
 	signUps: z.enum(SIGN_UPS),
 	allowedDomains: z.array(z.string().max(260)).max(100),
 });
+const emailSignInBody = z.object({ enabled: z.boolean() });
 
 // A little over the logo's limit, for the form around it. Larger is refused before it is read.
 const logoLimit = bodyLimit({
@@ -286,9 +287,10 @@ export const adminApi = new Hono<Env>()
 			c,
 			Effect.gen(function* () {
 				const microsoft = yield* actions((service) => service.microsoftSignIn);
+				const email = yield* actions((service) => service.emailSignIn);
 				const hosts = yield* PonderConfig.PonderConfig.useSync((config) => config.hosts);
 				const origins = [yield* originOf(c), ...hosts.map((host) => Auth.originFor([host], new Headers({ host })))];
-				return c.json({ microsoft, redirectUris: [...new Set(origins)].map((origin) => `${origin}${CALLBACK_PATH}`) });
+				return c.json({ email: { enabled: email }, microsoft, redirectUris: [...new Set(origins)].map((origin) => `${origin}${CALLBACK_PATH}`) });
 			}),
 		),
 	)
@@ -296,11 +298,23 @@ export const adminApi = new Hono<Env>()
 	// Saved at once, with its own button: turning sign-in on or off is not part of the credits form.
 	.put("/sign-in/microsoft", body(microsoftBody), (c) => {
 		const { clientSecret, ...settings } = c.req.valid("json");
-		return route(c, Effect.map(actions((service) => service.setMicrosoftSignIn(actorOf(c), settings, clientSecret)), (microsoft) => c.json({ microsoft })), {
+		const saved = Effect.gen(function* () {
+			const microsoft = yield* actions((service) => service.setMicrosoftSignIn(actorOf(c), settings, clientSecret));
+			// Turning Microsoft off turns email on again.
+			return c.json({ microsoft, email: { enabled: yield* actions((service) => service.emailSignIn) } });
+		});
+		return route(c, saved, {
 			// The problem's name goes along, so the form shows the message at its field.
 			InvalidSettings: (error, c) => c.json({ error: error.message, errors: [error.problem] }, 400),
 		});
 	})
+
+	// Sign-in by email can go off while Microsoft works (auth/SignInProviders.ts).
+	.put("/sign-in/email", body(emailSignInBody), (c) =>
+		route(c, Effect.map(actions((service) => service.setEmailSignIn(actorOf(c), c.req.valid("json").enabled)), (enabled) => c.json({ email: { enabled } })), {
+			EmailNeeded: (error, c) => c.json({ error: error.message }, 400),
+		}),
+	)
 
 	// Skills (skills.ts): Markdown files of instructions, on for everyone or off.
 

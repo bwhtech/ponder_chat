@@ -135,6 +135,19 @@ describe.skipIf(!base)("SignInProviders", () => {
 				yield* providers.saveMicrosoft(settings, undefined, "admin");
 			}),
 		);
+
+		it.effect("turns sign-in by email off while Microsoft is on, and keeps it off", () =>
+			Effect.gen(function* () {
+				const providers = yield* SignInProviders.SignInProviders;
+				assert.isTrue((yield* providers.active).email);
+				const before = (yield* providers.active).version;
+				assert.isFalse(yield* providers.saveEmail(false, "admin"));
+				const active = yield* providers.active;
+				assert.isAbove(active.version, before);
+				assert.isFalse(active.email);
+				assert.isTrue(Option.isSome(active.microsoft));
+			}),
+		);
 	});
 
 	// As after BETTER_AUTH_SECRET changed: the saved secret no longer opens.
@@ -145,11 +158,16 @@ describe.skipIf(!base)("SignInProviders", () => {
 				const status = yield* providers.microsoft;
 				assert.isTrue(status.enabled && status.hasSecret && status.secretUnreadable);
 				assert.isTrue(Option.isNone((yield* providers.active).microsoft));
+				// Email was off: with Microsoft not working, it is on, whatever its setting says.
+				assert.isTrue((yield* providers.active).email);
+				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "admin")))._tag, "EmailNeeded");
 				// It can't be kept on with a secret that does not open: Settings asks for it again.
 				const refused = yield* Effect.flip(providers.saveMicrosoft(settings, undefined, "admin"));
 				assert.strictEqual(refused.message, "Enter the client secret.");
 				assert.isFalse((yield* providers.saveMicrosoft(settings, SECRET, "admin")).secretUnreadable);
 				assert.strictEqual(Option.getOrThrow((yield* providers.active).microsoft).clientSecret, SECRET);
+				// Microsoft works again, and email's setting was kept: off.
+				assert.isFalse((yield* providers.active).email);
 			}),
 		);
 

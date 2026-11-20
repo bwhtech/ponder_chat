@@ -86,17 +86,18 @@ export function signInEmail(to: string, code: string, url?: string): Email {
 	};
 }
 
-/** An admin invited this email (/admin, People). `url` is Ponder's sign-in page. */
-export function inviteEmail(to: string, url: string): Email {
-	const steps = `Open ${url}, type this email address (${to}), and Ponder Chat sends you a code to sign in.`;
+/**
+ * An admin invited this email (/admin, People). `url` is Ponder's sign-in page. With
+ * `withMicrosoft`, sign-in by email is off and the person signs in with Microsoft.
+ */
+export function inviteEmail(to: string, url: string, withMicrosoft = false): Email {
+	const how = withMicrosoft ? `choose Sign in with Microsoft, and use your work account (${to}).` : `type this email address (${to}), and Ponder Chat sends you a code to sign in.`;
+	const note = withMicrosoft ? "You sign in as you do to Microsoft 365." : "You do not need a password.";
 	return {
 		to,
 		subject: "You are invited to Ponder Chat",
-		text: `You are invited to Ponder Chat.\n\n${steps}\n\nYou do not need a password.`,
-		html:
-			`<p>You are invited to Ponder Chat.</p>` +
-			`<p>Open <a href="${url}">${url}</a>, type this email address (${to}), and Ponder Chat sends you a code to sign in.</p>` +
-			`<p style="color:#666">You do not need a password.</p>`,
+		text: `You are invited to Ponder Chat.\n\nOpen ${url}, ${how}\n\n${note}`,
+		html: `<p>You are invited to Ponder Chat.</p>` + `<p>Open <a href="${url}">${url}</a>, ${how}</p>` + `<p style="color:#666">${note}</p>`,
 	};
 }
 

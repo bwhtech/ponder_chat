@@ -57,8 +57,8 @@ export type BootData = {
 	me: Effect.Success<ReturnType<typeof meOf>> | null;
 	/** The logos an admin set, for signed-out pages too: the sign-in page shows the logo. */
 	logos: Branding.LogoVersions;
-	/** For the sign-in page: whether people can sign in with Microsoft (GET /api/sign-in). */
-	signIn?: { microsoft: boolean };
+	/** For the sign-in page: whether people can sign in with Microsoft, and by email (GET /api/sign-in). */
+	signIn?: { microsoft: boolean; email: boolean };
 	threads?: Threads.ThreadSummary[];
 	/** The sidebar's workspaces. */
 	workspaces?: Workspaces.WorkspaceSummary[];
@@ -92,7 +92,7 @@ const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetc
 	);
 	if (Option.isNone(session)) {
 		const active = yield* SignInProviders.SignInProviders.use((providers) => providers.active);
-		return { me: null, logos, signIn: { microsoft: Option.isSome(active.microsoft) } } satisfies BootData;
+		return { me: null, logos, signIn: { microsoft: Option.isSome(active.microsoft), email: active.email } } satisfies BootData;
 	}
 	const { user } = session.value;
 	const { me, threads, workspaces, skills } = yield* Effect.all(

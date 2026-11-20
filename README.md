@@ -342,7 +342,7 @@ Documents (`server/workspaces/documents/`):
 | Requests | Requests for more credits that wait, with Approve and Decline. Below: the answers of the last 30 days. |
 | People | Everyone with an account, and invites without one. Invite people. Set a daily limit, make or remove an admin, sign out everywhere, ban and unban, email the invite again, cancel an invite. |
 | Person | One person's numbers, 30 days of credits, models, details and sessions. Give extra credits for today. |
-| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the summary model for long chats (see "Long chats"), the OpenRouter key and the list of admins. Its Branding tab sets the organisation's logo, for light and dark mode (see "Logo"). Its Sign-in tab sets up sign-in with Microsoft (see "Sign in with Microsoft"). On a phone, Settings is a page in the tab bar, with Branding and Sign-in under General. |
+| Settings | A dialog, from the account menu or Cmd+Shift+, (Ctrl+Shift+,). Its General tab has the default daily credits, credits per US dollar, "Read PDF text on this server" (see "Files"), the summary model for long chats (see "Long chats"), the OpenRouter key and the list of admins. Its Branding tab sets the organisation's logo, for light and dark mode (see "Logo"). Its Sign-in tab has a switch for sign-in by email and one for Microsoft (see "Sign in with Microsoft"). On a phone, Settings is a page in the tab bar, with Branding and Sign-in under General. |
 | Workspaces | Workspaces open to everyone: owner, people added, documents, status, errors and what indexing cost. A click on a document opens its indexing log. Private workspaces as totals only (see below). On a phone, it is in the account menu. |
 | Activity | Each change an admin made, newest first: who did it, to whom, what changed and when. A click on a name shows that person's events only. Read only. On a phone, it is in the account menu. |
 
@@ -358,12 +358,14 @@ Documents (`server/workspaces/documents/`):
 
 ### Sign in with Microsoft
 
-An organisation's people can sign in with their Microsoft 365 (Entra ID) work accounts. Sign-in by email stays on. An admin sets it up in Settings, Sign-in:
+An organisation's people can sign in with their Microsoft 365 (Entra ID) work accounts. An admin turns on the Microsoft switch in Settings, Sign-in, and the dialog asks for these:
 
 1. In the [Microsoft Entra admin center](https://entra.microsoft.com), open App registrations, then New registration. Choose "Accounts in this organizational directory only". Add the redirect URI that Settings shows, of type Web: `https://<your host>/api/auth/callback/microsoft`. Ponder shows one for each host in `PONDER_HOSTS`.
 2. Copy the Directory (tenant) ID and the Application (client) ID from the app's Overview page.
 3. In Certificates & secrets, make a client secret and copy its Value. Entra shows it once. The Secret ID beside it does not work, and Ponder says so if you paste it.
-4. In Ponder's Settings, enter these, your organisation's email domains, and who gets a new account: invited people only, or everyone in the organisation.
+4. In Ponder's dialog, enter these, your organisation's email domains, and who gets a new account: invited people only, or everyone with those domains. Turn on saves them. Configure changes them later.
+
+**Sign-in by email** has its own switch. It is on by default, and it can go off only while Microsoft sign-in is on and works. Then the sign-in page offers Microsoft only, no sign-in link or code is sent or accepted (a link sent before stops working too), and invite emails say to sign in with Microsoft. When Microsoft goes off (an admin turns it off, or its secret can't be read), sign-in by email is on again by itself. Ponder can't see that a client secret expired in Entra. If that happens while email is off, nobody can sign in: on the server, run `npx tsx scripts/admin.ts email-sign-in on` and restart Ponder, or put a new secret in Settings from a session that is still open.
 
 Better Auth's own Microsoft provider does the OAuth work: the state (bound to the browser that started, used once), PKCE, and the token exchange. Ponder asks only for `openid profile email`, and keeps none of Microsoft's tokens. Better Auth takes its providers when it is made, so Ponder makes it again when an admin saves the settings: a change works at once, with no restart.
 
@@ -382,7 +384,7 @@ The settings are in the `sign_in_providers` table. The client secret is sealed, 
 
 Limits: Better Auth reads the id_token that Microsoft's token endpoint answers over TLS, and does not check its signature. OpenID Connect allows this for a token that comes this way. A person whom the directory removes keeps the sessions they have, and a session lasts for as long as it is used at least once in 30 days: sign them out, or ban them, in People.
 
-Code: `server/auth/microsoft.ts` (the rules), `server/auth/SignInProviders.ts` (the settings), `server/auth/Auth.ts` (Better Auth), `web/admin/components/SignInSettings.vue` and `MicrosoftSignInDialog.vue`, `web/SignIn.vue`. Tests: `server/auth/microsoft.test.ts`, `SignInProviders.test.ts`, `microsoft-sign-in.test.ts` (whole sign-ins against a stand-in for Microsoft, `e2e/microsoft/server.ts`) and `e2e/tests/microsoft-sign-in.spec.ts`.
+Code: `server/auth/microsoft.ts` (the rules), `server/auth/SignInProviders.ts` (the settings), `server/auth/Auth.ts` (Better Auth), `web/admin/components/SignInSettings.vue`, `MicrosoftSignInDialog.vue` and `MicrosoftSignInForm.vue`, `web/SignIn.vue`. Tests: `server/auth/microsoft.test.ts`, `SignInProviders.test.ts`, `microsoft-sign-in.test.ts` (whole sign-ins against a stand-in for Microsoft, `e2e/microsoft/server.ts`) and `e2e/tests/microsoft-sign-in.spec.ts`.
 
 ### Logo
 

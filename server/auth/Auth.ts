@@ -36,7 +36,7 @@ import * as SignInProviders from "./SignInProviders.ts";
  * session lookup.
  *
  * An organisation's people can also sign in with Microsoft, once an admin sets it up on
- * /admin (microsoft.ts, SignInProviders.ts). Better Auth's own Microsoft provider does the
+ * /admin (microsoft.ts, SignInProviders.ts). Then the admin can turn sign-in by email off. Better Auth's own Microsoft provider does the
  * OAuth work. Better Auth takes its providers when it is made, so it is made again after
  * the settings change. Its pool stays.
  *
@@ -91,8 +91,14 @@ type Callbacks = {
 	readonly log: (line: string) => Promise<void>;
 };
 
-/** Microsoft sign-in, when an admin turned it on, and where Microsoft's endpoints are (PONDER_MICROSOFT_AUTHORITY). */
-type Providers = { readonly microsoft: Option.Option<MicrosoftProvider>; readonly authority: string | undefined };
+/**
+ * Microsoft sign-in, when an admin turned it on, where Microsoft's endpoints are
+ * (PONDER_MICROSOFT_AUTHORITY), and whether sign-in by email is on (SignInProviders.ts).
+ */
+type Providers = { readonly microsoft: Option.Option<MicrosoftProvider>; readonly authority: string | undefined; readonly email: boolean };
+
+/** Sign-in by email: what is off while an admin has it off. A link sent before then no longer works either. */
+const EMAIL_SIGN_IN_PATHS = ["/sign-in/magic-link", "/magic-link/verify", "/email-otp/send-verification-otp", "/sign-in/email-otp"];
 
 function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefined, providers: Providers, run: Callbacks) {
 	const microsoft = Option.getOrUndefined(providers.microsoft);
@@ -243,6 +249,7 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 			"/refresh-token",
 			"/get-access-token",
 			"/account-info",
+			...(providers.email ? [] : EMAIL_SIGN_IN_PATHS),
 		],
 		plugins: [
 			magicLink({
@@ -346,7 +353,7 @@ const make = Effect.gen(function* () {
 		const connections = yield* pool;
 		return yield* Ref.modify(made, (now) => {
 			if (Option.isSome(now) && now.value.version === active.version) return [now.value.auth, now];
-			const auth = build(connections, config.hosts, secret, { microsoft: active.microsoft, authority }, callbacks);
+			const auth = build(connections, config.hosts, secret, { microsoft: active.microsoft, authority, email: active.email }, callbacks);
 			return [auth, Option.some({ version: active.version, auth })];
 		});
 	});

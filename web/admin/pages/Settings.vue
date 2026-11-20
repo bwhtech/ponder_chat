@@ -25,6 +25,6 @@ const form = useSettingsForm();
 		<GeneralSettings :form="form" />
 		<!-- Its own top padding makes the 32px between sections. -->
 		<BrandingSettings v-if="!form.loadError" class="mt-4" />
-		<SignInSettings v-if="!form.loadError" class="mt-4" />
+		<SignInSettings v-if="!form.loadError" heading class="mt-4" />
 	</div>
 </template>

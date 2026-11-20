@@ -476,6 +476,41 @@ describe.skipIf(!base)("Sign in with Microsoft", () => {
 			}),
 		);
 
+		it.effect("turns sign-in by email off only while Microsoft works, and on again when Microsoft goes off", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const providers = yield* SignInProviders.SignInProviders;
+				const ana = person("ana");
+				const magicLink = (jar: Jar, email: string) => request(jar, "/api/auth/sign-in/magic-link", { method: "POST", body: { email, callbackURL: "/" } });
+				// A link sent while email was on.
+				yield* magicLink(browser(), ana);
+				const [link] = yield* sql<{ identifier: string }>`select identifier from verifications where value like ${`%${ana}%`} order by "createdAt" desc limit 1`;
+				assert.isDefined(link);
+
+				assert.isFalse(yield* providers.saveEmail(false, "test-admin"));
+				assert.isFalse((yield* providers.active).email);
+				// No link or code is sent, none is checked, and the link sent before no longer signs in.
+				assert.strictEqual((yield* magicLink(browser(), ana)).status, 404);
+				assert.strictEqual((yield* request(browser(), "/api/auth/email-otp/send-verification-otp", { method: "POST", body: { email: ana, type: "sign-in" } })).status, 404);
+				assert.strictEqual((yield* request(browser(), "/api/auth/sign-in/email-otp", { method: "POST", body: { email: ana, otp: "123456" } })).status, 404);
+				const jar = browser();
+				yield* request(jar, `/api/auth/magic-link/verify?token=${link?.identifier.replace("magic-link:", "")}&callbackURL=/`);
+				assert.isUndefined(yield* signedInAs(jar));
+				// Microsoft signs people in as before.
+				assert.strictEqual((yield* signIn(ana)).landed.pathname, "/chat/after");
+
+				// Microsoft off: email is the way in again, and its setting says so.
+				yield* save({ enabled: false }, undefined);
+				assert.isTrue((yield* providers.active).email);
+				assert.deepStrictEqual(yield* sql`select enabled from sign_in_providers where id = 'email'`, [{ enabled: true }]);
+				assert.strictEqual((yield* magicLink(browser(), person("nobody"))).status, 200);
+				// And it can't go off while Microsoft is off: nobody could sign in.
+				const refused = yield* Effect.flip(providers.saveEmail(false, "test-admin"));
+				assert.strictEqual(refused._tag, "EmailNeeded");
+				assert.isTrue((yield* providers.active).email);
+			}),
+		);
+
 		it.effect("drops the test's schema", () =>
 			Effect.gen(function* () {
 				const sql = yield* PgClient.PgClient;

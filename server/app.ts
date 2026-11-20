@@ -116,10 +116,10 @@ app.get("/api/brand/logo/:theme", async (c) => {
 	);
 });
 
-// Which ways to sign in the sign-in page offers besides email: Microsoft, when an admin set it up (auth/microsoft.ts).
+// Which ways to sign in the sign-in page offers: Microsoft, when an admin set it up (auth/microsoft.ts), and email unless it is off.
 // Before the session check: the page asks before anyone is signed in. The chat page has it in its boot data.
 app.get("/api/sign-in", (c) =>
-	route(c, Effect.map(SignInProviders.SignInProviders.use((providers) => providers.active), (active) => c.json({ microsoft: Option.isSome(active.microsoft) }))),
+	route(c, Effect.map(SignInProviders.SignInProviders.use((providers) => providers.active), (active) => c.json({ microsoft: Option.isSome(active.microsoft), email: active.email }))),
 );
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.

@@ -119,6 +119,10 @@ export class AdminActions extends Context.Service<
 		 * directory made again, whom sign-in refuses as "linked to another account".
 		 */
 		readonly unlinkMicrosoft: (actor: Actor, userId: string) => Effect.Effect<void, NoOne | SqlError>;
+		/** Whether people can sign in by email now (auth/SignInProviders.ts). */
+		readonly emailSignIn: Effect.Effect<boolean, SqlError>;
+		/** Turns sign-in by email on or off: off only while Microsoft works. Whether it is on after. */
+		readonly setEmailSignIn: (actor: Actor, enabled: boolean) => Effect.Effect<boolean, SignInProviders.EmailNeeded | SqlError>;
 		/** Answers a request for more credits, then emails the person, with a link to `origin`. A failed email does not undo the answer. */
 		readonly answer: (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) => Effect.Effect<void, AnsweredAlready | SqlError>;
 	}
@@ -198,8 +202,9 @@ const make = Effect.gen(function* () {
 	/** Sends the invite emails. Returns the addresses that could not be sent to. */
 	const emailInvites = Effect.fnUntraced(function* (origin: string, emails: ReadonlyArray<string>) {
 		const notSent: string[] = [];
+		const withMicrosoft = !(yield* signInProviders.active).email;
 		for (const email of emails) {
-			yield* mailer.send(Mailer.inviteEmail(email, origin)).pipe(
+			yield* mailer.send(Mailer.inviteEmail(email, origin, withMicrosoft)).pipe(
 				Effect.catchTags({
 					EmailNotSent: (error) => Effect.andThen(logEmailError(error), Effect.sync(() => notSent.push(email))),
 				}),
@@ -223,7 +228,8 @@ const make = Effect.gen(function* () {
 
 	const sendInvite = Effect.fn("AdminActions.sendInvite")(function* (actor: Actor, origin: string, email: string) {
 		if (!(yield* invites.invited(email))) return yield* new NoOne();
-		yield* mailer.send(Mailer.inviteEmail(email, origin)).pipe(Effect.tapError(logEmailError));
+		const withMicrosoft = !(yield* signInProviders.active).email;
+		yield* mailer.send(Mailer.inviteEmail(email, origin, withMicrosoft)).pipe(Effect.tapError(logEmailError));
 		yield* record(actor, "send-invite", { target: email });
 	});
 
@@ -299,13 +305,22 @@ const make = Effect.gen(function* () {
 	const setMicrosoftSignIn = Effect.fn("AdminActions.setMicrosoftSignIn")(function* (actor: Actor, input: MicrosoftSettings, clientSecret: string | undefined) {
 		const shown = ({ enabled, tenantId, clientId, signUps, allowedDomains }: MicrosoftStatus) => ({ enabled, tenantId, clientId, signUps, allowedDomains });
 		const before = yield* signInProviders.microsoft;
+		const emailBefore = (yield* signInProviders.active).email;
 		const after = yield* signInProviders.saveMicrosoft(input, clientSecret, actor.id);
-		// A new tenant unlinks everyone (SignInProviders.ts): the log says so.
+		// A new tenant unlinks everyone, and Microsoft off turns email on again (SignInProviders.ts): the log says so.
 		const unlinked = before.tenantId !== "" && before.tenantId !== after.tenantId;
+		const emailOn = !emailBefore && (yield* signInProviders.active).email;
 		yield* record(actor, "set-microsoft-sign-in", {
 			before: shown(before),
-			after: { ...shown(after), ...(clientSecret?.trim() && { secretChanged: true }), ...(unlinked && { unlinkedEveryone: true }) },
+			after: { ...shown(after), ...(clientSecret?.trim() && { secretChanged: true }), ...(unlinked && { unlinkedEveryone: true }), ...(emailOn && { emailOn: true }) },
 		});
+		return after;
+	});
+
+	const setEmailSignIn = Effect.fn("AdminActions.setEmailSignIn")(function* (actor: Actor, enabled: boolean) {
+		const before = (yield* signInProviders.active).email;
+		const after = yield* signInProviders.saveEmail(enabled, actor.id);
+		if (after !== before) yield* record(actor, "set-email-sign-in", { before: { enabled: before }, after: { enabled: after } });
 		return after;
 	});
 
@@ -343,6 +358,8 @@ const make = Effect.gen(function* () {
 		removeLogo,
 		microsoftSignIn: signInProviders.microsoft,
 		setMicrosoftSignIn,
+		emailSignIn: Effect.map(signInProviders.active, (active) => active.email),
+		setEmailSignIn,
 		unlinkMicrosoft,
 		answer,
 	});

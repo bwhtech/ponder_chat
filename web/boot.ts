@@ -13,8 +13,8 @@ type Boot = {
 	me?: Answer<typeof client.api.me.$get> | null;
 	/** The logos an admin set (brand.ts). */
 	logos?: LogoVersions;
-	/** For the sign-in page: the ways to sign in besides email (sign-in-providers.ts). */
-	signIn?: { microsoft: boolean };
+	/** For the sign-in page: the ways to sign in (sign-in-providers.ts). */
+	signIn?: { microsoft: boolean; email: boolean };
 	threads?: Answer<typeof client.api.threads.$get>["threads"];
 	workspaces?: Answer<typeof client.api.workspaces.$get>["workspaces"];
 	models?: Answer<typeof client.api.models.$get>;

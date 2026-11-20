@@ -28,10 +28,20 @@ async function set(admin: Page, change: Partial<typeof settings> = {}) {
 
 const turnOff = (admin: Page) => set(admin, { enabled: false });
 
-/** A signed-out person's browser, on the sign-in page. */
-async function visitor(browser: Browser) {
+/**
+ * A signed-out person's browser, on the sign-in page. With `signIn`, the page shows these ways to
+ * sign in, as if the server had them: the page reads them from its boot data (server/boot-page.ts).
+ */
+async function visitor(browser: Browser, signIn?: { microsoft: boolean; email: boolean }) {
 	const context = await browser.newContext({ baseURL: e2e.baseUrl, extraHTTPHeaders: { "cf-connecting-ip": randomIp() } });
 	const page = await context.newPage();
+	if (signIn)
+		await page.route("/", async (route) => {
+			const response = await route.fetch();
+			const html = (await response.text()).replace(/"signIn":\{[^}]*\}/, `"signIn":${JSON.stringify(signIn)}`);
+			expect(html).toContain(JSON.stringify(signIn));
+			await route.fulfill({ response, body: html });
+		});
 	await page.goto("/");
 	return { context, page };
 }
@@ -59,8 +69,12 @@ test("an admin sets up Microsoft in Settings, and an invited person signs in wit
 		await page.goto("/admin/settings");
 		const settingsDialog = page.getByRole("dialog").first();
 		await settingsDialog.getByRole("tab", { name: "Sign-in" }).click();
-		await expect(settingsDialog.getByText("Always on")).toBeVisible();
-		await settingsDialog.getByRole("button", { name: "Set up" }).click();
+		// Email is the only way in: its switch can't be turned off yet.
+		await expect(settingsDialog.getByRole("switch", { name: "Sign in by email" })).toBeChecked();
+		await expect(settingsDialog.getByRole("switch", { name: "Sign in by email" })).toBeDisabled();
+		await expect(settingsDialog.getByRole("button", { name: "Configure" })).toHaveCount(0);
+		// Turning Microsoft on asks for what it needs first.
+		await settingsDialog.getByRole("switch", { name: "Sign in with Microsoft" }).click();
 
 		const form = page.getByRole("dialog", { name: "Sign in with Microsoft" });
 		// What the admin registers in Entra: this server's address.
@@ -71,15 +85,21 @@ test("an admin sets up Microsoft in Settings, and an invited person signs in wit
 
 		// The secret's ID is the easy one to copy from Entra, and it never works: the form says so at the field.
 		await form.getByLabel("Client secret").fill("0f8fad5b-d9cb-469f-a165-70867728950e");
-		await form.getByRole("button", { name: "Save" }).click();
+		await form.getByRole("button", { name: "Turn on" }).click();
 		await expect(form.getByText("That is the secret's ID.", { exact: false })).toBeVisible();
 
 		await form.getByLabel("Client secret").fill(MICROSOFT_CLIENT_SECRET);
-		await form.getByRole("button", { name: "Save" }).click();
-		// The toast: the dialog's switch has the same words, while it closes.
+		await form.getByRole("button", { name: "Turn on" }).click();
 		await expect(page.getByRole("region", { name: /Notifications/ }).getByText("People can sign in with Microsoft")).toBeVisible();
+		await expect(form).toHaveCount(0);
 		await expect(settingsDialog.getByText(`For emails of ${DOMAIN}. A person still needs an invite.`)).toBeVisible();
-		await expect(settingsDialog.getByText("On", { exact: true })).toBeVisible();
+		await expect(settingsDialog.getByRole("switch", { name: "Sign in with Microsoft" })).toBeChecked();
+		// With Microsoft on, email can go off; Configure changes Microsoft's settings.
+		await expect(settingsDialog.getByRole("switch", { name: "Sign in by email" })).toBeEnabled();
+		await settingsDialog.getByRole("button", { name: "Configure" }).click();
+		await expect(form.getByLabel("Directory (tenant) ID")).toHaveValue(TENANT);
+		await form.getByRole("button", { name: "Cancel" }).click();
+		await expect(form).toHaveCount(0);
 
 		// The saved secret never comes back to the page.
 		const saved = await page.request.get("/api/admin/sign-in");
@@ -112,6 +132,39 @@ test("an admin sets up Microsoft in Settings, and an invited person signs in wit
 		await expect(page.getByText("Turned on sign-in with Microsoft").first()).toBeVisible();
 		await expect(page.getByText("New client secret").first()).toBeVisible();
 		await expect(page.getByText(MICROSOFT_CLIENT_SECRET)).toHaveCount(0);
+	} finally {
+		await turnOff(page);
+	}
+});
+
+test("with email turned off, the sign-in page offers Microsoft only, until Microsoft goes off", async ({ page, admin, browser }) => {
+	void admin;
+	// Every test signs in by email (fixtures.ts), so this one never turns it off on the shared server:
+	// it answers the page's request itself, and draws the sign-in page as the server would then.
+	// server/auth/microsoft-sign-in.test.ts turns email off for real.
+	try {
+		await set(page);
+		await page.route("**/api/admin/sign-in/email", (route) => route.fulfill({ json: { email: { enabled: false } } }));
+		await page.goto("/admin/settings");
+		const settingsDialog = page.getByRole("dialog").first();
+		await settingsDialog.getByRole("tab", { name: "Sign-in" }).click();
+		const email = settingsDialog.getByRole("switch", { name: "Sign in by email" });
+		await email.click();
+		await expect(page.getByRole("region", { name: /Notifications/ }).getByText("Sign-in by email is off")).toBeVisible();
+		await expect(email).not.toBeChecked();
+		await expect(settingsDialog.getByText("Off. People sign in with Microsoft only.")).toBeVisible();
+
+		const only = await visitor(browser, { microsoft: true, email: false });
+		await expect(only.page.getByText("Use your Microsoft work account.")).toBeVisible();
+		await expect(only.page.getByRole("button", { name: "Sign in with Microsoft" })).toBeVisible();
+		await expect(only.page.getByRole("button", { name: "Email me a link" })).toHaveCount(0);
+		await only.context.close();
+
+		// Microsoft off: email is on again, so there is always a way in.
+		await settingsDialog.getByRole("switch", { name: "Sign in with Microsoft" }).click();
+		await expect(page.getByRole("region", { name: /Notifications/ }).getByText("Microsoft is off. Sign-in by email is on again.")).toBeVisible();
+		await expect(email).toBeChecked();
+		await expect(email).toBeDisabled();
 	} finally {
 		await turnOff(page);
 	}
