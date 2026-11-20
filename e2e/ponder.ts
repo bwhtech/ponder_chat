@@ -44,6 +44,8 @@ export function ponderEnv(port: number, databaseUrl: string): NodeJS.ProcessEnv 
 		CLOUDFLARE_ACCOUNT_ID: "fake",
 		CLOUDFLARE_EMAIL_TOKEN: "fake",
 		PONDER_EMAIL_FROM: "Ponder Chat <ponder@example.com>",
+		// Sign-in with Microsoft goes to the stand-in (microsoft/server.ts), once a test sets it up.
+		PONDER_MICROSOFT_AUTHORITY: e2e.microsoftUrl,
 		// The test MCP servers are on 127.0.0.1 and use http. This lets connectors reach them (server/net/NetGuard.ts).
 		MCP_ALLOW_PRIVATE_NETWORKS: "1",
 		// The sweep (server/workflow/sweep.ts) every second, so tests see its work at once.

@@ -4,7 +4,7 @@ import { isRecord } from "./json";
 
 /**
  * What the server put in the page for its first screen (server/boot-page.ts): who is
- * signed in (null when nobody is), their chats, their workspaces, the models, the skills, the features and the logos.
+ * signed in (null when nobody is, with the ways to sign in), their chats, their workspaces, the models, the skills, the features and the logos.
  * The same answers as the API's, so the page draws without asking it first. Each is used
  * once, by the first load; later loads ask the API. In development (npm run dev) the page
  * has none, and every load asks.
@@ -13,6 +13,8 @@ type Boot = {
 	me?: Answer<typeof client.api.me.$get> | null;
 	/** The logos an admin set (brand.ts). */
 	logos?: LogoVersions;
+	/** For the sign-in page: the ways to sign in (sign-in-providers.ts). */
+	signIn?: { microsoft: boolean; email: boolean };
 	threads?: Answer<typeof client.api.threads.$get>["threads"];
 	workspaces?: Answer<typeof client.api.workspaces.$get>["workspaces"];
 	models?: Answer<typeof client.api.models.$get>;

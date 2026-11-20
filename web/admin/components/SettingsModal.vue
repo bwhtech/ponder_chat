@@ -4,11 +4,12 @@ import { ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import BrandingPanel from "./BrandingPanel.vue";
 import GeneralPanel from "./GeneralPanel.vue";
+import SignInPanel from "./SignInPanel.vue";
 
 /**
  * Settings on wider screens: frappe-ui's SettingsDialog, opened from the account menu or
- * with Cmd+Shift+, (Ctrl+Shift+,). Two tabs: General, and Branding (the logo). Changes not
- * saved are dropped when it closes.
+ * with Cmd+Shift+, (Ctrl+Shift+,). Three tabs: General, Branding (the logo) and Sign-in
+ * (email, and Microsoft). Changes not saved are dropped when it closes.
  */
 const open = defineModel<boolean>("open", { default: false });
 const tab = ref("general");
@@ -30,6 +31,10 @@ watch(() => route.fullPath, () => (open.value = false));
 					<template #prefix><span class="lucide-palette size-4 text-ink-gray-6" aria-hidden="true" /></template>
 					Branding
 				</SettingsNavItem>
+				<SettingsNavItem value="sign-in" class="!text-sm [@media(pointer:coarse)]:!h-11">
+					<template #prefix><span class="lucide-key-round size-4 text-ink-gray-6" aria-hidden="true" /></template>
+					Sign-in
+				</SettingsNavItem>
 			</SettingsNavGroup>
 		</SettingsSidebar>
 		<SettingsContent>
@@ -38,6 +43,9 @@ watch(() => route.fullPath, () => (open.value = false));
 			</SettingsPanel>
 			<SettingsPanel value="branding">
 				<BrandingPanel />
+			</SettingsPanel>
+			<SettingsPanel value="sign-in">
+				<SignInPanel />
 			</SettingsPanel>
 		</SettingsContent>
 		<!-- Close, as in the chat's Settings. After the content, so the dialog does not open with focus on it. -->

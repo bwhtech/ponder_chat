@@ -16,6 +16,7 @@ import { adminApi } from "./admin/routes.ts";
 import { connectorsApi, oauthCallback } from "./mcp/routes.ts";
 import type { SignedInEnv } from "./auth.ts";
 import * as Auth from "./auth/Auth.ts";
+import * as SignInProviders from "./auth/SignInProviders.ts";
 import * as Branding from "./branding/Branding.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
 import * as Credits from "./credits/Credits.ts";
@@ -114,6 +115,12 @@ app.get("/api/brand/logo/:theme", async (c) => {
 		),
 	);
 });
+
+// Which ways to sign in the sign-in page offers: Microsoft, when an admin set it up (auth/microsoft.ts), and email unless it is off.
+// Before the session check: the page asks before anyone is signed in. The chat page has it in its boot data.
+app.get("/api/sign-in", (c) =>
+	route(c, Effect.map(SignInProviders.SignInProviders.use((providers) => providers.active), (active) => c.json({ microsoft: Option.isSome(active.microsoft), email: active.email }))),
+);
 
 // Sign-in (auth.ts): magic links, sessions. Every other /api route needs a signed-in person.
 app.on(["GET", "POST"], "/api/auth/*", (c) => route(c, Auth.Auth.use((auth) => auth.handler(c.req.raw))));

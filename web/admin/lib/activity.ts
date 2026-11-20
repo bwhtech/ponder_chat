@@ -64,6 +64,21 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"set-openrouter-key": () => ({ text: "Changed the OpenRouter key", details: [] }),
 	"set-logo": (_, after) => ({ text: `Changed the logo for ${themeName(after.theme)}`, details: [] }),
 	"remove-logo": (before) => ({ text: `Removed the logo for ${themeName(before.theme)}`, details: [] }),
+	// Sign in with Microsoft (server/auth/microsoft.ts). The server says that the secret changed, never the secret.
+	"set-microsoft-sign-in": (before, after) => ({
+		text: before.enabled === after.enabled ? "Changed sign-in with Microsoft" : `Turned ${after.enabled ? "on" : "off"} sign-in with Microsoft`,
+		details: [
+			changed("Directory (tenant) ID", before.tenantId, after.tenantId),
+			changed("Application (client) ID", before.clientId, after.clientId),
+			after.secretChanged ? "New client secret" : "",
+			changed("Email domains", list(before.allowedDomains), list(after.allowedDomains)),
+			changed("New accounts", signUpsName(before.signUps), signUpsName(after.signUps)),
+			after.unlinkedEveryone ? "Unlinked everyone's Microsoft account, for the new directory" : "",
+			after.emailOn ? "Sign-in by email is on again" : "",
+		].filter(Boolean),
+	}),
+	"set-email-sign-in": (_, after) => ({ text: `Turned ${after.enabled ? "on" : "off"} sign-in by email`, details: [] }),
+	"unlink-microsoft": () => ({ text: "Unlinked their Microsoft account", details: [] }),
 	"create-skill": (_, after) => ({ text: `Created the skill ${skillName(after)}`, details: [] }),
 	"update-skill": (before, after) => ({ text: `Edited the skill ${skillName(after)}`, details: skillChanges(before, after) }),
 	"enable-skill": (_, after) => ({ text: `Turned on the skill ${skillName(after)}`, details: [] }),
@@ -115,6 +130,14 @@ function sharingChanges(before: Fields, after: Fields) {
 }
 
 /** The logo's theme (server/branding/Branding.ts). */
+function list(values: unknown) {
+	return Array.isArray(values) ? values.join(", ") : "";
+}
+
+function signUpsName(signUps: unknown) {
+	return signUps === "everyone" ? "Everyone in the organisation" : "Invited people only";
+}
+
 function themeName(theme: unknown) {
 	return theme === "dark" ? "dark mode" : "light mode";
 }

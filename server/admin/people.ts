@@ -32,6 +32,8 @@ export type Person = {
 	today: { used: number; limit: number; extra: number };
 	/** Credits over the last 7 days. */
 	week: number;
+	/** They have signed in with Microsoft, so a Microsoft account is linked (auth/microsoft.ts). */
+	microsoft: boolean;
 };
 
 /** An account or an invite, as AdminReports.ts reads it: text, boolean, ::int, timestamptz as a Date. */
@@ -49,6 +51,7 @@ export const PersonRow = Schema.Struct({
 	inviter: Schema.NullOr(Schema.String),
 	invite_credits: Schema.NullOr(Schema.Number),
 	last_active: Schema.NullOr(Schema.Date),
+	microsoft: Schema.Boolean,
 });
 type PersonRow = typeof PersonRow.Type;
 
@@ -76,6 +79,7 @@ export function toPerson(row: PersonRow, usage: Usage, limits: Limits, now: Date
 			extra: row.id ? limits.extra(user) : 0,
 		},
 		week: usage.total(user, 7).credits,
+		microsoft: row.microsoft,
 	};
 }
 

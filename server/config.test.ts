@@ -32,6 +32,7 @@ describe("PonderConfig", () => {
 			assert.isTrue(config.memoryEnabled && config.memoryIndexEnabled && config.pythonEnabled);
 			assert.isFalse(config.openSignup || config.allowPrivateNetworks || config.development);
 			assert.isTrue(Option.isNone(config.objectStore) && Option.isNone(config.email) && Option.isNone(config.notifyUrl));
+			assert.isTrue(Option.isNone(config.microsoftAuthority));
 		}),
 	);
 
@@ -46,6 +47,7 @@ describe("PonderConfig", () => {
 				OPENROUTER_BASE_URL: "http://127.0.0.1:3598/api/",
 				PONDER_S3_BUCKET: "files",
 				PONDER_S3_ENDPOINT: "https://r2.example/",
+				PONDER_MICROSOFT_AUTHORITY: "http://127.0.0.1:3598/microsoft/",
 			});
 			assert.deepStrictEqual(config.hosts, ["localhost:4000", "127.0.0.1:4000"]);
 			assert.deepStrictEqual(config.allowedEmails, ["ana@example.org", "bo@example.org"]);
@@ -54,6 +56,7 @@ describe("PonderConfig", () => {
 			assert.isFalse(config.allowPrivateNetworks);
 			assert.isFalse(config.memoryEnabled);
 			assert.strictEqual(config.openRouterBaseUrl, "http://127.0.0.1:3598/api");
+			assert.strictEqual(Option.getOrThrow(config.microsoftAuthority), "http://127.0.0.1:3598/microsoft");
 			const store = Option.getOrThrow(config.objectStore);
 			assert.deepStrictEqual([store.endpoint, store.region, store.accessKeyId, Redacted.value(store.secretAccessKey)], ["https://r2.example", "auto", "", ""]);
 		}),

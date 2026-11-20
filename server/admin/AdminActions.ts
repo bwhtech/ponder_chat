@@ -5,6 +5,8 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as Auth from "../auth/Auth.ts";
+import type { InvalidSettings, MicrosoftSettings, MicrosoftStatus } from "../auth/microsoft.ts";
+import * as SignInProviders from "../auth/SignInProviders.ts";
 import * as Branding from "../branding/Branding.ts";
 import * as Credits from "../credits/Credits.ts";
 import * as ExtraCredits from "../credits/ExtraCredits.ts";
@@ -19,7 +21,7 @@ import * as AdminReports from "./AdminReports.ts";
 
 /**
  * What admins change on /admin (admin/routes.ts): people's limits and roles, bans, invites,
- * requests for more credits, the settings and the logo.
+ * requests for more credits, the settings, the logo and sign-in with Microsoft.
  *
  * Role, ban and sign-out go through Better Auth's admin plugin (auth.api), which checks
  * the admin's session again (the request's headers) and ends a banned person's sessions.
@@ -30,6 +32,7 @@ import * as AdminReports from "./AdminReports.ts";
 
 /** The admin who makes the change. */
 export type Actor = { id: string; email: string };
+export type EmailSignIn = { enabled: boolean; signedInWithMicrosoft: boolean };
 
 /** No such person or invite. */
 export class NoOne extends Schema.TaggedError<NoOne>()("NoOne", {}) {
@@ -108,6 +111,22 @@ export class AdminActions extends Context.Service<
 		readonly setLogo: (actor: Actor, theme: Branding.Theme, upload: Buffer) => Effect.Effect<Branding.LogoVersions, Branding.LogoRefused | SqlError>;
 		/** Back to Ponder's logo for a theme. Which logos are set, after it. */
 		readonly removeLogo: (actor: Actor, theme: Branding.Theme) => Effect.Effect<Branding.LogoVersions, SqlError>;
+		/** Sign in with Microsoft, as the Settings page shows it: without the client secret. */
+		readonly microsoftSignIn: Effect.Effect<MicrosoftStatus, SqlError>;
+		/** Checks and saves Microsoft sign-in (auth/microsoft.ts). Without a client secret, the saved one stays. The settings after it. */
+		readonly setMicrosoftSignIn: (actor: Actor, settings: MicrosoftSettings, clientSecret: string | undefined) => Effect.Effect<MicrosoftStatus, InvalidSettings | SqlError>;
+		/**
+		 * Forgets which Microsoft account a person signs in with: for a person whose account the
+		 * directory made again, whom sign-in refuses as "linked to another account".
+		 */
+		readonly unlinkMicrosoft: (actor: Actor, userId: string) => Effect.Effect<void, NoOne | SqlError>;
+		/**
+		 * Whether people can sign in by email now (auth/SignInProviders.ts), and whether the admin
+		 * signed in with Microsoft since its settings were saved, which turning it off needs.
+		 */
+		readonly emailSignIn: (actor: Actor) => Effect.Effect<EmailSignIn, SqlError>;
+		/** Turns sign-in by email on or off: off only while Microsoft works for this admin. How it is after. */
+		readonly setEmailSignIn: (actor: Actor, enabled: boolean) => Effect.Effect<EmailSignIn, SignInProviders.EmailNeeded | SqlError>;
 		/** Answers a request for more credits, then emails the person, with a link to `origin`. A failed email does not undo the answer. */
 		readonly answer: (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) => Effect.Effect<void, AnsweredAlready | SqlError>;
 	}
@@ -127,6 +146,7 @@ const make = Effect.gen(function* () {
 	const extraCredits = yield* ExtraCredits.ExtraCredits;
 	const settings = yield* Settings.Settings;
 	const branding = yield* Branding.Branding;
+	const signInProviders = yield* SignInProviders.SignInProviders;
 	const openRouterKey = yield* OpenRouterKey.OpenRouterKey;
 	const models = yield* Models.Models;
 	const mailer = yield* Mailer.Mailer;
@@ -186,8 +206,9 @@ const make = Effect.gen(function* () {
 	/** Sends the invite emails. Returns the addresses that could not be sent to. */
 	const emailInvites = Effect.fnUntraced(function* (origin: string, emails: ReadonlyArray<string>) {
 		const notSent: string[] = [];
+		const withMicrosoft = !(yield* signInProviders.active).email;
 		for (const email of emails) {
-			yield* mailer.send(Mailer.inviteEmail(email, origin)).pipe(
+			yield* mailer.send(Mailer.inviteEmail(email, origin, withMicrosoft)).pipe(
 				Effect.catchTags({
 					EmailNotSent: (error) => Effect.andThen(logEmailError(error), Effect.sync(() => notSent.push(email))),
 				}),
@@ -211,7 +232,8 @@ const make = Effect.gen(function* () {
 
 	const sendInvite = Effect.fn("AdminActions.sendInvite")(function* (actor: Actor, origin: string, email: string) {
 		if (!(yield* invites.invited(email))) return yield* new NoOne();
-		yield* mailer.send(Mailer.inviteEmail(email, origin)).pipe(Effect.tapError(logEmailError));
+		const withMicrosoft = !(yield* signInProviders.active).email;
+		yield* mailer.send(Mailer.inviteEmail(email, origin, withMicrosoft)).pipe(Effect.tapError(logEmailError));
 		yield* record(actor, "send-invite", { target: email });
 	});
 
@@ -283,6 +305,39 @@ const make = Effect.gen(function* () {
 		return yield* branding.versions;
 	});
 
+	// The log keeps what was set and that the secret changed, never the secret.
+	const setMicrosoftSignIn = Effect.fn("AdminActions.setMicrosoftSignIn")(function* (actor: Actor, input: MicrosoftSettings, clientSecret: string | undefined) {
+		const shown = ({ enabled, tenantId, clientId, signUps, allowedDomains }: MicrosoftStatus) => ({ enabled, tenantId, clientId, signUps, allowedDomains });
+		const before = yield* signInProviders.microsoft;
+		const emailBefore = (yield* signInProviders.active).email;
+		const after = yield* signInProviders.saveMicrosoft(input, clientSecret, actor.id);
+		// A new tenant unlinks everyone, and Microsoft off turns email on again (SignInProviders.ts): the log says so.
+		const unlinked = before.tenantId !== "" && before.tenantId !== after.tenantId;
+		const emailOn = !emailBefore && (yield* signInProviders.active).email;
+		yield* record(actor, "set-microsoft-sign-in", {
+			before: shown(before),
+			after: { ...shown(after), ...(clientSecret?.trim() && { secretChanged: true }), ...(unlinked && { unlinkedEveryone: true }), ...(emailOn && { emailOn: true }) },
+		});
+		return after;
+	});
+
+	const emailSignIn = Effect.fn("AdminActions.emailSignIn")(function* (actor: Actor) {
+		const enabled = (yield* signInProviders.active).email;
+		return { enabled, signedInWithMicrosoft: yield* signInProviders.signedInSinceSaved(actor.id) } satisfies EmailSignIn;
+	});
+
+	const setEmailSignIn = Effect.fn("AdminActions.setEmailSignIn")(function* (actor: Actor, enabled: boolean) {
+		const before = (yield* signInProviders.active).email;
+		const after = yield* signInProviders.saveEmail(enabled, actor.id);
+		if (after !== before) yield* record(actor, "set-email-sign-in", { before: { enabled: before }, after: { enabled: after } });
+		return yield* emailSignIn(actor);
+	});
+
+	const unlinkMicrosoft = Effect.fn("AdminActions.unlinkMicrosoft")(function* (actor: Actor, userId: string) {
+		if (!(yield* signInProviders.unlink(userId))) return yield* new NoOne();
+		yield* record(actor, "unlink-microsoft", { target: userId });
+	});
+
 	const answer = Effect.fn("AdminActions.answer")(function* (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) {
 		const userId = yield* extraCredits.decide(requestId, decision, actor.id);
 		if (Option.isNone(userId)) return yield* new AnsweredAlready();
@@ -310,6 +365,11 @@ const make = Effect.gen(function* () {
 		setOpenRouterKey,
 		setLogo,
 		removeLogo,
+		microsoftSignIn: signInProviders.microsoft,
+		setMicrosoftSignIn,
+		emailSignIn,
+		setEmailSignIn,
+		unlinkMicrosoft,
 		answer,
 	});
 });

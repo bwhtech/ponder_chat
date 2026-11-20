@@ -16,6 +16,10 @@ export type Settings = Answer<typeof admin.settings.$put>;
 export type KeyStatus = SettingsData["openRouterKey"];
 export type Admin = SettingsData["admins"][number];
 
+/** Sign in with Microsoft, as an admin set it, without the client secret (server/auth/microsoft.ts). */
+export type SignInData = Answer<(typeof admin)["sign-in"]["$get"]>;
+export type MicrosoftSignIn = SignInData["microsoft"];
+
 export type Person = Answer<typeof admin.people.$get>["people"][number];
 export type PersonDetail = Answer<(typeof admin.people)[":id"]["$get"]>;
 
