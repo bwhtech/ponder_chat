@@ -84,8 +84,8 @@ type Callbacks = {
 	readonly applyInvite: (user: { id: string; email: string }) => Promise<void>;
 	/** Whether the person has an account of this provider linked already. */
 	readonly hasProviderAccount: (userId: string, providerId: string) => Promise<boolean>;
-	/** Notes that the person signed in with Microsoft (SignInProviders.signedIn). */
-	readonly signedInWithMicrosoft: (userId: string) => Promise<void>;
+	/** Notes that the person signed in with Microsoft, on the settings of `revision` (SignInProviders.signedIn). */
+	readonly signedInWithMicrosoft: (userId: string, revision: number) => Promise<void>;
 	readonly beforeCall: (ctx: AdminAuthEvents.HookContext) => Promise<void>;
 	readonly afterCall: (ctx: AdminAuthEvents.HookContext) => Promise<void>;
 	readonly forgetSessions: () => void;
@@ -194,7 +194,8 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 			session: {
 				create: {
 					after: async (session, ctx) => {
-						if (callbackProvider(ctx) === MICROSOFT) await run.signedInWithMicrosoft(session.userId);
+						// The revision of the settings this Better Auth was made with: the ones the sign-in ran on.
+						if (microsoft && callbackProvider(ctx) === MICROSOFT) await run.signedInWithMicrosoft(session.userId, microsoft.revision);
 					},
 				},
 			},
@@ -338,7 +339,7 @@ const make = Effect.gen(function* () {
 		applyInvite: (user) => run(invites.applyInvite(user)),
 		hasProviderAccount: (userId, providerId) =>
 			run(Effect.map(sql`select 1 from accounts where "userId" = ${userId} and "providerId" = ${providerId} limit 1`, (rows) => rows.length > 0)),
-		signedInWithMicrosoft: (userId) => run(signInProviders.signedIn(userId)),
+		signedInWithMicrosoft: (userId, revision) => run(signInProviders.signedIn(userId, revision)),
 		beforeCall: (ctx) => run(adminAuthEvents.before(ctx)),
 		afterCall: (ctx) => run(adminAuthEvents.after(ctx)),
 		forgetSessions: () => sessions.clear(),

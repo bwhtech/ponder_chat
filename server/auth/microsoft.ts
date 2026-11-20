@@ -53,8 +53,11 @@ export type MicrosoftSettings = {
  */
 export type MicrosoftStatus = MicrosoftSettings & { hasSecret: boolean; secretUnreadable: boolean; updatedAt: string | null };
 
-/** What sign-in runs on when Microsoft is on: the settings, with the client secret. */
-export type MicrosoftProvider = Omit<MicrosoftSettings, "enabled"> & { clientSecret: string };
+/**
+ * What sign-in runs on when Microsoft is on: the settings, with the client secret. `revision`
+ * names these settings: each save makes a new one (SignInProviders.ts).
+ */
+export type MicrosoftProvider = Omit<MicrosoftSettings, "enabled"> & { clientSecret: string; revision: number };
 
 export const NO_SETTINGS: MicrosoftSettings = { enabled: false, tenantId: "", clientId: "", signUps: "invited", allowedDomains: [] };
 

@@ -18,8 +18,8 @@ import { CHECK_SCOPE, checkedSettings, credentialsProblem, InvalidSettings, MICR
  * (secrets/Secrets.ts), so a copy of the database alone does not give it away.
  *
  * Sign-in by email is on unless an admin turned it off. It can go off only while Microsoft
- * is on, and only for an admin who signed in with Microsoft since its settings were last
- * saved: that sign-in shows the settings work, and let in an admin. When Microsoft goes off
+ * is on, and only for an admin who signed in with Microsoft on its settings as they are saved
+ * now (their revision): that sign-in shows the settings work, and let in an admin. When Microsoft goes off
  * (an admin turns it off, or its secret can't be read), or a change could stop it working
  * (another tenant, client, secret or domains), email is on again by itself: there is always a way in.
  *
@@ -53,6 +53,7 @@ const ProviderRow = Schema.Struct({
 	tenant_id: Schema.String,
 	sign_ups: Schema.Literals(SIGN_UPS),
 	allowed_domains: Schema.Array(Schema.String),
+	revision: Schema.Number,
 	updated_at: Schema.Date,
 });
 type ProviderRow = typeof ProviderRow.Type;
@@ -80,10 +81,10 @@ export class SignInProviders extends Context.Service<
 		 * Whether it is on after.
 		 */
 		readonly saveEmail: (enabled: boolean, by: string) => Effect.Effect<boolean, EmailNeeded | SqlError>;
-		/** Whether the person signed in with Microsoft since its settings were last saved. */
+		/** Whether the person signed in with Microsoft on its settings as they are saved now. */
 		readonly signedInSinceSaved: (userId: string) => Effect.Effect<boolean, SqlError>;
-		/** Notes a sign-in with Microsoft (Auth.ts), for signedInSinceSaved. */
-		readonly signedIn: (userId: string) => Effect.Effect<void, SqlError>;
+		/** Notes a sign-in with Microsoft on the settings of `revision` (Auth.ts), for signedInSinceSaved. */
+		readonly signedIn: (userId: string, revision: number) => Effect.Effect<void, SqlError>;
 		/** What sign-in runs on now: Microsoft, when it is on and complete, and email unless it is off. Kept in memory. */
 		readonly active: Effect.Effect<Active, SqlError>;
 		/** Whether the person has a Microsoft account linked. */
@@ -116,15 +117,25 @@ const make = Effect.gen(function* () {
 				tenant_id text not null default '',
 				sign_ups text not null default 'invited',
 				allowed_domains jsonb not null default '[]',
+				revision integer not null default 0,
 				updated_by text,
 				updated_at timestamptz not null default now()
+			)`;
+		yield* sql`alter table sign_in_providers add column if not exists revision integer not null default 0`;
+		// Who signed in with Microsoft, on which settings: a sign-in that started before a save
+		// finishes on the settings it started with, so its time alone would not say.
+		yield* sql`
+			create table if not exists microsoft_sign_ins (
+				user_id text primary key,
+				revision integer not null,
+				signed_in_at timestamptz not null default now()
 			)`;
 	});
 
 	const findProvider = SqlSchema.findOneOption({
 		Request: Schema.String,
 		Result: ProviderRow,
-		execute: (id) => sql`select enabled, client_id, client_secret, tenant_id, sign_ups, allowed_domains, updated_at from sign_in_providers where id = ${id}`,
+		execute: (id) => sql`select enabled, client_id, client_secret, tenant_id, sign_ups, allowed_domains, revision, updated_at from sign_in_providers where id = ${id}`,
 	});
 
 	const rowOf = (id: string) =>
@@ -177,7 +188,10 @@ const make = Effect.gen(function* () {
 
 	const forget = Ref.update(cached, (now) => ({ version: now.version + 1, ways: Option.none<Ways>() }));
 
-	const saveMicrosoft = Effect.fn("SignInProviders.saveMicrosoft")(function* (input: MicrosoftSettings, clientSecret: string | undefined, by: string) {
+	// In a transaction that holds Microsoft's row (`for update`): two saves at once, or a save and
+	// email turned off, go one after the other, each from what the one before saved.
+	const saveLocked = Effect.fnUntraced(function* (input: MicrosoftSettings, clientSecret: string | undefined, by: string) {
+		yield* sql`select 1 from sign_in_providers where id = ${MICROSOFT} for update`;
 		const secret = clientSecret?.trim() || undefined;
 		const before = yield* microsoft;
 		// A saved secret that can't be read is no secret: turning sign-in on needs a new one.
@@ -189,11 +203,12 @@ const make = Effect.gen(function* () {
 		// Sealing fails only with no key at all (BETTER_AUTH_SECRET), and the server does not start without one.
 		const sealed = secret === undefined ? null : yield* secrets.seal(SEAL_CONTEXT, secret).pipe(Effect.catchTags({ UnreadableSecret: Effect.die }));
 		const write = sql`
-			insert into sign_in_providers (id, enabled, client_id, client_secret, tenant_id, sign_ups, allowed_domains, updated_by)
-			values (${MICROSOFT}, ${settings.enabled}, ${settings.clientId}, ${sealed}, ${settings.tenantId}, ${settings.signUps}, ${sql.json(settings.allowedDomains)}, ${by})
+			insert into sign_in_providers (id, enabled, client_id, client_secret, tenant_id, sign_ups, allowed_domains, revision, updated_by)
+			values (${MICROSOFT}, ${settings.enabled}, ${settings.clientId}, ${sealed}, ${settings.tenantId}, ${settings.signUps}, ${sql.json(settings.allowedDomains)}, 1, ${by})
 			on conflict (id) do update set enabled = excluded.enabled, client_id = excluded.client_id,
 				client_secret = coalesce(excluded.client_secret, sign_in_providers.client_secret), tenant_id = excluded.tenant_id,
-				sign_ups = excluded.sign_ups, allowed_domains = excluded.allowed_domains, updated_by = excluded.updated_by, updated_at = now()`;
+				sign_ups = excluded.sign_ups, allowed_domains = excluded.allowed_domains, revision = sign_in_providers.revision + 1,
+				updated_by = excluded.updated_by, updated_at = now()`;
 		// What sign-in checks and where it goes: a change here may stop Microsoft working. Email goes on
 		// again, and an admin who wants it off signs in with Microsoft first, which shows it still works.
 		const mayBreak =
@@ -205,34 +220,33 @@ const make = Effect.gen(function* () {
 		// An account's id means something in its own tenant only. With another tenant, every linked person
 		// would be refused as "linked to another account": the links go, and each person links again at their next sign-in.
 		const newTenant = before.tenantId !== "" && before.tenantId !== settings.tenantId;
+		yield* write;
+		if (newTenant) yield* sql`delete from accounts where "providerId" = ${MICROSOFT}`;
+		// Microsoft off, or maybe not working: email is the way in again, and its setting says so.
+		if (mayBreak) yield* sql`update sign_in_providers set enabled = true, updated_by = ${by}, updated_at = now() where id = ${EMAIL} and not enabled`;
+	});
+
+	const saveMicrosoft = Effect.fn("SignInProviders.saveMicrosoft")(function* (input: MicrosoftSettings, clientSecret: string | undefined, by: string) {
 		// Memory is told even when the write fails: it may have reached the database before the failure did.
-		yield* sql
-			.withTransaction(
-				Effect.gen(function* () {
-					yield* write;
-					if (newTenant) yield* sql`delete from accounts where "providerId" = ${MICROSOFT}`;
-					// Microsoft off, or maybe not working: email is the way in again, and its setting says so.
-					if (mayBreak) yield* sql`update sign_in_providers set enabled = true, updated_by = ${by}, updated_at = now() where id = ${EMAIL} and not enabled`;
-				}),
-			)
-			.pipe(Effect.ensuring(forget));
+		yield* sql.withTransaction(saveLocked(input, clientSecret, by)).pipe(Effect.ensuring(forget));
 		return yield* microsoft;
 	});
 
-	// Better Auth's table of linked accounts (Auth.ts). Ponder keeps no tokens (updateAccountOnSignIn
-	// is off), so Better Auth leaves "updatedAt" as it was made: it says when the person last signed in with it.
+	// The settings a sign-in ran on, against the saved ones: equal only when no save came since it started.
 	const signedInSinceSaved = Effect.fn("SignInProviders.signedInSinceSaved")(function* (userId: string) {
 		const rows = yield* sql`
-			select 1 from accounts a join sign_in_providers p on p.id = ${MICROSOFT}
-			where a."userId" = ${userId} and a."providerId" = ${MICROSOFT} and a."updatedAt" > p.updated_at limit 1`.pipe(
+			select 1 from microsoft_sign_ins s join sign_in_providers p on p.id = ${MICROSOFT} and p.revision = s.revision
+			where s.user_id = ${userId}`.pipe(
 			// No table yet: nobody signed in with it.
 			Effect.catchTags({ SqlError: (error) => (pgCode(error) === "42P01" ? Effect.succeed([]) : Effect.fail(error)) }),
 		);
 		return rows.length > 0;
 	});
 
-	const signedIn = Effect.fn("SignInProviders.signedIn")(function* (userId: string) {
-		yield* sql`update accounts set "updatedAt" = now() where "userId" = ${userId} and "providerId" = ${MICROSOFT}`;
+	const signedIn = Effect.fn("SignInProviders.signedIn")(function* (userId: string, revision: number) {
+		yield* sql`
+			insert into microsoft_sign_ins (user_id, revision) values (${userId}, ${revision})
+			on conflict (user_id) do update set revision = excluded.revision, signed_in_at = now()`;
 	});
 
 	const saveEmail = Effect.fn("SignInProviders.saveEmail")(function* (enabled: boolean, by: string) {
@@ -253,12 +267,12 @@ const make = Effect.gen(function* () {
 	const provider = Effect.gen(function* () {
 		const found = yield* row;
 		if (Option.isNone(found) || !found.value.enabled || found.value.client_secret === null) return Option.none<MicrosoftProvider>();
-		const { client_id, tenant_id, sign_ups, allowed_domains, client_secret } = found.value;
+		const { client_id, tenant_id, sign_ups, allowed_domains, client_secret, revision } = found.value;
 		// saveMicrosoft turns it on only when it is complete. A row changed by hand that is not stays off.
 		if (!client_id || !tenant_id || !allowed_domains.length) return Option.none<MicrosoftProvider>();
 		// A secret that can't be read (its key changed) turns Microsoft off. Sign-in by email goes on.
 		return yield* secrets.unseal(SEAL_CONTEXT, client_secret).pipe(
-			Effect.map((clientSecret) => Option.some<MicrosoftProvider>({ tenantId: tenant_id, clientId: client_id, clientSecret, signUps: sign_ups, allowedDomains: allowed_domains })),
+			Effect.map((clientSecret) => Option.some<MicrosoftProvider>({ tenantId: tenant_id, clientId: client_id, clientSecret, signUps: sign_ups, allowedDomains: allowed_domains, revision })),
 			Effect.catchTags({
 				UnreadableSecret: (error) => Effect.as(Effect.logError("sign-in: Microsoft is off, because its client secret can't be read:", error.message), Option.none<MicrosoftProvider>()),
 			}),

@@ -43,6 +43,10 @@ const settings: MicrosoftSettings = {
 
 const problemOf = (error: { _tag: string; problem?: string }) => error.problem ?? error._tag;
 
+// The settings' revision that sign-in runs on now, and a sign-in on it (as Auth.ts notes one).
+const revisionNow = SignInProviders.SignInProviders.use((providers) => Effect.map(providers.active, (active) => Option.getOrThrow(active.microsoft).revision));
+const signInNow = (userId: string) => Effect.flatMap(revisionNow, (revision) => SignInProviders.SignInProviders.use((providers) => providers.signedIn(userId, revision)));
+
 describe.skipIf(!base)("SignInProviders", () => {
 	it.layer(providersLayer("test-secret-for-sign-in-providers-0123456789"), { excludeTestServices: true })((it) => {
 		it.effect("has nothing set up on a database with no table, and after it is made", () =>
@@ -112,7 +116,9 @@ describe.skipIf(!base)("SignInProviders", () => {
 				// What sign-in runs on has the secret, and a new version, so Better Auth is made again.
 				const active = yield* providers.active;
 				assert.isAbove(active.version, before);
-				assert.deepStrictEqual(Option.getOrThrow(active.microsoft), { tenantId: settings.tenantId, clientId: settings.clientId, clientSecret: SECRET, signUps: "everyone", allowedDomains: ["example.org"] });
+				const { revision, ...provider } = Option.getOrThrow(active.microsoft);
+				assert.deepStrictEqual(provider, { tenantId: settings.tenantId, clientId: settings.clientId, clientSecret: SECRET, signUps: "everyone", allowedDomains: ["example.org"] });
+				assert.isAbove(revision, 0);
 			}),
 		);
 
@@ -161,20 +167,20 @@ describe.skipIf(!base)("SignInProviders", () => {
 			}),
 		);
 
-		it.effect("turns sign-in by email off only for an admin who signed in with Microsoft since it was saved", () =>
+		it.effect("turns sign-in by email off only for an admin who signed in with Microsoft on its settings as saved", () =>
 			Effect.gen(function* () {
 				const providers = yield* SignInProviders.SignInProviders;
-				const sql = yield* PgClient.PgClient;
 				assert.isTrue((yield* providers.active).email);
-				// Linked before the settings were last saved: nothing shows they work now.
-				yield* sql`insert into accounts (id, "userId", "providerId", "accountId", "updatedAt") values ('a4', 'cy', 'microsoft', 'oid-cy', now() - interval '1 day')`;
+				// A sign-in on the settings before the last save, such as one that started before it and finished after.
+				const revision = yield* revisionNow;
+				yield* providers.signedIn("cy", revision - 1);
 				assert.isFalse(yield* providers.signedInSinceSaved("cy"));
 				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "cy"))).reason, "not-signed-in");
 				assert.isTrue((yield* providers.active).email);
 				// An admin with no Microsoft account at all.
 				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "nobody"))).reason, "not-signed-in");
 
-				yield* providers.signedIn("cy");
+				yield* signInNow("cy");
 				assert.isTrue(yield* providers.signedInSinceSaved("cy"));
 				const before = (yield* providers.active).version;
 				assert.isFalse(yield* providers.saveEmail(false, "cy"));
@@ -198,14 +204,14 @@ describe.skipIf(!base)("SignInProviders", () => {
 				// The same with another client, or a new secret.
 				for (const [change, secret] of [[{ clientId: "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee" }, undefined], [{}, SECRET]] as const) {
 					yield* providers.saveMicrosoft(settings, undefined, "cy");
-					yield* providers.signedIn("cy");
+					yield* signInNow("cy");
 					assert.isFalse(yield* providers.saveEmail(false, "cy"));
 					yield* providers.saveMicrosoft({ ...settings, ...change }, secret, "cy");
 					assert.isTrue((yield* providers.active).email);
 				}
 				// Off again, for the next test.
 				yield* providers.saveMicrosoft(settings, undefined, "cy");
-				yield* providers.signedIn("cy");
+				yield* signInNow("cy");
 				assert.isFalse(yield* providers.saveEmail(false, "cy"));
 			}),
 		);
