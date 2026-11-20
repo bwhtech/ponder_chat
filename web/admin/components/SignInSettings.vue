@@ -56,8 +56,7 @@ function describe(settings: MicrosoftSignIn) {
 
 const emailDescription = computed(() => {
 	if (email.value === false) return "Off. People sign in with Microsoft only.";
-	if (data.value && !microsoftWorks.value) return "A code and a link by email. Turn on Microsoft to switch this off.";
-	if (data.value && !emailCanGoOff.value) return "A code and a link by email. To switch this off, sign in with Microsoft once.";
+	if (microsoftWorks.value && !emailCanGoOff.value) return "A code and a link by email. To switch this off, sign in with Microsoft once.";
 	return "A code and a link by email.";
 });
 
