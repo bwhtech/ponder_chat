@@ -148,8 +148,9 @@ test("with email turned off, the sign-in page offers Microsoft only, until Micro
 		// As after this admin signed in with Microsoft (the fixtures' admin signs in by email).
 		await page.route("**/api/admin/sign-in", async (route) => {
 			const response = await route.fetch();
-			const json = (await response.json()) as { email: { enabled: boolean; signedInWithMicrosoft: boolean } };
-			await route.fulfill({ response, json: { ...json, email: { ...json.email, signedInWithMicrosoft: true } } });
+			const body: unknown = await response.json();
+			if (typeof body !== "object" || body === null || !("email" in body)) throw new Error("GET /api/admin/sign-in: no email");
+			await route.fulfill({ response, json: { ...body, email: { enabled: true, signedInWithMicrosoft: true } } });
 		});
 		await page.route("**/api/admin/sign-in/email", (route) => route.fulfill({ json: { email: { enabled: false, signedInWithMicrosoft: true } } }));
 		await page.goto("/admin/settings");
