@@ -118,8 +118,8 @@ function saved(next: Pick<SignInData, "microsoft" | "email">) {
 		<section v-else class="space-y-1">
 			<h2 v-if="heading" class="text-base-semibold text-ink-gray-9">Sign-in</h2>
 			<div class="divide-y divide-outline-gray-1">
-				<div class="flex items-center gap-4">
-					<span class="flex size-9 shrink-0 items-center justify-center rounded-full border border-outline-gray-2" aria-hidden="true">
+				<div class="flex items-start gap-4">
+					<span class="mt-3.5 flex size-9 shrink-0 items-center justify-center rounded-4 border border-outline-gray-2" aria-hidden="true">
 						<span class="lucide-mail size-[18px] text-ink-gray-6" />
 					</span>
 					<SettingsRow class="min-w-0 flex-1" title="Email" :description="emailDescription">
@@ -133,8 +133,8 @@ function saved(next: Pick<SignInData, "microsoft" | "email">) {
 						/>
 					</SettingsRow>
 				</div>
-				<div class="flex items-center gap-4">
-					<span class="flex size-9 shrink-0 items-center justify-center rounded-full border border-outline-gray-2" aria-hidden="true">
+				<div class="flex items-start gap-4">
+					<span class="mt-3.5 flex size-9 shrink-0 items-center justify-center rounded-4 border border-outline-gray-2" aria-hidden="true">
 						<MicrosoftLogo class="size-4" />
 					</span>
 					<SettingsRow class="min-w-0 flex-1" title="Microsoft" :description="microsoft ? describe(microsoft) : INTRO">
