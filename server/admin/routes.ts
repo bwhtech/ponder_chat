@@ -287,10 +287,10 @@ export const adminApi = new Hono<Env>()
 			c,
 			Effect.gen(function* () {
 				const microsoft = yield* actions((service) => service.microsoftSignIn);
-				const email = yield* actions((service) => service.emailSignIn);
+				const email = yield* actions((service) => service.emailSignIn(actorOf(c)));
 				const hosts = yield* PonderConfig.PonderConfig.useSync((config) => config.hosts);
 				const origins = [yield* originOf(c), ...hosts.map((host) => Auth.originFor([host], new Headers({ host })))];
-				return c.json({ email: { enabled: email }, microsoft, redirectUris: [...new Set(origins)].map((origin) => `${origin}${CALLBACK_PATH}`) });
+				return c.json({ email, microsoft, redirectUris: [...new Set(origins)].map((origin) => `${origin}${CALLBACK_PATH}`) });
 			}),
 		),
 	)
@@ -301,7 +301,7 @@ export const adminApi = new Hono<Env>()
 		const saved = Effect.gen(function* () {
 			const microsoft = yield* actions((service) => service.setMicrosoftSignIn(actorOf(c), settings, clientSecret));
 			// Turning Microsoft off turns email on again.
-			return c.json({ microsoft, email: { enabled: yield* actions((service) => service.emailSignIn) } });
+			return c.json({ microsoft, email: yield* actions((service) => service.emailSignIn(actorOf(c))) });
 		});
 		return route(c, saved, {
 			// The problem's name goes along, so the form shows the message at its field.
@@ -311,7 +311,7 @@ export const adminApi = new Hono<Env>()
 
 	// Sign-in by email can go off while Microsoft works (auth/SignInProviders.ts).
 	.put("/sign-in/email", body(emailSignInBody), (c) =>
-		route(c, Effect.map(actions((service) => service.setEmailSignIn(actorOf(c), c.req.valid("json").enabled)), (enabled) => c.json({ email: { enabled } })), {
+		route(c, Effect.map(actions((service) => service.setEmailSignIn(actorOf(c), c.req.valid("json").enabled)), (email) => c.json({ email })), {
 			EmailNeeded: (error, c) => c.json({ error: error.message }, 400),
 		}),
 	)

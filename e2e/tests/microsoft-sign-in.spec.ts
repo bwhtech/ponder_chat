@@ -94,8 +94,9 @@ test("an admin sets up Microsoft in Settings, and an invited person signs in wit
 		await expect(form).toHaveCount(0);
 		await expect(settingsDialog.getByText(`For emails of ${DOMAIN}. A person still needs an invite.`)).toBeVisible();
 		await expect(settingsDialog.getByRole("switch", { name: "Sign in with Microsoft" })).toBeChecked();
-		// With Microsoft on, email can go off; Configure changes Microsoft's settings.
-		await expect(settingsDialog.getByRole("switch", { name: "Sign in by email" })).toBeEnabled();
+		// Email can go off once this admin has signed in with Microsoft, which shows it works. Configure changes Microsoft's settings.
+		await expect(settingsDialog.getByRole("switch", { name: "Sign in by email" })).toBeDisabled();
+		await expect(settingsDialog.getByText("To switch this off, sign in with Microsoft once.", { exact: false })).toBeVisible();
 		await settingsDialog.getByRole("button", { name: "Configure" }).click();
 		await expect(form.getByLabel("Directory (tenant) ID")).toHaveValue(TENANT);
 		await form.getByRole("button", { name: "Cancel" }).click();
@@ -144,7 +145,13 @@ test("with email turned off, the sign-in page offers Microsoft only, until Micro
 	// server/auth/microsoft-sign-in.test.ts turns email off for real.
 	try {
 		await set(page);
-		await page.route("**/api/admin/sign-in/email", (route) => route.fulfill({ json: { email: { enabled: false } } }));
+		// As after this admin signed in with Microsoft (the fixtures' admin signs in by email).
+		await page.route("**/api/admin/sign-in", async (route) => {
+			const response = await route.fetch();
+			const json = (await response.json()) as { email: { enabled: boolean; signedInWithMicrosoft: boolean } };
+			await route.fulfill({ response, json: { ...json, email: { ...json.email, signedInWithMicrosoft: true } } });
+		});
+		await page.route("**/api/admin/sign-in/email", (route) => route.fulfill({ json: { email: { enabled: false, signedInWithMicrosoft: true } } }));
 		await page.goto("/admin/settings");
 		const settingsDialog = page.getByRole("dialog").first();
 		await settingsDialog.getByRole("tab", { name: "Sign-in" }).click();

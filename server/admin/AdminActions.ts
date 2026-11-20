@@ -32,6 +32,7 @@ import * as AdminReports from "./AdminReports.ts";
 
 /** The admin who makes the change. */
 export type Actor = { id: string; email: string };
+export type EmailSignIn = { enabled: boolean; signedInWithMicrosoft: boolean };
 
 /** No such person or invite. */
 export class NoOne extends Schema.TaggedError<NoOne>()("NoOne", {}) {
@@ -119,10 +120,13 @@ export class AdminActions extends Context.Service<
 		 * directory made again, whom sign-in refuses as "linked to another account".
 		 */
 		readonly unlinkMicrosoft: (actor: Actor, userId: string) => Effect.Effect<void, NoOne | SqlError>;
-		/** Whether people can sign in by email now (auth/SignInProviders.ts). */
-		readonly emailSignIn: Effect.Effect<boolean, SqlError>;
-		/** Turns sign-in by email on or off: off only while Microsoft works. Whether it is on after. */
-		readonly setEmailSignIn: (actor: Actor, enabled: boolean) => Effect.Effect<boolean, SignInProviders.EmailNeeded | SqlError>;
+		/**
+		 * Whether people can sign in by email now (auth/SignInProviders.ts), and whether the admin
+		 * signed in with Microsoft since its settings were saved, which turning it off needs.
+		 */
+		readonly emailSignIn: (actor: Actor) => Effect.Effect<EmailSignIn, SqlError>;
+		/** Turns sign-in by email on or off: off only while Microsoft works for this admin. How it is after. */
+		readonly setEmailSignIn: (actor: Actor, enabled: boolean) => Effect.Effect<EmailSignIn, SignInProviders.EmailNeeded | SqlError>;
 		/** Answers a request for more credits, then emails the person, with a link to `origin`. A failed email does not undo the answer. */
 		readonly answer: (actor: Actor, origin: string, requestId: number, decision: ExtraCredits.Decision) => Effect.Effect<void, AnsweredAlready | SqlError>;
 	}
@@ -317,11 +321,16 @@ const make = Effect.gen(function* () {
 		return after;
 	});
 
+	const emailSignIn = Effect.fn("AdminActions.emailSignIn")(function* (actor: Actor) {
+		const enabled = (yield* signInProviders.active).email;
+		return { enabled, signedInWithMicrosoft: yield* signInProviders.signedInSinceSaved(actor.id) } satisfies EmailSignIn;
+	});
+
 	const setEmailSignIn = Effect.fn("AdminActions.setEmailSignIn")(function* (actor: Actor, enabled: boolean) {
 		const before = (yield* signInProviders.active).email;
 		const after = yield* signInProviders.saveEmail(enabled, actor.id);
 		if (after !== before) yield* record(actor, "set-email-sign-in", { before: { enabled: before }, after: { enabled: after } });
-		return after;
+		return yield* emailSignIn(actor);
 	});
 
 	const unlinkMicrosoft = Effect.fn("AdminActions.unlinkMicrosoft")(function* (actor: Actor, userId: string) {
@@ -358,7 +367,7 @@ const make = Effect.gen(function* () {
 		removeLogo,
 		microsoftSignIn: signInProviders.microsoft,
 		setMicrosoftSignIn,
-		emailSignIn: Effect.map(signInProviders.active, (active) => active.email),
+		emailSignIn,
 		setEmailSignIn,
 		unlinkMicrosoft,
 		answer,

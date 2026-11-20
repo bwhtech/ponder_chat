@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { BottomSheet, Dialog } from "frappe-ui";
-import type { MicrosoftSignIn } from "../api";
+import type { MicrosoftSignIn, SignInData } from "../api";
 import { isMobile } from "../lib/viewport";
 import MicrosoftSignInForm from "./MicrosoftSignInForm.vue";
 
@@ -10,10 +10,10 @@ import MicrosoftSignInForm from "./MicrosoftSignInForm.vue";
  */
 defineProps<{ microsoft: MicrosoftSignIn; redirectUris: string[]; turningOn: boolean }>();
 const open = defineModel<boolean>("open", { default: false });
-const emit = defineEmits<{ saved: [microsoft: MicrosoftSignIn] }>();
+const emit = defineEmits<{ saved: [saved: Pick<SignInData, "microsoft" | "email">] }>();
 
-function saved(microsoft: MicrosoftSignIn) {
-	emit("saved", microsoft);
+function saved(next: Pick<SignInData, "microsoft" | "email">) {
+	emit("saved", next);
 	open.value = false;
 }
 </script>

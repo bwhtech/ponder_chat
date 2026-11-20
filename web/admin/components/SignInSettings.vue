@@ -7,7 +7,7 @@ import MicrosoftSignInDialog from "./MicrosoftSignInDialog.vue";
 
 /**
  * How people sign in: a switch for each way. Email is on unless turned off, which it can be
- * only while Microsoft works (server/auth/SignInProviders.ts). Microsoft's switch opens its
+ * only while Microsoft works, once this admin signed in with it (server/auth/SignInProviders.ts). Microsoft's switch opens its
  * dialog when it has nothing to run on yet; once on, Configure changes its settings.
  * Skeletons stand in for the switches until they load; if they can't, the error replaces them.
  * `heading` on the phone's Settings page, where the tabs' title is not there.
@@ -39,6 +39,8 @@ const microsoftOn = computed(() => turningOn.value || microsoft.value?.enabled =
 const complete = (settings: MicrosoftSignIn) => settings.hasSecret && !settings.secretUnreadable && settings.tenantId !== "";
 const microsoftWorks = computed(() => microsoft.value?.enabled === true && complete(microsoft.value));
 const email = computed(() => data.value?.email.enabled);
+/** Email can go off: Microsoft works, and this admin signed in with it since its settings were saved. */
+const emailCanGoOff = computed(() => microsoftWorks.value && data.value?.email.signedInWithMicrosoft === true);
 
 // Closed without saving: the switch goes back to off.
 watch(dialogOpen, (open) => !open && (turningOn.value = false));
@@ -55,6 +57,7 @@ function describe(settings: MicrosoftSignIn) {
 const emailDescription = computed(() => {
 	if (email.value === false) return "Off. People sign in with Microsoft only.";
 	if (data.value && !microsoftWorks.value) return "A code and a link by email. Turn on Microsoft to switch this off.";
+	if (data.value && !emailCanGoOff.value) return "A code and a link by email. To switch this off, sign in with Microsoft once.";
 	return "A code and a link by email.";
 });
 
@@ -98,9 +101,12 @@ async function setEmail(on: boolean) {
 	}
 }
 
-function saved(next: MicrosoftSignIn) {
-	if (data.value) data.value.microsoft = next;
+function saved(next: Pick<SignInData, "microsoft" | "email">) {
+	const emailBefore = data.value?.email.enabled;
+	if (data.value) Object.assign(data.value, next);
 	turningOn.value = false;
+	// A change that could stop Microsoft working turns email on again (server/auth/SignInProviders.ts).
+	if (emailBefore === false && next.email.enabled) toast.info("Sign-in by email is on again. Sign in with Microsoft to check the change, then switch it off.");
 }
 </script>
 
@@ -117,7 +123,7 @@ function saved(next: MicrosoftSignIn) {
 					<Switch
 						v-else
 						:model-value="email"
-						:disabled="savingEmail || (email && !microsoftWorks)"
+						:disabled="savingEmail || (email && !emailCanGoOff)"
 						aria-label="Sign in by email"
 						@update:model-value="setEmail"
 					/>

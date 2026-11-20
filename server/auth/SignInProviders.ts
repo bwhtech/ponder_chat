@@ -16,9 +16,11 @@ import { checkedSettings, InvalidSettings, MICROSOFT, NO_SETTINGS, SIGN_UPS, typ
  * (microsoft.ts), and whether sign-in by email is on. A provider's client secret is sealed
  * (secrets/Secrets.ts), so a copy of the database alone does not give it away.
  *
- * Sign-in by email is on unless an admin turned it off, and it can be off only while
- * Microsoft is on and works. When Microsoft goes off (an admin turns it off, or its secret
- * can't be read), email is on again by itself: there is always a way in.
+ * Sign-in by email is on unless an admin turned it off. It can go off only while Microsoft
+ * is on, and only for an admin who signed in with Microsoft since its settings were last
+ * saved: that sign-in shows the settings work, and let in an admin. When Microsoft goes off
+ * (an admin turns it off, or its secret can't be read), or a change could stop it working
+ * (another tenant, client, secret or domains), email is on again by itself: there is always a way in.
  *
  * Better Auth takes its providers when it is made, so Auth.ts makes it again after a
  * change: `active` carries a version for that. Every sign-in request asks for `active`, so
@@ -29,10 +31,15 @@ import { checkedSettings, InvalidSettings, MICROSOFT, NO_SETTINGS, SIGN_UPS, typ
 export type Active = { version: number; microsoft: Option.Option<MicrosoftProvider>; email: boolean };
 type Ways = Omit<Active, "version">;
 
-/** Email sign-in can't go off while Microsoft is off: nobody could sign in. */
-export class EmailNeeded extends Schema.TaggedError<EmailNeeded>()("EmailNeeded", {}) {
+/**
+ * Email sign-in can't go off: Microsoft is off, and nobody could sign in; or the admin has not
+ * signed in with Microsoft since its settings were saved, so nothing shows that they work.
+ */
+export class EmailNeeded extends Schema.TaggedError<EmailNeeded>()("EmailNeeded", { reason: Schema.Literals(["microsoft-off", "not-signed-in"]) }) {
 	override get message() {
-		return "Turn on sign-in with Microsoft first. Without it, nobody could sign in.";
+		return this.reason === "microsoft-off"
+			? "Turn on sign-in with Microsoft first. Without it, nobody could sign in."
+			: "Sign out, and sign in again with Microsoft first. That shows it works.";
 	}
 }
 
@@ -66,10 +73,15 @@ export class SignInProviders extends Context.Service<
 			by: string,
 		) => Effect.Effect<MicrosoftStatus, InvalidSettings | SqlError>;
 		/**
-		 * Turns sign-in by email on or off. Off only while Microsoft is on and works (EmailNeeded).
+		 * Turns sign-in by email on or off. Off only while Microsoft is on and works, and the admin
+		 * `by` (a user id) signed in with it since its settings were saved (EmailNeeded).
 		 * Whether it is on after.
 		 */
 		readonly saveEmail: (enabled: boolean, by: string) => Effect.Effect<boolean, EmailNeeded | SqlError>;
+		/** Whether the person signed in with Microsoft since its settings were last saved. */
+		readonly signedInSinceSaved: (userId: string) => Effect.Effect<boolean, SqlError>;
+		/** Notes a sign-in with Microsoft (Auth.ts), for signedInSinceSaved. */
+		readonly signedIn: (userId: string) => Effect.Effect<void, SqlError>;
 		/** What sign-in runs on now: Microsoft, when it is on and complete, and email unless it is off. Kept in memory. */
 		readonly active: Effect.Effect<Active, SqlError>;
 		/** Whether the person has a Microsoft account linked. */
@@ -147,6 +159,14 @@ const make = Effect.gen(function* () {
 			on conflict (id) do update set enabled = excluded.enabled, client_id = excluded.client_id,
 				client_secret = coalesce(excluded.client_secret, sign_in_providers.client_secret), tenant_id = excluded.tenant_id,
 				sign_ups = excluded.sign_ups, allowed_domains = excluded.allowed_domains, updated_by = excluded.updated_by, updated_at = now()`;
+		// What sign-in checks and where it goes: a change here may stop Microsoft working. Email goes on
+		// again, and an admin who wants it off signs in with Microsoft first, which shows it still works.
+		const mayBreak =
+			!settings.enabled ||
+			sealed !== null ||
+			before.tenantId !== settings.tenantId ||
+			before.clientId !== settings.clientId ||
+			before.allowedDomains.join(",") !== settings.allowedDomains.join(",");
 		// An account's id means something in its own tenant only. With another tenant, every linked person
 		// would be refused as "linked to another account": the links go, and each person links again at their next sign-in.
 		const newTenant = before.tenantId !== "" && before.tenantId !== settings.tenantId;
@@ -156,19 +176,42 @@ const make = Effect.gen(function* () {
 				Effect.gen(function* () {
 					yield* write;
 					if (newTenant) yield* sql`delete from accounts where "providerId" = ${MICROSOFT}`;
-					// Microsoft off: email is the way in again, and its setting says so.
-					if (!settings.enabled) yield* sql`update sign_in_providers set enabled = true, updated_by = ${by}, updated_at = now() where id = ${EMAIL} and not enabled`;
+					// Microsoft off, or maybe not working: email is the way in again, and its setting says so.
+					if (mayBreak) yield* sql`update sign_in_providers set enabled = true, updated_by = ${by}, updated_at = now() where id = ${EMAIL} and not enabled`;
 				}),
 			)
 			.pipe(Effect.ensuring(forget));
 		return yield* microsoft;
 	});
 
+	// Better Auth's table of linked accounts (Auth.ts). Ponder keeps no tokens (updateAccountOnSignIn
+	// is off), so Better Auth leaves "updatedAt" as it was made: it says when the person last signed in with it.
+	const signedInSinceSaved = Effect.fn("SignInProviders.signedInSinceSaved")(function* (userId: string) {
+		const rows = yield* sql`
+			select 1 from accounts a join sign_in_providers p on p.id = ${MICROSOFT}
+			where a."userId" = ${userId} and a."providerId" = ${MICROSOFT} and a."updatedAt" > p.updated_at limit 1`.pipe(
+			// No table yet: nobody signed in with it.
+			Effect.catchTags({ SqlError: (error) => (pgCode(error) === "42P01" ? Effect.succeed([]) : Effect.fail(error)) }),
+		);
+		return rows.length > 0;
+	});
+
+	const signedIn = Effect.fn("SignInProviders.signedIn")(function* (userId: string) {
+		yield* sql`update accounts set "updatedAt" = now() where "userId" = ${userId} and "providerId" = ${MICROSOFT}`;
+	});
+
 	const saveEmail = Effect.fn("SignInProviders.saveEmail")(function* (enabled: boolean, by: string) {
-		if (!enabled && Option.isNone((yield* active).microsoft)) return yield* new EmailNeeded();
-		yield* sql`
+		const write = sql`
 			insert into sign_in_providers (id, enabled, updated_by) values (${EMAIL}, ${enabled}, ${by})
-			on conflict (id) do update set enabled = excluded.enabled, updated_by = excluded.updated_by, updated_at = now()`.pipe(Effect.ensuring(forget));
+			on conflict (id) do update set enabled = excluded.enabled, updated_by = excluded.updated_by, updated_at = now()`;
+		const off = Effect.gen(function* () {
+			// Microsoft's row is held till the end, so its settings can't change between the check and the write.
+			yield* sql`select 1 from sign_in_providers where id = ${MICROSOFT} for update`;
+			if (Option.isNone(yield* provider)) return yield* new EmailNeeded({ reason: "microsoft-off" });
+			if (!(yield* signedInSinceSaved(by))) return yield* new EmailNeeded({ reason: "not-signed-in" });
+			yield* write;
+		});
+		yield* (enabled ? write : sql.withTransaction(off)).pipe(Effect.ensuring(forget));
 		return (yield* active).email;
 	});
 
@@ -198,7 +241,7 @@ const make = Effect.gen(function* () {
 		return { version: known.version, ...ways };
 	});
 
-	// Better Auth's table of linked accounts (Auth.ts): one row for a person's Microsoft account.
+	// One row in accounts for a person's Microsoft account.
 	const isLinked = Effect.fn("SignInProviders.isLinked")(function* (userId: string) {
 		const rows = yield* sql`select 1 from accounts where "userId" = ${userId} and "providerId" = ${MICROSOFT} limit 1`;
 		return rows.length > 0;
@@ -209,7 +252,7 @@ const make = Effect.gen(function* () {
 		return rows.length > 0;
 	});
 
-	return SignInProviders.of({ migrate, microsoft, saveMicrosoft, saveEmail, active, isLinked, unlink });
+	return SignInProviders.of({ migrate, microsoft, saveMicrosoft, saveEmail, signedInSinceSaved, signedIn, active, isLinked, unlink });
 });
 
 export const layer = Layer.effect(SignInProviders, make);

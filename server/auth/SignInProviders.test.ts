@@ -57,7 +57,7 @@ describe.skipIf(!base)("SignInProviders", () => {
 					updatedAt: null,
 				});
 				// Better Auth's table of linked accounts, as far as this service reads it.
-				yield* sql`create table accounts (id text primary key, "userId" text not null, "providerId" text not null, "accountId" text not null)`;
+				yield* sql`create table accounts (id text primary key, "userId" text not null, "providerId" text not null, "accountId" text not null, "updatedAt" timestamptz not null default now())`;
 				assert.isTrue(Option.isNone((yield* providers.active).microsoft));
 			}),
 		);
@@ -136,16 +136,52 @@ describe.skipIf(!base)("SignInProviders", () => {
 			}),
 		);
 
-		it.effect("turns sign-in by email off while Microsoft is on, and keeps it off", () =>
+		it.effect("turns sign-in by email off only for an admin who signed in with Microsoft since it was saved", () =>
 			Effect.gen(function* () {
 				const providers = yield* SignInProviders.SignInProviders;
+				const sql = yield* PgClient.PgClient;
 				assert.isTrue((yield* providers.active).email);
+				// Linked before the settings were last saved: nothing shows they work now.
+				yield* sql`insert into accounts (id, "userId", "providerId", "accountId", "updatedAt") values ('a4', 'cy', 'microsoft', 'oid-cy', now() - interval '1 day')`;
+				assert.isFalse(yield* providers.signedInSinceSaved("cy"));
+				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "cy"))).reason, "not-signed-in");
+				assert.isTrue((yield* providers.active).email);
+				// An admin with no Microsoft account at all.
+				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "nobody"))).reason, "not-signed-in");
+
+				yield* providers.signedIn("cy");
+				assert.isTrue(yield* providers.signedInSinceSaved("cy"));
 				const before = (yield* providers.active).version;
-				assert.isFalse(yield* providers.saveEmail(false, "admin"));
+				assert.isFalse(yield* providers.saveEmail(false, "cy"));
 				const active = yield* providers.active;
 				assert.isAbove(active.version, before);
 				assert.isFalse(active.email);
 				assert.isTrue(Option.isSome(active.microsoft));
+			}),
+		);
+
+		it.effect("turns sign-in by email on again when a change could stop Microsoft working", () =>
+			Effect.gen(function* () {
+				const providers = yield* SignInProviders.SignInProviders;
+				// Who may sign up does not change who gets in: email stays off. A new turn-off needs a new sign-in.
+				yield* providers.saveMicrosoft({ ...settings, signUps: "invited" }, undefined, "cy");
+				assert.isFalse((yield* providers.active).email);
+				assert.isFalse(yield* providers.signedInSinceSaved("cy"));
+				// Other domains may leave out every admin.
+				yield* providers.saveMicrosoft({ ...settings, allowedDomains: ["example.com"] }, undefined, "cy");
+				assert.isTrue((yield* providers.active).email);
+				// The same with another client, or a new secret.
+				for (const [change, secret] of [[{ clientId: "bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee" }, undefined], [{}, SECRET]] as const) {
+					yield* providers.saveMicrosoft(settings, undefined, "cy");
+					yield* providers.signedIn("cy");
+					assert.isFalse(yield* providers.saveEmail(false, "cy"));
+					yield* providers.saveMicrosoft({ ...settings, ...change }, secret, "cy");
+					assert.isTrue((yield* providers.active).email);
+				}
+				// Off again, for the next test.
+				yield* providers.saveMicrosoft(settings, undefined, "cy");
+				yield* providers.signedIn("cy");
+				assert.isFalse(yield* providers.saveEmail(false, "cy"));
 			}),
 		);
 	});
@@ -160,14 +196,14 @@ describe.skipIf(!base)("SignInProviders", () => {
 				assert.isTrue(Option.isNone((yield* providers.active).microsoft));
 				// Email was off: with Microsoft not working, it is on, whatever its setting says.
 				assert.isTrue((yield* providers.active).email);
-				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "admin")))._tag, "EmailNeeded");
+				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, "cy"))).reason, "microsoft-off");
 				// It can't be kept on with a secret that does not open: Settings asks for it again.
 				const refused = yield* Effect.flip(providers.saveMicrosoft(settings, undefined, "admin"));
 				assert.strictEqual(refused.message, "Enter the client secret.");
 				assert.isFalse((yield* providers.saveMicrosoft(settings, SECRET, "admin")).secretUnreadable);
 				assert.strictEqual(Option.getOrThrow((yield* providers.active).microsoft).clientSecret, SECRET);
-				// Microsoft works again, and email's setting was kept: off.
-				assert.isFalse((yield* providers.active).email);
+				// A new secret may not work: email is on again, till an admin signs in with Microsoft and turns it off.
+				assert.isTrue((yield* providers.active).email);
 			}),
 		);
 

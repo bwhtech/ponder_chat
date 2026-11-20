@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Button, FormControl, Password, toast } from "frappe-ui";
 import { computed, ref, watch } from "vue";
-import { admin, ApiError, unwrap, type MicrosoftSignIn } from "../api";
+import { admin, ApiError, unwrap, type MicrosoftSignIn, type SignInData } from "../api";
 
 /**
  * The settings of sign-in with Microsoft (server/auth/microsoft.ts), in MicrosoftSignInDialog:
@@ -14,7 +14,7 @@ type SignUps = MicrosoftSignIn["signUps"];
 type Field = "tenantId" | "clientId" | "clientSecret" | "domains";
 
 const props = defineProps<{ microsoft: MicrosoftSignIn; redirectUris: string[]; turningOn: boolean }>();
-const emit = defineEmits<{ saved: [microsoft: MicrosoftSignIn]; cancel: [] }>();
+const emit = defineEmits<{ saved: [saved: Pick<SignInData, "microsoft" | "email">]; cancel: [] }>();
 
 const SIGN_UP_OPTIONS: { label: string; value: SignUps }[] = [
 	{ label: "Invited people only", value: "invited" },
@@ -66,8 +66,7 @@ async function save() {
 			allowedDomains: domainsOf(domains.value),
 			...(clientSecret.value.trim() && { clientSecret: clientSecret.value.trim() }),
 		};
-		const { microsoft } = await unwrap(admin["sign-in"].microsoft.$put({ json }), "The sign-in settings could not be saved. Try again.");
-		emit("saved", microsoft);
+		emit("saved", await unwrap(admin["sign-in"].microsoft.$put({ json }), "The sign-in settings could not be saved. Try again."));
 		toast.success(props.turningOn ? "People can sign in with Microsoft" : "Saved the Microsoft settings");
 	} catch (e) {
 		const field = e instanceof ApiError ? FIELD_OF[e.errors[0] ?? ""] : undefined;

@@ -84,6 +84,8 @@ type Callbacks = {
 	readonly applyInvite: (user: { id: string; email: string }) => Promise<void>;
 	/** Whether the person has an account of this provider linked already. */
 	readonly hasProviderAccount: (userId: string, providerId: string) => Promise<boolean>;
+	/** Notes that the person signed in with Microsoft (SignInProviders.signedIn). */
+	readonly signedInWithMicrosoft: (userId: string) => Promise<void>;
 	readonly beforeCall: (ctx: AdminAuthEvents.HookContext) => Promise<void>;
 	readonly afterCall: (ctx: AdminAuthEvents.HookContext) => Promise<void>;
 	readonly forgetSessions: () => void;
@@ -186,6 +188,14 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 						if (!(await run.isAllowed(user.email))) throw new APIError("FORBIDDEN", { code: "NOT_INVITED", message: NOT_INVITED });
 					},
 					after: async (user) => run.applyInvite(user),
+				},
+			},
+			// A sign-in with Microsoft shows its settings work: then an admin can turn sign-in by email off (SignInProviders.ts).
+			session: {
+				create: {
+					after: async (session, ctx) => {
+						if (callbackProvider(ctx) === MICROSOFT) await run.signedInWithMicrosoft(session.userId);
+					},
 				},
 			},
 			account: {
@@ -328,6 +338,7 @@ const make = Effect.gen(function* () {
 		applyInvite: (user) => run(invites.applyInvite(user)),
 		hasProviderAccount: (userId, providerId) =>
 			run(Effect.map(sql`select 1 from accounts where "userId" = ${userId} and "providerId" = ${providerId} limit 1`, (rows) => rows.length > 0)),
+		signedInWithMicrosoft: (userId) => run(signInProviders.signedIn(userId)),
 		beforeCall: (ctx) => run(adminAuthEvents.before(ctx)),
 		afterCall: (ctx) => run(adminAuthEvents.after(ctx)),
 		forgetSessions: () => sessions.clear(),

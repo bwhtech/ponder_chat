@@ -487,7 +487,13 @@ describe.skipIf(!base)("Sign in with Microsoft", () => {
 				const [link] = yield* sql<{ identifier: string }>`select identifier from verifications where value like ${`%${ana}%`} order by "createdAt" desc limit 1`;
 				assert.isDefined(link);
 
-				assert.isFalse(yield* providers.saveEmail(false, "test-admin"));
+				// Turning email off needs a sign-in with Microsoft since its settings were saved: it shows they work.
+				yield* save({}, undefined);
+				const anaId = (yield* sql<{ id: string }>`select id from users where email = ${ana}`)[0]?.id ?? "";
+				assert.strictEqual((yield* Effect.flip(providers.saveEmail(false, anaId))).reason, "not-signed-in");
+				assert.strictEqual((yield* signIn(ana)).landed.pathname, "/chat/after");
+				assert.isTrue(yield* providers.signedInSinceSaved(anaId));
+				assert.isFalse(yield* providers.saveEmail(false, anaId));
 				assert.isFalse((yield* providers.active).email);
 				// No link or code is sent, none is checked, and the link sent before no longer signs in.
 				assert.strictEqual((yield* magicLink(browser(), ana)).status, 404);
@@ -505,8 +511,8 @@ describe.skipIf(!base)("Sign in with Microsoft", () => {
 				assert.deepStrictEqual(yield* sql`select enabled from sign_in_providers where id = 'email'`, [{ enabled: true }]);
 				assert.strictEqual((yield* magicLink(browser(), person("nobody"))).status, 200);
 				// And it can't go off while Microsoft is off: nobody could sign in.
-				const refused = yield* Effect.flip(providers.saveEmail(false, "test-admin"));
-				assert.strictEqual(refused._tag, "EmailNeeded");
+				const refused = yield* Effect.flip(providers.saveEmail(false, anaId));
+				assert.strictEqual(refused.reason, "microsoft-off");
 				assert.isTrue((yield* providers.active).email);
 			}),
 		);
