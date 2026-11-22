@@ -193,11 +193,40 @@ describe.skipIf(!base)("replies that race", () => {
 			}).pipe(onFakeWorkflow),
 		);
 
+		it.effect("four replies started at once in four chats: one is refused", () =>
+			Effect.gen(function* () {
+				const replies = yield* Replies.Replies;
+				const busy = `test-busy-${tag}`;
+				const results = yield* Effect.all(
+					[1, 2, 3, 4].map((chat) => Effect.exit(replies.start({ threadId: `thread-busy-${chat}-${tag}`, owner: busy, messages: [message("m1", "Hello")] }))),
+					{ concurrency: "unbounded" },
+				);
+				const refused = results.filter(Exit.isFailure);
+				assert.strictEqual(refused.length, 1);
+				assert.strictEqual(Exit.findErrorOption(refused[0]!).pipe(Option.getOrThrow)._tag, "TooManyReplies");
+			}).pipe(onFakeWorkflow),
+		);
+
+		it.effect("stopped calls whose cost is not known yet count as in flight", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const replies = yield* Replies.Replies;
+				const stopper = `test-stopper-${tag}`;
+				for (const call of [1, 2, 3]) {
+					yield* sql`
+						insert into runs (id, "user", function_id, model, steps, input_tokens, output_tokens, cached_tokens, cost_usd, duration_ms, finish_reason, created_at)
+						values (${`${stopper}-${call}`}, ${stopper}, 'chat', 'test/model', 1, 0, 0, 0, null, 0, 'stopped', now())`;
+				}
+				const refused = yield* Effect.flip(replies.start({ threadId: `thread-stopper-${tag}`, owner: stopper, messages: [message("m1", "Hello")] }));
+				assert.strictEqual(refused._tag, "TooManyReplies");
+			}).pipe(onFakeWorkflow),
+		);
+
 		it.effect("a sweep stopped in the middle of saving a reply leaves its run for the next sweep", () =>
 			Effect.gen(function* () {
 				const threadId = `thread-sweep-stop-${tag}`;
 				const replies = yield* Replies.Replies;
-				const { runId } = yield* replies.start({ threadId, owner, messages: [message("m1", "Hi")] });
+				const { runId } = yield* replies.start({ threadId, owner: `test-sweep-${tag}`, messages: [message("m1", "Hi")] });
 				// The run failed without saving its reply, and its stream is still being read when the sweep stops (SIGTERM).
 				workflow.status.set(runId, "failed");
 				const reading = Deferred.makeUnsafe<void>();

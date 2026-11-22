@@ -217,6 +217,8 @@ describe.skipIf(!base)("chats in a workspace", () => {
 				const sql = yield* PgClient.PgClient;
 				const workspaces = yield* Workspaces.Workspaces;
 				const replies = yield* Replies.Replies;
+				// The fake workflow's runs never finish, and a person may have only a few in flight.
+				yield* sql`update thread_runs set finished_at = now() where finished_at is null`;
 				const racing = (yield* workspaces.create(actor(ana), { name: "Racing", description: "", instructions: "", icon: null })).id;
 				yield* workspaces.setOrgAccess(actor(ana), racing, "ask");
 				// A chat already in it, whose row the test holds: the delete stops there, with the workspace taken.
