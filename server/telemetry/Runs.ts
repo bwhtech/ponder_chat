@@ -32,10 +32,11 @@ export const COMPACTION_FUNCTION_ID = "compaction";
 /**
  * How a reply's model call ends when it did not finish (ModelCalls.ts): still running or
  * cut by a crash ("started"), cut by a crash and settled ("interrupted"), tried again
- * ("retried"), failed on its last attempt ("failed"), or cut by Stop ("stopped").
- * OpenRouter may bill them, so they are kept, but they cost the person no credits.
+ * ("retried"), or failed on its last attempt ("failed"). OpenRouter may bill them, so they
+ * are kept, but they cost the person no credits. A call cut by Stop ("stopped") does cost
+ * credits: it runs to its end on OpenRouter, and the person read what it wrote.
  */
-export const UNCHARGED_CALLS = ["started", "interrupted", "retried", "failed", "stopped"] as const;
+export const UNCHARGED_CALLS = ["started", "interrupted", "retried", "failed"] as const;
 
 /** One agent run: one generateText/streamText call, such as one /api/chat request or one subagent call. */
 export type RunRow = {
@@ -105,7 +106,7 @@ export class Runs extends Context.Service<
 		/**
 		 * Read-only usage for `GET /api/usage?thread=`: a person's runs, for one thread or the latest 100,
 		 * with totals. Subagent runs carry the thread of the run that called them. The list has
-		 * every row; the totals leave out the model calls that did not finish (UNCHARGED_CALLS)
+		 * every row; the totals leave out the model calls that cost no credits (UNCHARGED_CALLS)
 		 * and the app's own calls (SYSTEM_FUNCTION_IDS), which cost the person nothing.
 		 */
 		readonly usageReport: (query: { user: string; thread?: string }) => Effect.Effect<UsageReport, SqlError>;
@@ -121,10 +122,11 @@ const make = Effect.gen(function* () {
 	 * deploy/sentinel.sh all read this view.
 	 *
 	 * A reply writes one "chat" run per model call; the calls before the last end in
-	 * "tool-calls", so only the last one is the reply. Web searches, memory and titles have
-	 * their own function_id; the app's own calls (SYSTEM_FUNCTION_IDS) cost no credits. Model calls that a crash, an error or Stop cut short are kept in
-	 * `runs` but cost no credits (UNCHARGED_CALLS, ModelCalls.ts). The view is made again at
-	 * each start, because `runs.*` changes when `runs` gets a column.
+	 * "tool-calls", so only the last one is the reply; a call cut by Stop is charged but is
+	 * not a finished reply. Web searches, memory and titles have their own function_id; the
+	 * app's own calls (SYSTEM_FUNCTION_IDS) cost no credits. Model calls that a crash or an
+	 * error cut short are kept in `runs` but cost no credits (UNCHARGED_CALLS, ModelCalls.ts).
+	 * The view is made again at each start, because `runs.*` changes when `runs` gets a column.
 	 */
 	const migrateChargedRuns = sql.withTransaction(
 		Effect.gen(function* () {
@@ -132,7 +134,7 @@ const make = Effect.gen(function* () {
 			// A view's query can't take parameters, so the constant goes in as text.
 			yield* sql.unsafe(`
 				create view charged_runs as
-				select runs.*, (function_id = 'chat' and parent_id is null and finish_reason <> 'tool-calls') as is_reply
+				select runs.*, (function_id = 'chat' and parent_id is null and finish_reason not in ('tool-calls', 'stopped')) as is_reply
 				from runs where coalesce(function_id, '') not in (${quoted(SYSTEM_FUNCTION_IDS)})
 					and finish_reason not in (${quoted(UNCHARGED_CALLS)})`);
 		}),

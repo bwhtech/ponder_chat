@@ -76,6 +76,14 @@ export class ThreadRuns extends Context.Service<
 		 * the pool while `work` needs others, and enough waiting requests would empty the pool.
 		 */
 		readonly withLock: <A, E, R>(threadId: string, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+		/** As withLock, for one person, so replies started at once each count the others (inFlight). */
+		readonly withPersonLock: <A, E, R>(owner: string, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
+		/**
+		 * What the person's credits can't see yet: their replies running in other threads, and
+		 * their stopped calls whose cost OpenRouter has not told. A run or a cost that never
+		 * settles stops counting after a while, so it can't keep the person out.
+		 */
+		readonly inFlight: (owner: string, threadId: string) => Effect.Effect<number, SqlError>;
 	}
 >()("ponder/workflow/ThreadRuns") {}
 
@@ -96,6 +104,7 @@ const make = Effect.gen(function* () {
 		yield* sql`alter table thread_runs add column if not exists message_id text`;
 		yield* sql`alter table thread_runs add column if not exists base_parts integer`;
 		yield* sql`alter table thread_runs add column if not exists failed boolean not null default false`;
+		yield* sql`create index if not exists thread_runs_unfinished on thread_runs (thread_id) where finished_at is null`;
 	});
 
 	const setActive = Effect.fn("ThreadRuns.setActive")(function* (threadId: string, runId: string, model: string, continued: Continued | null = null) {
@@ -157,28 +166,50 @@ const make = Effect.gen(function* () {
 		yield* sql`delete from thread_runs where thread_id = ${threadId}`;
 	});
 
-	// One lock per thread with work waiting or running, gone when the last one is done. A
-	// Semaphore serves its waiters in order, as the old chain of promises did.
+	const findInFlight = SqlSchema.findOne({
+		Request: Schema.Struct({ owner: Schema.String, threadId: Schema.String }),
+		Result: Schema.Struct({ count: Schema.Number }),
+		execute: ({ owner, threadId }) => sql`
+			select (
+				(select count(*) from thread_runs join threads on threads.id = thread_runs.thread_id
+					where threads.owner = ${owner} and thread_runs.thread_id <> ${threadId}
+						and thread_runs.finished_at is null and thread_runs.started_at > now() - interval '1 hour')
+				+ (select count(*) from runs
+					where "user" = ${owner} and finish_reason = 'stopped' and cost_usd is null and created_at > now() - interval '2 minutes')
+			)::int as count`,
+	});
+
+	const inFlight = Effect.fn("ThreadRuns.inFlight")(function* (owner: string, threadId: string) {
+		const row = yield* findInFlight({ owner, threadId }).pipe(Effect.catchTags({ SchemaError: Effect.die, NoSuchElementError: Effect.die }));
+		return row.count;
+	});
+
+	return ThreadRuns.of({ migrate, setActive, active, latest, unfinished, finish, superseded, forget, withLock: keyedLock(), withPersonLock: keyedLock(), inFlight });
+});
+
+export const layer = Layer.effect(ThreadRuns, make);
+
+/**
+ * One lock per key with work waiting or running, gone when the last one is done. A
+ * Semaphore serves its waiters in order, as the old chain of promises did.
+ */
+function keyedLock() {
 	const locks = new Map<string, { lock: Semaphore.Semaphore; holders: number }>();
-	const withLock = <A, E, R>(threadId: string, work: Effect.Effect<A, E, R>) =>
+	return <A, E, R>(key: string, work: Effect.Effect<A, E, R>) =>
 		Effect.acquireUseRelease(
 			Effect.sync(() => {
-				const entry = locks.get(threadId) ?? { lock: Semaphore.makeUnsafe(1), holders: 0 };
+				const entry = locks.get(key) ?? { lock: Semaphore.makeUnsafe(1), holders: 0 };
 				entry.holders++;
-				locks.set(threadId, entry);
+				locks.set(key, entry);
 				return entry;
 			}),
 			(entry) => entry.lock.withPermit(work),
 			(entry) =>
 				Effect.sync(() => {
-					if (--entry.holders === 0) locks.delete(threadId);
+					if (--entry.holders === 0) locks.delete(key);
 				}),
 		);
-
-	return ThreadRuns.of({ migrate, setActive, active, latest, unfinished, finish, superseded, forget, withLock });
-});
-
-export const layer = Layer.effect(ThreadRuns, make);
+}
 
 function threadRun(row: typeof RunRow.Type): ThreadRun {
 	return {

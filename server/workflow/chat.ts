@@ -3,6 +3,7 @@ import { getWorkflowMetadata, getWritable } from "workflow";
 import { RESEARCH_MODEL, type WebMode } from "../../shared/web-mode.ts";
 import { ContextGuard, ContextOverLimitError } from "./context-guard.ts";
 import { runReply } from "./loop.ts";
+import { CreditsRanOutError } from "./model-call.ts";
 import type { Continued } from "./runs.ts";
 import { endReplyStream, finishRunStep, saveReplyStep, turnContextStep } from "./steps.ts";
 
@@ -81,7 +82,7 @@ export async function chatTurn(turn: ChatTurn) {
 		failure = error;
 	}
 	const failed = turn.web === "research" ? "Deep research could not finish. Retry, or ask without it." : `${turn.model.name} could not finish this reply. Retry, or choose another model.`;
-	const message = failure instanceof ContextOverLimitError ? failure.message : failure ? failed : undefined;
+	const message = failure instanceof ContextOverLimitError || failure instanceof CreditsRanOutError ? failure.message : failure ? failed : undefined;
 	// A stream left open would keep the save below waiting, so then the save reads only what the run wrote.
 	const ended = await endReplyStream(writable, message).then(
 		() => true,

@@ -20,9 +20,9 @@ import * as ExtraCredits from "./ExtraCredits.ts";
  *
  * Spending is read from `charged_runs` (telemetry/Runs.ts): the `runs` that OpenRouter
  * charged for, except thread titles, which the app makes and the person did not ask for. Nothing is reserved up front: a person
- * with credits left can start a reply, and that one reply may take them past the limit.
- * The next one is refused. Replies have no length cap of their own: going over by one
- * reply is accepted.
+ * with credits left can start a reply. The credits are read again before each later model
+ * call of the reply, and a person has at most a few replies in flight (workflow/replies.ts),
+ * so going past the limit is bounded by the model calls already running.
  *
  * The default limit and the credits per dollar are in `settings` (settings/Settings.ts), which
  * admins change on /admin. A row in `credit_limits` sets one person's limit (from /admin,

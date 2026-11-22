@@ -2,7 +2,7 @@ import type { ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { ModelMessage, ToolCallPart } from "ai";
 import type { Estimate } from "../compaction/tokens.ts";
 import { answeredApprovals, signApprovalStep, verifyApprovalStep, withoutApprovals, type Approval } from "./approvals.ts";
-import { modelCallStep, type ModelCall, type ModelToolCall } from "./model-call.ts";
+import { CreditsRanOutError, modelCallStep, type ModelCall, type ModelToolCall } from "./model-call.ts";
 import { STEP_BOUNDARY } from "./stream-parts.ts";
 import type { ToolSetup, ToolsTurn } from "./reply-tools.ts";
 import { callConnectorToolStep, planToolCallsStep, runPythonStep, webFetchStep, webSearchStep, workspaceSearchStep } from "./steps.ts";
@@ -57,7 +57,8 @@ class ReplyLoop {
 		let measured = 0;
 		for (let step = 1; step <= this.reply.maxSteps; step++) {
 			const estimated = await this.keepInside(step === 1, measured);
-			const response = await modelCallStep({ ...this.call, messages: this.messages, tools, estimated }, this.reply.writable);
+			const response = await modelCallStep({ ...this.call, messages: this.messages, tools, estimated, checkCredits: step > 1 }, this.reply.writable);
+			if (response.outOfCredits) throw new CreditsRanOutError();
 			measured = response.inputTokens;
 			// Under Auto the rest of the reply stays on the model that answered, which needs its
 			// own signed reasoning back with its tool calls; another model could not take it.

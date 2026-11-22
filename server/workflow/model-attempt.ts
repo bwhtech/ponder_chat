@@ -16,6 +16,7 @@ import * as Stream from "effect/Stream";
 import { isAuto } from "../../shared/auto-model.ts";
 import * as CompactionStore from "../compaction/store.ts";
 import { measuredRatio } from "../compaction/tokens.ts";
+import * as Credits from "../credits/Credits.ts";
 import * as AutoRouter from "../models/AutoRouter.ts";
 import { problem, sqlMessage } from "../runtime/Database.ts";
 import type { StepRules } from "../runtime/step.ts";
@@ -75,6 +76,9 @@ export const rules: StepRules<ModelCallRetry | ModelCallFatal | SqlError> = {
 export type StepAttempt = { stepId: string; attempt: number };
 
 type Finish = Extract<TextStreamPart<ToolSet>, { type: "finish-step" }>;
+
+/** Whether the person has no credits left, before a later model call of their reply (model-call.ts). */
+export const outOfCredits = (owner: string) => Effect.map(Credits.Credits.use((credits) => credits.status(owner)), (status) => status.remaining <= 0);
 
 export const run = Effect.fnUntraced(function* (call: ModelCall, writable: WritableStream<ModelCallStreamPart>, step: StepAttempt) {
 	const calls = yield* ModelCalls.ModelCalls;
