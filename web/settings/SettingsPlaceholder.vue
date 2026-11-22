@@ -5,12 +5,15 @@ import DialogFrame from "../DialogFrame.vue";
 import { credits } from "../numbers";
 import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
 import PanelHeader from "./PanelHeader.vue";
-import { creditsNote, MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, type SettingsTab } from "./state";
+import { creditsNote, MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, USAGE_INTRO, type SettingsTab } from "./state";
+import UsageSkeleton from "./UsageSkeleton.vue";
+import UsageToday from "./UsageToday.vue";
 
 /**
  * Settings (SettingsModal.vue) while its code arrives: the same dialog, the same sidebar, and
- * the open tab. Account has everything it shows already; Memory and Connectors show rows
- * shaped like theirs, as their own loading does (MemoryPanel.vue, connectors/ConnectorsPanel.vue).
+ * the open tab. Account has everything it shows already, and Usage its first card; Usage, Memory
+ * and Connectors show rows shaped like theirs, as their own loading does (UsagePanel.vue,
+ * MemoryPanel.vue, connectors/ConnectorsPanel.vue).
  * Nothing moves when the dialog takes its place. The markup copies frappe-ui's SettingsDialog,
  * and Memory's tabs copy frappe-ui's TabButtons, with Memories chosen.
  */
@@ -70,6 +73,15 @@ function pick(tab: SettingsTab) {
 									<span class="whitespace-nowrap text-sm tabular-nums text-ink-gray-6">{{ credits(me.credits.remaining) }} left today</span>
 								</div>
 							</div>
+						</div>
+					</div>
+				</template>
+				<template v-else-if="settings.tab === 'usage'">
+					<PanelHeader title="Usage" :description="USAGE_INTRO" />
+					<div class="min-h-0 flex-1 overflow-hidden px-4 pb-16 sm:px-12">
+						<div class="space-y-4 pt-5">
+							<UsageToday v-if="me" :credits="me.credits" />
+							<UsageSkeleton />
 						</div>
 					</div>
 				</template>

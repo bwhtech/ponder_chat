@@ -36,6 +36,6 @@ const refill = computed(() => `Refills ${fromNow(props.credits.resetsAt)}`);
 				:style="{ transform: `translateX(${(left - 1) * 100}%)` }"
 			/>
 		</div>
-		<span class="text-p-xs text-ink-gray-6">{{ refill }}</span>
+		<span class="text-p-xs text-ink-gray-6"><slot name="refill">{{ refill }}</slot></span>
 	</div>
 </template>

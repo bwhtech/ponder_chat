@@ -6,14 +6,18 @@ import { credits } from "../numbers";
  * the chat (a connector that needs a new sign-in, a memory note under a reply) and the
  * account menu can open it.
  */
-export type SettingsTab = "account" | "memory" | "connectors";
+export type SettingsTab = "account" | "usage" | "memory" | "connectors";
 
 /** Settings' tabs, in the dialog's sidebar (SettingsModal.vue) and in its stand-in (SettingsPlaceholder.vue). */
 export const SETTINGS_TABS: { value: SettingsTab; label: string; icon: string }[] = [
 	{ value: "account", label: "Account", icon: "lucide-circle-user" },
+	{ value: "usage", label: "Usage", icon: "lucide-gauge" },
 	{ value: "memory", label: "Memory", icon: "lucide-brain" },
 	{ value: "connectors", label: "Connectors", icon: "lucide-plug" },
 ];
+
+/** The Usage tab's first line, in the tab (UsagePanel.vue) and in its stand-in. */
+export const USAGE_INTRO = "Your credits today, and what used them over the last 30 days.";
 
 /** The Memory tab's first lines, in the tab (MemoryPanel.vue) and in its stand-in. */
 export const MEMORY_INTRO =
