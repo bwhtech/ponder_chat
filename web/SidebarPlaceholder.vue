@@ -18,13 +18,10 @@ defineProps<{ sheet?: boolean; name: string }>();
 <template>
 	<nav v-if="!sheet && sidebarCollapsed" class="hidden h-full flex-shrink-0 flex-col overflow-x-hidden border-r border-outline-gray-1 bg-surface-sidebar md:flex" style="width: 3rem" aria-label="Chats" aria-busy="true">
 		<div class="flex h-12 shrink-0 items-center px-1">
-			<div class="flex h-10 items-center rounded-4 px-1.5"><div class="size-7 shrink-0 overflow-hidden rounded-[6px]"><BrandLogo class="size-full" /></div></div>
+			<div class="flex size-10 shrink-0 items-center justify-center"><span class="lucide-panel-left size-4 text-ink-gray-6" aria-hidden="true" /></div>
 		</div>
-		<div class="mt-auto px-2 pb-1">
+		<div class="mt-auto px-2 pb-2">
 			<div class="flex h-7 items-center pl-2 [@media(pointer:coarse)]:h-11"><span class="lucide-square-pen size-4 text-ink-gray-6" aria-hidden="true" /></div>
-		</div>
-		<div class="px-2 pb-2">
-			<div class="flex h-7 items-center pl-2 [@media(pointer:coarse)]:h-11"><span class="lucide-panel-right-open size-4 rotate-180 text-ink-gray-6" aria-hidden="true" /></div>
 		</div>
 	</nav>
 	<nav v-else-if="!sheet" class="hidden h-full flex-shrink-0 flex-col overflow-x-hidden border-r border-outline-gray-1 bg-surface-sidebar md:flex" style="width: 16rem" aria-label="Chats" aria-busy="true">
