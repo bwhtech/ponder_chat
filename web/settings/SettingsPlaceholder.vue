@@ -2,10 +2,9 @@
 import { Button, Skeleton } from "frappe-ui";
 import { me, signOut } from "../account";
 import DialogFrame from "../DialogFrame.vue";
-import { credits } from "../numbers";
 import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
 import PanelHeader from "./PanelHeader.vue";
-import { creditsNote, MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, USAGE_INTRO, type SettingsTab } from "./state";
+import { MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, USAGE_INTRO, type SettingsTab } from "./state";
 import UsageSkeleton from "./UsageSkeleton.vue";
 import UsageToday from "./UsageToday.vue";
 
@@ -62,15 +61,6 @@ function pick(tab: SettingsTab) {
 								</div>
 								<div class="flex shrink-0 items-start justify-end">
 									<Button icon-left="lucide-log-out" label="Sign out" @click="signOut" />
-								</div>
-							</div>
-							<div class="flex items-center gap-8 py-3.5">
-								<div class="min-w-0 flex-1">
-									<div class="block text-base-medium leading-tighter text-ink-gray-8">Daily credits</div>
-									<div class="mt-1 text-base leading-5 text-ink-gray-6">{{ creditsNote(me.credits) }}</div>
-								</div>
-								<div class="flex shrink-0 items-start justify-end">
-									<span class="whitespace-nowrap text-sm tabular-nums text-ink-gray-6">{{ credits(me.credits.remaining) }} left today</span>
 								</div>
 							</div>
 						</div>
