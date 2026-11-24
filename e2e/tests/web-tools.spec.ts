@@ -152,8 +152,8 @@ test("Deep research is for one message: Perplexity's research model writes it, i
 	expect(first.model).toBe(RESEARCH_MODEL.id);
 	expect(first.tools).toEqual([]);
 	expect(first.system).toContain("You are Ponder's deep research");
-	await expect(chat.reply(page).getByRole("link", { name: "[1]" })).toHaveAttribute("href", "https://research.example/retention");
-	await expect(chat.reply(page).getByRole("link", { name: "[2]" })).toHaveAttribute("href", "https://research.example/survey");
+	await expect(chat.reply(page).getByRole("link", { name: "Source 1" })).toHaveAttribute("href", "https://research.example/retention");
+	await expect(chat.reply(page).getByRole("link", { name: "Source 2" })).toHaveAttribute("href", "https://research.example/survey");
 	await expect(replyWeb(page)).toHaveText("Deep research");
 	// The chat's model did not write it, so its name is not under it.
 	await expect(chat.reply(page).locator('[data-slot="reply-model"]')).toHaveCount(0);
