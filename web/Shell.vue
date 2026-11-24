@@ -241,6 +241,7 @@ function onSaved() {
 				@new-chat="newThread"
 				@select-workspace="pickWorkspace"
 				@new-workspace="newWorkspace"
+				@open-usage="showSettings('usage')"
 			/>
 
 			<!-- The page's main landmark, as on the sign-in page: the open chat or a workspace. -->
@@ -304,6 +305,7 @@ function onSaved() {
 				@new-chat="newThread"
 				@select-workspace="pickWorkspace"
 				@new-workspace="newWorkspace"
+				@open-usage="showSettings('usage')"
 			/>
 		</BottomSheet>
 

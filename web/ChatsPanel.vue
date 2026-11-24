@@ -14,7 +14,7 @@ import WorkspaceRows from "./workspaces/WorkspaceRows.vue";
  * `highlight` marks the open chat; `highlightWorkspace` the open workspace page.
  */
 defineProps<{ sheet?: boolean; name: string; menu: DropdownOptions; highlight: boolean; highlightWorkspace: boolean }>();
-const emit = defineEmits<{ select: [id: string]; newChat: []; selectWorkspace: [id: string]; newWorkspace: [] }>();
+const emit = defineEmits<{ select: [id: string]; newChat: []; selectWorkspace: [id: string]; newWorkspace: []; openUsage: [] }>();
 </script>
 
 <template>
@@ -31,7 +31,9 @@ const emit = defineEmits<{ select: [id: string]; newChat: []; selectWorkspace: [
 			<Button variant="outline" size="md" icon-left="lucide-square-pen" class="w-full !justify-start !px-2 bg-surface-base transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out-strong active:scale-[0.98] motion-reduce:transform-none" @click="emit('newChat')">New chat</Button>
 		</div>
 		<div v-if="me" class="px-2 pb-2">
-			<CreditMeter :credits="me.credits" />
+			<button type="button" class="block w-full rounded-7 text-left hover:bg-surface-gray-2 active:bg-surface-gray-3" @click="emit('openUsage')">
+				<CreditMeter :credits="me.credits" />
+			</button>
 		</div>
 	</Sidebar>
 	<div v-else class="flex flex-col gap-2 px-2 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -41,7 +43,9 @@ const emit = defineEmits<{ select: [id: string]; newChat: []; selectWorkspace: [
 			<WorkspaceRows :highlight="highlightWorkspace" @select="emit('selectWorkspace', $event)" @create="emit('newWorkspace')" />
 		</ThreadList>
 		<div v-if="me" class="border-t border-outline-gray-1 pt-2">
-			<CreditMeter :credits="me.credits" />
+			<button type="button" class="block w-full rounded-7 text-left hover:bg-surface-gray-2 active:bg-surface-gray-3" @click="emit('openUsage')">
+				<CreditMeter :credits="me.credits" />
+			</button>
 		</div>
 	</div>
 </template>
