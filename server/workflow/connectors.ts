@@ -4,7 +4,6 @@ import { CONNECTOR_CALL, CONNECTOR_SEARCH } from "../../shared/connectors.ts";
 import { Catalog, MAX_LIMIT, MAX_TOOL_NAME, offText, type CatalogData } from "../mcp/catalog.ts";
 import { MAX_QUERY_CHARS } from "../mcp/rank.ts";
 import { approvedIn } from "./connector-messages.ts";
-import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
 
 /**
  * The person's connector tools in a reply. They are not tools of their own: the model
@@ -13,21 +12,12 @@ import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
  * cached (mcp/catalog.ts). Which connectors the person has goes with their latest
  * message (connector-messages.ts).
  *
- * A live MCP client can't cross a step boundary or survive a restart, so one step reads
- * the catalog as plain data (recorded, so a replay uses the same tools). Searching and
+ * A live MCP client can't cross a step boundary or survive a restart, so the reply's
+ * context step reads the catalog as plain data (turnContextStep in steps.ts; recorded, so
+ * a replay uses the same tools). Searching and
  * checking a call are pure, so they need no step. Each call is its own step that
  * connects (mcp/McpClients.ts).
  */
-
-export async function connectorCatalogStep(owner: string): Promise<CatalogData> {
-	"use step";
-	return contextStep("connectors", `person ${owner}`, async () => {
-		const { runStep } = await import("../runtime/step.ts");
-		const Connectors = await import("../mcp/Connectors.ts");
-		return runStep(Connectors.Connectors.use((connectors) => connectors.connectorCatalogFor(owner)));
-	});
-}
-connectorCatalogStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 /** The section for the instructions. It names no connector, so it stays the same when they change. */
 export const CONNECTOR_GUIDANCE = `The person connected apps to Ponder (connectors), and a <connectors> note in their latest message names them. Connector tools are not in your tool list. Find one with ${CONNECTOR_SEARCH}, then call it with ${CONNECTOR_CALL}, with its exact name and an input that fits the signature the search returned. When the note lists a tool with its signature, call it directly. Use connectors when the person asks about what is in those apps, or asks you to do something there. Search before you say you can't do something in one of them. ${CONNECTOR_SEARCH} searches only the connectors, not the web.

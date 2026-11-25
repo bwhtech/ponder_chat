@@ -26,6 +26,7 @@ import { calledToolName } from "./connectors.ts";
 import type { ModelCall, ModelResponse, ModelToolCall } from "./model-call.ts";
 import { classifyModelError, FIRST_CHUNK_MS, ModelStalledError, NEXT_CHUNK_MS, RESEARCH_FIRST_CHUNK_MS, RESEARCH_NEXT_CHUNK_MS } from "./model-errors.ts";
 import * as ChatModels from "./model.ts";
+import { CoalescingWriter } from "./coalesce.ts";
 import { RESET_STEP, storedPart, toolCallOf } from "./stream-parts.ts";
 import * as WorkflowRuns from "./WorkflowRuns.ts";
 
@@ -158,6 +159,8 @@ const modelStream = Effect.fnUntraced(
 			onError: () => {},
 		});
 		const seen: { error?: unknown; finish?: Finish } = {};
+		// The model's small pieces are joined before they are written (coalesce.ts).
+		const out = new CoalescingWriter(writer);
 		const toolCalls: ModelToolCall[] = [];
 		const stall = stallDeadline(since, call.research ? { first: RESEARCH_FIRST_CHUNK_MS, next: RESEARCH_NEXT_CHUNK_MS } : { first: FIRST_CHUNK_MS, next: NEXT_CHUNK_MS });
 		// Per part: no span for each one.
@@ -170,14 +173,16 @@ const modelStream = Effect.fnUntraced(
 			if (!stored) return;
 			// Only the model's output counts: streamText sends its own start parts at once.
 			stall.moved(yield* Clock.currentTimeMillis);
-			yield* write(writer, stored);
+			yield* Effect.tryPromise({ try: () => out.write(stored), catch: (cause) => new AttemptBroke({ cause }) });
 		});
 		// The deadline is watched on its own, so a write that waits (the durable stream)
 		// can't hold it off, as the old watchdog's timer could not be held off.
 		yield* Effect.raceFirst(
 			Stream.fromAsyncIterable(result.fullStream, (cause) => new AttemptBroke({ cause })).pipe(Stream.runForEach(take)),
 			stall.watch.pipe(Effect.tapError(() => Scope.close(request, Exit.void))),
-		);
+		).pipe(Effect.ensuring(Effect.promise(() => out.flush().catch(() => undefined))));
+		// What waited is written before the step returns; a write that failed fails the attempt.
+		yield* Effect.tryPromise({ try: () => out.flush(), catch: (cause) => new AttemptBroke({ cause }) });
 		const { error, finish } = seen;
 		if (error !== undefined) return yield* new AttemptBroke({ cause: error });
 		if (!finish) return yield* Effect.fail(new ModelStalledError("The model's stream ended without finishing."));

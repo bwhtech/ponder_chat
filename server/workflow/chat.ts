@@ -19,25 +19,12 @@ import {
 } from "../search/schema.ts";
 import { needsFetchApproval } from "../search/trusted-pages.ts";
 import { connectorNote } from "../mcp/catalog-note.ts";
-import { EMPTY_CATALOG } from "../mcp/catalog.ts";
-import { CONNECTOR_GUIDANCE, connectorCatalogStep, connectorTools } from "./connectors.ts";
+import { CONNECTOR_GUIDANCE, connectorTools } from "./connectors.ts";
 import { ContextGuard, ContextOverLimitError, toolTokens } from "./context-guard.ts";
 import { runReply } from "./loop.ts";
 import type { Continued } from "./runs.ts";
-import { skillsGuidance, skillsStep, skillTools } from "./skills.ts";
-import {
-	endReplyStream,
-	finishRunStep,
-	loadModelMessages,
-	recallMemoryStep,
-	runPythonStep,
-	saveReplyStep,
-	trustedPagesStep,
-	webFetchStep,
-	webSearchStep,
-	workspaceContextStep,
-	workspaceSearchStep,
-} from "./steps.ts";
+import { skillsGuidance, skillTools } from "./skills.ts";
+import { endReplyStream, finishRunStep, runPythonStep, saveReplyStep, turnContextStep, webFetchStep, webSearchStep, workspaceSearchStep } from "./steps.ts";
 import { WORKSPACE_SEARCH, WORKSPACE_SEARCH_DESCRIPTION, workspacePrompt, workspaceSearchInput } from "../workspaces/prompt.ts";
 
 export type ChatTurn = {
@@ -82,26 +69,30 @@ export async function chatTurn(turn: ChatTurn) {
 	const writable = getWritable<ModelCallStreamPart>();
 	let failure: unknown;
 	try {
-		// What the person told Ponder in earlier chats (server/memory.ts). The turn is saved to memory with the reply (reply.ts).
-		// Without it, or without connectors, the reply is still written. Each of these steps
-		// logs its own failure as "reply degraded" (context-step.ts), so the catches stay quiet.
-		const memory = await recallMemoryStep(turn.threadId, turn.owner).catch(() => ({ guidance: "", recalled: "" }));
-		// The tools of the apps the person connected (server/mcp/), recorded by the step.
-		const catalog = await connectorCatalogStep(turn.owner).catch(() => EMPTY_CATALOG);
-		// The skills admins turned on (server/skills.ts), recorded by the step. Without them the reply is still written.
-		const skills = await skillsStep().catch(() => []);
-		// Without it, every page waits for the person: safe, only slower.
-		const trustedPages = await trustedPagesStep(turn.threadId).catch(() => []);
-		// The workspace's instructions, documents and excerpts (server/workspaces/). Without them the reply is still written.
-		const workspaceId = turn.workspaceId;
-		const workspace = workspaceId ? await workspaceContextStep(workspaceId, turn.owner, turn.threadId, turn.model.id).catch(() => null) : null;
-		const searchDocumentIds = workspace?.searchDocumentIds ?? [];
-		// With the web off the model has neither tool, so no prompt can talk it into a search.
-		const web = turn.web !== "off";
+		// What the reply reads before its first model call, in one step (steps.ts): what the person
+		// told Ponder in earlier chats (server/memory.ts; the turn is saved to memory with the reply,
+		// reply.ts), the tools of the apps they connected (server/mcp/), the skills admins turned
+		// on (server/skills.ts), the pages web_fetch may read without asking, the workspace's
+		// instructions, documents and excerpts (server/workspaces/), and the thread as the model
+		// reads it. Without any but the thread, the reply is still written.
 		// Deep research is Perplexity's model (RESEARCH_MODEL): it searches and reads the web for minutes on its
 		// own, and takes no tools. The workspace reaches it as text: its documents, and the excerpts for the message.
 		const research = turn.web === "research";
 		const model = research ? RESEARCH_MODEL : turn.model;
+		const workspaceId = turn.workspaceId;
+		// A long chat is summarized before a call would go over the model's window (context-guard.ts).
+		const keep = turn.answeredBy ? turn.continued?.messageId : undefined;
+		const { memory, catalog, skills, trustedPages, workspace, context } = await turnContextStep(writable, {
+			threadId: turn.threadId,
+			owner: turn.owner,
+			modelId: model.id,
+			chosenModelId: turn.model.id,
+			workspaceId,
+			keepReasoningOf: keep,
+		});
+		const searchDocumentIds = workspace?.searchDocumentIds ?? [];
+		// With the web off the model has neither tool, so no prompt can talk it into a search.
+		const web = turn.web !== "off";
 		const sourcesOnly = Boolean(workspace) && !web;
 		const tools: ToolSet = research ? {} : {
 			...(web && {
@@ -162,11 +153,8 @@ export async function chatTurn(turn: ChatTurn) {
 			.join("\n\n");
 		// The <connectors> note goes with the latest message, as memory's does, and is never summarized.
 		const connectors = connectorNote(catalog);
-		// A long chat is summarized before a call would go over the model's window (context-guard.ts).
-		const keep = turn.answeredBy ? turn.continued?.messageId : undefined;
 		// The workspace's best passages for this message go with it, as memory's do.
 		const excerpts = workspace?.excerpts ?? "";
-		const context = await loadModelMessages(writable, turn.threadId, turn.owner, model.id, memory.recalled, skills, connectors, keep, excerpts);
 		const base = { threadId: turn.threadId, owner: turn.owner, runId: workflowRunId, modelId: model.id, recalled: memory.recalled, skills, connectors, excerpts, keepReasoningOf: keep };
 		const guard = new ContextGuard(base, context, await toolTokens(tools), writable, model.name);
 		// Each model call records its cost in `runs`, which credits are charged from (model-attempt.ts).
