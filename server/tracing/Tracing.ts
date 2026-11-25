@@ -3,7 +3,9 @@ import type { Attributes } from "@opentelemetry/api";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as References from "effect/References";
 import * as Tracer from "effect/Tracer";
+import { tracingState } from "./state.ts";
 
 /**
  * Effect's spans, as OpenTelemetry spans of the provider that setup.ts registers. So they
@@ -37,7 +39,18 @@ const make = Effect.map(OtelTracer.make, (otel) =>
 	}),
 );
 
-export const layer = Layer.effect(Tracer.Tracer, make).pipe(Layer.provideMerge(OtelTracer.layerGlobalTracer));
+const otelLayer = Layer.effect(Tracer.Tracer, make).pipe(Layer.provideMerge(OtelTracer.layerGlobalTracer));
+
+/**
+ * Without tracing (no OTEL_EXPORTER_OTLP_ENDPOINT, as in production by default), Effect
+ * registers no spans at all. Every Effect.fn makes a span, and each one went through
+ * OpenTelemetry's global provider, which records nothing but still builds its contexts:
+ * about a tenth of a plain request's CPU. Tracing starts before the runtime is built
+ * (plugins/tracing.ts), so this is decided once, with tracing on or off for good.
+ */
+const offLayer = Layer.merge(OtelTracer.layerGlobalTracer, Layer.succeed(References.TracerEnabled, false));
+
+export const layer = Layer.unwrap(Effect.sync(() => (tracingState() ? otelLayer : offLayer)));
 
 /**
  * What a span may carry: how the work went, never what it was about. Counts, sizes, times,
