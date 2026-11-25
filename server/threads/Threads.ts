@@ -130,12 +130,17 @@ const make = Effect.gen(function* () {
 	 * (a long one is close to 1 MB), so the list was bound by Postgres.
 	 */
 	const migrateSummaryColumns = Effect.gen(function* () {
-		yield* sql`alter table threads add column if not exists message_count integer generated always as (jsonb_array_length(messages)) stored`;
-		// Cut, as only its first line names the thread (shared/thread-name.ts), and a pasted message can be huge.
+		// One ALTER TABLE: each stored column added rewrites the table, and this rewrites it once.
+		// first_text is the first line of the first message, trimmed and then cut: only it names
+		// the thread (shared/thread-name.ts), and a pasted message can be huge.
 		yield* sql.unsafe(`
-			alter table threads add column if not exists first_text text generated always as (
-				left(jsonb_path_query_first(messages, '$[*] ? (@.role == "user").parts[*] ? (@.type == "text").text') #>> '{}', 1000)
-			) stored`);
+			alter table threads
+				add column if not exists message_count integer generated always as (jsonb_array_length(messages)) stored,
+				add column if not exists first_text text generated always as (
+					left(regexp_replace(split_part(
+						jsonb_path_query_first(messages, '$[*] ? (@.role == "user").parts[*] ? (@.type == "text").text') #>> '{}',
+						E'\\n', 1), '^\\s+|\\s+$', '', 'g'), 1000)
+				) stored`);
 	});
 
 	const findMessagesJson = SqlSchema.findOneOption({

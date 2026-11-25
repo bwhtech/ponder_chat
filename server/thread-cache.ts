@@ -23,7 +23,15 @@ import * as ThreadRuns from "./workflow/runs.ts";
  * One cache for the process: the service lives in the app's runtime, which every copy of
  * this module in the build shares.
  */
-type Entry = { etag: string; json: string; brotli: Buffer; gzip?: Buffer };
+type Entry = {
+	etag: string;
+	json: string;
+	brotli: Buffer;
+	/** Made on the first request without brotli, once (ThreadCache.gzip). */
+	gzip?: Promise<Buffer>;
+	/** The gzip's size once it is made, counted with the rest. */
+	gzipBytes: number;
+};
 
 const brotliAsync = promisify(brotliCompress);
 const gzipAsync = promisify(gzip);
@@ -39,6 +47,8 @@ export class ThreadCache extends Context.Service<
 	{
 		/** The answer for the version, kept while it holds; `body` makes it once on a miss. */
 		readonly entry: <E, R>(id: string, etag: string, body: Effect.Effect<string, E, R>) => Effect.Effect<Entry, E, R>;
+		/** The entry's gzip, for a client without brotli: made once, and counted in the cache's size. */
+		readonly gzip: (id: string, entry: Entry) => Effect.Effect<Buffer>;
 		/** Drops a deleted thread. A saved one needs nothing: its new version misses the cache. */
 		readonly forget: (id: string) => Effect.Effect<void>;
 	}
@@ -50,9 +60,9 @@ const make = Effect.sync(() => {
 		Effect.suspend(() => {
 			const found = lru.get(id, etag);
 			if (found) return Effect.succeed(found);
-			return Effect.flatMap(body, (json) => Effect.map(toBrotli(json), (brotli) => lru.remember(id, { etag, json, brotli })));
+			return Effect.flatMap(body, (json) => Effect.map(toBrotli(json), (brotli) => lru.remember(id, { etag, json, brotli, gzipBytes: 0 })));
 		});
-	return ThreadCache.of({ entry, forget: (id) => Effect.sync(() => lru.forget(id)) });
+	return ThreadCache.of({ entry, gzip: (id, entry) => Effect.promise(() => lru.gzipOf(id, entry)), forget: (id) => Effect.sync(() => lru.forget(id)) });
 });
 
 export const layer = Layer.effect(ThreadCache, make);
@@ -82,18 +92,33 @@ export const threadResponse = Effect.fn("ThreadCache.respond")(function* (c: Hon
 		etag,
 		Effect.map(threads.loadJson(id), (messages) => `{"messages":${messages}${tail}`),
 	);
-	const accepts = c.req.header("Accept-Encoding") ?? "";
-	if (/\bbr\b/.test(accepts)) {
+	const takes = acceptedEncodings(c.req.header("Accept-Encoding") ?? "");
+	if (takes("br")) {
 		return c.body(new Uint8Array(entry.brotli), 200, { ...headers, "Content-Type": "application/json", "Content-Encoding": "br" });
 	}
-	if (/\bgzip\b/.test(accepts)) {
-		entry.gzip ??= yield* Effect.promise(() => gzipAsync(entry.json));
-		return c.body(new Uint8Array(entry.gzip), 200, { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" });
+	if (takes("gzip")) {
+		const zipped = yield* cache.gzip(id, entry);
+		return c.body(new Uint8Array(zipped), 200, { ...headers, "Content-Type": "application/json", "Content-Encoding": "gzip" });
 	}
 	return c.body(entry.json, 200, { ...headers, "Content-Type": "application/json" });
 });
 
-/** Entries by thread, the least recently used first, up to MAX_BYTES of JSON and gzip. */
+/**
+ * Whether the request takes an encoding: named in Accept-Encoding, or under `*`, with a
+ * quality above 0. `gzip, br;q=0` refuses brotli (RFC 9110, section 12.5.3).
+ */
+export function acceptedEncodings(header: string) {
+	const qualities = new Map<string, number>();
+	for (const item of header.split(",")) {
+		const [name = "", ...params] = item.split(";").map((part) => part.trim().toLowerCase());
+		if (!name) continue;
+		const q = params.find((param) => param.startsWith("q="));
+		qualities.set(name, q ? Number(q.slice(2)) || 0 : 1);
+	}
+	return (encoding: string) => (qualities.get(encoding) ?? qualities.get("*") ?? 0) > 0;
+}
+
+/** Entries by thread, the least recently used first, up to MAX_BYTES of JSON and its compressed copies. */
 class Lru {
 	private entries = new Map<string, Entry>();
 	private bytes = 0;
@@ -111,12 +136,30 @@ class Lru {
 		this.forget(id);
 		this.entries.set(id, entry);
 		this.bytes += size(entry);
+		this.evictFor(id);
+		return entry;
+	}
+
+	/** The entry's gzip, made once even for requests at the same time. Counted while the entry is kept. */
+	gzipOf(id: string, entry: Entry): Promise<Buffer> {
+		entry.gzip ??= gzipAsync(entry.json).then((zipped) => {
+			if (this.entries.get(id) === entry) {
+				entry.gzipBytes = zipped.length;
+				this.bytes += zipped.length;
+				this.evictFor(id);
+			}
+			return zipped;
+		});
+		return entry.gzip;
+	}
+
+	/** Evicts the least recently used entries until the cache fits, but never `kept`. */
+	private evictFor(kept: string) {
 		for (const [oldest, old] of this.entries) {
-			if (this.bytes <= MAX_BYTES || oldest === id) break;
+			if (this.bytes <= MAX_BYTES || oldest === kept) break;
 			this.entries.delete(oldest);
 			this.bytes -= size(old);
 		}
-		return entry;
 	}
 
 	forget(id: string) {
@@ -127,5 +170,4 @@ class Lru {
 	}
 }
 
-// gzip is rare (browsers take brotli), so it is left out of the count.
-const size = (entry: Entry) => entry.json.length + entry.brotli.length;
+const size = (entry: Entry) => entry.json.length + entry.brotli.length + entry.gzipBytes;

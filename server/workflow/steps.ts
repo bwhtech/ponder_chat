@@ -80,8 +80,13 @@ export async function turnContextStep(
 	const ReplyTools = await import("./reply-tools.ts");
 	const { runStep } = await import("../runtime/step.ts");
 	const Threads = await import("../threads/Threads.ts");
+	// One read of the thread for memory and trusted pages. A failed read is not kept, so their retries read it again.
 	let thread: Promise<UIMessage[]> | undefined;
-	const messages = () => (thread ??= runStep(Threads.Threads.use((threads) => threads.load(threadId))));
+	const messages = () =>
+		(thread ??= runStep(Threads.Threads.use((threads) => threads.load(threadId))).catch((error: unknown) => {
+			thread = undefined;
+			throw error;
+		}));
 	const [memory, catalog, skills, trustedPages, workspace] = await Promise.all([
 		gatherContext("memory", `thread ${threadId}`, { guidance: "", recalled: "" }, async () => {
 			const Memory = await import("../memory.ts");
