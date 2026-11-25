@@ -178,11 +178,17 @@ const modelStream = Effect.fnUntraced(
 		// The deadline is watched on its own, so a write that waits (the durable stream)
 		// can't hold it off, as the old watchdog's timer could not be held off.
 		yield* Effect.raceFirst(
-			Stream.fromAsyncIterable(result.fullStream, (cause) => new AttemptBroke({ cause })).pipe(Stream.runForEach(take)),
+			Stream.fromAsyncIterable(result.fullStream, (cause) => new AttemptBroke({ cause })).pipe(
+				Stream.runForEach(take),
+				// What waited is written before the step returns, still inside the stall's deadline;
+				// a write that failed fails the attempt.
+				Effect.andThen(Effect.tryPromise({ try: () => out.flush(), catch: (cause) => new AttemptBroke({ cause }) })),
+			),
 			stall.watch.pipe(Effect.tapError(() => Scope.close(request, Exit.void))),
-		).pipe(Effect.ensuring(Effect.promise(() => out.flush().catch(() => undefined))));
-		// What waited is written before the step returns; a write that failed fails the attempt.
-		yield* Effect.tryPromise({ try: () => out.flush(), catch: (cause) => new AttemptBroke({ cause }) });
+		).pipe(
+			// On a failure, what waited is sent on without waiting for it: a write that hangs must not hold the attempt.
+			Effect.ensuring(Effect.sync(() => void out.flush().catch(() => undefined))),
+		);
 		const { error, finish } = seen;
 		if (error !== undefined) return yield* new AttemptBroke({ cause: error });
 		if (!finish) return yield* Effect.fail(new ModelStalledError("The model's stream ended without finishing."));

@@ -1,30 +1,15 @@
-import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import { asSchema, type ModelMessage, type ToolCallPart, type ToolResultPart, type ToolSet } from "ai";
+import { asSchema, type ModelMessage, type ToolCallPart, type ToolSet } from "ai";
 import type { ModelToolCall, ToolSpec } from "./model-call.ts";
+import { errorText, isStepRequest, type PlannedCall, type ToolOutcome } from "./tool-outcomes.ts";
+
+export { outcomeParts, toolMessage, toolSpans, type ToolOutcome, type ToolSpan } from "./tool-outcomes.ts";
 
 /**
- * A tool call's outcome: what the model reads, and what the page shows. An invalid call
- * never ran, and the page already shows its error. `start` and `end` are the workflow's
- * clock (the time of the events delivered before and after the call), for its span.
- */
-export type ToolOutcome = {
-	call: ToolCallPart;
-	output: unknown;
-	failed: boolean;
-	invalid?: boolean;
-	/** An approved call that did not run, such as one with a signature that is not valid. The page shows why. */
-	refused?: boolean;
-	start: number;
-	end: number;
-};
-
-/** An `execute_tool` span of a call the loop ran, sent by a step (tool-spans.ts): workflow code can't send spans. */
-export type ToolSpan = { name: string; callId: string; start: number; end: number; failed: boolean };
-
-/**
- * Runs the model's tool calls in the workflow (loop.ts). Each tool's `execute` makes its
- * own durable step where it has one (steps.ts, connectors.ts), so a model call that runs
- * again never runs a tool again. The calls of one response run in parallel.
+ * The model's tool calls, checked and run in a step (planToolCallsStep, steps.ts), not in
+ * the workflow: the tools' schemas need zod and the AI SDK. A tool with a durable step of
+ * its own (web_search, run_python, connector_call…) gives a StepRequest from `execute`,
+ * and the workflow runs that step (loop.ts), so a model call that runs again never runs
+ * such a tool again. The calls of one response run in parallel.
  */
 export class ToolCalls {
 	constructor(private readonly tools: ToolSet) {}
@@ -39,6 +24,25 @@ export class ToolCalls {
 				inputSchema: await asSchema(tool.inputSchema).jsonSchema,
 			})),
 		);
+	}
+
+	/**
+	 * What to do with each of a response's calls, in their order (planToolCallsStep): ask the
+	 * person first, run its step, or its outcome. An `approved` call is not asked about again.
+	 */
+	async plan(calls: ModelToolCall[], messages: ModelMessage[], { approved = false }: { approved?: boolean } = {}): Promise<PlannedCall[]> {
+		const asks = approved ? calls.map(() => false) : await Promise.all(calls.map((call) => this.needsApproval(call, messages)));
+		const outcomes = await this.run(
+			calls.filter((_, index) => !asks[index]),
+			messages,
+		);
+		let next = 0;
+		return calls.map(({ invalid: _invalid, ...call }, index): PlannedCall => {
+			if (asks[index]) return { call, ask: true };
+			const { output, failed, invalid } = outcomes[next++]!;
+			if (!failed && isStepRequest(output)) return { call, ask: false, step: output.stepRequest };
+			return { call, ask: false, outcome: { output, failed, ...(invalid && { invalid }) } };
+		});
 	}
 
 	/** Whether the call waits for the person: web_fetch to a new page, or a connector tool on "Ask first". */
@@ -92,41 +96,4 @@ export class ToolCalls {
 		if (!result || result.success) return result ? result.value : call.input;
 		throw new Error(`Invalid input for ${call.toolName}: ${errorText(result.error)}`);
 	}
-}
-
-/** The spans of the calls that ran: not an invalid call, nor an approved one that was refused. The name is the tool the model called, such as connector_call: never a connector's own tool. */
-export function toolSpans(outcomes: ToolOutcome[]): ToolSpan[] {
-	return outcomes.filter(({ invalid, refused }) => !invalid && !refused).map(({ call, start, end, failed }) => ({ name: call.toolName, callId: call.toolCallId, start, end, failed }));
-}
-
-/** The tool message that gives the model the outcomes. */
-export function toolMessage(outcomes: ToolOutcome[], denied: ToolCallPart[] = []): ModelMessage[] {
-	const content: ToolResultPart[] = [
-		...outcomes.map(({ call, output, failed }) => ({
-			type: "tool-result" as const,
-			toolCallId: call.toolCallId,
-			toolName: call.toolName,
-			output: failed ? { type: "error-text" as const, value: String(output) } : modelOutput(output),
-		})),
-		...denied.map((call) => ({ type: "tool-result" as const, toolCallId: call.toolCallId, toolName: call.toolName, output: { type: "execution-denied" as const } })),
-	];
-	return content.length ? [{ role: "tool", content }] : [];
-}
-
-/** The outcomes as the page shows them, as WorkflowAgent wrote them. */
-export function outcomeParts(outcomes: ToolOutcome[]): ModelCallStreamPart[] {
-	return outcomes.filter(({ invalid }) => !invalid).map(({ call, output, failed }) =>
-		(failed
-			? { type: "tool-error", toolCallId: call.toolCallId, toolName: call.toolName, input: call.input, error: output }
-			: { type: "tool-result", toolCallId: call.toolCallId, toolName: call.toolName, input: call.input, output }) as ModelCallStreamPart,
-	);
-}
-
-function modelOutput(output: unknown): ToolResultPart["output"] {
-	if (typeof output === "string") return { type: "text", value: output };
-	return { type: "json", value: (output ?? null) as never };
-}
-
-function errorText(error: unknown) {
-	return error instanceof Error ? error.message : String(error);
 }
