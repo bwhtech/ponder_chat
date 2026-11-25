@@ -54,6 +54,12 @@ export class Threads extends Context.Service<
 		readonly migrate: Effect.Effect<void, SqlError>;
 		/** The thread's messages, or none for a thread not saved yet. Any owner's: callers check the owner first. */
 		readonly load: (id: string) => Effect.Effect<UIMessage[], SqlError>;
+		/**
+		 * The thread's messages as the JSON text Postgres holds, "[]" for a thread not saved yet.
+		 * For GET /api/threads/:id (thread-cache.ts), which sends them as they are: a long thread
+		 * is close to 1 MB, and parsing it only to write it out again costs the event loop.
+		 */
+		readonly loadJson: (id: string) => Effect.Effect<string, SqlError>;
 		/** When the person's thread was last saved, and its workspace; none for one not saved yet (or not theirs). Its version for caching. */
 		readonly version: (id: string, owner: string) => Effect.Effect<Option.Option<ThreadVersion>, SqlError>;
 		/** Whose thread this is; none for a new one. */
@@ -115,8 +121,28 @@ const make = Effect.gen(function* () {
 		yield* sql`alter table threads add column if not exists workspace_id text`;
 		yield* sql`create index if not exists threads_workspace on threads (workspace_id) where workspace_id is not null`;
 		yield* migrateSearch;
+		yield* migrateSummaryColumns;
 	});
 
+	/**
+	 * What the list shows of each thread, kept by Postgres when the thread is saved. Reading
+	 * them from the messages on every list read the whole JSON of every thread in the list
+	 * (a long one is close to 1 MB), so the list was bound by Postgres.
+	 */
+	const migrateSummaryColumns = Effect.gen(function* () {
+		yield* sql`alter table threads add column if not exists message_count integer generated always as (jsonb_array_length(messages)) stored`;
+		// Cut, as only its first line names the thread (shared/thread-name.ts), and a pasted message can be huge.
+		yield* sql.unsafe(`
+			alter table threads add column if not exists first_text text generated always as (
+				left(jsonb_path_query_first(messages, '$[*] ? (@.role == "user").parts[*] ? (@.type == "text").text') #>> '{}', 1000)
+			) stored`);
+	});
+
+	const findMessagesJson = SqlSchema.findOneOption({
+		Request: Schema.String,
+		Result: Schema.Struct({ messages: Schema.String }),
+		execute: (id) => sql`select messages::text as messages from threads where id = ${id}`,
+	});
 	const findMessages = SqlSchema.findOneOption({
 		Request: Schema.String,
 		Result: MessagesRow,
@@ -141,9 +167,7 @@ const make = Effect.gen(function* () {
 		Request: Schema.Struct({ owner: Schema.String, workspaceId: Schema.NullOr(Schema.String) }),
 		Result: SummaryRow,
 		execute: ({ owner, workspaceId }) => sql`
-			select id, title, updated_at, jsonb_array_length(messages) as messages,
-				jsonb_path_query_first(messages, '$[*] ? (@.role == "user").parts[*] ? (@.type == "text").text') #>> '{}' as first,
-				workspace_id
+			select id, title, updated_at, message_count as messages, first_text as first, workspace_id
 			from threads where owner = ${owner} ${workspaceId === null ? sql`` : sql`and workspace_id = ${workspaceId}`}
 			order by updated_at desc limit 200`,
 	});
@@ -154,6 +178,11 @@ const make = Effect.gen(function* () {
 		const messages = Option.match(row, { onNone: (): UIMessage[] => [], onSome: (found) => found.messages });
 		yield* Tracing.annotate({ "ponder.messages": messages.length });
 		return messages;
+	});
+
+	const loadJson = Effect.fn("thread.loadJson")(function* (id: string) {
+		const row = yield* findMessagesJson(id).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+		return Option.match(row, { onNone: () => "[]", onSome: (found) => found.messages });
 	});
 
 	const version = Effect.fn("Threads.version")(function* (id: string, owner: string) {
@@ -207,7 +236,7 @@ const make = Effect.gen(function* () {
 		return rows.length > 0;
 	});
 
-	return Threads.of({ migrate, load, version, owner, workspaceOf, save, update, list, rename, remove });
+	return Threads.of({ migrate, load, loadJson, version, owner, workspaceOf, save, update, list, rename, remove });
 });
 
 export const layer = Layer.effect(Threads, make);
