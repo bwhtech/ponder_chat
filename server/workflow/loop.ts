@@ -1,15 +1,18 @@
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import type { ModelMessage, ToolCallPart, ToolSet } from "ai";
+import type { ModelMessage, ToolCallPart } from "ai";
 import type { Estimate } from "../compaction/tokens.ts";
 import { answeredApprovals, signApprovalStep, verifyApprovalStep, withoutApprovals, type Approval } from "./approvals.ts";
 import { modelCallStep, type ModelCall, type ModelToolCall } from "./model-call.ts";
 import { STEP_BOUNDARY } from "./stream-parts.ts";
-import { outcomeParts, toolMessage, ToolCalls, toolSpans, type ToolOutcome, type ToolSpan } from "./tool-calls.ts";
+import type { ToolSetup, ToolsTurn } from "./reply-tools.ts";
+import { callConnectorToolStep, planToolCallsStep, runPythonStep, webFetchStep, webSearchStep, workspaceSearchStep } from "./steps.ts";
+import { errorText, outcomeParts, toolMessage, toolSpans, type PlannedCall, type StepCall, type ToolOutcome, type ToolSpan } from "./tool-outcomes.ts";
 
 export type Reply = {
 	call: Omit<ModelCall, "messages" | "tools" | "estimated">;
 	messages: ModelMessage[];
-	tools: ToolSet;
+	/** The tools as plain data (reply-tools.ts): the workflow code never loads them. */
+	tools: ToolSetup & { turn: ToolsTurn };
 	writable: WritableStream<ModelCallStreamPart>;
 	/** The most model calls in one reply. */
 	maxSteps: number;
@@ -30,7 +33,10 @@ export type CallGuard = {
  * are made. Each model call is one durable step with its own retries (model-call.ts), and
  * each tool call is its own step, so nothing that finished runs again after a restart.
  *
- * The stream holds what WorkflowAgent wrote, so reply.ts and the page read it as before.
+ * The tools are plain data here: one step checks a response's calls and runs the ones
+ * with no step of their own (planToolCallsStep), and the loop runs the steps of the
+ * others (runToolStep). The stream holds what WorkflowAgent wrote, so reply.ts and the
+ * page read it as before.
  */
 export async function runReply(reply: Reply) {
 	await new ReplyLoop(reply).run();
@@ -39,17 +45,15 @@ export async function runReply(reply: Reply) {
 class ReplyLoop {
 	private messages: ModelMessage[];
 	private call: Reply["call"];
-	private readonly tools: ToolCalls;
 
 	constructor(private readonly reply: Reply) {
 		this.messages = reply.messages;
 		this.call = reply.call;
-		this.tools = new ToolCalls(reply.tools);
 	}
 
 	async run() {
 		await this.carryOutApprovals();
-		const tools = await this.tools.specs();
+		const tools = this.reply.tools.specs;
 		let measured = 0;
 		for (let step = 1; step <= this.reply.maxSteps; step++) {
 			const estimated = await this.keepInside(step === 1, measured);
@@ -79,12 +83,9 @@ class ReplyLoop {
 
 	/** Runs the calls, or asks the person first. False when the reply waits for the person. */
 	private async runToolCalls(calls: ModelToolCall[]) {
-		const asks: ModelToolCall[] = [];
-		for (const call of calls) if (await this.tools.needsApproval(call, this.messages)) asks.push(call);
-		const outcomes = await this.tools.run(
-			calls.filter((call) => !asks.includes(call)),
-			this.messages,
-		);
+		const planned = await planToolCallsStep(this.reply.tools.turn, calls, this.messages);
+		const asks = planned.filter((plan) => plan.ask).map((plan) => plan.call);
+		const outcomes = await Promise.all(planned.filter((plan) => !plan.ask).map((plan) => this.outcomeOf(plan)));
 		this.messages = [...this.messages, ...toolMessage(outcomes)];
 		if (!asks.length) {
 			await writePartsStep(this.reply.writable, [...outcomeParts(outcomes), ...STEP_BOUNDARY], toolSpans(outcomes));
@@ -117,11 +118,28 @@ class ReplyLoop {
 	private async approvedOutcome({ call, request }: Approval): Promise<ToolOutcome> {
 		const now = Date.now();
 		const refused = (output: string): ToolOutcome => ({ call, output, failed: false, refused: true, start: now, end: now });
-		if (!this.tools.canApprove(call.toolName)) return refused(`Tool "${call.toolName}" does not require approval`);
+		if (!this.reply.tools.approvable.includes(call.toolName)) return refused(`Tool "${call.toolName}" does not require approval`);
 		const signed = { approvalId: request.approvalId, toolCallId: call.toolCallId, toolName: call.toolName, input: call.input };
 		if (!(await verifyApprovalStep(signed, request.signature))) return refused("The approval is not valid, so the call did not run.");
-		const [outcome] = await this.tools.run([call], this.messages);
-		return outcome;
+		const [planned] = await planToolCallsStep(this.reply.tools.turn, [call], this.messages, true);
+		return this.outcomeOf(planned!);
+	}
+
+	/**
+	 * A planned call's outcome: the one the planning step gave, or what its own step gives.
+	 * The times are the workflow's clock, for the call's span. A step that throws is a
+	 * failed outcome, which the model reads.
+	 */
+	private async outcomeOf(plan: PlannedCall): Promise<ToolOutcome> {
+		const start = Date.now();
+		// Never asked: the calls to ask about are left out before, and an approved call is not asked again.
+		if (plan.ask) return { call: plan.call, output: "The call waits for the person.", failed: true, start, end: start };
+		if ("outcome" in plan) return { call: plan.call, ...plan.outcome, start, end: start };
+		try {
+			return { call: plan.call, output: await runToolStep(plan.step, this.reply.call), failed: false, start, end: Date.now() };
+		} catch (error) {
+			return { call: plan.call, output: errorText(error), failed: true, start, end: Date.now() };
+		}
 	}
 }
 
@@ -154,4 +172,33 @@ async function writePartsStep(writable: WritableStream<ModelCallStreamPart>, par
 	} finally {
 		writer.releaseLock();
 	}
+}
+
+/** Runs a call in its own durable step (reply-tools.ts says which). */
+function runToolStep(step: StepCall, { threadId, owner }: { threadId: string; owner: string }): Promise<unknown> {
+	switch (step.tool) {
+		case "web_search":
+			return webSearchStep(step.input, threadId, owner);
+		case "web_fetch":
+			return webFetchStep(step.input);
+		case "run_python":
+			return runPythonStep(step.input, threadId, owner);
+		case "workspace_search":
+			return workspaceSearchStep(step.input, step.scope);
+		case "connector_call":
+			return callConnectorToolStep(step.connectionId, step.toolName, step.input, owner, step.approved).catch(interruptedOrThrow);
+	}
+}
+
+/**
+ * What the model reads for a connector call that a server stop cut short: it can't tell
+ * whether the call took effect. The runtime fails a started step that has no retries left
+ * with "Step … exceeded max retries" instead of running it again. Any other error is the
+ * call's own, and the model reads it as it is.
+ */
+function interruptedOrThrow(error: unknown): string {
+	if (error instanceof Error && /exceeded max retries/.test(error.message)) {
+		return "The server restarted during this call, so it may or may not have taken effect. Check before you call it again.";
+	}
+	throw error;
 }

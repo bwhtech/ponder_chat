@@ -1,17 +1,8 @@
 import { toUIMessageChunk, type ModelCallStreamPart } from "@ai-sdk/workflow";
 import type { UIMessageChunk } from "ai";
+import { COMPACTION_MARKER } from "./stream-parts.ts";
 
-/**
- * A run's raw stream as UI chunks: createModelCallToUIChunkTransform from
- * @ai-sdk/workflow, plus Ponder's compaction status. compactStep writes the status as a
- * `raw` part, which the library's transform drops; here it becomes a `data-compaction`
- * part with a fixed id, so "done" replaces "running" in the message. It is saved with the
- * reply, and convertToModelMessages leaves it out, so the model never reads it.
- *
- * The chunks are counted the same way as the library does, so a reconnect that skips
- * `uiStartIndex` chunks lines up. No Node imports: the workflow's steps import the marker.
- */
-export const COMPACTION_MARKER = "ponderCompaction";
+export { COMPACTION_MARKER } from "./stream-parts.ts";
 export const COMPACTION_PART = "data-compaction";
 
 export function toUIChunks({ uiStartIndex = 0 } = {}) {

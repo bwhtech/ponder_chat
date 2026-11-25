@@ -2,7 +2,6 @@ import { tool, type DataUIPart, type TextPart, type ToolSet, type UIDataTypes } 
 import { z } from "zod";
 import { SKILL_NAME } from "../../shared/skill-file.ts";
 import type { ActiveSkill } from "../skills.ts";
-import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
 
 /**
  * Skills in a reply (server/skills.ts). Two ways in:
@@ -18,16 +17,6 @@ import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
  */
 export const USE_SKILL = "use_skill";
 export const SKILL_PART = "data-skill";
-
-export async function skillsStep(): Promise<ActiveSkill[]> {
-	"use step";
-	return contextStep("skills", "all skills", async () => {
-		const { runStep } = await import("../runtime/step.ts");
-		const Skills = await import("../skills.ts");
-		return runStep(Skills.Skills.use((skills) => skills.active));
-	});
-}
-skillsStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 /** The section for the instructions. Empty with no skills on. */
 export function skillsGuidance(skills: ActiveSkill[]): string {

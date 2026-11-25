@@ -1,6 +1,6 @@
 import type { LanguageModelV4Prompt } from "@ai-sdk/provider";
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
-import { asSchema, type ModelMessage, type ToolResultPart, type ToolSet } from "ai";
+import type { ModelMessage, ToolResultPart } from "ai";
 import type { CompactRequest } from "../compaction/compaction.ts";
 import { addEstimates, budgetFor, countTokens, estimate, estimateTokens, measuredRatio, type Budget, type Estimate } from "../compaction/tokens.ts";
 import { trimResult } from "./context.ts";
@@ -115,14 +115,6 @@ export class ContextGuard {
 				: `This reply grew too long for ${this.modelName}: its tool results don't fit. Ask for less at a time, or choose a model with a longer context.`,
 		);
 	}
-}
-
-/** The estimated tokens of the tools' names, descriptions and input schemas. */
-export async function toolTokens(tools: ToolSet) {
-	const specs = await Promise.all(
-		Object.entries(tools).map(async ([name, tool]) => ({ name, description: tool.description, schema: tool.inputSchema ? await asSchema(tool.inputSchema).jsonSchema : {} })),
-	);
-	return estimateTokens(specs);
 }
 
 /**

@@ -3,8 +3,14 @@ import type { CompactionState, CompactRequest, CompactResult } from "../compacti
 import type { RunPythonInput } from "../python/schema.ts";
 import type { WebFetchInput, WebSearchInput } from "../search/schema.ts";
 import type { ActiveSkill } from "../skills.ts";
-import { CONTEXT_STEP_RETRIES, contextStep } from "./context-step.ts";
-import { COMPACTION_MARKER } from "./reply-chunks.ts";
+import type { ModelMessage, UIMessage } from "ai";
+import type { CatalogData } from "../mcp/catalog.ts";
+import type { ChatTurn } from "./chat.ts";
+import { gatherContext } from "./context-step.ts";
+import type { ModelToolCall } from "./model-call.ts";
+import type { ToolSetup, ToolsTurn } from "./reply-tools.ts";
+import type { PlannedCall } from "./tool-outcomes.ts";
+import { COMPACTION_MARKER } from "./stream-parts.ts";
 import type { Continued } from "./runs.ts";
 import type { ThreadContext } from "./thread-messages.ts";
 import type { WorkspaceSearchInput, WorkspaceTurn } from "../workspaces/prompt.ts";
@@ -16,34 +22,127 @@ import type { WorkspaceSearchInput, WorkspaceTurn } from "../workspaces/prompt.t
  * cannot load Node modules (the database, files, the sandbox).
  */
 
+/** Everything a reply reads before its first model call (turnContextStep). */
+export type TurnContext = {
+	/** Memory's guidance for the instructions, and what it recalls for the person's latest message. */
+	memory: { guidance: string; recalled: string };
+	/** The tools of the apps the person connected (server/mcp/), as plain data. */
+	catalog: CatalogData;
+	/** The skills admins turned on (server/skills.ts). */
+	skills: ActiveSkill[];
+	/** The pages web_fetch may read in this thread without asking the person (search/trusted-pages.ts). */
+	trustedPages: string[];
+	/** The workspace's part of the turn; null without a workspace, or when it could not be read. */
+	workspace: WorkspaceTurn | null;
+	/** The thread as the model reads it (thread-messages.ts). */
+	context: ThreadContext;
+	/** The reply's system prompt (reply-tools.ts). */
+	system: string;
+	/** The <connectors> note, which goes with the latest message (mcp/catalog-note.ts). */
+	connectors: string;
+	/** What decides the reply's tools, for the steps that check and run its calls (planToolCallsStep). */
+	toolsTurn: ToolsTurn;
+	/** The tools as the workflow keeps them: plain data (reply-tools.ts). */
+	tools: ToolSetup;
+};
+
 /**
- * The thread as the model reads it (thread-messages.ts), with its saved summary in place
- * of the messages it covers, and what compaction decides from: the estimate, the
- * thread's measured ratio and the model's window. A step, so a replay reads the same.
+ * What a reply reads before its first model call, in one step: memory, connectors, skills,
+ * trusted pages and the workspace at once, then the thread as the model reads it, which
+ * needs them.
  *
- * A reply that reads a saved summary says so to the page, as the reply that wrote it did,
- * so the divider stays after a Retry of that reply.
+ * One step, not six: the workflow resumes after each step, and each resume evaluates its
+ * whole bundle again, so six steps in a row held up the first word of every reply. It
+ * also makes the reply's system prompt and tools (reply-tools.ts), which the workflow
+ * code must not load. Each read but the thread's has its own retries and
+ * falls back to a reply without it (gatherContext). The thread is read once for memory
+ * and trusted pages. A failure to read it fails the step, which Workflow runs again.
+ *
+ * The thread has its saved summary in place of the messages it covers, and what compaction
+ * decides from: the estimate, the thread's measured ratio and the model's window. A reply
+ * that reads a saved summary says so to the page, as the reply that wrote it did, so the
+ * divider stays after a Retry of that reply.
  */
-export async function loadModelMessages(
+export async function turnContextStep(
 	writable: WritableStream<ModelCallStreamPart>,
-	threadId: string,
-	owner: string,
-	modelId: string,
-	recalled: string,
-	skills: ActiveSkill[] = [],
-	/** The <connectors> note (mcp/catalog-note.ts). */
-	connectors = "",
-	/** A reply that keeps its reasoning (context.ts). */
-	keepReasoningOf?: string,
-	/** The <workspace_excerpts> block (workspaces/prompt.ts). */
-	excerpts = "",
-): Promise<ThreadContext> {
+	turn: ChatTurn,
+	options: {
+		/** The model the reply's messages are for (the research model under deep research). */
+		modelId: string;
+		/** A reply that keeps its reasoning (context.ts). */
+		keepReasoningOf?: string;
+	},
+): Promise<TurnContext> {
 	"use step";
+	const { threadId, owner, workspaceId } = turn;
+	const { EMPTY_CATALOG } = await import("../mcp/catalog.ts");
+	const { connectorNote } = await import("../mcp/catalog-note.ts");
+	const ReplyTools = await import("./reply-tools.ts");
 	const { runStep } = await import("../runtime/step.ts");
+	const Threads = await import("../threads/Threads.ts");
+	// One read of the thread for memory and trusted pages. A failed read is not kept, so their retries read it again.
+	let thread: Promise<UIMessage[]> | undefined;
+	const messages = () =>
+		(thread ??= runStep(Threads.Threads.use((threads) => threads.load(threadId))).catch((error: unknown) => {
+			thread = undefined;
+			throw error;
+		}));
+	const [memory, catalog, skills, trustedPages, workspace] = await Promise.all([
+		gatherContext("memory", `thread ${threadId}`, { guidance: "", recalled: "" }, async () => {
+			const Memory = await import("../memory.ts");
+			const loaded = await messages();
+			return runStep(Memory.Memory.use((memory) => memory.forRun({ threadId, user: owner }, loaded)));
+		}),
+		gatherContext("connectors", `person ${owner}`, EMPTY_CATALOG, async () => {
+			const Connectors = await import("../mcp/Connectors.ts");
+			return runStep(Connectors.Connectors.use((connectors) => connectors.connectorCatalogFor(owner)));
+		}),
+		gatherContext("skills", "all skills", [] as ActiveSkill[], async () => {
+			const Skills = await import("../skills.ts");
+			return runStep(Skills.Skills.use((skills) => skills.active));
+		}),
+		gatherContext("trusted pages", `thread ${threadId}`, [] as string[], async () => {
+			const { trustedPageKeys } = await import("../search/trusted-pages.ts");
+			return trustedPageKeys(await messages());
+		}),
+		// Null when they can no longer ask in it: the route checked before the run started, so that is a race.
+		workspaceId
+			? gatherContext("workspace", `workspace ${workspaceId}`, null, async () => {
+					const Option = await import("effect/Option");
+					const { workspaceTurn } = await import("../workspaces/documents/turn.ts");
+					return Option.getOrNull(await runStep(workspaceTurn({ owner, workspaceId, threadId, modelId: turn.model.id })));
+				})
+			: null,
+	]);
+	const connectors = connectorNote(catalog);
 	const { loadThreadContext } = await import("./thread-messages.ts");
-	const context = await runStep(loadThreadContext(threadId, { owner, modelId, recalled, skills, connectors, excerpts, keepReasoningOf }));
+	const context = await runStep(
+		loadThreadContext(threadId, {
+			owner,
+			modelId: options.modelId,
+			recalled: memory.recalled,
+			skills,
+			connectors,
+			excerpts: workspace?.excerpts ?? "",
+			keepReasoningOf: options.keepReasoningOf,
+		}),
+	);
 	if (context.through) await writeCompactionState(writable, { state: "done", through: context.through });
-	return context;
+	const sourcesOnly = Boolean(workspace) && turn.web === "off";
+	const toolsTurn: ToolsTurn = {
+		threadId,
+		owner,
+		python: turn.python,
+		web: turn.web,
+		...(workspaceId && { workspaceId }),
+		catalog,
+		skills,
+		trustedPages,
+		searchDocumentIds: workspace?.searchDocumentIds ?? [],
+		sourcesOnly,
+	};
+	const system = ReplyTools.systemPrompt(turn, { guidance: memory.guidance, workspace, sourcesOnly, skills, catalog });
+	return { memory, catalog, skills, trustedPages, workspace, context, system, connectors, toolsTurn, tools: await ReplyTools.toolSetup(toolsTurn) };
 }
 
 /** How many times compaction runs again after it fails. On the last attempt it leaves the old messages out instead of failing. */
@@ -77,37 +176,6 @@ async function writeCompactionState(writable: WritableStream<ModelCallStreamPart
 	}
 }
 
-/** Memory's guidance for the instructions, and what it recalls for the person's latest message. */
-export async function recallMemoryStep(threadId: string, owner: string): Promise<{ guidance: string; recalled: string }> {
-	"use step";
-	return contextStep("memory", `thread ${threadId}`, async () => {
-		const { runStep } = await import("../runtime/step.ts");
-		const Threads = await import("../threads/Threads.ts");
-		const Memory = await import("../memory.ts");
-		const messages = await runStep(Threads.Threads.use((threads) => threads.load(threadId)));
-		return runStep(Memory.Memory.use((memory) => memory.forRun({ threadId, user: owner }, messages)));
-	});
-}
-recallMemoryStep.maxRetries = CONTEXT_STEP_RETRIES;
-
-/**
- * The workspace's part of the turn (workspaces/documents/turn.ts): its name, instructions
- * and the documents that fit, for the system prompt; the excerpts for the latest message;
- * the documents that workspace_search reads. Read again with the person's access, as
- * every read of a workspace is. Null when they can no longer ask in it: the route checked
- * before the run started, so that is a race.
- */
-export async function workspaceContextStep(workspaceId: string, owner: string, threadId: string, modelId: string): Promise<WorkspaceTurn | null> {
-	"use step";
-	return contextStep("workspace", `workspace ${workspaceId}`, async () => {
-		const { runStep } = await import("../runtime/step.ts");
-		const Option = await import("effect/Option");
-		const { workspaceTurn } = await import("../workspaces/documents/turn.ts");
-		return Option.getOrNull(await runStep(workspaceTurn({ owner, workspaceId, threadId, modelId })));
-	});
-}
-workspaceContextStep.maxRetries = CONTEXT_STEP_RETRIES;
-
 /** workspace_search, bound by the workflow to the chat's workspace and the documents in search: the model gives only the query. */
 export async function workspaceSearchStep(input: WorkspaceSearchInput, scope: { owner: string; workspaceId: string; threadId: string; documentIds: string[] }): Promise<string> {
 	"use step";
@@ -130,18 +198,6 @@ export async function webSearchStep(input: WebSearchInput, threadId: string, own
 	const { executeWebSearch } = await import("../search/tool.ts");
 	return runStep(executeWebSearch(input, { threadId, owner }));
 }
-
-/** The pages web_fetch may read in this thread without asking the person (search/trusted-pages.ts). */
-export async function trustedPagesStep(threadId: string): Promise<string[]> {
-	"use step";
-	return contextStep("trusted pages", `thread ${threadId}`, async () => {
-		const { runStep } = await import("../runtime/step.ts");
-		const Threads = await import("../threads/Threads.ts");
-		const { trustedPageKeys } = await import("../search/trusted-pages.ts");
-		return trustedPageKeys(await runStep(Threads.Threads.use((threads) => threads.load(threadId))));
-	});
-}
-trustedPagesStep.maxRetries = CONTEXT_STEP_RETRIES;
 
 export async function webFetchStep(input: WebFetchInput) {
 	"use step";
@@ -187,3 +243,29 @@ export async function endReplyStream(writable: WritableStream<ModelCallStreamPar
 	}
 	await writable.close();
 }
+
+/**
+ * Checks a model response's tool calls, and decides for each: ask the person first, run
+ * its own step, or its outcome (reply-tools.ts, ToolCalls.plan). Tools with no step of
+ * their own (write_artifact, show_ui, use_skill, connector_search…) run here: they are pure,
+ * so a run that replays gets the same. An `approved` call is one the person approved.
+ */
+export async function planToolCallsStep(turn: ToolsTurn, calls: ModelToolCall[], messages: ModelMessage[], approved = false): Promise<PlannedCall[]> {
+	"use step";
+	const { planToolCalls } = await import("./reply-tools.ts");
+	return planToolCalls(turn, calls, messages, approved);
+}
+
+/**
+ * One connector tool call. It returns a failure as its result instead of throwing, and
+ * it is never retried: a retried call could create the same issue or send the same
+ * email twice. After a crash in the middle of the call, the workflow runtime fails the
+ * step instead of running it again (a step with no retries runs once).
+ */
+export async function callConnectorToolStep(connectionId: string, toolName: string, input: unknown, owner: string, approved: boolean): Promise<string> {
+	"use step";
+	const { runStep } = await import("../runtime/step.ts");
+	const Connectors = await import("../mcp/Connectors.ts");
+	return runStep(Connectors.Connectors.use((connectors) => connectors.callConnectorTool(connectionId, toolName, input, owner, approved)));
+}
+callConnectorToolStep.maxRetries = 0;
