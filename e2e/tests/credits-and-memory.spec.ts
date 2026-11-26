@@ -116,3 +116,23 @@ test("an older Memory link, ?view=memory, opens Settings on Memory over the chat
 	await expect(settings).toHaveCount(0);
 	await expect(page.getByText("What's on your mind?")).toBeVisible();
 });
+
+test("the credits in the sidebar open Settings on Usage", async ({ page }) => {
+	await page.getByRole("button", { name: /Credits left/ }).click();
+	const settings = page.getByRole("dialog", { name: "Settings" });
+	await expect(settings.getByRole("tab", { name: "Usage" })).toHaveAttribute("aria-selected", "true");
+});
+
+test("Settings keeps its open tab in the URL, so a reload opens it there again", async ({ page }) => {
+	await page.goto("/?settings=usage");
+	const settings = page.getByRole("dialog", { name: "Settings" });
+	await expect(settings.getByRole("tab", { name: "Usage" })).toHaveAttribute("aria-selected", "true");
+
+	await settings.getByRole("tab", { name: "Memory" }).click();
+	await expect(page).toHaveURL(/[?&]settings=memory/);
+	await page.reload();
+	await expect(settings.getByRole("tab", { name: "Memory" })).toHaveAttribute("aria-selected", "true");
+
+	await settings.getByRole("button", { name: "Close settings" }).click();
+	await expect(page).not.toHaveURL(/settings=/);
+});

@@ -20,6 +20,7 @@ import * as SignInProviders from "./auth/SignInProviders.ts";
 import * as Branding from "./branding/Branding.ts";
 import { bootPage, meOf, skillOptions } from "./boot-page.ts";
 import * as Credits from "./credits/Credits.ts";
+import { creditUsage } from "./credits/CreditUsage.ts";
 import * as Files from "./files.ts";
 import { fileHeaders, MAX_FILE_BYTES, refusalText } from "./files.ts";
 import * as Memory from "./memory.ts";
@@ -191,6 +192,9 @@ const api = app
 	.get("/api/skills", (c) => route(c, Effect.map(skillOptions, (skills) => c.json({ skills }))))
 
 	.get("/api/credits", (c) => route(c, Effect.map(Credits.Credits.use((credits) => credits.status(userOf(c))), (status) => c.json(status))))
+
+	// Settings, Usage: the signed-in person's own credits per day and what used them (credits/CreditUsage.ts).
+	.get("/api/credits/usage", (c) => route(c, Effect.map(creditUsage(userOf(c)), (usage) => c.json(usage))))
 
 	// Out of credits: ask the admins for more (credits/ExtraCredits.ts). One request waits at a time.
 	.post("/api/credits/request", perPerson("creditRequest"), (c) =>

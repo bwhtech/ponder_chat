@@ -6,7 +6,7 @@ import { provideFileViewer } from "frappe-ui-ai-elements";
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue";
 import { me, refreshCredits, signOut } from "./account";
 import BreadcrumbsStandIn from "./BreadcrumbsStandIn.vue";
-import { openSettings, settings, type SettingsTab } from "./settings/state";
+import { openSettings, SETTINGS_TABS, settings, type SettingsTab } from "./settings/state";
 import ChatView from "./ChatView.vue";
 import { pendingDialog } from "./dialogs";
 import ThreadSkeleton from "./ThreadSkeleton.vue";
@@ -106,12 +106,25 @@ watch(() => me.value?.credits.request?.status === "pending", (pending) => pendin
 // Files in the chat (attachments, images from Python) open in the side panel.
 provideFileViewer(viewInPanel);
 // The main area shows the open chat, or a workspace (?w=<slug>, workspaces/store.ts).
-// Back and Forward change the page under Settings, so Settings closes: it keeps no history of its own.
+// Back and Forward change the page under Settings, so Settings follows that page's URL: open on its
+// tab, or closed. It keeps no history of its own.
 addEventListener("popstate", () => {
-	settings.open = false;
+	const tab = settingsTabInUrl();
+	if (tab) openSettings(tab);
+	else settings.open = false;
 	openWorkspaceKey.value = workspaceInUrl();
 	openOldMemoryLink();
 });
+// Open Settings puts its tab in the URL (?settings=usage), so a reload opens it there again.
+watch(
+	() => settings.open && settings.tab,
+	(tab) => {
+		const url = new URL(location.href);
+		if (tab) url.searchParams.set("settings", tab);
+		else url.searchParams.delete("settings");
+		history.replaceState(history.state, "", url);
+	},
+);
 const page = computed(() => (openWorkspaceKey.value ? "workspace" : "chat"));
 // The side panel shows a file or an artifact of the open chat or workspace, so it closes when that changes.
 watch([current, page, openWorkspaceKey], closePanel);
@@ -144,6 +157,10 @@ function openOldMemoryLink() {
 }
 openOldMemoryLink();
 
+function settingsTabInUrl() {
+	return SETTINGS_TABS.find(({ value }) => value === new URL(location.href).searchParams.get("settings"))?.value;
+}
+
 function pickWorkspace(slug: string) {
 	sheetOpen.value = false;
 	showWorkspace(slug);
@@ -170,6 +187,7 @@ function showSettings(tab: SettingsTab = "account") {
 	openSettings(tab);
 }
 
+// ?settings=<tab> opens Settings on that tab, as a reload left it.
 // Back from a connector's sign-in in this tab (a phone): /?settings=connectors&connector=<id>,
 // or &connector_error=<why> (server/mcp/routes.ts). Opens the connector, then tidies the URL.
 const back = new URL(location.href);
@@ -181,6 +199,9 @@ if (back.searchParams.get("settings") === "connectors") {
 	openSettings("connectors", id);
 	if (problem) toast.error(problem);
 	else if (id) void import("./connectors/api").then(({ loadConnectors }) => loadConnectors()).then(() => toast.success("Connected"));
+} else {
+	const tab = settingsTabInUrl();
+	if (tab) openSettings(tab);
 }
 
 // Admin is its own page, which on a phone on a slow network takes seconds to start drawing. The
@@ -241,6 +262,7 @@ function onSaved() {
 				@new-chat="newThread"
 				@select-workspace="pickWorkspace"
 				@new-workspace="newWorkspace"
+				@open-usage="showSettings('usage')"
 			/>
 
 			<!-- The page's main landmark, as on the sign-in page: the open chat or a workspace. -->
@@ -304,6 +326,7 @@ function onSaved() {
 				@new-chat="newThread"
 				@select-workspace="pickWorkspace"
 				@new-workspace="newWorkspace"
+				@open-usage="showSettings('usage')"
 			/>
 		</BottomSheet>
 
