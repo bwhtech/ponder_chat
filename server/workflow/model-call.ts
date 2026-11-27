@@ -67,7 +67,7 @@ export async function modelCallStep(call: ModelCall, writable: WritableStream<Mo
 	const { runStep } = await import("../runtime/step.ts");
 	const ModelAttempt = await import("./model-attempt.ts");
 	const { stepId, attempt } = getStepMetadata();
-	if (call.checkCredits && (await runStep(ModelAttempt.outOfCredits(call.owner)))) return { messages: [], toolCalls: [], finishReason: "out-of-credits", inputTokens: 0, outOfCredits: true };
+	if (call.checkCredits && (await runStep(ModelAttempt.outOfCredits(call, { stepId, attempt })))) return { messages: [], toolCalls: [], finishReason: "out-of-credits", inputTokens: 0, outOfCredits: true };
 	return runStep(ModelAttempt.run(call, writable, { stepId, attempt }), ModelAttempt.rules);
 }
 modelCallStep.maxRetries = MODEL_CALL_ATTEMPTS - 1;

@@ -77,8 +77,15 @@ export type StepAttempt = { stepId: string; attempt: number };
 
 type Finish = Extract<TextStreamPart<ToolSet>, { type: "finish-step" }>;
 
-/** Whether the person has no credits left, before a later model call of their reply (model-call.ts). */
-export const outOfCredits = (owner: string) => Effect.map(Credits.Credits.use((credits) => credits.status(owner)), (status) => status.remaining <= 0);
+/**
+ * Whether the person has no credits left, before a later model call of their reply (model-call.ts).
+ * A retry replaces the earlier attempts, so they stop counting before the check, as in `run`.
+ */
+export const outOfCredits = Effect.fnUntraced(function* (call: ModelCall, step: StepAttempt) {
+	if (step.attempt > 1) yield* ModelCalls.ModelCalls.use((calls) => calls.settleEarlierAttempts(call.threadId, call.runId, step.stepId, ModelCalls.recordId(call.runId, step.stepId, step.attempt)));
+	const status = yield* Credits.Credits.use((credits) => credits.status(call.owner));
+	return status.remaining <= 0;
+});
 
 export const run = Effect.fnUntraced(function* (call: ModelCall, writable: WritableStream<ModelCallStreamPart>, step: StepAttempt) {
 	const calls = yield* ModelCalls.ModelCalls;
