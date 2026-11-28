@@ -263,6 +263,37 @@ describe.skipIf(!base)("team grants on workspaces", () => {
 		assert.deepStrictEqual(changed.after.teams, [{ id: ops, name: `Logged ${tag}`, access: "edit" }]);
 	});
 
+	it("waits for a removal from the team that gives the sharer their access, then refuses them", async () => {
+		const editors = await team(`Race editors ${tag}`, "ana", ["cy"]);
+		const other = await team(`Race other ${tag}`, "bob");
+		const workspace = await create("dan", `Race ${tag}`);
+		assert.strictEqual((await call("dan", "PUT", `/api/workspaces/${workspace}/teams/${editors}`, { access: "edit" })).status, 200);
+
+		// A removal of cy from the team, as Teams.removeMember makes it, held open.
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		let holding!: () => void;
+		const held = new Promise<void>((resolve) => (holding = resolve));
+		const removal = database((sql) =>
+			sql.withTransaction(
+				Effect.gen(function* () {
+					yield* sql`select id from teams where id = ${editors} for no key update`;
+					yield* sql`delete from team_members where team_id = ${editors} and user_id = ${who.cy}`;
+					yield* Effect.sync(holding);
+					yield* Effect.promise(() => gate);
+				}),
+			),
+		);
+		await held;
+		const share = call<Refusal>("cy", "PUT", `/api/workspaces/${workspace}/teams/${other}`, { access: "ask" });
+		await new Promise((resolve) => setTimeout(resolve, 300));
+		release();
+		await removal;
+		assert.strictEqual((await share).status, 404, "removed before the share could change anything");
+		const detail = await call<One>("dan", "GET", `/api/workspaces/${workspace}`);
+		assert.notInclude(detail.body.workspace.teams?.map((each) => each.id) ?? [], other);
+	});
+
 	it("deletes a workspace with its team grants", async () => {
 		const ops = await team(`Deleted ${tag}`, "bob");
 		const notes = await create("ana", "Deleted notes");

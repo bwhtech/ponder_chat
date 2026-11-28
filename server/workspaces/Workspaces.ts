@@ -432,6 +432,10 @@ const make = Effect.gen(function* () {
 			yield* sql.withTransaction(
 				Effect.gen(function* () {
 					yield* lockLive(workspaceId, "change");
+					// The rows of the person's teams, shared until the end: a removal from a team that
+					// gives them their access (Teams.ts locks the team's row) waits for this change, or
+					// this change waits for it and then reads them as removed.
+					yield* sql`select t.id from teams t join team_members m on m.team_id = t.id where m.user_id = ${actor.id} for share of t`;
 					const found = yield* withAccess(actor.id, workspaceId, "share");
 					const before = yield* sharingView(workspaceId);
 					yield* change(found);
