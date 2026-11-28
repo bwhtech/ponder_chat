@@ -2,6 +2,7 @@
 import { Button, Skeleton } from "frappe-ui";
 import { me } from "./account";
 import BrandLogo from "./BrandLogo.vue";
+import { sidebarCollapsed } from "./sidebar";
 import ThreadRowsSkeleton from "./ThreadRowsSkeleton.vue";
 import WorkspaceRowsPlaceholder from "./workspaces/WorkspaceRowsPlaceholder.vue";
 
@@ -15,7 +16,15 @@ defineProps<{ sheet?: boolean; name: string }>();
 </script>
 
 <template>
-	<nav v-if="!sheet" class="hidden h-full flex-shrink-0 flex-col overflow-x-hidden border-r border-outline-gray-1 bg-surface-sidebar md:flex" style="width: 16rem" aria-label="Chats" aria-busy="true">
+	<nav v-if="!sheet && sidebarCollapsed" class="hidden h-full flex-shrink-0 flex-col overflow-x-hidden border-r border-outline-gray-1 bg-surface-sidebar md:flex" style="width: 3rem" aria-label="Chats" aria-busy="true">
+		<div class="flex h-12 shrink-0 items-center px-1">
+			<div class="flex size-10 shrink-0 items-center justify-center"><span class="lucide-panel-left size-4 text-ink-gray-6" aria-hidden="true" /></div>
+		</div>
+		<div class="mt-auto px-2 pb-2">
+			<div class="flex h-7 items-center pl-2 [@media(pointer:coarse)]:h-11"><span class="lucide-square-pen size-4 text-ink-gray-6" aria-hidden="true" /></div>
+		</div>
+	</nav>
+	<nav v-else-if="!sheet" class="hidden h-full flex-shrink-0 flex-col overflow-x-hidden border-r border-outline-gray-1 bg-surface-sidebar md:flex" style="width: 16rem" aria-label="Chats" aria-busy="true">
 		<!-- frappe-ui's SidebarHeader, drawn without its menu. -->
 		<div class="flex h-12 shrink-0 items-center px-1">
 			<div class="flex h-10 w-full items-center rounded-4 px-1.5">
@@ -51,6 +60,12 @@ defineProps<{ sheet?: boolean; name: string }>();
 				</div>
 				<div class="h-1 rounded-full bg-surface-gray-3" />
 				<span class="flex h-[1lh] items-center text-p-xs"><Skeleton class="h-2.5 w-28 rounded-4" /></span>
+			</div>
+		</div>
+		<div class="px-2 pb-2">
+			<div class="flex h-7 items-center pl-2 text-ink-gray-6 [@media(pointer:coarse)]:h-11">
+				<span class="lucide-panel-right-open size-4" aria-hidden="true" />
+				<span class="ml-2 truncate text-sm leading-tighter">Collapse</span>
 			</div>
 		</div>
 	</nav>
