@@ -46,8 +46,11 @@ export type TeamDetail = {
 export type NewTeam = { name: string; description: string; adminUserId: string };
 export type TeamChanges = { name?: string; description?: string };
 
-/** An invite by email: the account with that email joined, or the email was invited. */
-export type InviteResult = ({ added: true } | { invited: true }) & { team: TeamDetail };
+/**
+ * An invite by email: the account with that email joined, or the email was invited. The team
+ * as the person sees it now: null when they invited their own email as a member.
+ */
+export type InviteResult = ({ added: true } | { invited: true }) & { team: TeamDetail | null };
 
 /** No such team. Routes answer 404. */
 export class TeamNotFound extends Schema.TaggedError<TeamNotFound>()("TeamNotFound", {

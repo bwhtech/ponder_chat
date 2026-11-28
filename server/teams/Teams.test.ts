@@ -158,6 +158,34 @@ describe.skipIf(!base)("teams through their routes", () => {
 			assert.deepInclude(detail.body.team, { canOrganise: false, canChangePeople: true });
 		});
 
+		it("answers null, not the team, to a team admin who demoted or removed themselves", async () => {
+			const team = (await create("boss", `Self ${tag}`, "ana")).body.team.id;
+			await setMember("ana", team, "bob", "admin");
+			assert.isNull((await setMember("ana", team, "ana", "member")).body.team, "demoted: no members or invites");
+			await setMember("bob", team, "ana", "admin");
+			assert.isNull((await removeMember("ana", team, "ana")).body.team, "removed");
+			assert.isNotNull((await removeMember("bob", team, "cy")).body.team, "removing someone else answers the team");
+		});
+
+		it("keeps one team admin when the last two leave or step down at the same time", async () => {
+			const pair = async (name: string) => {
+				const team = (await create("boss", `${name} ${tag}`, "ana")).body.team.id;
+				await setMember("ana", team, "bob", "admin");
+				return team;
+			};
+			const admins = async (team: string) => (await call<One>("boss", "GET", `/api/admin/teams/${team}`)).body.team.members.filter((member) => member.role === "admin").length;
+
+			const both = await pair("Race");
+			const removed = await Promise.all([removeMember("ana", both, "ana"), removeMember("bob", both, "bob")]);
+			assert.sameMembers(removed.map(outcome), ["ok", LAST_ADMIN]);
+			assert.strictEqual(await admins(both), 1);
+
+			const mixed = await pair("Race mixed");
+			const changed = await Promise.all([removeMember("ana", mixed, "ana"), setMember("bob", mixed, "bob", "member")]);
+			assert.sameMembers(changed.map(outcome), ["ok", LAST_ADMIN]);
+			assert.strictEqual(await admins(mixed), 1);
+		});
+
 		it("refuses members, other teams' admins and the org-admin actions", async () => {
 			const team = (await create("boss", `Desk ${tag}`, "ana")).body.team.id;
 			await setMember("ana", team, "bob", "member");
