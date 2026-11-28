@@ -10,6 +10,7 @@ import TeamFormDialog from "../components/TeamFormDialog.vue";
 import EmptyState from "../../EmptyState.vue";
 import { when } from "../../dates";
 import { count } from "../../numbers";
+import { teamActions } from "../lib/team-actions";
 import { isMobile } from "../lib/viewport";
 
 /**
@@ -145,6 +146,11 @@ const actionsFor = (member: TeamMember) => [
 ];
 
 const editing = ref(false);
+
+// Org admins: archive and restore, and delete an archived team (team-actions.ts).
+const organise = computed(() => (team.value ? teamActions(team.value, { shown: (changed) => show(changed.id, changed), deleted: () => void router.push("/teams") }) : []));
+const canEdit = computed(() => Boolean(team.value?.canOrganise && !team.value.archived));
+const mobileActions = computed(() => [...(canEdit.value ? [{ label: "Edit team", icon: "lucide-pencil", onClick: () => (editing.value = true) }] : []), ...organise.value]);
 </script>
 
 <template>
@@ -152,13 +158,16 @@ const editing = ref(false);
 		<PageHeaderMobile v-if="isMobile" :title="team.name">
 			<template #prefix><PageHeaderBackButton :fallback-route="{ path: '/teams' }" /></template>
 			<template #suffix>
-				<Button v-if="team.canOrganise && !team.archived" variant="ghost" icon="lucide-pencil" aria-label="Edit team" @click="editing = true" />
+				<Dropdown v-if="mobileActions.length" :options="mobileActions">
+					<Button variant="ghost" icon="lucide-ellipsis" aria-label="Team actions" />
+				</Dropdown>
 			</template>
 		</PageHeaderMobile>
 		<PageHeader v-else>
 			<Breadcrumbs class="-ml-0.5" :items="[{ label: 'Teams', route: '/teams' }, { label: team.name }]" />
 			<div class="ml-auto flex items-center gap-2">
-				<Button v-if="team.canOrganise && !team.archived" label="Edit" icon-left="lucide-pencil" @click="editing = true" />
+				<Button v-if="canEdit" label="Edit" icon-left="lucide-pencil" @click="editing = true" />
+				<Button v-for="action in organise" :key="action.label" :label="action.label" :icon-left="action.icon" :theme="action.theme ?? 'gray'" @click="action.onClick" />
 			</div>
 		</PageHeader>
 
@@ -170,6 +179,7 @@ const editing = ref(false);
 				</div>
 				<p v-if="team.description" class="whitespace-pre-line break-words text-p-base text-ink-gray-6">{{ team.description }}</p>
 				<p class="text-sm tabular-nums text-ink-gray-6">{{ summary }}</p>
+				<p v-if="team.archived" class="pt-2 text-p-sm text-ink-gray-6">Archived: its workspace grants give no access, and no one can change its people or invites. Restore it to change it.</p>
 			</div>
 
 			<section v-if="team.canChangePeople" class="space-y-3" aria-labelledby="add-people">

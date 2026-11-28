@@ -7,7 +7,7 @@ import { base, USERS_TABLE, useTestSchema } from "../workspaces/test-env.ts";
 import type { TeamDetail, TeamSummary } from "./Teams.ts";
 
 /**
- * The teams tests' app (*.test.ts here): the admin API on the app's runtime, on
+ * The teams tests' app (*.test.ts here): the admin API, the workspaces API and /api/teams on the app's runtime, on
  * TEST_DATABASE_URL, in a schema of the test file's own. The routes run behind a stand-in
  * for the session check of app.ts, which takes the person from a header. Each test file
  * that imports this gets its own copy, and so its own schema.
@@ -27,9 +27,11 @@ const Threads = await import("../threads/Threads.ts");
 const AdminEvents = await import("../admin/AdminEvents.ts");
 const Invites = await import("../people/Invites.ts");
 const Runs = await import("../telemetry/Runs.ts");
-const Workspaces = await import("../workspaces/Workspaces.ts");
+export const Workspaces = await import("../workspaces/Workspaces.ts");
 export const Teams = await import("./Teams.ts");
 export const { adminApi } = await import("../admin/routes.ts");
+const { workspacesApi } = await import("../workspaces/routes.ts");
+const { teamsApi } = await import("./routes.ts");
 
 /**
  * The people: two org admins and seven others. Eve is banned. Fay and gus are for the
@@ -46,7 +48,9 @@ const app = new Hono<SignedInEnv>()
 		c.set("user", { id, email: `${id}@example.invalid`, name: id } as SignedInEnv["Variables"]["user"]);
 		await next();
 	})
-	.route("/api/admin", adminApi);
+	.route("/api/admin", adminApi)
+	.route("/api/workspaces", workspacesApi)
+	.route("/api/teams", teamsApi);
 
 export type One = { team: TeamDetail };
 export type List = { teams: TeamSummary[] };
@@ -67,6 +71,40 @@ export const setMember = (by: Who, teamId: string, person: Who | string, role: "
 	call<One & Refusal>(by, "PUT", `/api/admin/teams/${teamId}/members/${person in who ? who[person as Who] : person}`, { role });
 export const removeMember = (by: Who, teamId: string, person: Who) => call<One & Refusal>(by, "DELETE", `/api/admin/teams/${teamId}/members/${who[person]}`);
 export const roles = (team: TeamDetail): string[][] => team.members.map((member) => [member.id, member.role]);
+
+export const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Holds every change that logs an activity event open, just before its commit: a lock on
+ * admin_events makes the event's insert wait. `waiting` resolves once `count` changes wait.
+ */
+export async function holdEvents() {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	let holding!: () => void;
+	const held = new Promise<void>((resolve) => (holding = resolve));
+	const done = database((sql) =>
+		sql.withTransaction(
+			Effect.gen(function* () {
+				yield* sql`lock table admin_events in share mode`;
+				yield* Effect.sync(holding);
+				yield* Effect.promise(() => gate);
+			}),
+		),
+	);
+	await held;
+	const waiting = async (count: number) => {
+		for (let tries = 0; tries < 100; tries++) {
+			const [row] = await database(
+				(sql) => sql<{ count: number }>`select count(*)::int as count from pg_locks where relation = 'admin_events'::regclass and not granted`,
+			);
+			if ((row?.count ?? 0) >= count) return;
+			await pause(50);
+		}
+		throw new Error("No change waited for admin_events.");
+	};
+	return { waiting, release: () => (release(), done) };
+}
 
 /** The schema, its users and every table the teams need. Run in beforeAll. */
 export async function setUp() {

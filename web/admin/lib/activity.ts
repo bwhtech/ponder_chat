@@ -1,6 +1,6 @@
 import { skillTitle } from "../../../shared/skill-file";
 import type { Activity } from "../api";
-import { count } from "../../numbers";
+import { count, plural } from "../../numbers";
 import { credits, date } from "./format";
 import { AUTO_COST_OPTIONS } from "./settings-form";
 
@@ -104,7 +104,15 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 		details: before.role ? [`In place of ${roleName(before.role)}`] : [],
 	}),
 	"cancel-team-invite": (before) => ({ text: `Cancelled their invite to ${teamName(before)}`, details: [] }),
+	// No target: about the team, not one person.
+	"archive-team": (_, after) => ({ text: `Archived the team ${teamName(after)}`, details: [] }),
+	"restore-team": (_, after) => ({ text: `Restored the team ${teamName(after)}`, details: [] }),
+	"delete-team": (before) => ({
+		text: `Deleted the team ${teamName(before)}`,
+		details: [[plural(Number(before.members ?? 0), "member"), plural(Number(before.grants ?? 0), "workspace grant"), plural(Number(before.invites ?? 0), "invite")].join(" · ")],
+	}),
 };
+
 
 /** “HR”, as the team was named then. */
 function teamName(fields: Fields) {

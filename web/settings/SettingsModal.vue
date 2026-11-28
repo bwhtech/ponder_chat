@@ -6,10 +6,11 @@ import ConnectorPage from "../connectors/ConnectorPage.vue";
 import ConnectorsPanel from "../connectors/ConnectorsPanel.vue";
 import AccountPanel from "./AccountPanel.vue";
 import MemoryPanel from "./MemoryPanel.vue";
+import TeamsPanel from "./TeamsPanel.vue";
 import { SETTINGS_TABS, settings, type SettingsTab } from "./state";
 
 /**
- * Settings: frappe-ui's SettingsDialog, as on /admin, with Account, Memory and Connectors.
+ * Settings: frappe-ui's SettingsDialog, as on /admin, with Account, Memory, Teams and Connectors.
  * Cmd+Shift+, (Ctrl+Shift+,) opens it too. On a phone it fills the screen. A chat that a
  * memory came from opens in the page, and Settings closes.
  */
@@ -54,6 +55,7 @@ watch(
 		<SettingsContent>
 			<SettingsPanel value="account"><AccountPanel /></SettingsPanel>
 			<SettingsPanel value="memory"><MemoryPanel @open-thread="openThread" /></SettingsPanel>
+			<SettingsPanel value="teams"><TeamsPanel /></SettingsPanel>
 			<SettingsPanel value="connectors">
 				<ConnectorPage v-if="connector && !connectorsError" :key="connector.id" :connector="connector" />
 				<ConnectorsPanel v-else />

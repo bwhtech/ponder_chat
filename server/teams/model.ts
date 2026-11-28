@@ -40,10 +40,22 @@ export type TeamDetail = {
 	createdAt: string;
 	members: TeamMember[];
 	invites: TeamInvite[];
+	/** Workspaces the team has a grant on, for what Delete takes with it. */
+	grantCount: number;
 	/** Renames it, and archives, restores or deletes it: org admins. */
 	canOrganise: boolean;
 	/** Adds and removes people and changes their roles. */
 	canChangePeople: boolean;
+};
+
+/** One of the person's own active teams, in Settings > Teams (GET /api/teams/mine): its members, never its invites. */
+export type MyTeam = {
+	id: string;
+	name: string;
+	description: string;
+	/** The person's own role. */
+	role: TeamRole;
+	members: { id: string; name: string; email: string; role: TeamRole }[];
 };
 
 export type NewTeam = { name: string; description: string; adminUserId: string };
@@ -71,11 +83,12 @@ const REFUSALS = {
 	"last-admin": "A team needs at least one team admin. Make someone else a team admin first.",
 	banned: "This person is banned, so they can't join a team.",
 	"no-account": "That person has no account.",
+	"not-archived": "Archive this team before you delete it.",
 } as const;
 
 /** The person may not do this to the team. Routes answer 403 with the message ("no-account": 400). */
 export class TeamRefused extends Schema.TaggedError<TeamRefused>()("TeamRefused", {
-	reason: Schema.Literals(["needs-org-admin", "needs-team-admin", "archived", "last-admin", "banned", "no-account"]),
+	reason: Schema.Literals(["needs-org-admin", "needs-team-admin", "archived", "last-admin", "banned", "no-account", "not-archived"]),
 }) {
 	override get message() {
 		return REFUSALS[this.reason];

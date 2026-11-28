@@ -7,6 +7,11 @@ export function count(value: number) {
 	return grouped.format(value);
 }
 
+/** A count and its noun, such as "1 member" or "3 members". */
+export function plural(value: number, noun: string) {
+	return `${count(value)} ${value === 1 ? noun : `${noun}s`}`;
+}
+
 /** Credits: one decimal place under 100, whole numbers from 100 up, such as "47.3" or "1,000". */
 export function credits(value: number) {
 	return count(value >= 100 ? Math.round(value) : value);
