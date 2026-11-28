@@ -23,8 +23,11 @@ import * as TestClock from "effect/testing/TestClock";
 import { FatalError, RetryableError } from "workflow";
 import * as CompactionStore from "../compaction/store.ts";
 import * as PonderConfig from "../config.ts";
+import * as Credits from "../credits/Credits.ts";
+import * as ExtraCredits from "../credits/ExtraCredits.ts";
 import * as AutoRouter from "../models/AutoRouter.ts";
 import * as Models from "../models/Models.ts";
+import * as Notify from "../notify/Notify.ts";
 import * as OpenRouter from "../openrouter/OpenRouter.ts";
 import * as OpenRouterKey from "../openrouter/OpenRouterKey.ts";
 import * as Database from "../runtime/Database.ts";
@@ -97,6 +100,8 @@ const answer = (generationId: string): LanguageModelV4StreamPart[] => [
 	{ type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage, providerMetadata: { openrouter: { usage: { cost: 0.00042 } } } },
 ];
 
+const config = PonderConfig.layerFromEnv({ DATABASE_URL: url ?? "postgres://ponder@127.0.0.1:9/none", OPENROUTER_API_KEY: "sk-or-v1-test", OPENROUTER_BASE_URL: "http://fake.test/api" });
+
 /** The services of an attempt, with the fake model, and Workflow saying the run has `status`. */
 const layerWith = (model: MockLanguageModelV4, status: WorkflowRuns.RunStatus = "running") =>
 	Layer.mergeAll(
@@ -115,7 +120,7 @@ const layerWith = (model: MockLanguageModelV4, status: WorkflowRuns.RunStatus = 
 			Layer.provide(Layer.mergeAll(Models.layer, OpenRouterKey.layer, Settings.layer)),
 			Layer.provide(Layer.mergeAll(OpenRouter.layer, Secrets.layer)),
 			Layer.provideMerge(Layer.mergeAll(Database.layer, Layer.succeed(HttpClient.HttpClient, HttpClient.make((request) => Effect.die(`no request in this test: ${request.url}`))))),
-			Layer.provide(PonderConfig.layerFromEnv({ DATABASE_URL: url ?? "postgres://ponder@127.0.0.1:9/none", OPENROUTER_API_KEY: "sk-or-v1-test", OPENROUTER_BASE_URL: "http://fake.test/api" })),
+			Layer.provide(config),
 		),
 	);
 
@@ -328,6 +333,20 @@ describe.skipIf(!url)("a model call's `runs` row", () => {
 			const last = yield* Effect.flip(runAttempt(`wrun_fail_${tag}`, failing(`gen-last-${tag}`), { attempt: 3 }));
 			assert.instanceOf(last, ModelAttempt.ModelCallFatal);
 			assert.strictEqual(Option.getOrThrow(yield* rowOf(`wrun_fail_${tag}:step_1:3`).pipe(Effect.provide(database))).finish_reason, "failed");
+		}),
+	);
+
+	it.live("leaves the attempt a retry replaces out of its credit check", () =>
+		Effect.gen(function* () {
+			const retry = { ...call(`wrun_spent_${tag}`), owner: `test-spender-${tag}` };
+			const credits = Credits.layer.pipe(Layer.provideMerge(Layer.mergeAll(ExtraCredits.layer, Settings.layer, Notify.layer)), Layer.provideMerge(database), Layer.provide(config));
+			yield* Credits.Credits.use((service) => Effect.andThen(service.migrate, service.setDailyCredits(retry.owner, 1))).pipe(Effect.provide(credits));
+			const fake = fakeModel();
+			// The first attempt costs 2 credits, then the server stops before the step saves its result.
+			fake.send(...answer(`gen-spent-${tag}`).map((part) => (part.type === "finish" ? { ...part, providerMetadata: { openrouter: { usage: { cost: 0.002 } } } } : part)));
+			fake.end();
+			yield* ModelAttempt.run(retry, fakeWritable("none").writable, { stepId: "step_1", attempt: 1 }).pipe(Effect.provide(layerWith(fake.model)));
+			assert.isFalse(yield* ModelAttempt.outOfCredits(retry, { stepId: "step_1", attempt: 2 }).pipe(Effect.provide(credits)));
 		}),
 	);
 

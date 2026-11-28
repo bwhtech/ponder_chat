@@ -23,7 +23,7 @@ test("a reply goes on after a deploy stops its server in the middle of a model c
 	expect(await fake.calls(tag)).toHaveLength(2);
 });
 
-test("Stop keeps the stopped call's cost, and does not charge it", async ({ page, fake }, testInfo) => {
+test("Stop keeps the stopped call's cost, and charges it", async ({ page, fake }, testInfo) => {
 	const { person, tag, words } = await setUp(page, fake, testInfo.title);
 	await fake.chat({ match: tag, steps: [{ text: words, delayMs: 150, cost: 0.0003 }] });
 
@@ -32,6 +32,6 @@ test("Stop keeps the stopped call's cost, and does not charge it", async ({ page
 	await chat.stop(page).click();
 	await chat.idle(page);
 
-	// The call runs to its end on OpenRouter: its row gets the cost, and stays uncharged.
-	await expect.poll(() => modelCalls(person), { timeout: 30_000 }).toEqual([{ finish_reason: "stopped", cost_usd: 0.0003, charged: false }]);
+	// The call runs to its end on OpenRouter: its row gets the cost, and the person is charged it.
+	await expect.poll(() => modelCalls(person), { timeout: 30_000 }).toEqual([{ finish_reason: "stopped", cost_usd: 0.0003, charged: true }]);
 });

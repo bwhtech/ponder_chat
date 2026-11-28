@@ -84,6 +84,19 @@ export class OutOfCredits extends Schema.TaggedError<OutOfCredits>()("OutOfCredi
 	}
 }
 
+/** More replies at once than the credit count can keep up with. The message is the plain text the chat shows. */
+export class TooManyReplies extends Schema.TaggedError<TooManyReplies>()("TooManyReplies", {}) {
+	override get message() {
+		return "You have too many replies in progress. Try again in a moment.";
+	}
+}
+
+/**
+ * A call's cost is known only when it ends, so replies started together can't see each
+ * other's spending. This bounds how far past the limit they can go.
+ */
+const MAX_REPLIES_IN_FLIGHT = 3;
+
 export type StartInput = {
 	threadId: string;
 	owner: string;
@@ -111,7 +124,7 @@ export class Replies extends Context.Service<
 		 * A chat in a workspace needs the person to be able to ask in it, on every message: a
 		 * new chat fails with WorkspaceNotFound, a saved one with WorkspaceAccessLost.
 		 */
-		readonly start: (input: StartInput) => Effect.Effect<Started, OutOfCredits | ThreadNotYours | Workspaces.WorkspaceNotFound | WorkspaceAccessLost | SqlError>;
+		readonly start: (input: StartInput) => Effect.Effect<Started, OutOfCredits | TooManyReplies | ThreadNotYours | Workspaces.WorkspaceNotFound | WorkspaceAccessLost | SqlError>;
 		/**
 		 * The latest reply of a thread, by the thread id (a reloaded page) or the run id (a
 		 * dropped connection), from `uiStartIndex` (the UI chunks the page has). A finished run
@@ -134,9 +147,9 @@ export class Replies extends Context.Service<
 		 * flight across a deploy that changed its steps. Run by the sweep (sweep.ts).
 		 *
 		 * The reply is saved as far as it got: marked failed, so the page offers Retry, or
-		 * cancelled, for a run that Stop cancelled and a crash kept from saving. The calls the run
-		 * had in flight cost no credits, and the sweep gets their cost. One run that fails to
-		 * finish does not keep the others waiting.
+		 * cancelled, for a run that Stop cancelled and a crash kept from saving. The calls a failed
+		 * run had in flight cost no credits, a cancelled run's do, and the sweep gets their cost.
+		 * One run that fails to finish does not keep the others waiting.
 		 */
 		readonly finishEndedRuns: Effect.Effect<void, SqlError>;
 	}
@@ -223,7 +236,7 @@ const make = Effect.gen(function* () {
 				provided(saveReply(run.threadId, owner, run.runId, run.model, { cancelled: true, continued: run.continued })),
 				Effect.gen(function* () {
 					yield* runs.finish(run.threadId, run.runId, run.model, { cancelled: true, continued: run.continued });
-					// The model call in flight runs to its end on OpenRouter; it costs the person no credits.
+					// The model call in flight runs to its end on OpenRouter, and is charged what it billed.
 					yield* calls
 						.stop(run.threadId, run.runId)
 						.pipe(Effect.catchTags({ SqlError: (error) => Effect.logWarning(`replies: could not mark the calls of run ${run.runId} stopped:`, problem(error)) }));
@@ -263,6 +276,7 @@ const make = Effect.gen(function* () {
 		const continued = continuedFrom(messages);
 		const previous = Option.getOrUndefined(yield* runs.active(threadId));
 		if (previous && sameContinuation(previous.continued, continued)) return { runId: previous.runId, model: previous.model, followed: true };
+		if ((yield* runs.inFlight(owner, threadId)) >= MAX_REPLIES_IN_FLIGHT) return yield* new TooManyReplies();
 		// Before anything is stopped or saved: the stale page's thread must not replace the saved one.
 		const asked = continued ? messages.at(-1)! : undefined;
 		const answers = asked ? answersIn(asked) : [];
@@ -336,7 +350,7 @@ const make = Effect.gen(function* () {
 		const python = yield* sandbox.ready;
 		const continued = continuedFrom(messages);
 		yield* untilQuestionSaved(threadId, messages, continued);
-		const started = yield* runs.withLock(threadId, startRun(input, model, python, checked));
+		const started = yield* runs.withPersonLock(owner, runs.withLock(threadId, startRun(input, model, python, checked)));
 		// The run goes on if the request closes; the page reconnects with follow.
 		const stream = "stream" in started ? started.stream : yield* provided(replyStream(started.runId, started.model, { continued })).pipe(inReplyTrace(started.runId));
 		if (!started.followed) {

@@ -16,6 +16,7 @@ import * as Stream from "effect/Stream";
 import { isAuto } from "../../shared/auto-model.ts";
 import * as CompactionStore from "../compaction/store.ts";
 import { measuredRatio } from "../compaction/tokens.ts";
+import * as Credits from "../credits/Credits.ts";
 import * as AutoRouter from "../models/AutoRouter.ts";
 import { problem, sqlMessage } from "../runtime/Database.ts";
 import type { StepRules } from "../runtime/step.ts";
@@ -75,6 +76,16 @@ export const rules: StepRules<ModelCallRetry | ModelCallFatal | SqlError> = {
 export type StepAttempt = { stepId: string; attempt: number };
 
 type Finish = Extract<TextStreamPart<ToolSet>, { type: "finish-step" }>;
+
+/**
+ * Whether the person has no credits left, before a later model call of their reply (model-call.ts).
+ * A retry replaces the earlier attempts, so they stop counting before the check, as in `run`.
+ */
+export const outOfCredits = Effect.fnUntraced(function* (call: ModelCall, step: StepAttempt) {
+	if (step.attempt > 1) yield* ModelCalls.ModelCalls.use((calls) => calls.settleEarlierAttempts(call.threadId, call.runId, step.stepId, ModelCalls.recordId(call.runId, step.stepId, step.attempt)));
+	const status = yield* Credits.Credits.use((credits) => credits.status(call.owner));
+	return status.remaining <= 0;
+});
 
 export const run = Effect.fnUntraced(function* (call: ModelCall, writable: WritableStream<ModelCallStreamPart>, step: StepAttempt) {
 	const calls = yield* ModelCalls.ModelCalls;

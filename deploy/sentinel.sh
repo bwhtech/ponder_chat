@@ -39,8 +39,8 @@ check() { # KEY CONDITION-COMMAND MESSAGE : alerts when the command fails
 
 if [ "${1:-}" = "--daily" ]; then
 	USERS=$(sql "select count(distinct \"user\") from runs where created_at > now() - interval '1 day' and function_id = 'chat'")
-	# Model calls that finished: charged_runs leaves out the attempts a crash, an error or Stop cut short. COST below keeps them, as OpenRouter billed them.
-	CALLS=$(sql "select count(*) from charged_runs where created_at > now() - interval '1 day' and function_id = 'chat'")
+	# Model calls that finished: charged_runs leaves out the attempts a crash or an error cut short, and this leaves out those Stop cut short. COST below keeps them all, as OpenRouter billed them.
+	CALLS=$(sql "select count(*) from charged_runs where created_at > now() - interval '1 day' and function_id = 'chat' and finish_reason <> 'stopped'")
 	REPLIES=$(sql "select count(*) from workflow.workflow_runs where created_at > now() - interval '1 day'")
 	FAILED=$(sql "select count(*) from workflow.workflow_runs where created_at > now() - interval '1 day' and status = 'failed'")
 	COST=$(sql "select to_char(coalesce(sum(cost_usd), 0), 'FM990.00') from runs where created_at > now() - interval '1 day'")

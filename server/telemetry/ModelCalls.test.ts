@@ -120,7 +120,7 @@ describe.skipIf(!url)("ModelCalls and Runs", () => {
 			}),
 		);
 
-		it.effect("keeps a call that Stop cut short uncharged, with its tokens", () =>
+		it.effect("charges a call that Stop cut short, and does not count it as a reply", () =>
 			Effect.gen(function* () {
 				const calls = yield* ModelCalls.ModelCalls;
 				const sql = yield* PgClient.PgClient;
@@ -130,7 +130,7 @@ describe.skipIf(!url)("ModelCalls and Runs", () => {
 				yield* calls.stop(threadId, runId);
 				yield* record.finish(usage({ finishReason: "tool-calls" }), { stopped: false });
 				assert.deepInclude(yield* rowOf(id), { finish_reason: "stopped", input_tokens: 1000, cost_usd: "0.000123" });
-				assert.deepStrictEqual(yield* sql`select id from charged_runs where id = ${id}`, []);
+				assert.deepStrictEqual(yield* sql`select is_reply from charged_runs where id = ${id}`, [{ is_reply: false }]);
 				// And when the run itself was cancelled.
 				const cancelled = yield* calls.record(ModelCalls.recordId(runId, "step_3", 1), context);
 				yield* cancelled.start(`gen-c-${run}`);
@@ -215,8 +215,8 @@ describe.skipIf(!url)("ModelCalls and Runs", () => {
 				assert.isTrue(report.runs.every((row) => row.thread_id === threadId && row.created_at instanceof Date));
 				const title = report.runs.find((row) => row.id === `${runId}:title`)!;
 				assert.strictEqual(title.cost_usd, 0.5);
-				// Every run that finished and costs credits: step_1. The calls that did not finish, and the title (the app's own call), are left out.
-				assert.deepStrictEqual(report.totals, { runs: 1, input_tokens: 1000, output_tokens: 50, cached_tokens: 900, cost_usd: 0.000123 });
+				// Every run that costs credits: step_1, and step_2 and step_3 that Stop cut short. The calls a crash or an error cut short, and the title (the app's own call), are left out.
+				assert.deepStrictEqual(report.totals, { runs: 3, input_tokens: 3000, output_tokens: 150, cached_tokens: 2700, cost_usd: 0.000369 });
 				assert.deepStrictEqual(yield* runs.usageReport({ user, thread: "" }), yield* runs.usageReport({ user }));
 				assert.deepStrictEqual((yield* runs.usageReport({ user: `nobody-${run}` })).totals, { runs: 0, input_tokens: 0, output_tokens: 0, cached_tokens: 0, cost_usd: 0 });
 			}),

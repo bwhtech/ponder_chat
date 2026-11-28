@@ -265,6 +265,7 @@ const api = app
 			),
 			{
 				OutOfCredits: (error, c) => c.text(error.message, 402),
+				TooManyReplies: (error, c) => c.text(error.message, 429),
 				ThreadNotYours: (_, c) => c.json({ error: "Not found" }, 404),
 				WorkspaceNotFound: (error, c) => c.text(error.message, 404),
 				// The chat is the person's own, so it may say why: they were removed from its workspace.

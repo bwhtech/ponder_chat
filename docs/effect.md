@@ -232,7 +232,7 @@ postgres.js is gone from the server: `PgClient` is its only pool (10), plus bett
 | `runs.ts` | `ThreadRuns`: each thread's latest run (`thread_runs`), and `withLock`, the in-process lock of a thread (a `Semaphore` per thread with work waiting). |
 | `approval-uses.ts` | `ApprovalUses`: each approval answer used once (`approval_uses`), in a transaction. |
 | `WorkflowRuns.ts` | `WorkflowRuns`: Workflow's runtime API (`start`, `status`, `cancel`, `readable`, `endStream`). The seam that tests replace. A run that can't start or a stream that can't be read is a defect, thrown as itself; a cancel and the end of a stream fail with `WorkflowFailed`, which callers log. |
-| `replies.ts` | `Replies`: `start` (with the credit check and the title), `follow`, `stop`, `remove`, `whenFinished`, `finishEndedRuns`. Fails with `OutOfCredits` (402, its message is the text the chat shows) and `ThreadNotYours` (404). |
+| `replies.ts` | `Replies`: `start` (with the credit check and the title), `follow`, `stop`, `remove`, `whenFinished`, `finishEndedRuns`. Fails with `OutOfCredits` (402, its message is the text the chat shows), `TooManyReplies` (429, the same) and `ThreadNotYours` (404). |
 | `reply.ts` | `replyStream`, `saveReply` (span `reply.save`), and the run's last steps: `saveRunReply`, `finishFailedRun`. |
 | `model.ts` | `ChatModels`: the OpenRouter model of one attempt, with the key and Auto's plugin read then. A test gives a fake model. |
 | `model-attempt.ts` | `run`: one attempt at a model call (below). |

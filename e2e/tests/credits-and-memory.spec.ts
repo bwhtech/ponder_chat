@@ -21,6 +21,15 @@ test("stops a person who used today's credits", async ({ page, fake }) => {
 	expect(response.status()).toBe(402);
 });
 
+test("ends a reply when the credits run out between its model calls", async ({ page, fake }) => {
+	await fake.chat({ match: "costly search", steps: [{ toolCalls: [{ name: "web_search", input: { query: "heat pumps" } }], cost: 1 }, { text: "Heat pumps save energy." }] });
+
+	await chat.send(page, "A costly search");
+	await expect(page.getByText("You've used today's credits")).toBeVisible();
+	await expect(chat.reply(page)).not.toContainText("Heat pumps save energy.");
+	expect(await fake.calls("costly search")).toHaveLength(1);
+});
+
 test("remembers what the person said, and recalls it in a new chat", async ({ page, fake }) => {
 	await fake.memory({
 		match: "green tea",

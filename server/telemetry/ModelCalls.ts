@@ -23,9 +23,9 @@ import type { UNCHARGED_CALLS } from "./Runs.ts";
  *
  * The row is written when OpenRouter's first chunk names the call (its generation id),
  * so a call that a crash cuts short is still in `runs`. When the attempt ends, the row
- * gets its tokens and cost. An attempt that failed, or that a crash or Stop cut short,
- * costs no credits. A stream cut short does not report its cost, so the sweep gets it
- * from OpenRouter's generation API later (fillCosts), off the reply's path.
+ * gets its tokens and cost. An attempt that failed, or that a crash cut short, costs no
+ * credits; one that Stop cut short does. A stream cut short does not report its cost, so
+ * the sweep gets it from OpenRouter's generation API later (fillCosts), off the reply's path.
  *
  * The row id is the workflow run, the step and the attempt, so an attempt that runs
  * again never writes a row twice.
@@ -55,9 +55,8 @@ export type ModelCallRecord = {
 	/** The call has begun on OpenRouter, and may be billed from now on. */
 	readonly start: (generationId: string) => Effect.Effect<void, SqlError>;
 	/**
-	 * The call finished: its tokens and cost. A call that Stop cut short keeps them but
-	 * stays uncharged ("stopped"): Stop marked its row (ModelCalls.stop), or its run is
-	 * cancelled (`stopped`).
+	 * The call finished: its tokens and cost. A call that Stop cut short keeps them as
+	 * "stopped": Stop marked its row (ModelCalls.stop), or its run is cancelled (`stopped`).
 	 */
 	readonly finish: (usage: CallUsage, options: { stopped: boolean }) => Effect.Effect<void, SqlError>;
 	/** The attempt failed. Only a call that OpenRouter began (start) can be billed, so only it has a row. */
@@ -92,7 +91,7 @@ export class ModelCalls extends Context.Service<
 		 * to settle them. Called when the run saves its reply.
 		 */
 		readonly settle: (threadId: string, runId: string) => Effect.Effect<void, SqlError>;
-		/** After Stop: the run's calls in flight are uncharged, even when they finish later. */
+		/** After Stop: the run's calls in flight end as "stopped", and cost what OpenRouter billed. */
 		readonly stop: (threadId: string, runId: string) => Effect.Effect<void, SqlError>;
 		/**
 		 * Gets the cost of model calls that ended without it, from OpenRouter's generation API.
@@ -128,7 +127,7 @@ const make = Effect.gen(function* () {
 		});
 
 		const finish = Effect.fn("ModelCalls.finish")(function* (usage: CallUsage, { stopped }: { stopped: boolean }) {
-			const finishReason = stopped ? ("stopped" satisfies Uncharged) : usage.finishReason;
+			const finishReason = stopped ? "stopped" : usage.finishReason;
 			const toolCalls = sql.json(usage.toolCalls.map((name) => ({ name, status: "ok" })));
 			const generationId = Option.getOrNull(yield* Ref.get(generation));
 			const durationMs = yield* elapsed;

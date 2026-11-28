@@ -41,6 +41,8 @@ test("a run cancelled without saving its reply is finished as stopped, with no R
 	await expect(chat.reply(page)).toContainText(`${tag}-3`);
 	await expect(page.getByRole("button", { name: "Retry", exact: true })).toHaveCount(0);
 	await expect(chat.stop(page)).toHaveCount(0);
+	// The call in flight is charged what OpenRouter billed, once the sweep has its cost.
+	await expect.poll(async () => (await modelCalls(person)).some((call) => call.finish_reason === "stopped" && call.charged && call.cost_usd !== null), { timeout: 30_000 }).toBe(true);
 });
 
 test("an approval sent again after the runtime failed its run in the middle of the call runs nothing", async ({ page, fake }, testInfo) => {
