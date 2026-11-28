@@ -56,7 +56,7 @@
 										<span class="lucide-inbox size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Requests</span>
 									</div>
 									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/people" class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
-										<span class="lucide-users size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">People</span>
+										<span class="lucide-user-round size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Users</span>
 									</div>
 									<div data-slot="sidebar-item" data-state="inactive" data-boot-nav="/teams" data-boot-team class="flex h-7 items-center rounded-4 pl-2 text-ink-gray-6 data-[state=active]:bg-surface-elevation-3 data-[state=active]:text-ink-gray-8 data-[state=active]:shadow-sm [@media(pointer:coarse)]:h-11">
 										<span class="lucide-users-round size-4 shrink-0 text-ink-gray-6"></span><span class="ml-2 truncate text-sm leading-tighter">Teams</span>
@@ -115,7 +115,7 @@
 								<span class="lucide-inbox block size-6"></span><span class="text-xs-medium leading-tighter">Requests</span>
 							</div>
 							<div data-boot-nav="/people" class="flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-ink-gray-5 data-[state=active]:text-ink-gray-8">
-								<span class="lucide-users size-6"></span><span class="text-xs-medium leading-tighter">People</span>
+								<span class="lucide-user-round size-6"></span><span class="text-xs-medium leading-tighter">Users</span>
 							</div>
 							<div data-boot-nav="/skills" class="flex min-h-14 flex-col items-center justify-center gap-1 py-2 text-ink-gray-5 data-[state=active]:text-ink-gray-8">
 								<span class="lucide-sparkles size-6"></span><span class="text-xs-medium leading-tighter">Skills</span>
@@ -201,7 +201,7 @@
 				// Wider screens open /admin/settings as a dialog over Overview (router.ts).
 				const page = team && path === "/" ? "/teams" : path === "/settings" && !phone ? "/" : path;
 				const section = "/" + page.split("/")[1];
-				const titles = { "/": "Overview", "/requests": "Requests", "/people": "People", "/teams": "Teams", "/skills": "Skills", "/workspaces": "Workspaces", "/activity": "Activity", "/settings": "Settings" };
+				const titles = { "/": "Overview", "/requests": "Requests", "/people": "Users", "/teams": "Teams", "/skills": "Skills", "/workspaces": "Workspaces", "/activity": "Activity", "/settings": "Settings" };
 				const shell = document.getElementById("app");
 				const all = (selector, root = shell) => root.querySelectorAll(selector);
 

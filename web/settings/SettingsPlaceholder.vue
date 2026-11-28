@@ -6,7 +6,7 @@ import { credits } from "../numbers";
 import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
 import TeamRowsSkeleton from "./TeamRowsSkeleton.vue";
 import PanelHeader from "./PanelHeader.vue";
-import { creditsNote, MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, TEAMS_INTRO, type SettingsTab } from "./state";
+import { creditsNote, MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, type SettingsTab } from "./state";
 
 /**
  * Settings (SettingsModal.vue) while its code arrives: the same dialog, the same sidebar, and
@@ -95,7 +95,7 @@ function pick(tab: SettingsTab) {
 					</div>
 				</template>
 				<template v-else-if="settings.tab === 'teams'">
-					<PanelHeader title="Teams" :description="TEAMS_INTRO" />
+					<PanelHeader title="Teams" />
 					<div class="min-h-0 flex-1 overflow-hidden px-4 pb-16 sm:px-12">
 						<div class="pt-5"><TeamRowsSkeleton /></div>
 					</div>

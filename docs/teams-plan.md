@@ -9,7 +9,7 @@ This file keeps the decisions, the data model, the access rules, the API and the
 Built on the integration branch `feat/teams` (pull request #89), one ticket at a time (see "Tickets"). Each ticket had a review by a second model, and the branch had a review for standards and for this spec. Changes from this plan that the build made:
 
 - `TeamDetail` also has `canOrganise`, `canChangePeople` and `grantCount`. The admin shell reads the scope from `user.adminScope` on `/api/me`; `GET /api/admin/me` also exists.
-- Removing an email on the People page also cancels its team invites. The "added to a team" email also goes to a new team's first admin.
+- Removing an email on the Users page also cancels its team invites. The "added to a team" email also goes to a new team's first admin.
 - Nobody renames an archived team. A team admin does not see an archived team at all.
 - A join at first sign-in is logged as "add-team-member", by invite. Delete logs one event with counts.
 

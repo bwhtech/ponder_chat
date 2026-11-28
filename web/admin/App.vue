@@ -120,7 +120,7 @@ onBeforeUnmount(() => clearInterval(timer));
 								</span>
 							</template>
 						</MobileNavItem>
-						<MobileNavItem label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')" />
+						<MobileNavItem label="Users" icon="lucide-user-round" route="/people" :active="route.path.startsWith('/people')" />
 						<MobileNavItem label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
 						<Dropdown :options="MORE" side="top" align="end">
 							<MobileNavItem label="More" icon="lucide-ellipsis" :active="inMore" />
@@ -150,7 +150,7 @@ onBeforeUnmount(() => clearInterval(timer));
 											/>
 										</template>
 									</SidebarItem>
-									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="People" icon="lucide-users" route="/people" :active="route.path.startsWith('/people')">
+									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Users" icon="lucide-user-round" route="/people" :active="route.path.startsWith('/people')">
 										<template #suffix>
 											<span v-if="counts.invited" class="mr-2 text-xs tabular-nums text-ink-gray-5">{{ counts.invited }} invited</span>
 										</template>

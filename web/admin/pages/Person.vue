@@ -175,7 +175,7 @@ const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { a
 			</template>
 		</PageHeaderMobile>
 		<PageHeader v-else>
-			<Breadcrumbs class="-ml-0.5" :items="[{ label: 'People', route: '/people' }, { label: person.name }]" />
+			<Breadcrumbs class="-ml-0.5" :items="[{ label: 'Users', route: '/people' }, { label: person.name }]" />
 			<div class="ml-auto flex items-center gap-2">
 				<Button label="Set daily credits" icon-left="lucide-gauge" @click="creditsOpen = true" />
 				<Dropdown :options="actions">
@@ -282,13 +282,13 @@ const chartMotion = matchMedia("(prefers-reduced-motion: reduce)").matches ? { a
 			<template #prefix><PageHeaderBackButton :fallback-route="{ path: '/people' }" /></template>
 		</PageHeaderMobile>
 		<PageHeader v-else>
-			<!-- Loading: "People" stays a parent link, as it is once loaded, and a bar stands where the name lands. Same classes as frappe-ui's Breadcrumbs. -->
+			<!-- Loading: "Users" stays a parent link, as it is once loaded, and a bar stands where the name lands. Same classes as frappe-ui's Breadcrumbs. -->
 			<nav v-if="state.kind === 'loading'" aria-label="Breadcrumb" class="-ml-0.5 flex items-center leading-tighter">
-				<RouterLink to="/people" class="rounded-4 px-0.5 py-1 text-lg-medium leading-tighter text-ink-gray-5 hover:text-ink-gray-7">People</RouterLink>
+				<RouterLink to="/people" class="rounded-4 px-0.5 py-1 text-lg-medium leading-tighter text-ink-gray-5 hover:text-ink-gray-7">Users</RouterLink>
 				<span class="mx-0.5 text-base text-ink-gray-4" aria-hidden="true">/</span>
 				<span class="flex px-0.5 py-1"><Skeleton class="h-3.5 w-16 rounded-4" /></span>
 			</nav>
-			<Breadcrumbs v-else class="-ml-0.5" :items="[{ label: 'People', route: '/people' }, { label: state.kind === 'missing' ? 'Not found' : 'Could not load' }]" />
+			<Breadcrumbs v-else class="-ml-0.5" :items="[{ label: 'Users', route: '/people' }, { label: state.kind === 'missing' ? 'Not found' : 'Could not load' }]" />
 			<div v-if="state.kind === 'loading'" class="ml-auto flex items-center gap-2">
 				<Button label="Set daily credits" icon-left="lucide-gauge" disabled />
 				<Button icon="lucide-ellipsis" aria-label="More actions" disabled />

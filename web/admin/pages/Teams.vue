@@ -78,10 +78,6 @@ const creating = ref(false);
 	</PageHeader>
 
 	<div class="mx-auto w-full max-w-5xl px-3 pb-16 pt-4 sm:px-5 md:pt-6">
-		<p class="max-w-[640px] pb-4 text-p-sm text-ink-gray-6">
-			<template v-if="orgAdmin">A team is a group of people, such as HR. Its team admins add and remove its people. Teams give no access on their own.</template>
-			<template v-else>The teams you manage. Add people, invite new ones by email, change roles and remove people.</template>
-		</p>
 
 		<div v-if="teams.length" class="flex pb-3">
 			<TextInput v-model="search" type="search" placeholder="Search" aria-label="Search teams" class="w-full md:ml-auto md:w-60">

@@ -6,7 +6,6 @@ import { client, unwrap, type Answer } from "../api";
 import EmptyState from "../EmptyState.vue";
 import PanelBody from "./PanelBody.vue";
 import PanelHeader from "./PanelHeader.vue";
-import { TEAMS_INTRO } from "./state";
 import TeamRowsSkeleton from "./TeamRowsSkeleton.vue";
 
 /**
@@ -34,7 +33,7 @@ const manageLink = (team: MyTeam) => `/admin/teams/${encodeURIComponent(team.id)
 </script>
 
 <template>
-	<PanelHeader title="Teams" :description="TEAMS_INTRO" />
+	<PanelHeader title="Teams" />
 	<PanelBody>
 		<div class="pt-5">
 			<EmptyState v-if="loadError" icon="lucide-circle-alert" title="Your teams could not load" :body="loadError" alert>

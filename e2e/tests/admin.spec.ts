@@ -3,7 +3,7 @@ import { chat, expect, jsonOf, randomIp, signIn, test, uniqueEmail, type Thread 
 
 test("an admin sees the people page", async ({ page, admin }) => {
 	await page.goto("/admin/people");
-	await expect(page.getByRole("heading", { name: "People", exact: true })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Users", exact: true })).toBeVisible();
 	await expect(page.getByText(admin.email).first()).toBeVisible();
 	await expect(page.getByText("This page is for admins")).toHaveCount(0);
 });

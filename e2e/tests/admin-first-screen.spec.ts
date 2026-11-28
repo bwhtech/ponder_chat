@@ -6,7 +6,7 @@ import { expect, test } from "../fixtures.ts";
  * the app uses. When the app mounts, its own loading screen replaces it. Here, every label
  * the copy draws must be where the app draws it, so nothing moves on the swap.
  */
-const labels = ["Overview", "Requests", "People", "Today", "Active people", "People out of credits", "Over time", "14 days", "Credits used per day", "Credits by model", "Who uses Ponder"];
+const labels = ["Overview", "Requests", "Users", "Today", "Active people", "People out of credits", "Over time", "14 days", "Credits used per day", "Credits by model", "Who uses Ponder"];
 
 for (const view of [
 	{ name: "wide", viewport: { width: 1440, height: 900 }, isMobile: false },

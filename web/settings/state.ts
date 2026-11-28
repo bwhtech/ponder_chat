@@ -20,9 +20,6 @@ export const SETTINGS_TABS: { value: SettingsTab; label: string; icon: string }[
 export const MEMORY_INTRO =
 	"Ponder remembers what you tell it about yourself, your work and how you like answers, and uses it in new chats so you don't have to repeat yourself. It never keeps passwords, contact details, ID numbers, health details, or what you say about other people.";
 
-/** The Teams tab's first line, in the tab (TeamsPanel.vue) and in its stand-in. */
-export const TEAMS_INTRO = "The teams you are in, and who else is in them. A workspace shared with a team is shared with each person in it.";
-
 /** The Memory tab's own tabs, in the tab and in its stand-in. */
 export const MEMORY_TABS = [
 	{ value: "memories", label: "Memories" },

@@ -33,7 +33,7 @@ test("a team admin opens /admin from the chat and sees only their teams", async 
 	await expect(lead.page.getByRole("heading", { name: "Teams", exact: true })).toBeVisible();
 	await expect(lead.page.locator(`[data-team="${name}"]`)).toBeVisible();
 	await expect(lead.page.getByRole("button", { name: "New team" })).toHaveCount(0);
-	for (const other of ["Overview", "People", "Skills", "Activity"]) await expect(lead.page.getByRole("link", { name: other, exact: true })).toHaveCount(0);
+	for (const other of ["Overview", "Users", "Skills", "Activity"]) await expect(lead.page.getByRole("link", { name: other, exact: true })).toHaveCount(0);
 
 	// Another page: NoAccess in the shell, and its API answers no.
 	await lead.page.goto("/admin/people");
