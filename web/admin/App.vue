@@ -73,7 +73,7 @@ onBeforeUnmount(() => clearInterval(timer));
 
 			<MobileShell v-else-if="isTeamAdmin && isMobile">
 				<RouterView v-if="inTeams" />
-				<NoAccess v-else-if="route.path !== '/'" :email="viewer.user.email" teams />
+				<NoAccess v-else-if="route.path !== '/'" :email="viewer.user.email" teams class="py-16" />
 				<template #nav>
 					<MobileNav>
 						<MobileNavItem label="Teams" icon="lucide-users-round" route="/teams" :active="inTeams" />
@@ -97,7 +97,7 @@ onBeforeUnmount(() => clearInterval(timer));
 					</Sidebar>
 				</template>
 				<RouterView v-if="inTeams" />
-				<NoAccess v-else-if="route.path !== '/'" :email="viewer.user.email" teams />
+				<NoAccess v-else-if="route.path !== '/'" :email="viewer.user.email" teams class="py-16" />
 			</DesktopShell>
 
 			<MobileShell v-else-if="isMobile">
