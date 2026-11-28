@@ -7,6 +7,7 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
 import type { Email } from "../email/Mailer.ts";
 import { parseJson } from "../test-json.ts";
 // Types only: the module itself is imported below, once the environment is set.
@@ -41,7 +42,42 @@ const cancel = (by: "boss" | "ana" | "cy", teamId: string, email: string) => cal
 const newEmail = (name: string) => `${name}-${tag}@new.invalid`;
 const allowed = (email: string) =>
 	database((sql) => sql<{ team_only: boolean; invited_by: string | null; daily_credits: number | null }>`select team_only, invited_by, daily_credits from allowed_emails where email = ${email}`);
+const invitesOf = async (email: string) =>
+	(await database((sql) => sql<{ team_id: string }>`select team_id from team_invites where email = ${email}`)).map((row) => row.team_id);
 const mailTo = (email: string) => sent.filter((each) => each.to === email);
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Holds every change that logs an activity event open, just before its commit: a lock on
+ * admin_events makes the event's insert wait. `waiting` resolves once `count` changes wait.
+ */
+async function holdEvents() {
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	let holding!: () => void;
+	const held = new Promise<void>((resolve) => (holding = resolve));
+	const done = database((sql) =>
+		sql.withTransaction(
+			Effect.gen(function* () {
+				yield* sql`lock table admin_events in share mode`;
+				yield* Effect.sync(holding);
+				yield* Effect.promise(() => gate);
+			}),
+		),
+	);
+	await held;
+	const waiting = async (count: number) => {
+		for (let tries = 0; tries < 100; tries++) {
+			const [row] = await database(
+				(sql) => sql<{ count: number }>`select count(*)::int as count from pg_locks where relation = 'admin_events'::regclass and not granted`,
+			);
+			if ((row?.count ?? 0) >= count) return;
+			await pause(50);
+		}
+		throw new Error("No change waited for admin_events.");
+	};
+	return { waiting, release: () => (release(), done) };
+}
 
 describe.skipIf(!base)("team invites", () => {
 	beforeAll(setUp);
@@ -176,6 +212,87 @@ describe.skipIf(!base)("team invites", () => {
 		assert.deepStrictEqual(team.invites, []);
 		assert.deepInclude((await call<One>("ana", "GET", `/api/admin/teams/${two}`)).body.team.members.find((each) => each.id === id), { role: "member" });
 		assert.lengthOf(await allowed(email), 1, "the way in stays: it is their account's now");
+	});
+
+	it("cancels an email's team invites when an org admin removes it on People, and logs each", async () => {
+		const [first, second] = [(await create("boss", "Removed one", "ana")).body.team.id, (await create("boss", "Removed two", "cy")).body.team.id];
+		const email = newEmail("yan");
+		await invite("ana", first, email, "admin");
+		await invite("cy", second, email);
+		assert.strictEqual((await call("boss", "DELETE", `/api/admin/invites/${encodeURIComponent(email)}`)).status, 200);
+
+		assert.deepStrictEqual((await call<One>("ana", "GET", `/api/admin/teams/${first}`)).body.team.invites, []);
+		assert.deepStrictEqual((await call<One>("cy", "GET", `/api/admin/teams/${second}`)).body.team.invites, []);
+		assert.lengthOf(await allowed(email), 0);
+		const logged = await database(
+			(sql) => sql<{ actor_id: string; before: unknown }>`
+				select actor_id, before from admin_events where target = ${email} and action = 'cancel-team-invite' order by before->>'name'`,
+		);
+		assert.deepStrictEqual(logged, [
+			{ actor_id: who.boss, before: { team: first, name: "Removed one", role: "admin" } },
+			{ actor_id: who.boss, before: { team: second, name: "Removed two", role: "member" } },
+		]);
+	});
+
+	it("puts the way in back when an email is invited again with the same role", async () => {
+		const team = (await create("boss", "Repaired", "ana")).body.team.id;
+		const email = newEmail("zed");
+		await invite("ana", team, email);
+		// What a removal on People left before it cancelled the team invites too.
+		await database((sql) => sql`delete from allowed_emails where email = ${email}`);
+		assert.strictEqual((await invite("ana", team, email)).status, 200);
+		assert.deepStrictEqual(await allowed(email), [{ team_only: true, invited_by: who.ana, daily_credits: null }]);
+	});
+
+	it("joins the team of an invite that commits while the account is made", async () => {
+		const team = (await create("boss", "Late invite", "ana")).body.team.id;
+		const email = newEmail("wes");
+		const events = await holdEvents();
+		// The invite found no account, wrote its rows, and waits to commit.
+		const invited = invite("ana", team, email, "admin");
+		await events.waiting(1);
+		const id = `wes-${tag}`;
+		await database((sql) => sql`insert into users (id, name, email, role) values (${id}, '', ${email}, 'user')`);
+		const joined = database((sql) => joinInvitedTeams(sql, { id, email }));
+		await pause(300);
+		await events.release();
+		await Promise.all([invited, joined]);
+
+		const after = (await call<One>("ana", "GET", `/api/admin/teams/${team}`)).body.team;
+		assert.deepInclude(after.members.find((each) => each.id === id), { role: "admin" });
+		assert.deepStrictEqual(after.invites, []);
+	});
+
+	it("keeps the way in of an invite that commits while another team cancels its own", async () => {
+		const [first, second] = [(await create("boss", "Race first", "ana")).body.team.id, (await create("boss", "Race second", "cy")).body.team.id];
+		const email = newEmail("abe");
+		await invite("ana", first, email);
+		const events = await holdEvents();
+		const invited = invite("cy", second, email);
+		await events.waiting(1);
+		const cancelled = cancel("ana", first, email);
+		await pause(300);
+		await events.release();
+		assert.deepStrictEqual((await Promise.all([invited, cancelled])).map((each) => each.status), [200, 200]);
+
+		assert.deepStrictEqual(await invitesOf(email), [second]);
+		assert.lengthOf(await allowed(email), 1);
+	});
+
+	it("cancels an invite that commits while an org admin removes its email", async () => {
+		const [first, second] = [(await create("boss", "Removal first", "ana")).body.team.id, (await create("boss", "Removal second", "cy")).body.team.id];
+		const email = newEmail("bea");
+		await invite("ana", first, email);
+		const events = await holdEvents();
+		const invited = invite("cy", second, email);
+		await events.waiting(1);
+		const removed = call("boss", "DELETE", `/api/admin/invites/${encodeURIComponent(email)}`);
+		await pause(300);
+		await events.release();
+		assert.deepStrictEqual((await Promise.all([invited, removed])).map((each) => each.status), [200, 200]);
+
+		assert.deepStrictEqual(await invitesOf(email), []);
+		assert.lengthOf(await allowed(email), 0);
 	});
 
 	it("lets a team admin of another team add nobody to this one", async () => {

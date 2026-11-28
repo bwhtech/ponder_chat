@@ -18,6 +18,7 @@ import * as Notify from "../notify/Notify.ts";
 import * as Database from "../runtime/Database.ts";
 import * as Http from "../runtime/Http.ts";
 import * as Settings from "../settings/Settings.ts";
+import { migrateTeams } from "../teams/tables.ts";
 import * as Accounts from "./Accounts.ts";
 import * as Invites from "./Invites.ts";
 
@@ -47,6 +48,9 @@ describe.skipIf(!base)("Invites", () => {
 				yield* invites.migrate;
 				yield* Credits.Credits.use((credits) => credits.migrate);
 				yield* sql`create table users (id text primary key, name text, email text, role text, "createdAt" timestamptz not null default now(), "updatedAt" timestamptz not null default now())`;
+				// disallow cancels team invites too. Their workspace grants need a workspaces table.
+				yield* sql`create table workspaces (id text primary key)`;
+				yield* migrateTeams(sql);
 			}),
 		);
 
@@ -100,8 +104,8 @@ describe.skipIf(!base)("Invites", () => {
 		it.effect("takes back an invite", () =>
 			Effect.gen(function* () {
 				const invites = yield* Invites.Invites;
-				assert.isTrue(yield* invites.disallow(ana.toUpperCase()));
-				assert.isFalse(yield* invites.disallow(ana));
+				assert.deepStrictEqual(yield* invites.disallow(ana.toUpperCase()), { invited: true, teamInvites: [] });
+				assert.deepStrictEqual(yield* invites.disallow(ana), { invited: false, teamInvites: [] });
 				assert.isFalse(yield* invites.isAllowed(ana));
 				assert.isFalse(yield* invites.setInviteCredits(ana, 5));
 				assert.deepStrictEqual(yield* invites.inviteCredits(ana.toLowerCase()), Option.none());

@@ -10,6 +10,7 @@ import * as SignInProviders from "../auth/SignInProviders.ts";
 import * as Mailer from "../email/Mailer.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { roleFrom } from "../people/Accounts.ts";
+import { lockInvitesOf } from "../people/Invites.ts";
 import { pgCode } from "../runtime/Database.ts";
 import { canAdminister, canChangePeople, canOrganise, leavesNoAdmin, type TeamRole, type TeamViewer } from "./access.ts";
 import { teamEmails } from "./emails.ts";
@@ -39,6 +40,9 @@ import { migrateTeams } from "./tables.ts";
  * role only then. So two admins who change the team at once take turns, and the last-admin
  * rule sees the other's change. Every change goes to the admin activity log. The emails go
  * after the commit (emails.ts).
+ *
+ * An invite or a cancel takes its email's lock (Invites.lockInvitesOf) before the team's
+ * row. Nothing takes them the other way round, so they can't deadlock.
  */
 export * from "./model.ts";
 
@@ -277,13 +281,14 @@ const make = Effect.gen(function* () {
 
 	/** In lockForPeople's transaction: invites an email with no account. Whether the invite is new. */
 	const putInvite = Effect.fnUntraced(function* (actor: Actor, facts: FactsRow, teamId: string, email: string, role: TeamRole) {
+		// The way in, with the default daily credits. An org admin's own invite stays as it is.
+		// Also for an invite made before: its email may have been removed since.
+		yield* sql`insert into allowed_emails (email, invited_by, team_only) values (${email}, ${actor.id}, true) on conflict (email) do nothing`;
 		const [found] = yield* sql<{ role: TeamRole }>`select role from team_invites where team_id = ${teamId} and email = ${email}`;
 		if (found?.role === role) return false;
 		yield* sql`
 			insert into team_invites (team_id, email, role, invited_by) values (${teamId}, ${email}, ${role}, ${actor.id})
 			on conflict (team_id, email) do update set role = excluded.role`;
-		// The way in, with the default daily credits. An org admin's own invite stays as it is.
-		yield* sql`insert into allowed_emails (email, invited_by, team_only) values (${email}, ${actor.id}, true) on conflict (email) do nothing`;
 		yield* sql`update teams set updated_at = now() where id = ${teamId}`;
 		const team = { team: teamId, name: facts.name };
 		yield* events.record({ actor, action: "invite-to-team", target: email, before: found ? { ...team, role: found.role } : null, after: { ...team, role } });
@@ -293,6 +298,7 @@ const make = Effect.gen(function* () {
 	const invite = Effect.fn("Teams.invite")(function* (actor: Actor, teamId: string, email: string, role: TeamRole) {
 		const { name, account, added, invited } = yield* sql.withTransaction(
 			Effect.gen(function* () {
+				yield* lockInvitesOf(sql, email);
 				const locked = yield* lockForPeople(actor, teamId);
 				const account = yield* accounts.idOfEmail(email);
 				const added = Option.isSome(account) ? yield* putMember(actor, locked, teamId, account.value, role) : Option.none<string>();
@@ -309,9 +315,9 @@ const make = Effect.gen(function* () {
 	const cancelInvite = Effect.fn("Teams.cancelInvite")(function* (actor: Actor, teamId: string, email: string) {
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
+				// So it sees another team's invite of this email that is being made now.
+				yield* lockInvitesOf(sql, email);
 				const { facts } = yield* lockForPeople(actor, teamId);
-				// Two teams that cancel the same email's invites at once take turns here, so the second sees the first's.
-				yield* sql`select 1 from allowed_emails where email = ${email} for update`;
 				const [found] = yield* sql<{ role: TeamRole }>`delete from team_invites where team_id = ${teamId} and email = ${email} returning role`;
 				if (!found) return;
 				// Not an email that an org admin invited, another team still invites, or that has an account and signs in with it.

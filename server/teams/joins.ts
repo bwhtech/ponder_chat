@@ -1,5 +1,6 @@
 import type * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
+import { lockInvitesOf } from "../people/Invites.ts";
 
 /**
  * A person's first sign-in, by link, by code or with Microsoft (auth/Auth.ts, after it
@@ -11,10 +12,12 @@ export const joinInvitedTeams = (sql: PgClient.PgClient, user: { id: string; ema
 	sql.withTransaction(
 		Effect.gen(function* () {
 			const email = user.email.trim().toLowerCase();
+			// An invite that is being made now waits for this, or this for it: none is lost.
+			yield* lockInvitesOf(sql, email);
 			yield* sql`
+				with gone as (delete from team_invites where email = ${email} returning team_id, role, invited_by)
 				insert into team_members (team_id, user_id, role, added_by)
-				select team_id, ${user.id}, role, invited_by from team_invites where email = ${email}
+				select team_id, ${user.id}, role, invited_by from gone
 				on conflict (team_id, user_id) do nothing`;
-			yield* sql`delete from team_invites where email = ${email}`;
 		}),
 	).pipe(Effect.withSpan("Teams.joinInvitedTeams"));
