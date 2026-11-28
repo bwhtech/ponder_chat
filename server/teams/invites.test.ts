@@ -31,8 +31,7 @@ Object.assign(process.env, {
 	CLOUDFLARE_API_URL: `http://127.0.0.1:${(mail.address() as AddressInfo).port}`,
 });
 
-const { base, call, create, database, emailOf, holdEvents, pause, setMember, setUp, tag, tearDown, who } = await import("./test-app.ts");
-const { joinInvitedTeams } = await import("./joins.ts");
+const { base, call, create, database, emailOf, holdEvents, joinTeams, setMember, setUp, tag, tearDown, who } = await import("./test-app.ts");
 
 type Invited = One & Refusal & { invited?: true; added?: true };
 const invite = (by: "boss" | "ana" | "cy", teamId: string, email: string, role: "member" | "admin" = "member") =>
@@ -162,7 +161,7 @@ describe.skipIf(!base)("team invites", () => {
 		]);
 	});
 
-	it("makes the person a member of each team that invited them, at their first sign-in", async () => {
+	it("makes the person a member of each team that invited them, at their first sign-in, and logs each", async () => {
 		const [one, two] = [(await create("boss", "Join one", "ana")).body.team.id, (await create("boss", "Join two", "ana")).body.team.id];
 		const email = newEmail("uma");
 		await invite("ana", one, email, "admin");
@@ -170,13 +169,21 @@ describe.skipIf(!base)("team invites", () => {
 		const id = `uma-${tag}`;
 		await database((sql) => sql`insert into users (id, name, email, role) values (${id}, '', ${email.toUpperCase()}, 'user')`);
 		// What Auth.ts runs once it has made the account.
-		await database((sql) => joinInvitedTeams(sql, { id, email: email.toUpperCase() }));
+		await joinTeams({ id, email: email.toUpperCase() });
 
 		const team = (await call<One>("ana", "GET", `/api/admin/teams/${one}`)).body.team;
 		assert.deepInclude(team.members.find((each) => each.id === id), { role: "admin", email: email.toUpperCase() });
 		assert.deepStrictEqual(team.invites, []);
 		assert.deepInclude((await call<One>("ana", "GET", `/api/admin/teams/${two}`)).body.team.members.find((each) => each.id === id), { role: "member" });
 		assert.lengthOf(await allowed(email), 1, "the way in stays: it is their account's now");
+
+		const logged = await database(
+			(sql) => sql<{ actor_id: string; action: string; target: string; after: unknown }>`select actor_id, action, target, after from admin_events where target = ${id} order by id`,
+		);
+		assert.deepStrictEqual(logged, [
+			{ actor_id: id, action: "add-team-member", target: id, after: { team: one, name: "Join one", role: "admin", byInvite: true } },
+			{ actor_id: id, action: "add-team-member", target: id, after: { team: two, name: "Join two", role: "member", byInvite: true } },
+		]);
 	});
 
 	it("cancels an email's team invites when an org admin removes it on People, and logs each", async () => {
@@ -215,11 +222,11 @@ describe.skipIf(!base)("team invites", () => {
 		const events = await holdEvents();
 		// The invite found no account, wrote its rows, and waits to commit.
 		const invited = invite("ana", team, email, "admin");
-		await events.waiting(1);
+		await events.waiting([invited]);
 		const id = `wes-${tag}`;
 		await database((sql) => sql`insert into users (id, name, email, role) values (${id}, '', ${email}, 'user')`);
-		const joined = database((sql) => joinInvitedTeams(sql, { id, email }));
-		await pause(300);
+		const joined = joinTeams({ id, email });
+		await events.waiting([invited, joined]);
 		await events.release();
 		await Promise.all([invited, joined]);
 
@@ -234,9 +241,9 @@ describe.skipIf(!base)("team invites", () => {
 		await invite("ana", first, email);
 		const events = await holdEvents();
 		const invited = invite("cy", second, email);
-		await events.waiting(1);
+		await events.waiting([invited]);
 		const cancelled = cancel("ana", first, email);
-		await pause(300);
+		await events.waiting([invited, cancelled]);
 		await events.release();
 		assert.deepStrictEqual((await Promise.all([invited, cancelled])).map((each) => each.status), [200, 200]);
 
@@ -250,9 +257,9 @@ describe.skipIf(!base)("team invites", () => {
 		await invite("ana", first, email);
 		const events = await holdEvents();
 		const invited = invite("cy", second, email);
-		await events.waiting(1);
+		await events.waiting([invited]);
 		const removed = call("boss", "DELETE", `/api/admin/invites/${encodeURIComponent(email)}`);
-		await pause(300);
+		await events.waiting([invited, removed]);
 		await events.release();
 		assert.deepStrictEqual((await Promise.all([invited, removed])).map((each) => each.status), [200, 200]);
 

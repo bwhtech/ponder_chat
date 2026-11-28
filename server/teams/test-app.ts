@@ -1,7 +1,10 @@
 import * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
+import * as Schedule from "effect/Schedule";
+import * as Schema from "effect/Schema";
 import { Hono } from "hono";
 import type { SignedInEnv } from "../auth.ts";
+import { decodeRows } from "../runtime/Database.ts";
 import { jsonBody } from "../test-json.ts";
 import { base, USERS_TABLE, useTestSchema } from "../workspaces/test-env.ts";
 import type { TeamDetail, TeamSummary } from "./Teams.ts";
@@ -27,6 +30,7 @@ const Threads = await import("../threads/Threads.ts");
 const AdminEvents = await import("../admin/AdminEvents.ts");
 const Invites = await import("../people/Invites.ts");
 const Runs = await import("../telemetry/Runs.ts");
+const { joinInvitedTeams } = await import("./joins.ts");
 export const Workspaces = await import("../workspaces/Workspaces.ts");
 export const Teams = await import("./Teams.ts");
 export const { adminApi } = await import("../admin/routes.ts");
@@ -41,6 +45,8 @@ const PEOPLE = ["boss", "boss2", "ana", "bob", "cy", "dan", "eve", "fay", "gus"]
 export type Who = (typeof PEOPLE)[number];
 export const who = Object.fromEntries(PEOPLE.map((person) => [person, `${person}-${tag}`])) as Record<Who, string>;
 export const emailOf = (person: Who) => `${person}-${tag}@example.invalid`;
+/** The person as the service takes them, for a call that skips the routes. */
+export const actor = (person: Who) => ({ id: who[person], email: `${who[person]}@example.invalid`, origin: "http://localhost" });
 
 const app = new Hono<SignedInEnv>()
 	.use("*", async (c, next) => {
@@ -72,38 +78,69 @@ export const setMember = (by: Who, teamId: string, person: Who | string, role: "
 export const removeMember = (by: Who, teamId: string, person: Who) => call<One & Refusal>(by, "DELETE", `/api/admin/teams/${teamId}/members/${who[person]}`);
 export const roles = (team: TeamDetail): string[][] => team.members.map((member) => [member.id, member.role]);
 
-export const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+/** The first sign-in's join of the teams that invited the email (joins.ts). */
+export const joinTeams = (user: { id: string; email: string }) =>
+	runPromise(Effect.gen(function* () {
+		const events = yield* AdminEvents.AdminEvents;
+		yield* joinInvitedTeams(yield* PgClient.PgClient, events, user);
+	}));
+
+const PidRow = Schema.Struct({ pid: Schema.Number });
+const CountRow = Schema.Struct({ count: Schema.Number });
 
 /**
- * Holds every change that logs an activity event open, just before its commit: a lock on
- * admin_events makes the event's insert wait. `waiting` resolves once `count` changes wait.
+ * Runs `work` in a transaction of its own and holds it open until `release`: the test's way
+ * to stop other changes at a lock that `work` takes. `waiting(requests)` resolves once each
+ * of these requests waits behind it, or is done.
  */
-export async function holdEvents() {
+export async function holdOpen(work: (sql: PgClient.PgClient) => Effect.Effect<unknown, unknown>) {
 	let release!: () => void;
 	const gate = new Promise<void>((resolve) => (release = resolve));
-	let holding!: () => void;
-	const held = new Promise<void>((resolve) => (holding = resolve));
+	let holding!: (pid: number) => void;
+	const held = new Promise<number>((resolve) => (holding = resolve));
 	const done = database((sql) =>
 		sql.withTransaction(
 			Effect.gen(function* () {
-				yield* sql`lock table admin_events in share mode`;
-				yield* Effect.sync(holding);
+				const [session] = yield* sql`select pg_backend_pid() as pid`.pipe(decodeRows(PidRow));
+				yield* work(sql);
+				yield* Effect.sync(() => holding(session?.pid ?? 0));
 				yield* Effect.promise(() => gate);
 			}),
 		),
 	);
-	await held;
-	const waiting = async (count: number) => {
-		for (let tries = 0; tries < 100; tries++) {
-			const [row] = await database(
-				(sql) => sql<{ count: number }>`select count(*)::int as count from pg_locks where relation = 'admin_events'::regclass and not granted`,
-			);
-			if ((row?.count ?? 0) >= count) return;
-			await pause(50);
-		}
-		throw new Error("No change waited for admin_events.");
-	};
-	return { waiting, release: () => (release(), done) };
+	const pid = await held;
+	return { waiting: (requests: Promise<unknown>[]) => waitingBehind(pid, requests), release: () => (release(), done) };
+}
+
+/**
+ * Holds every change that logs an activity event open, just before its commit: a lock on
+ * admin_events makes the event's insert wait.
+ */
+export const holdEvents = () => holdOpen((sql) => sql`lock table admin_events in share mode`);
+
+/**
+ * Resolves once each request waits for the session `pid`, or for a session that waits for
+ * it, or is done. A request that need not wait (as when the lock under test is gone) lets the
+ * test go on, and fail on what it finds. Postgres gives no event when a session starts to
+ * wait for a lock, so this asks it every 10 ms, for 10 seconds at most (as blockedBy in
+ * workspaces/test-env.ts).
+ */
+async function waitingBehind(pid: number, requests: Promise<unknown>[]) {
+	let done = 0;
+	for (const request of requests) void request.then(() => done++, () => done++);
+	await database((sql) =>
+		sql`
+			with recursive behind (pid) as (
+				select pid from pg_stat_activity where ${pid} = any(pg_blocking_pids(pid))
+				union
+				select a.pid from pg_stat_activity a join behind b on b.pid = any(pg_blocking_pids(a.pid)))
+			select count(*)::int as count from behind`.pipe(
+			decodeRows(CountRow),
+			Effect.map(([row]) => row?.count ?? 0),
+			Effect.repeat({ until: (count) => count + done >= requests.length, schedule: Schedule.spaced("10 millis") }),
+			Effect.timeout("10 seconds"),
+		),
+	);
 }
 
 /** The schema, its users and every table the teams need. Run in beforeAll. */

@@ -245,7 +245,10 @@ const make = Effect.gen(function* () {
 	});
 
 	const get = Effect.fn("Teams.get")(function* (actor: Actor, teamId: string) {
-		const viewer = viewerOf(yield* factsOf(actor.id, teamId));
+		const facts = yield* factsOf(actor.id, teamId);
+		const viewer = viewerOf(facts);
+		// As in their list: a team admin does not see an archived team.
+		if (facts.archived && !viewer.orgAdmin) return yield* new TeamNotFound({ teamId });
 		if (!canAdminister(viewer)) return yield* new TeamRefused({ reason: "needs-team-admin" });
 		return yield* detail(teamId, viewer);
 	});
