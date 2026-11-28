@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Combobox } from "frappe-ui";
-import { computed, ref, watch } from "vue";
+import { Combobox, debounce } from "frappe-ui";
+import { computed, onUnmounted, ref, watch } from "vue";
 import { displayName } from "../../../shared/display-name";
 import { client } from "../../api";
 import { unwrap, type PersonFound } from "../api";
@@ -20,7 +20,8 @@ const searchError = ref("");
 const picked = ref<string | null>(null);
 // Each search takes a number: a slower answer to an older query is dropped.
 let asked = 0;
-let timer: ReturnType<typeof setTimeout> | undefined;
+const searchSoon = debounce((text: string) => void search(text), 150);
+onUnmounted(() => searchSoon.cancel());
 
 const options = computed(() =>
 	results.value
@@ -28,10 +29,7 @@ const options = computed(() =>
 		.map((person) => ({ label: displayName(person.name, person.email), value: person.id, description: person.email })),
 );
 
-watch(query, (text) => {
-	clearTimeout(timer);
-	timer = setTimeout(() => void search(text), 150);
-});
+watch(query, (text) => searchSoon(text));
 
 watch(picked, (id) => {
 	const person = results.value.find((each) => each.id === id);

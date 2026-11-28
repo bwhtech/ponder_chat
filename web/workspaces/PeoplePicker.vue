@@ -2,7 +2,7 @@
 import { displayName } from "../../shared/display-name";
 import { Combobox } from "frappe-ui";
 import { computed, ref, watch } from "vue";
-import { count } from "../numbers";
+import { plural } from "../numbers";
 import { ADD_PEOPLE } from "./dialogs";
 import { searchPeople, searchTeams, type Person, type TeamMatch } from "./store";
 
@@ -32,7 +32,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 const options = computed(() => {
 	const teams = results.value.teams
 		.filter((team) => !props.excludeTeams.includes(team.id))
-		.map((team) => ({ label: team.name, value: TEAM + team.id, icon: "lucide-users", description: members(team.memberCount) }));
+		.map((team) => ({ label: team.name, value: TEAM + team.id, icon: "lucide-users", description: plural(team.memberCount, "member") }));
 	const people = results.value.people
 		.filter((person) => !props.exclude.includes(person.id))
 		.map((person) => ({ label: displayName(person.name, person.email), value: person.id, description: person.email }));
@@ -77,10 +77,6 @@ function onOpen(open: boolean) {
 	if (!open) return;
 	query.value = "";
 	void search("");
-}
-
-function members(total: number) {
-	return `${count(total)} ${total === 1 ? "member" : "members"}`;
 }
 </script>
 
