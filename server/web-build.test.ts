@@ -76,11 +76,12 @@ describe("chunksOf", () => {
 describe("prefetchFor", () => {
 	const prefetch = { everyone: ["/assets/chat-sdk.js"], admins: ["/assets/admin.js"] };
 
-	it("gives an admin the admin pages' files after everyone's", () => {
-		assert.deepStrictEqual(prefetchFor("admin", prefetch), ["/assets/chat-sdk.js", "/assets/admin.js"]);
+	it("gives an org admin and a team admin the admin pages' files after everyone's", () => {
+		assert.deepStrictEqual(prefetchFor("org", prefetch), ["/assets/chat-sdk.js", "/assets/admin.js"]);
+		assert.deepStrictEqual(prefetchFor("team", prefetch), ["/assets/chat-sdk.js", "/assets/admin.js"]);
 	});
 
 	it("gives anyone else only everyone's", () => {
-		assert.deepStrictEqual(prefetchFor("user", prefetch), ["/assets/chat-sdk.js"]);
+		assert.deepStrictEqual(prefetchFor(null, prefetch), ["/assets/chat-sdk.js"]);
 	});
 });

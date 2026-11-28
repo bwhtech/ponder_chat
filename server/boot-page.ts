@@ -11,6 +11,7 @@ import * as Accounts from "./people/Accounts.ts";
 import { route } from "./runtime/route.ts";
 import * as Skills from "./skills.ts";
 import * as Sandbox from "./python/pyodide.ts";
+import * as Teams from "./teams/Teams.ts";
 import * as Threads from "./threads/Threads.ts";
 import * as WebBuild from "./web-build.ts";
 import * as Workspaces from "./workspaces/Workspaces.ts";
@@ -73,13 +74,21 @@ export type BootData = {
 	prefetch?: string[];
 };
 
-/** GET /api/me: who is signed in, their role (read from the database, not the cookie), and their credits for today. */
+/**
+ * GET /api/me: who is signed in, their role (read from the database, not the cookie), what
+ * they reach in /admin (the chat's Admin item: org admins and team admins), and their
+ * credits for today.
+ */
 export const meOf = Effect.fn("BootPage.me")(function* ({ id, email, name }: Pick<Auth.SignedIn, "id" | "email" | "name">) {
-	const { role, credits } = yield* Effect.all(
-		{ role: Accounts.Accounts.use((accounts) => accounts.roleOf(id)), credits: Credits.Credits.use((credits) => credits.status(id)) },
+	const { role, scope, credits } = yield* Effect.all(
+		{
+			role: Accounts.Accounts.use((accounts) => accounts.roleOf(id)),
+			scope: Teams.Teams.use((teams) => teams.adminScope(id)),
+			credits: Credits.Credits.use((credits) => credits.status(id)),
+		},
 		{ concurrency: "unbounded" },
 	);
-	return { user: { id, email, name, role }, credits };
+	return { user: { id, email, name, role, adminScope: Option.getOrNull(scope) }, credits };
 });
 
 /** GET /api/skills: the skills that are on, for the $ menu. Names and descriptions, not the instructions. */
@@ -108,12 +117,12 @@ const bootData = Effect.fn("BootPage.data")(function* (headers: Headers, prefetc
 	const python = Option.getOrUndefined(yield* Sandbox.Sandbox.use((sandbox) => sandbox.readyNow));
 	const models = Option.getOrUndefined(yield* Models.Models.use((models) => models.cached));
 	const features = python === undefined ? undefined : { python };
-	return { me, logos, threads, workspaces, skills, models, features, prefetch: prefetchFor(me.user.role, prefetch) } satisfies BootData;
+	return { me, logos, threads, workspaces, skills, models, features, prefetch: prefetchFor(me.user.adminScope, prefetch) } satisfies BootData;
 });
 
-/** Everyone's files, and for an admin the admin pages' after them: only admins can open those. */
-export function prefetchFor(role: Accounts.Role, { everyone, admins }: WebBuild.Prefetch) {
-	return role === "admin" ? [...everyone, ...admins] : everyone;
+/** Everyone's files, and for an org or team admin the admin pages' after them: only they can open those. */
+export function prefetchFor(scope: Teams.AdminScope | null, { everyone, admins }: WebBuild.Prefetch) {
+	return scope ? [...everyone, ...admins] : everyone;
 }
 
 /** JSON in a script tag that never runs. "<" is escaped, so a chat's title cannot close the tag. */

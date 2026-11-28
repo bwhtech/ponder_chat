@@ -203,10 +203,10 @@ const backFromCache = (event: PageTransitionEvent) => event.persisted && (openin
 addEventListener("pageshow", backFromCache);
 onBeforeUnmount(() => removeEventListener("pageshow", backFromCache));
 
-// Admin (for admins), Settings, Theme and Sign out. Memory and Connectors are in Settings.
+// Admin (for org admins and team admins), Settings, Theme and Sign out. Memory and Connectors are in Settings.
 const theme = useThemeMenu();
 const menu = computed(() => [
-	...(me.value?.user.role === "admin" ? [{ label: "Admin", icon: "lucide-shield", onClick: openAdmin }] : []),
+	...(me.value?.user.adminScope ? [{ label: "Admin", icon: "lucide-shield", onClick: openAdmin }] : []),
 	{ label: "Settings", icon: "lucide-settings", onClick: () => showSettings() },
 	theme(),
 	{ label: "Sign out", icon: "lucide-log-out", onClick: () => void signOut() },
