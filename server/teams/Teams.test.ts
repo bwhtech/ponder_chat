@@ -232,6 +232,40 @@ describe.skipIf(!base)("teams through their routes", () => {
 			assert.deepInclude(detail, { canOrganise: false, canChangePeople: true });
 		});
 
+		it("answers null, not the team, to a team admin who demoted or removed themselves", async () => {
+			const team = (await service((teams) => teams.create(actor("boss"), { name: `Self ${tag}`, description: "", adminUserId: who.ana }))).id;
+			await service((teams) => teams.setMember(actor("ana"), team, who.bob, "admin"));
+			assert.isNull(await service((teams) => teams.setMember(actor("ana"), team, who.ana, "member")), "demoted: no members or invites");
+			await service((teams) => teams.setMember(actor("bob"), team, who.ana, "admin"));
+			assert.isNull(await service((teams) => teams.removeMember(actor("ana"), team, who.ana)), "removed");
+			assert.isNotNull(await service((teams) => teams.removeMember(actor("bob"), team, who.cy)), "removing someone else answers the team");
+		});
+
+		it("keeps one team admin when the last two leave or step down at the same time", async () => {
+			const pair = async (name: string) => {
+				const team = (await service((teams) => teams.create(actor("boss"), { name: `${name} ${tag}`, description: "", adminUserId: who.ana }))).id;
+				await service((teams) => teams.setMember(actor("ana"), team, who.bob, "admin"));
+				return team;
+			};
+			const admins = async (team: string) => (await service((teams) => teams.get(actor("boss"), team))).members.filter((member) => member.role === "admin").length;
+
+			const both = await pair("Race");
+			const removed = await Promise.all([
+				attempt((teams) => teams.removeMember(actor("ana"), both, who.ana)),
+				attempt((teams) => teams.removeMember(actor("bob"), both, who.bob)),
+			]);
+			assert.sameMembers(removed, ["ok", "last-admin"]);
+			assert.strictEqual(await admins(both), 1);
+
+			const mixed = await pair("Race mixed");
+			const changed = await Promise.all([
+				attempt((teams) => teams.removeMember(actor("ana"), mixed, who.ana)),
+				attempt((teams) => teams.setMember(actor("bob"), mixed, who.bob, "member")),
+			]);
+			assert.sameMembers(changed, ["ok", "last-admin"]);
+			assert.strictEqual(await admins(mixed), 1);
+		});
+
 		it("refuses members, other teams' admins and the org-admin actions", async () => {
 			const team = (await service((teams) => teams.create(actor("boss"), { name: `Desk ${tag}`, description: "", adminUserId: who.ana }))).id;
 			await service((teams) => teams.setMember(actor("ana"), team, who.bob, "member"));

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Avatar, Badge, Breadcrumbs, Button, Dropdown, PageHeader, PageHeaderBackButton, PageHeaderMobile, Select, Skeleton, toast } from "frappe-ui";
 import { computed, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import { displayName } from "../../../shared/display-name";
 import { admin, ApiError, unwrap, type PersonFound, type TeamDetail, type TeamMember, type TeamRole } from "../api";
 import ListSkeleton from "../components/ListSkeleton.vue";
@@ -17,6 +18,7 @@ import { isMobile } from "../lib/viewport";
  * Each change answers the team as it is now, and the page shows that answer.
  */
 const props = defineProps<{ id: string }>();
+const router = useRouter();
 
 type PageState = { kind: "loading" } | { kind: "loaded"; team: TeamDetail } | { kind: "missing" } | { kind: "error"; message: string };
 const state = ref<PageState>({ kind: "loading" });
@@ -52,10 +54,16 @@ function retry() {
 	void load();
 }
 
-/** Shows the team as a change left it. A newer load in flight is dropped. */
-function show(changed: TeamDetail) {
+/**
+ * Shows team `id` as a change left it, when the page still shows that team: an answer that
+ * comes after a move to another team is dropped, as is a newer load in flight. Null: the
+ * person removed or demoted themselves, so the team is no longer theirs to manage.
+ */
+function show(id: string, changed: TeamDetail | null) {
+	if (id !== props.id) return;
 	asked++;
-	state.value = { kind: "loaded", team: changed };
+	if (changed) state.value = { kind: "loaded", team: changed };
+	else void router.push("/teams");
 }
 
 const ROLES = [
@@ -74,8 +82,9 @@ const nameOf = (person: { name: string; email: string }) => displayName(person.n
 const param = (member: { id: string }) => ({ id: encodeURIComponent(props.id), userId: encodeURIComponent(member.id) });
 
 async function setRole(person: { id: string; name: string; email: string }, role: TeamRole, added: boolean) {
+	const id = props.id;
 	try {
-		show((await unwrap(admin.teams[":id"].members[":userId"].$put({ param: param(person), json: { role } }))).team);
+		show(id, (await unwrap(admin.teams[":id"].members[":userId"].$put({ param: param(person), json: { role } }))).team);
 		const as = role === "admin" ? "a team admin" : "a member";
 		toast.success(added ? `Added ${nameOf(person)} as ${as}` : `${nameOf(person)} is now ${as}`);
 	} catch (e) {
@@ -84,8 +93,9 @@ async function setRole(person: { id: string; name: string; email: string }, role
 }
 
 async function remove(member: TeamMember) {
+	const id = props.id;
 	try {
-		show((await unwrap(admin.teams[":id"].members[":userId"].$delete({ param: param(member) }))).team);
+		show(id, (await unwrap(admin.teams[":id"].members[":userId"].$delete({ param: param(member) }))).team);
 		toast.success(`Removed ${nameOf(member)} from the team`);
 	} catch (e) {
 		toast.error((e as Error).message);
@@ -176,7 +186,7 @@ const editing = ref(false);
 			</section>
 		</div>
 
-		<TeamFormDialog v-model:open="editing" :team="team" @saved="show" />
+		<TeamFormDialog v-model:open="editing" :team="team" @saved="(saved) => show(saved.id, saved)" />
 	</template>
 
 	<!-- Missing, error and loading keep the page's own frame. -->

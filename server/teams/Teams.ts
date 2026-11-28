@@ -109,10 +109,10 @@ export class Teams extends Context.Service<
 		readonly update: (actor: Actor, teamId: string, changes: TeamChanges) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | TeamNameTaken | SqlError>;
 		/** Org admins and the team's admins. */
 		readonly get: (actor: Actor, teamId: string) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | SqlError>;
-		/** Adds a person with this role, or gives a member this role. Never a banned person. */
-		readonly setMember: (actor: Actor, teamId: string, userId: string, role: TeamRole) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | SqlError>;
-		/** Removes a person, themselves too. Removing someone who is no member changes nothing. */
-		readonly removeMember: (actor: Actor, teamId: string, userId: string) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | SqlError>;
+		/** Adds a person with this role, or gives a member this role. Never a banned person. Null when the person demoted themselves. */
+		readonly setMember: (actor: Actor, teamId: string, userId: string, role: TeamRole) => Effect.Effect<TeamDetail | null, TeamNotFound | TeamRefused | SqlError>;
+		/** Removes a person, themselves too. Removing someone who is no member changes nothing. Null when the person removed themselves. */
+		readonly removeMember: (actor: Actor, teamId: string, userId: string) => Effect.Effect<TeamDetail | null, TeamNotFound | TeamRefused | SqlError>;
 	}
 >()("ponder/teams/Teams") {}
 
@@ -150,9 +150,13 @@ const make = Effect.gen(function* () {
 		} satisfies TeamDetail;
 	});
 
-	/** The detail as the person sees it after a change: they may have removed themselves. */
+	/**
+	 * The detail as the person sees it after a change, or null when the change took away their
+	 * right to see it: a team admin who removed or demoted themselves.
+	 */
 	const detailNow = Effect.fnUntraced(function* (actor: Actor, teamId: string) {
-		return yield* detail(teamId, viewerOf(yield* factsOf(actor.id, teamId)));
+		const viewer = viewerOf(yield* factsOf(actor.id, teamId));
+		return canAdminister(viewer) ? yield* detail(teamId, viewer) : null;
 	});
 
 	/**
@@ -225,7 +229,7 @@ const make = Effect.gen(function* () {
 				yield* events.record({ actor, action: "update-team", before: { team: teamId, ...before }, after: { team: teamId, ...after } });
 			}),
 		);
-		return yield* detailNow(actor, teamId);
+		return yield* get(actor, teamId);
 	});
 
 	const get = Effect.fn("Teams.get")(function* (actor: Actor, teamId: string) {
