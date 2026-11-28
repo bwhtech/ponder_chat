@@ -13,7 +13,8 @@ import * as Teams from "./Teams.ts";
  * team that does not exist answers 404; a change the person may not make, 403 with a
  * message the page can show.
  *
- * /api/teams, for every signed-in person, mounted in app.ts: the share picker's search.
+ * /api/teams, for every signed-in person, mounted in app.ts: the share picker's search, and
+ * the person's own teams.
  */
 type Env = SignedInEnv;
 
@@ -81,6 +82,11 @@ export const teamsAdminApi = new Hono<Env>()
 		return route(c, Effect.map(teams(c, (service, actor) => service.invite(actor, c.req.param("id"), email, role)), (result) => c.json(result)), errors);
 	})
 
+	// Org admins. Archive and restore answer the team; delete only an archived team.
+	.post("/:id/archive", (c) => route(c, Effect.map(teams(c, (service, actor) => service.archive(actor, c.req.param("id"))), (team) => c.json({ team })), errors))
+	.post("/:id/restore", (c) => route(c, Effect.map(teams(c, (service, actor) => service.restore(actor, c.req.param("id"))), (team) => c.json({ team })), errors))
+	.delete("/:id", (c) => route(c, Effect.map(teams(c, (service, actor) => service.remove(actor, c.req.param("id"))), () => c.json({ deleted: true as const })), errors))
+
 	.delete("/:id/invites/:email", (c) =>
 		route(
 			c,
@@ -89,7 +95,12 @@ export const teamsAdminApi = new Hono<Env>()
 		),
 	);
 
-/** GET /api/teams?q=: active teams by name, at most 20, with their member count. Never their members. */
-export const teamsApi = new Hono<Env>().get("/", validate("query", searchQuery), (c) =>
-	route(c, Effect.map(Teams.Teams.use((service) => service.search(c.req.valid("query").q)), (found) => c.json({ teams: found }))),
-);
+/**
+ * GET /api/teams?q=: active teams by name, at most 20, with their member count. Never their members.
+ * GET /api/teams/mine: the person's own active teams, with their members (Settings > Teams).
+ */
+export const teamsApi = new Hono<Env>()
+	.get("/", validate("query", searchQuery), (c) =>
+		route(c, Effect.map(Teams.Teams.use((service) => service.search(c.req.valid("query").q)), (found) => c.json({ teams: found }))),
+	)
+	.get("/mine", (c) => route(c, Effect.map(Teams.Teams.use((service) => service.mine(c.get("user").id)), (found) => c.json({ teams: found }))));

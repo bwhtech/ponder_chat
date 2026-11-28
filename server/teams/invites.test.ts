@@ -7,7 +7,6 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
 import type { Email } from "../email/Mailer.ts";
 import { parseJson } from "../test-json.ts";
 // Types only: the module itself is imported below, once the environment is set.
@@ -32,7 +31,7 @@ Object.assign(process.env, {
 	CLOUDFLARE_API_URL: `http://127.0.0.1:${(mail.address() as AddressInfo).port}`,
 });
 
-const { base, call, create, database, emailOf, setMember, setUp, tag, tearDown, who } = await import("./test-app.ts");
+const { base, call, create, database, emailOf, holdEvents, pause, setMember, setUp, tag, tearDown, who } = await import("./test-app.ts");
 const { joinInvitedTeams } = await import("./joins.ts");
 
 type Invited = One & Refusal & { invited?: true; added?: true };
@@ -45,40 +44,6 @@ const allowed = (email: string) =>
 const invitesOf = async (email: string) =>
 	(await database((sql) => sql<{ team_id: string }>`select team_id from team_invites where email = ${email}`)).map((row) => row.team_id);
 const mailTo = (email: string) => sent.filter((each) => each.to === email);
-const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Holds every change that logs an activity event open, just before its commit: a lock on
- * admin_events makes the event's insert wait. `waiting` resolves once `count` changes wait.
- */
-async function holdEvents() {
-	let release!: () => void;
-	const gate = new Promise<void>((resolve) => (release = resolve));
-	let holding!: () => void;
-	const held = new Promise<void>((resolve) => (holding = resolve));
-	const done = database((sql) =>
-		sql.withTransaction(
-			Effect.gen(function* () {
-				yield* sql`lock table admin_events in share mode`;
-				yield* Effect.sync(holding);
-				yield* Effect.promise(() => gate);
-			}),
-		),
-	);
-	await held;
-	const waiting = async (count: number) => {
-		for (let tries = 0; tries < 100; tries++) {
-			const [row] = await database(
-				(sql) => sql<{ count: number }>`select count(*)::int as count from pg_locks where relation = 'admin_events'::regclass and not granted`,
-			);
-			if ((row?.count ?? 0) >= count) return;
-			await pause(50);
-		}
-		throw new Error("No change waited for admin_events.");
-	};
-	return { waiting, release: () => (release(), done) };
-}
-
 describe.skipIf(!base)("team invites", () => {
 	beforeAll(setUp);
 	afterAll(async () => {

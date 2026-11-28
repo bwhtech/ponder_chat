@@ -30,7 +30,16 @@ const SummaryRow = Schema.Struct({
 });
 
 const MatchRow = Schema.Struct({ id: Schema.String, name: Schema.String, member_count: Schema.Number });
-const TeamRow = Schema.Struct({ id: Schema.String, name: Schema.String, description: Schema.String, archived: Schema.Boolean, created_at: Schema.Date });
+const TeamRow = Schema.Struct({
+	id: Schema.String,
+	name: Schema.String,
+	description: Schema.String,
+	archived: Schema.Boolean,
+	created_at: Schema.Date,
+	grant_count: Schema.Number,
+});
+const MyTeamRow = Schema.Struct({ id: Schema.String, name: Schema.String, description: Schema.String, role: RoleSchema });
+const TeamMemberRow = Schema.Struct({ team_id: Schema.String, id: Schema.String, name: Schema.String, email: Schema.String, role: RoleSchema });
 const MemberRow = Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String, role: RoleSchema, added_at: Schema.Date });
 const InviteRow = Schema.Struct({ email: Schema.String, role: RoleSchema, invited_by: Schema.String, created_at: Schema.Date });
 const PersonRow = Schema.Struct({ email: Schema.String, banned: Schema.Boolean, role: Schema.NullOr(RoleSchema) });
@@ -42,6 +51,8 @@ export type MatchRow = typeof MatchRow.Type;
 export type TeamRow = typeof TeamRow.Type;
 export type MemberRow = typeof MemberRow.Type;
 export type InviteRow = typeof InviteRow.Type;
+export type MyTeamRow = typeof MyTeamRow.Type;
+export type TeamMemberRow = typeof TeamMemberRow.Type;
 
 export type Rows = {
 	/** The team and the person's role in it; none when there is no such team. */
@@ -55,6 +66,10 @@ export type Rows = {
 	team: (teamId: string) => Effect.Effect<Option.Option<TeamRow>, SqlError>;
 	/** By name, or by email for a person with no name, as the page names them. */
 	members: (teamId: string) => Effect.Effect<ReadonlyArray<MemberRow>, SqlError>;
+	/** The person's active teams, by name, with their role. */
+	mine: (userId: string) => Effect.Effect<ReadonlyArray<MyTeamRow>, SqlError>;
+	/** The members of these teams, each team's in the order of `members`. */
+	membersOf: (teamIds: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<TeamMemberRow>, SqlError>;
 	/** Oldest first. */
 	invites: (teamId: string) => Effect.Effect<ReadonlyArray<InviteRow>, SqlError>;
 	/** A person with an account: their email, whether they are banned, and their role in the team. None without an account. */
@@ -104,7 +119,28 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 	const team = SqlSchema.findOneOption({
 		Request: Schema.String,
 		Result: TeamRow,
-		execute: (teamId) => sql`select id, name, description, archived_at is not null as archived, created_at from teams where id = ${teamId}`,
+		execute: (teamId) => sql`
+			select id, name, description, archived_at is not null as archived, created_at,
+				(select count(*)::int from workspace_teams g where g.team_id = teams.id) as grant_count
+			from teams where id = ${teamId}`,
+	});
+	const mine = SqlSchema.findAll({
+		Request: Schema.String,
+		Result: MyTeamRow,
+		execute: (userId) => sql`
+			select t.id, t.name, t.description, m.role
+			from team_members m join teams t on t.id = m.team_id
+			where m.user_id = ${userId} and t.archived_at is null
+			order by lower(t.name), t.id`,
+	});
+	const membersOf = SqlSchema.findAll({
+		Request: Schema.Array(Schema.String),
+		Result: TeamMemberRow,
+		execute: (teamIds) => sql`
+			select m.team_id, u.id, coalesce(u.name, '') as name, u.email, m.role
+			from team_members m join users u on u.id = m.user_id
+			where m.team_id in ${sql.in(teamIds)}
+			order by lower(coalesce(nullif(u.name, ''), u.email)), lower(u.email)`,
 	});
 	const members = SqlSchema.findAll({
 		Request: Schema.String,
@@ -154,6 +190,8 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		team: (teamId) => decoded(team(teamId)),
 		members: (teamId) => decoded(members(teamId)),
 		invites: (teamId) => decoded(invites(teamId)),
+		mine: (userId) => decoded(mine(userId)),
+		membersOf: (teamIds) => (teamIds.length === 0 ? Effect.succeed([]) : decoded(membersOf(teamIds))),
 		person: (request) => decoded(person(request)),
 		name: (userId) => decoded(name(userId)),
 	};

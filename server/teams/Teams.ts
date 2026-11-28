@@ -14,10 +14,12 @@ import { lockInvitesOf } from "../people/Invites.ts";
 import { pgCode } from "../runtime/Database.ts";
 import { canAdminister, canChangePeople, canOrganise, leavesNoAdmin, type TeamRole, type TeamViewer } from "./access.ts";
 import { teamEmails } from "./emails.ts";
+import { lifecycleOf } from "./lifecycle.ts";
 import {
 	type Actor,
 	type AdminScope,
 	type InviteResult,
+	type MyTeam,
 	type NewTeam,
 	type TeamChanges,
 	type TeamDetail,
@@ -32,7 +34,7 @@ import { migrateTeams } from "./tables.ts";
 
 /**
  * Teams (docs/teams-plan.md): named groups of people in the org, such as HR. Org admins
- * make and rename them, and name the first team admin. Team admins and org admins add
+ * make, rename, archive, restore and delete them, and name the first team admin. Team admins and org admins add
  * people, invite emails that have no account yet, remove people and change their roles. A
  * team keeps at least one team admin, unless an org admin decides otherwise (access.ts).
  *
@@ -41,8 +43,8 @@ import { migrateTeams } from "./tables.ts";
  * rule sees the other's change. Every change goes to the admin activity log. The emails go
  * after the commit (emails.ts).
  *
- * An invite or a cancel takes its email's lock (Invites.lockInvitesOf) before the team's
- * row. Nothing takes them the other way round, so they can't deadlock.
+ * An invite, a cancel or a delete takes its emails' locks (Invites.lockInvitesOf) before the
+ * team's row, so they can't deadlock. Archive, restore and delete are in lifecycle.ts.
  */
 export * from "./model.ts";
 
@@ -55,6 +57,8 @@ export class Teams extends Context.Service<
 		readonly adminScope: (userId: string) => Effect.Effect<Option.Option<AdminScope>, SqlError>;
 		/** Org admins: every team, archived too. Team admins: the active teams they admin. */
 		readonly list: (actor: Actor) => Effect.Effect<TeamSummary[], SqlError>;
+		/** The person's active teams, with their members: any signed-in person, for Settings > Teams. */
+		readonly mine: (userId: string) => Effect.Effect<MyTeam[], SqlError>;
 		/** Active teams whose name has this text, without case: at most 20. Any signed-in person. */
 		readonly search: (text: string) => Effect.Effect<TeamMatch[], SqlError>;
 		/** Org admins only. The first team admin must have an account and not be banned. They get an email. */
@@ -82,6 +86,14 @@ export class Teams extends Context.Service<
 		 * unless an org admin invited it or another team's invite holds it. No invite: no change.
 		 */
 		readonly cancelInvite: (actor: Actor, teamId: string, email: string) => Effect.Effect<TeamDetail | null, TeamNotFound | TeamRefused | SqlError>;
+		/** Org admins only. Its grants stop counting and its people can't change, until restore. Again: no change. */
+		readonly archive: (actor: Actor, teamId: string) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | SqlError>;
+		readonly restore: (actor: Actor, teamId: string) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | SqlError>;
+		/**
+		 * Org admins only, and only an archived team: with its members, invites and grants. An
+		 * email that only its invites let in may no longer sign in.
+		 */
+		readonly remove: (actor: Actor, teamId: string) => Effect.Effect<void, TeamNotFound | TeamRefused | SqlError>;
 	}
 >()("ponder/teams/Teams") {}
 
@@ -115,6 +127,7 @@ const make = Effect.gen(function* () {
 			createdAt: team.created_at.toISOString(),
 			members: members.map((member) => ({ id: member.id, name: member.name, email: member.email, role: member.role, addedAt: member.added_at.toISOString() })),
 			invites: invites.map((invite) => ({ email: invite.email, role: invite.role, invitedBy: invite.invited_by, createdAt: invite.created_at.toISOString() })),
+			grantCount: team.grant_count,
 			canOrganise: canOrganise(viewer),
 			canChangePeople: canChangePeople(viewer, team.archived),
 		} satisfies TeamDetail;
@@ -170,6 +183,20 @@ const make = Effect.gen(function* () {
 				adminCount: row.admin_count,
 				inviteCount: row.invite_count,
 				archived: row.archived,
+			}),
+		);
+	});
+
+	const mine = Effect.fn("Teams.mine")(function* (userId: string) {
+		const teams = yield* rows.mine(userId);
+		const members = yield* rows.membersOf(teams.map((team) => team.id));
+		return teams.map(
+			(team): MyTeam => ({
+				id: team.id,
+				name: team.name,
+				description: team.description,
+				role: team.role,
+				members: members.filter((member) => member.team_id === team.id).map((member) => ({ id: member.id, name: member.name, email: member.email, role: member.role })),
 			}),
 		);
 	});
@@ -332,7 +359,12 @@ const make = Effect.gen(function* () {
 		return yield* detailNow(actor, teamId);
 	});
 
-	return Teams.of({ migrate, adminScope, list, search, create, update, get, setMember, removeMember, invite, cancelInvite });
+	const lifecycle = lifecycleOf({ sql, events, lockTeam, viewerOf, get });
+	const archive = Effect.fn("Teams.archive")(lifecycle.archive);
+	const restore = Effect.fn("Teams.restore")(lifecycle.restore);
+	const remove = Effect.fn("Teams.remove")(lifecycle.remove);
+
+	return Teams.of({ migrate, adminScope, list, mine, search, create, update, get, setMember, removeMember, invite, cancelInvite, archive, restore, remove });
 });
 
 export const layer = Layer.effect(Teams, make);

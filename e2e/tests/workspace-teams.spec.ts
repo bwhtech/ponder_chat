@@ -8,7 +8,7 @@ import { createWorkspace, newPerson } from "../workspaces.ts";
  * Team grants on workspaces (docs/teams-plan.md, ticket 3): Share finds teams and people, a
  * team added gives every member its access at once, its role changes and it is removed as a
  * person's is. An archived team's grant is greyed out and has only Remove. Teams are made
- * through the admin API; archived by hand (archived_at), as the archive action comes later.
+ * and archived through the admin API.
  */
 const headers = { Origin: e2e.baseUrl };
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -49,7 +49,7 @@ test("Share adds a team: its members get access at once; its role changes and it
 	const oldId = await makeTeam(page, old, admin.id, [member.person.id]);
 	const workspace = await createWorkspace(page, `Pay rules ${mark}`);
 	await grant(page, workspace.id, oldId, "ask");
-	await db`update teams set archived_at = now() where id = ${oldId}`;
+	expect((await page.request.post(`/api/admin/teams/${oldId}/archive`, { headers })).ok()).toBe(true);
 
 	await test.step("an archived team gives nothing", async () => {
 		await member.page.goto("/");
