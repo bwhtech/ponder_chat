@@ -21,6 +21,7 @@ import * as AdminEvents from "./AdminEvents.ts";
 import * as AdminReports from "./AdminReports.ts";
 import { validate } from "../validate.ts";
 import * as AdminWorkspaces from "../workspaces/admin.ts";
+import { teamsAdminApi } from "../teams/routes.ts";
 
 /**
  * The API behind /admin, mounted at /api/admin. Every route needs an admin (requireAdmin).
@@ -123,6 +124,9 @@ export const adminApi = new Hono<Env>()
 		const { before, person } = c.req.valid("query");
 		return route(c, Effect.map(reports((service) => service.activity({ olderThan: before, person })), (page) => c.json(page)));
 	})
+
+	// Teams (teams/routes.ts): its service checks the person's role in each team again.
+	.route("/teams", teamsAdminApi)
 
 	// Workspaces (workspaces/admin.ts): organisation ones in full, private ones as totals with no names.
 	.get("/workspaces", (c) => route(c, Effect.map(workspaces((service) => service.report), (report) => c.json(report))))

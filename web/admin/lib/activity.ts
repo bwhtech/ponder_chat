@@ -89,7 +89,25 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"update-workspace": (before, after) => ({ text: `Edited ${theWorkspace(after)}`, details: workspaceChanges(before, after) }),
 	"share-workspace": (before, after) => ({ text: sharingText(before, after), details: sharingChanges(before, after) }),
 	"delete-workspace": (before) => ({ text: `Deleted ${theWorkspace(before)}`, details: [] }),
+	// Teams (server/teams/Teams.ts). The person is the event's target: the first team admin, or who was added, changed or removed.
+	"create-team": (_, after) => ({ text: `Made the team ${teamName(after)}, with them as team admin`, details: [] }),
+	"update-team": (before, after) => ({
+		text: `Edited the team ${teamName(after)}`,
+		details: [changed("Name", before.name, after.name), before.description !== after.description ? "New description" : ""].filter(Boolean),
+	}),
+	"add-team-member": (_, after) => ({ text: `Added them to ${teamName(after)} as ${roleName(after.role)}`, details: [] }),
+	"set-team-role": (_, after) => ({ text: `Made them ${roleName(after.role)} of ${teamName(after)}`, details: [] }),
+	"remove-team-member": (before) => ({ text: `Removed them from ${teamName(before)}`, details: [] }),
 };
+
+/** “HR”, as the team was named then. */
+function teamName(fields: Fields) {
+	return `“${String(fields.name ?? "")}”`;
+}
+
+function roleName(role: unknown) {
+	return role === "admin" ? "a team admin" : "a member";
+}
 
 /** “the workspace “Handbook””, or “a workspace”: the server names a workspace only while it is open to everyone (server/admin/activity.ts). */
 function theWorkspace(fields: Fields) {
