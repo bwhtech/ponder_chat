@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { Avatar, Badge, Breadcrumbs, Button, Dropdown, PageHeader, PageHeaderBackButton, PageHeaderMobile, Select, Skeleton, toast } from "frappe-ui";
+import { Avatar, Badge, Breadcrumbs, Button, Dropdown, PageHeader, PageHeaderBackButton, PageHeaderMobile, Select, Skeleton, TextInput, toast } from "frappe-ui";
 import { computed, ref, watch } from "vue";
 import { displayName } from "../../../shared/display-name";
-import { admin, ApiError, unwrap, type PersonFound, type TeamDetail, type TeamMember, type TeamRole } from "../api";
+import { admin, ApiError, unwrap, type PersonFound, type TeamDetail, type TeamInvite, type TeamMember, type TeamRole } from "../api";
 import ListSkeleton from "../components/ListSkeleton.vue";
 import PersonSearch from "../components/PersonSearch.vue";
 import TeamFormDialog from "../components/TeamFormDialog.vue";
@@ -13,8 +13,9 @@ import { isMobile } from "../lib/viewport";
 
 /**
  * One team (server/teams/Teams.ts): its name and description, which org admins edit, and
- * its people with their roles. "Add people" adds a person at once, with the role picked.
- * Each change answers the team as it is now, and the page shows that answer.
+ * its people with their roles, and the emails invited. "Add people" adds a person at once,
+ * with the role picked. An email adds its account, or invites the email: it joins at its
+ * first sign-in. Each change answers the team as it is now, and the page shows that answer.
  */
 const props = defineProps<{ id: string }>();
 
@@ -94,6 +95,37 @@ async function remove(member: TeamMember) {
 
 const add = (person: PersonFound) => void setRole(person, newRole.value, true);
 
+const email = ref("");
+const inviting = ref(false);
+const roleName = (role: TeamRole) => (role === "admin" ? "a team admin" : "a member");
+
+async function invite() {
+	const address = email.value.trim();
+	if (!address || inviting.value) return;
+	inviting.value = true;
+	try {
+		const answer = await unwrap(admin.teams[":id"].invites.$post({ param: { id: encodeURIComponent(props.id) }, json: { email: address, role: newRole.value } }));
+		show(answer.team);
+		toast.success("added" in answer ? `Added ${address} as ${roleName(newRole.value)}` : `Invited ${address} as ${roleName(newRole.value)}`);
+		email.value = "";
+	} catch (e) {
+		toast.error((e as Error).message);
+	} finally {
+		inviting.value = false;
+	}
+}
+
+async function cancelInvite(invite: TeamInvite) {
+	try {
+		show((await unwrap(admin.teams[":id"].invites[":email"].$delete({ param: { id: encodeURIComponent(props.id), email: encodeURIComponent(invite.email) } }))).team);
+		toast.success(`Cancelled the invite for ${invite.email}`);
+	} catch (e) {
+		toast.error((e as Error).message);
+	}
+}
+
+const inviteActions = (invite: TeamInvite) => [{ label: "Cancel invite", icon: "lucide-mail-x", theme: "red" as const, onClick: () => void cancelInvite(invite) }];
+
 const actionsFor = (member: TeamMember) => [
 	member.role === "admin"
 		? { label: "Make member", icon: "lucide-user-round", onClick: () => void setRole(member, "member", false) }
@@ -137,6 +169,21 @@ const editing = ref(false);
 					</div>
 					<Select v-model="newRole" :options="ROLES" aria-label="Role for the people you add" class="sm:w-36" />
 				</div>
+				<form class="flex flex-col gap-2 sm:flex-row" @submit.prevent="invite">
+					<TextInput
+						v-model="email"
+						type="email"
+						class="min-w-0 flex-1"
+						placeholder="Or an email: name@example.com"
+						aria-label="Email to add or invite"
+						autocomplete="off"
+						autocapitalize="none"
+						spellcheck="false"
+						enterkeyhint="send"
+					/>
+					<Button type="submit" label="Add by email" :loading="inviting" :disabled="!email.trim()" class="sm:w-36" />
+				</form>
+				<p class="text-sm text-ink-gray-5">An email with no account gets an invite. They join the team when they first sign in.</p>
 			</section>
 
 			<section class="space-y-3" aria-labelledby="members">
@@ -162,7 +209,7 @@ const editing = ref(false);
 			<section v-if="team.invites.length" class="space-y-3" aria-labelledby="invites">
 				<h2 id="invites" class="text-base-semibold text-ink-gray-9">Invited</h2>
 				<ul class="divide-y divide-outline-gray-1">
-					<li v-for="invite in team.invites" :key="invite.email" class="flex items-center gap-3 py-2.5">
+					<li v-for="invite in team.invites" :key="invite.email" class="flex items-center gap-3 py-2.5" :data-invite="invite.email">
 						<Avatar :label="invite.email" size="lg" />
 						<div class="min-w-0 flex-1">
 							<div class="flex items-center gap-1.5">
@@ -171,6 +218,9 @@ const editing = ref(false);
 							</div>
 							<p class="truncate text-sm text-ink-gray-6">Invited by {{ invite.invitedBy }} · {{ when(invite.createdAt) }}</p>
 						</div>
+						<Dropdown v-if="team.canChangePeople" :options="inviteActions(invite)">
+							<Button variant="ghost" icon="lucide-ellipsis" :aria-label="`Actions for ${invite.email}`" />
+						</Dropdown>
 					</li>
 				</ul>
 			</section>
@@ -215,6 +265,11 @@ const editing = ref(false);
 					<Skeleton class="h-7 flex-1 rounded-4" />
 					<Skeleton class="h-7 rounded-4 sm:w-36" />
 				</div>
+				<div class="flex flex-col gap-2 sm:flex-row">
+					<Skeleton class="h-7 flex-1 rounded-4" />
+					<Skeleton class="h-7 rounded-4 sm:w-36" />
+				</div>
+				<p class="text-sm text-ink-gray-5">An email with no account gets an invite. They join the team when they first sign in.</p>
 			</section>
 			<section class="space-y-3">
 				<h2 class="text-base-semibold text-ink-gray-9">Members</h2>

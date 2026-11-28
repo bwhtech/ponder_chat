@@ -27,6 +27,7 @@ export type TeamSummary = Answer<typeof admin.teams.$get>["teams"][number];
 export type TeamDetail = Answer<(typeof admin.teams)[":id"]["$get"]>["team"];
 export type TeamMember = TeamDetail["members"][number];
 export type TeamRole = TeamMember["role"];
+export type TeamInvite = TeamDetail["invites"][number];
 /** A person in the people search (GET /api/people). */
 export type PersonFound = Answer<typeof client.api.people.$get>["people"][number];
 export type PersonDetail = Answer<(typeof admin.people)[":id"]["$get"]>;
