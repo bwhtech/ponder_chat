@@ -55,6 +55,9 @@ export class Accounts extends Context.Service<
 >()("ponder/people/Accounts") {}
 
 /** Better Auth keeps several roles as "admin,user", so "admin" wins if it is one of them. */
+/** A LIKE pattern that finds the text anywhere, as it is: % and _ in it are not wildcards. */
+export const containsPattern = (text: string) => `%${text.trim().replace(/[\\%_]/g, (special) => `\\${special}`)}%`;
+
 export const roleFrom = (role: string | null): Role => ((role ?? "").split(",").some((one) => one.trim() === "admin") ? "admin" : "user");
 
 const make = Effect.gen(function* () {
@@ -125,9 +128,7 @@ const make = Effect.gen(function* () {
 	});
 
 	const search = Effect.fn("Accounts.search")(function* (text: string) {
-		// The text is matched as it is: % and _ in it are not wildcards.
-		const pattern = `%${text.trim().replace(/[\\%_]/g, (special) => `\\${special}`)}%`;
-		return yield* findPeople(pattern).pipe(Effect.catchTags({ SchemaError: Effect.die }));
+		return yield* findPeople(containsPattern(text)).pipe(Effect.catchTags({ SchemaError: Effect.die }));
 	});
 
 	return Accounts.of({ roleOf, isAdmin, setRole, listAdmins, hasAccount, emailOf, idOfEmail, search });

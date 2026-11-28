@@ -37,6 +37,7 @@ import * as Runs from "./telemetry/Runs.ts";
 import { validate } from "./validate.ts";
 import { WEB_BUILD } from "./web-build.ts";
 import * as Replies from "./workflow/replies.ts";
+import { teamsApi } from "./teams/routes.ts";
 import { peopleApi, workspacesApi } from "./workspaces/routes.ts";
 
 /**
@@ -172,6 +173,8 @@ const api = app
 	// Workspaces and the people picker (server/workspaces/). A workspace the person can't use is a 404.
 	.route("/api/workspaces", workspacesApi)
 	.route("/api/people", peopleApi)
+	// Teams for the share picker (server/teams/): any signed-in person, names and member counts only.
+	.route("/api/teams", teamsApi)
 
 	// Whether the chat can run Python, for the attach button.
 	.get("/api/features", (c) => route(c, Effect.map(Sandbox.Sandbox.use((sandbox) => sandbox.ready), (python) => c.json({ python }))))

@@ -22,6 +22,10 @@ export type WorkspaceDetail = Answer<(typeof client.api.workspaces)[":id"]["$get
 export type Person = { id: string; name: string; email: string };
 export type MemberAccess = "ask" | "edit";
 export type Member = Person & { access: MemberAccess };
+/** A team added to a workspace. An archived one gives no access, and can only be removed. */
+export type WorkspaceTeam = NonNullable<WorkspaceDetail["teams"]>[number];
+/** A team in the share picker (GET /api/teams?q=). */
+export type TeamMatch = Answer<typeof client.api.teams.$get>["teams"][number];
 /** General access: "ask" while everyone in the organisation can ask in it. */
 export type OrgAccess = "none" | "ask";
 /** Every workspace starts private: an admin opens it to everyone from Share. */
@@ -155,8 +159,8 @@ export async function updateWorkspace(id: string, changes: Partial<WorkspaceInpu
 }
 
 /**
- * Sharing, one change at a time (ShareDialog.vue): a person added or given a role, a person
- * removed, General access changed. Each answers the workspace as the person sees it now; the
+ * Sharing, one change at a time (ShareDialog.vue): a person or a team added or given a role,
+ * a person or a team removed, General access changed. Each answers the workspace as the person sees it now; the
  * sidebar is read again, for its icon.
  */
 export async function setMember(id: string, userId: string, access: MemberAccess) {
@@ -175,6 +179,20 @@ export async function removeMember(id: string, userId: string) {
 
 export async function setOrgAccess(id: string, orgAccess: OrgAccess) {
 	const { workspace } = await unwrap(client.api.workspaces[":id"].access.$put({ param: { id: encodeURIComponent(id) }, json: { orgAccess } }), SHARING_FAILED);
+	void loadWorkspaces();
+	return workspace;
+}
+
+export async function setTeam(id: string, teamId: string, access: MemberAccess) {
+	const param = { id: encodeURIComponent(id), teamId: encodeURIComponent(teamId) };
+	const { workspace } = await unwrap(client.api.workspaces[":id"].teams[":teamId"].$put({ param, json: { access } }), SHARING_FAILED);
+	void loadWorkspaces();
+	return workspace;
+}
+
+export async function removeTeam(id: string, teamId: string) {
+	const param = { id: encodeURIComponent(id), teamId: encodeURIComponent(teamId) };
+	const { workspace } = await unwrap(client.api.workspaces[":id"].teams[":teamId"].$delete({ param }), SHARING_FAILED);
 	void loadWorkspaces();
 	return workspace;
 }
@@ -278,6 +296,10 @@ async function sendPin(id: string, pinned: boolean) {
 
 export async function searchPeople(q: string): Promise<readonly Person[]> {
 	return (await unwrap(client.api.people.$get({ query: { q } }), "People could not load.")).people;
+}
+
+export async function searchTeams(q: string): Promise<readonly TeamMatch[]> {
+	return (await unwrap(client.api.teams.$get({ query: { q } }), "Teams could not load.")).teams;
 }
 
 /** Who deletes it: its owner, and admins while it is open to everyone (server/workspaces/access.ts). */

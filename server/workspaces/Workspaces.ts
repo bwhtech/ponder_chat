@@ -11,6 +11,8 @@ import * as AdminEvents from "../admin/AdminEvents.ts";
 import * as ObjectStore from "../files/ObjectStore.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { roleFrom } from "../people/Accounts.ts";
+import { decodeRows } from "../runtime/Database.ts";
+import { TeamNotFound } from "../teams/Teams.ts";
 import { type Access, accessFrom, atLeast, canChangeOrgAccess, canDelete, canShare, type MemberAccess, type OrgAccess } from "./access.ts";
 import { documentStore, type DocumentSummary } from "./documents/store.ts";
 import { migrateDocuments } from "./documents/tables.ts";
@@ -27,9 +29,10 @@ import { claimSlug, migrateSlugs } from "./slug.ts";
  * answer never shows that it exists. Changes to a workspace while it is open to everyone go
  * to the admin activity log (AdminEvents.ts).
  *
- * Sharing is one change at a time: a person added or given a role, a person removed, or
- * General access opened or closed. Two people who change different people at once both
- * keep their change.
+ * Sharing is one change at a time: a person or a team added or given a role, a person or
+ * a team removed, or General access opened or closed. Two people who change different
+ * people at once both keep their change. A team grant is live: who is in the team now
+ * has its access (docs/teams-plan.md).
  *
  * A chat stays its writer's own: nothing here reads or lists chats. A chat only points to
  * its workspace (`threads.workspace_id`), and a deleted workspace lets its chats go.
@@ -40,6 +43,8 @@ export type { Access, MemberAccess, OrgAccess } from "./access.ts";
 export type Actor = { id: string; email: string };
 export type Person = { id: string; name: string; email: string };
 export type Member = Person & { access: MemberAccess };
+/** A team added to a workspace. An archived team keeps its grant, but gives no access. */
+export type WorkspaceTeam = { id: string; name: string; memberCount: number; access: MemberAccess; archived: boolean };
 
 /**
  * A row of the sidebar (GET /api/workspaces, the boot page). `pinned` is the person's own:
@@ -58,6 +63,8 @@ export type WorkspaceSummary = {
 	access: Access;
 	/** The people added, without the owner. */
 	memberCount: number;
+	/** The active teams added. */
+	teamCount: number;
 	pinned: boolean;
 	/** To the microsecond, in UTC ISO 8601: the list's order. */
 	createdAt: string;
@@ -65,8 +72,8 @@ export type WorkspaceSummary = {
 };
 
 /**
- * One workspace (GET /api/workspaces/:id), as the person who asks may use it. `members` only
- * for a person who can change them (`canShare`), else null.
+ * One workspace (GET /api/workspaces/:id), as the person who asks may use it. `members` and
+ * `teams` only for a person who can change them (`canShare`), else null.
  */
 export type WorkspaceDetail = Omit<WorkspaceSummary, "pinned"> & {
 	instructions: string;
@@ -76,6 +83,8 @@ export type WorkspaceDetail = Omit<WorkspaceSummary, "pinned"> & {
 	/** Opens it to everyone, or closes it: admins only (access.ts). */
 	canChangeOrgAccess: boolean;
 	members: Member[] | null;
+	/** By name, archived teams too. */
+	teams: WorkspaceTeam[] | null;
 	/** Oldest first, with their status, for everyone who can ask. */
 	documents: DocumentSummary[];
 };
@@ -100,11 +109,12 @@ const REFUSALS = {
 	"needs-share": "Only the owner and people who can edit can share this workspace.",
 	"needs-delete": "Only the owner can delete this workspace. While it is open to everyone, admins can too.",
 	"owner-fixed": "The owner always has full access.",
+	"team-archived": "This team is archived, so it can't be added.",
 } as const;
 
 /** The person can use the workspace, but not for this. Routes answer 403 with the message. */
 export class WorkspaceRefused extends Schema.TaggedError<WorkspaceRefused>()("WorkspaceRefused", {
-	reason: Schema.Literals(["org-needs-admin", "org-needs-owner", "needs-edit", "needs-share", "needs-delete", "owner-fixed"]),
+	reason: Schema.Literals(["org-needs-admin", "org-needs-owner", "needs-edit", "needs-share", "needs-delete", "owner-fixed", "team-archived"]),
 }) {
 	override get message() {
 		return REFUSALS[this.reason];
@@ -155,6 +165,18 @@ export class Workspaces extends Context.Service<
 		) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | UnknownPerson | SqlError>;
 		/** Removes a person: whoever can share, themselves too. Never the owner. Removing someone who is no member changes nothing. */
 		readonly removeMember: (actor: Actor, workspaceId: string, userId: string) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | SqlError>;
+		/**
+		 * Adds an active team with this role, or gives a team this role: whoever can share. An
+		 * archived team can't be added, but its role can still be changed.
+		 */
+		readonly setTeam: (
+			actor: Actor,
+			workspaceId: string,
+			teamId: string,
+			access: MemberAccess,
+		) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | TeamNotFound | SqlError>;
+		/** Removes a team, archived ones too: whoever can share. Removing a team that was not added changes nothing. */
+		readonly removeTeam: (actor: Actor, workspaceId: string, teamId: string) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | SqlError>;
 		/** Opens it to everyone in the organisation, or closes it: admins only. Its people keep their roles either way. */
 		readonly setOrgAccess: (actor: Actor, workspaceId: string, orgAccess: OrgAccess) => Effect.Effect<WorkspaceDetail, WorkspaceNotFound | WorkspaceRefused | SqlError>;
 		/** Marks it deleted, deletes its documents, and lets its chats go: they stay their writers', in no workspace. */
@@ -166,6 +188,8 @@ export class Workspaces extends Context.Service<
 
 /** What a person's access was decided from, for the checks after it. */
 type Resolved = { access: Access; admin: boolean; orgAccess: OrgAccess; ownerId: string };
+
+const ArchivedRow = Schema.Struct({ archived: Schema.Boolean });
 
 const make = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
@@ -250,7 +274,7 @@ const make = Effect.gen(function* () {
 		resolved.admin = roleFrom(found.value.role) === "admin";
 		resolved.orgAccess = found.value.org_access;
 		resolved.ownerId = found.value.owner_id;
-		resolved.access = accessFrom({ orgAccess: resolved.orgAccess, ownerId: resolved.ownerId, member: found.value.member }, userId, resolved.admin);
+		resolved.access = accessFrom({ orgAccess: resolved.orgAccess, ownerId: resolved.ownerId, member: found.value.member, team: found.value.team }, userId, resolved.admin);
 		return resolved;
 	});
 
@@ -272,8 +296,8 @@ const make = Effect.gen(function* () {
 			canDelete: canDelete(row.org_access, access, admin),
 			canChangeOrgAccess: canChangeOrgAccess(row.org_access, access, admin),
 		};
-		const members = rights.canShare ? yield* rows.members(workspaceId) : null;
-		return detailFrom(row, access, rights, members, yield* documents.list(workspaceId));
+		const people = rights.canShare ? { members: yield* rows.members(workspaceId), teams: yield* rows.teams(workspaceId) } : { members: null, teams: null };
+		return detailFrom(row, access, rights, people, yield* documents.list(workspaceId));
 	});
 
 	/** A workspace open to everyone is organisation content, so its changes go to the activity log: open before or after. */
@@ -316,7 +340,10 @@ const make = Effect.gen(function* () {
 		const admin = yield* accounts.isAdmin(userId);
 		const found = yield* rows.summaries(userId);
 		// In the order the query gives.
-		return found.map((row) => ({ ...summaryFrom(row, accessFrom({ orgAccess: row.org_access, ownerId: row.owner_id, member: row.member }, userId, admin)), pinned: row.pinned }));
+		return found.map((row) => ({
+			...summaryFrom(row, accessFrom({ orgAccess: row.org_access, ownerId: row.owner_id, member: row.member, team: row.team }, userId, admin)),
+			pinned: row.pinned,
+		}));
 	});
 
 	// Admitted as a chat is (admit): a delete waits for the pin, and then takes it with the workspace;
@@ -391,7 +418,8 @@ const make = Effect.gen(function* () {
 	/** Who can use the workspace, for the activity log. */
 	const sharingView = Effect.fnUntraced(function* (workspaceId: string) {
 		const [found] = yield* sql<{ org_access: OrgAccess }>`select org_access from workspaces where id = ${workspaceId}`;
-		return { workspace: workspaceId, orgAccess: found?.org_access ?? "none", members: memberIds(yield* rows.members(workspaceId)) };
+		const teams = (yield* rows.teams(workspaceId)).map(({ id, name, access }) => ({ id, name, access }));
+		return { workspace: workspaceId, orgAccess: found?.org_access ?? "none", members: memberIds(yield* rows.members(workspaceId)), teams };
 	});
 
 	/**
@@ -407,6 +435,10 @@ const make = Effect.gen(function* () {
 			yield* sql.withTransaction(
 				Effect.gen(function* () {
 					yield* lockLive(workspaceId, "change");
+					// The rows of the person's teams, shared until the end: a removal from a team that
+					// gives them their access (Teams.ts locks the team's row) waits for this change, or
+					// this change waits for it and then reads them as removed.
+					yield* sql`select t.id from teams t join team_members m on m.team_id = t.id where m.user_id = ${actor.id} for share of t`;
 					const found = yield* withAccess(actor.id, workspaceId, "share");
 					const before = yield* sharingView(workspaceId);
 					yield* change(found);
@@ -442,6 +474,29 @@ const make = Effect.gen(function* () {
 		);
 	});
 
+	const setTeam = Effect.fn("Workspaces.setTeam")(function* (actor: Actor, workspaceId: string, teamId: string, access: MemberAccess) {
+		return yield* changeSharing(actor, workspaceId, () =>
+			Effect.gen(function* () {
+				// The team's row, shared until the end: an archive waits for the grant, or the grant sees it archived.
+				const [team] = yield* sql`select archived_at is not null as archived from teams where id = ${teamId} for share`.pipe(decodeRows(ArchivedRow));
+				if (!team) return yield* new TeamNotFound({ teamId });
+				if (team.archived) {
+					const changed = yield* sql`update workspace_teams set access = ${access} where workspace_id = ${workspaceId} and team_id = ${teamId} returning team_id`;
+					if (changed.length === 0) return yield* new WorkspaceRefused({ reason: "team-archived" });
+					return;
+				}
+				// A team that stays keeps when and by whom it was added.
+				yield* sql`
+					insert into workspace_teams (workspace_id, team_id, access, added_by) values (${workspaceId}, ${teamId}, ${access}, ${actor.id})
+					on conflict (workspace_id, team_id) do update set access = excluded.access`;
+			}),
+		);
+	});
+
+	const removeTeam = Effect.fn("Workspaces.removeTeam")(function* (actor: Actor, workspaceId: string, teamId: string) {
+		return yield* changeSharing(actor, workspaceId, () => Effect.asVoid(sql`delete from workspace_teams where workspace_id = ${workspaceId} and team_id = ${teamId}`));
+	});
+
 	const setOrgAccess = Effect.fn("Workspaces.setOrgAccess")(function* (actor: Actor, workspaceId: string, orgAccess: OrgAccess) {
 		return yield* changeSharing(actor, workspaceId, (found) =>
 			Effect.gen(function* () {
@@ -462,6 +517,7 @@ const make = Effect.gen(function* () {
 				const before = yield* detail(workspaceId, found.access, found.admin);
 				yield* sql`update workspaces set deleted_at = now(), updated_at = now() where id = ${workspaceId}`;
 				yield* sql`delete from workspace_members where workspace_id = ${workspaceId}`;
+				yield* sql`delete from workspace_teams where workspace_id = ${workspaceId}`;
 				yield* sql`delete from workspace_pins where workspace_id = ${workspaceId}`;
 				// The chats stay their writers', in no workspace.
 				yield* sql`update threads set workspace_id = null where workspace_id = ${workspaceId}`;
@@ -480,7 +536,7 @@ const make = Effect.gen(function* () {
 		return Option.map(yield* rows.detail(workspaceId), (row) => ({ name: row.name, instructions: row.instructions }));
 	});
 
-	return Workspaces.of({ migrate, accessOf, check, admit, list, pin, get, create, update, setMember, removeMember, setOrgAccess, remove, instructionsFor });
+	return Workspaces.of({ migrate, accessOf, check, admit, list, pin, get, create, update, setMember, removeMember, setTeam, removeTeam, setOrgAccess, remove, instructionsFor });
 });
 
 export const layer = Layer.effect(Workspaces, make);
@@ -495,6 +551,7 @@ function summaryFrom(row: SummaryRow, access: Access): Omit<WorkspaceSummary, "p
 		icon: row.icon,
 		access,
 		memberCount: row.member_count,
+		teamCount: row.team_count,
 		createdAt: row.created_at,
 		updatedAt: row.updated_at.toISOString(),
 	};
@@ -502,13 +559,13 @@ function summaryFrom(row: SummaryRow, access: Access): Omit<WorkspaceSummary, "p
 
 type Rights = Pick<WorkspaceDetail, "canShare" | "canDelete" | "canChangeOrgAccess">;
 
-function detailFrom(row: DetailRow, access: Access, rights: Rights, members: Member[] | null, documents: DocumentSummary[]): WorkspaceDetail {
+function detailFrom(row: DetailRow, access: Access, rights: Rights, people: Pick<WorkspaceDetail, "members" | "teams">, documents: DocumentSummary[]): WorkspaceDetail {
 	return {
 		...summaryFrom(row, access),
 		instructions: row.instructions,
 		owner: { id: row.owner_id, name: row.owner_name, email: row.owner_email },
 		...rights,
-		members,
+		...people,
 		documents,
 	};
 }

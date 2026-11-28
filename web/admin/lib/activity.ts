@@ -1,6 +1,7 @@
 import { skillTitle } from "../../../shared/skill-file";
 import type { Activity } from "../api";
-import { count } from "../../numbers";
+import { teamRoleName } from "../../../shared/team-role";
+import { count, plural } from "../../numbers";
 import { credits, date } from "./format";
 import { AUTO_COST_OPTIONS } from "./settings-form";
 
@@ -89,7 +90,39 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"update-workspace": (before, after) => ({ text: `Edited ${theWorkspace(after)}`, details: workspaceChanges(before, after) }),
 	"share-workspace": (before, after) => ({ text: sharingText(before, after), details: sharingChanges(before, after) }),
 	"delete-workspace": (before) => ({ text: `Deleted ${theWorkspace(before)}`, details: [] }),
+	// Teams (server/teams/Teams.ts). The person is the event's target: the first team admin, who was added, changed or removed, or the email invited.
+	"create-team": (_, after) => ({ text: `Made the team ${teamName(after)}, with them as team admin`, details: [] }),
+	"update-team": (before, after) => ({
+		text: `Edited the team ${teamName(after)}`,
+		details: [changed("Name", before.name, after.name), before.description !== after.description ? "New description" : ""].filter(Boolean),
+	}),
+	// At their first sign-in, the person joins each team that invited them (server/teams/joins.ts): they are the actor.
+	"add-team-member": (_, after) => ({
+		text: after.byInvite ? `Joined ${teamName(after)} as ${teamRoleName(after.role)}, by invite` : `Added them to ${teamName(after)} as ${teamRoleName(after.role)}`,
+		details: [],
+	}),
+	"set-team-role": (_, after) => ({ text: `Made them ${teamRoleName(after.role)} of ${teamName(after)}`, details: [] }),
+	"remove-team-member": (before) => ({ text: `Removed them from ${teamName(before)}`, details: [] }),
+	// The target is the email: it has no account yet.
+	"invite-to-team": (before, after) => ({
+		text: `Invited them to ${teamName(after)} as ${teamRoleName(after.role)}`,
+		details: before.role ? [`In place of ${teamRoleName(before.role)}`] : [],
+	}),
+	"cancel-team-invite": (before) => ({ text: `Cancelled their invite to ${teamName(before)}`, details: [] }),
+	// No target: about the team, not one person.
+	"archive-team": (_, after) => ({ text: `Archived the team ${teamName(after)}`, details: [] }),
+	"restore-team": (_, after) => ({ text: `Restored the team ${teamName(after)}`, details: [] }),
+	"delete-team": (before) => ({
+		text: `Deleted the team ${teamName(before)}`,
+		details: [[plural(Number(before.members ?? 0), "member"), plural(Number(before.grants ?? 0), "workspace grant"), plural(Number(before.invites ?? 0), "invite")].join(" · ")],
+	}),
 };
+
+
+/** “HR”, as the team was named then. */
+function teamName(fields: Fields) {
+	return `“${String(fields.name ?? "")}”`;
+}
 
 /** “the workspace “Handbook””, or “a workspace”: the server names a workspace only while it is open to everyone (server/admin/activity.ts). */
 function theWorkspace(fields: Fields) {
@@ -126,7 +159,36 @@ function sharingChanges(before: Fields, after: Fields) {
 		changed("General access", general(before), general(after)),
 		members(before) === members(after) ? "" : `Members: ${count(members(before))} → ${count(members(after))}`,
 		members(before) === members(after) && roles(before) !== roles(after) ? "A member's role changed" : "",
+		...teamChanges(before, after),
 	].filter(Boolean);
+}
+
+/** The teams added, removed or given another role, by name. Events from before teams have no `teams`. */
+function teamChanges(before: Fields, after: Fields) {
+	const old = new Map(teamsOf(before).map((team) => [team.id, team]));
+	const now = new Map(teamsOf(after).map((team) => [team.id, team]));
+	const added = [...now.values()].filter((team) => !old.has(team.id)).map((team) => `Added the team ${team.name} (${accessName(team.access)})`);
+	const removed = [...old.values()].filter((team) => !now.has(team.id)).map((team) => `Removed the team ${team.name}`);
+	const changedRole = [...now.values()].flatMap((team) => {
+		const was = old.get(team.id);
+		return was && was.access !== team.access ? [`Team ${team.name}: ${accessName(was.access)} → ${accessName(team.access)}`] : [];
+	});
+	return [...added, ...changedRole, ...removed];
+}
+
+type TeamGrant = { id: string; name: string; access: string };
+
+function teamsOf(fields: Fields): TeamGrant[] {
+	if (!Array.isArray(fields.teams)) return [];
+	return fields.teams.flatMap((raw: unknown) => {
+		if (typeof raw !== "object" || raw === null) return [];
+		const { id, name, access } = raw as Record<string, unknown>;
+		return typeof id === "string" && typeof name === "string" && typeof access === "string" ? [{ id, name, access }] : [];
+	});
+}
+
+function accessName(access: string) {
+	return access === "edit" ? "can edit" : "can ask";
 }
 
 /** The logo's theme (server/branding/Branding.ts). */

@@ -109,7 +109,7 @@ function invited() {
 </script>
 
 <template>
-	<PageHeaderMobile v-if="isMobile" title="People">
+	<PageHeaderMobile v-if="isMobile" title="Users">
 		<template #prefix><AccountMenu compact /></template>
 		<template #suffix>
 			<Button variant="ghost" icon="lucide-user-plus" aria-label="Invite people" @click="inviting = true" />
@@ -117,7 +117,7 @@ function invited() {
 	</PageHeaderMobile>
 	<PageHeader v-else>
 		<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
-			<h1 class="text-lg-semibold text-ink-gray-9">People</h1>
+			<h1 class="text-lg-semibold text-ink-gray-9">Users</h1>
 			<Button variant="solid" theme="gray" icon-left="lucide-user-plus" label="Invite people" class="ml-auto" @click="inviting = true" />
 		</div>
 	</PageHeader>

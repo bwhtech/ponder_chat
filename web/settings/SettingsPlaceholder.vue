@@ -4,13 +4,14 @@ import { me, signOut } from "../account";
 import DialogFrame from "../DialogFrame.vue";
 import { credits } from "../numbers";
 import MemoryRowsSkeleton from "./MemoryRowsSkeleton.vue";
+import TeamRowsSkeleton from "./TeamRowsSkeleton.vue";
 import PanelHeader from "./PanelHeader.vue";
 import { creditsNote, MEMORY_INTRO, MEMORY_TABS, SETTINGS_TABS, settings, type SettingsTab } from "./state";
 
 /**
  * Settings (SettingsModal.vue) while its code arrives: the same dialog, the same sidebar, and
- * the open tab. Account has everything it shows already; Memory and Connectors show rows
- * shaped like theirs, as their own loading does (MemoryPanel.vue, connectors/ConnectorsPanel.vue).
+ * the open tab. Account has everything it shows already; Memory, Teams and Connectors show rows
+ * shaped like theirs, as their own loading does (MemoryPanel.vue, TeamsPanel.vue, connectors/ConnectorsPanel.vue).
  * Nothing moves when the dialog takes its place. The markup copies frappe-ui's SettingsDialog,
  * and Memory's tabs copy frappe-ui's TabButtons, with Memories chosen.
  */
@@ -91,6 +92,12 @@ function pick(tab: SettingsTab) {
 							</div>
 							<MemoryRowsSkeleton />
 						</div>
+					</div>
+				</template>
+				<template v-else-if="settings.tab === 'teams'">
+					<PanelHeader title="Teams" />
+					<div class="min-h-0 flex-1 overflow-hidden px-4 pb-16 sm:px-12">
+						<div class="pt-5"><TeamRowsSkeleton /></div>
 					</div>
 				</template>
 				<template v-else>

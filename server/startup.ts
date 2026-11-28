@@ -23,6 +23,7 @@ import * as Skills from "./skills.ts";
 import { seedStandardSkills } from "./standard-skills.ts";
 import * as Threads from "./threads/Threads.ts";
 import * as Telemetry from "./telemetry/Telemetry.ts";
+import * as Teams from "./teams/Teams.ts";
 import { stopTracing } from "./tracing/setup.ts";
 import { toolApprovalSecret } from "./workflow/approval-secret.ts";
 import * as ApprovalUses from "./workflow/approval-uses.ts";
@@ -99,6 +100,8 @@ const migrateAll = Effect.gen(function* () {
 	yield* Files.Files.use((files) => files.migrate);
 	yield* Credits.Credits.use((credits) => credits.migrate);
 	yield* Invites.Invites.use((invites) => invites.migrate);
+	// After Auth, Workspaces and Invites: its tables reference users and workspaces, and it adds a column to allowed_emails.
+	yield* Teams.Teams.use((teams) => teams.migrate);
 	yield* AdminEvents.AdminEvents.use((events) => events.migrate);
 	yield* Secrets.Secrets.use((secrets) => secrets.migrate);
 	yield* Branding.Branding.use((branding) => branding.migrate);

@@ -28,6 +28,8 @@ const Threads = await import("../threads/Threads.ts");
 const AdminEvents = await import("../admin/AdminEvents.ts");
 const Runs = await import("../telemetry/Runs.ts");
 const Workspaces = await import("./Workspaces.ts");
+const Invites = await import("../people/Invites.ts");
+const Teams = await import("../teams/Teams.ts");
 const { peopleApi, workspacesApi } = await import("./routes.ts");
 
 /** The people: two admins and four others. */
@@ -74,9 +76,9 @@ const setOrgAccess = (by: Who, workspaceId: string, orgAccess: string) => call<O
 const roles = (workspace: WorkspaceDetail): string[][] => workspace.members?.map((member) => [member.id, member.access]) ?? [];
 
 describe("the access table, as a pure function", () => {
-	it("gives each cell: a person's own role, or what General access gives them, whichever is higher", () => {
-		const open = { orgAccess: "ask" as const, ownerId: "o", member: null };
-		const closed = { orgAccess: "none" as const, ownerId: "o", member: null };
+	it("gives each cell: the highest of a person's own role, their teams' grant, and what General access gives them", () => {
+		const open = { orgAccess: "ask" as const, ownerId: "o", member: null, team: null };
+		const closed = { orgAccess: "none" as const, ownerId: "o", member: null, team: null };
 		const cells: [string, Access, Access][] = [
 			["closed owner", accessFrom(closed, "o", false), "owner"],
 			["closed ask member", accessFrom({ ...closed, member: "ask" }, "m", false), "ask"],
@@ -90,6 +92,15 @@ describe("the access table, as a pure function", () => {
 			["open admin not added", accessFrom(open, "a", true), "edit"],
 			["open admin added to ask", accessFrom({ ...open, member: "ask" }, "a", true), "edit"],
 			["open anyone", accessFrom(open, "x", false), "ask"],
+			["closed ask team", accessFrom({ ...closed, team: "ask" }, "m", false), "ask"],
+			["closed edit team", accessFrom({ ...closed, team: "edit" }, "m", false), "edit"],
+			["closed ask member, edit team", accessFrom({ ...closed, member: "ask", team: "edit" }, "m", false), "edit"],
+			["closed edit member, ask team", accessFrom({ ...closed, member: "edit", team: "ask" }, "m", false), "edit"],
+			["closed admin in an ask team", accessFrom({ ...closed, team: "ask" }, "a", true), "ask"],
+			["closed owner in an ask team", accessFrom({ ...closed, team: "ask" }, "o", false), "owner"],
+			["open edit team", accessFrom({ ...open, team: "edit" }, "m", false), "edit"],
+			["open ask team", accessFrom({ ...open, team: "ask" }, "m", false), "ask"],
+			["open admin in an ask team", accessFrom({ ...open, team: "ask" }, "a", true), "edit"],
 		];
 		for (const [cell, got, expected] of cells) assert.strictEqual(got, expected, cell);
 	});
@@ -138,6 +149,9 @@ describe.skipIf(!base)("workspaces through their routes", () => {
 				// Before Workspaces, as at start-up: a document's log references `runs`.
 				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
+				// The team tables (teams/tables.ts): a person's access reads their teams' grants.
+				yield* Invites.Invites.use((invites) => invites.migrate);
+				yield* Teams.Teams.use((teams) => teams.migrate);
 				// Twice, without a change.
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
 			}),

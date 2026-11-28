@@ -239,8 +239,10 @@ const make = Effect.gen(function* () {
 
 	const removeInvite = Effect.fn("AdminActions.removeInvite")(function* (actor: Actor, email: string) {
 		if (yield* accounts.hasAccount(email)) return yield* new SignedInAlready();
-		if (!(yield* invites.disallow(email))) return yield* new NoOne();
-		yield* record(actor, "remove-invite", { target: email });
+		const removed = yield* invites.disallow(email);
+		if (!removed.invited && !removed.teamInvites.length) return yield* new NoOne();
+		if (removed.invited) yield* record(actor, "remove-invite", { target: email });
+		for (const before of removed.teamInvites) yield* record(actor, "cancel-team-invite", { target: email, before });
 	});
 
 	const settingsPage = Effect.gen(function* () {

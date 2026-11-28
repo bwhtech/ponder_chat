@@ -6,12 +6,13 @@ import { credits } from "../numbers";
  * the chat (a connector that needs a new sign-in, a memory note under a reply) and the
  * account menu can open it.
  */
-export type SettingsTab = "account" | "memory" | "connectors";
+export type SettingsTab = "account" | "memory" | "teams" | "connectors";
 
 /** Settings' tabs, in the dialog's sidebar (SettingsModal.vue) and in its stand-in (SettingsPlaceholder.vue). */
 export const SETTINGS_TABS: { value: SettingsTab; label: string; icon: string }[] = [
 	{ value: "account", label: "Account", icon: "lucide-circle-user" },
 	{ value: "memory", label: "Memory", icon: "lucide-brain" },
+	{ value: "teams", label: "Teams", icon: "lucide-users-round" },
 	{ value: "connectors", label: "Connectors", icon: "lucide-plug" },
 ];
 
