@@ -14,21 +14,30 @@ import {
 	SidebarSection,
 } from "frappe-ui";
 import { computed, defineAsyncComponent, onBeforeUnmount, watch } from "vue";
-import { RouterView, useRoute } from "vue-router";
+import { RouterView, useRoute, useRouter } from "vue-router";
 import AccountMenu from "./components/AccountMenu.vue";
 import NoAccess from "./components/NoAccess.vue";
 import { isMobile } from "./lib/viewport";
-import { askViewer, counts, refreshCounts, settingsOpen, viewer, viewerError } from "./store";
+import { askViewer, counts, refreshCounts, scope, settingsOpen, viewer, viewerError } from "./store";
 import EmptyState from "../EmptyState.vue";
 
 /**
  * The admin shell. main.ts draws it once it knows who is signed in (store.ts). Signed in
- * without the admin role sees NoAccess. The server checks the role again on every
- * /api/admin call. Settings is a dialog on wider screens (account menu) and a page under
- * the phone tab bar's More, with Workspaces and Activity.
+ * without the admin role, and admin of no team, sees NoAccess. The server checks the role
+ * again on every /api/admin call. Settings is a dialog on wider screens (account menu) and
+ * a page under the phone tab bar's More, with Workspaces and Activity.
+ *
+ * A team admin's shell has only Teams, which is their first page, and a way back to the
+ * chat. Any other page shows NoAccess inside the shell.
  */
 const route = useRoute();
-const isAdmin = computed(() => viewer.value?.user.role === "admin");
+const router = useRouter();
+const isAdmin = computed(() => scope.value === "org");
+const isTeamAdmin = computed(() => scope.value === "team");
+const inTeams = computed(() => route.path === "/teams" || route.path.startsWith("/teams/"));
+
+// A team admin's first page is Teams. Replaced, so Back does not return to the empty "/".
+watch([isTeamAdmin, () => route.path], ([team, path]) => team && path === "/" && void router.replace("/teams"), { immediate: true });
 
 // The dialog's code loads after the first page, as it opens only from the account menu or its shortcut.
 const SettingsModal = defineAsyncComponent(() => import("./components/SettingsModal.vue"));
@@ -60,7 +69,36 @@ onBeforeUnmount(() => clearInterval(timer));
 				<Button label="Try again" @click="retryViewer" />
 			</EmptyState>
 			<div v-else-if="!viewer" class="h-full" aria-busy="true" />
-			<NoAccess v-else-if="!isAdmin" :email="viewer.user.email" />
+			<NoAccess v-else-if="!scope" :email="viewer.user.email" />
+
+			<MobileShell v-else-if="isTeamAdmin && isMobile">
+				<RouterView v-if="inTeams" />
+				<NoAccess v-else-if="route.path !== '/'" :email="viewer.user.email" teams />
+				<template #nav>
+					<MobileNav>
+						<MobileNavItem label="Teams" icon="lucide-users-round" route="/teams" :active="inTeams" />
+						<MobileNavItem label="Chat" icon="lucide-message-circle" href="/" :active="false" />
+					</MobileNav>
+				</template>
+			</MobileShell>
+
+			<DesktopShell v-else-if="isTeamAdmin">
+				<template #sidebar>
+					<Sidebar width="16rem" class="border-r">
+						<AccountMenu />
+						<ScrollArea class="min-h-0 flex-1" viewport-class="px-2 pt-1 pb-10">
+							<SidebarSection>
+								<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Teams" icon="lucide-users-round" route="/teams" :active="inTeams" />
+							</SidebarSection>
+						</ScrollArea>
+						<div class="px-2 py-2">
+							<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Back to chat" icon="lucide-arrow-left" href="/" />
+						</div>
+					</Sidebar>
+				</template>
+				<RouterView v-if="inTeams" />
+				<NoAccess v-else-if="route.path !== '/'" :email="viewer.user.email" teams />
+			</DesktopShell>
 
 			<MobileShell v-else-if="isMobile">
 				<RouterView />

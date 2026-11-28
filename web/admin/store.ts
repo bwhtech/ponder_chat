@@ -1,4 +1,4 @@
-import { reactive, ref } from "vue";
+import { computed, reactive, ref } from "vue";
 import { admin, loadViewer, unwrap, type Settings, type Viewer } from "./api";
 
 /**
@@ -7,6 +7,8 @@ import { admin, loadViewer, unwrap, type Settings, type Viewer } from "./api";
  * page loads its own data.
  */
 export const viewer = ref<Viewer | null | undefined>(undefined);
+/** What the viewer reaches here: all of /admin ("org"), only the teams they admin ("team"), or nothing (null). */
+export const scope = computed(() => viewer.value?.user.adminScope ?? null);
 export const settings = reactive<Settings>({ defaultDailyCredits: 0, creditsPerUsd: 1000, pdfTextOnServer: true, compactionModel: "", autoCostTier: "medium" });
 export const counts = reactive({ pendingRequests: 0, invited: 0 });
 /** The settings dialog, on wider screens. Phones have the Settings page instead. */
@@ -21,6 +23,7 @@ export async function askViewer() {
 		if (!loaded) return location.assign("/");
 		viewer.value = loaded;
 		viewerError.value = false;
+		rememberScope(loaded.user.adminScope);
 	} catch {
 		viewerError.value = true;
 	}
@@ -28,4 +31,18 @@ export async function askViewer() {
 
 export async function refreshCounts() {
 	Object.assign(counts, await unwrap(admin.summary.$get()));
+}
+
+/**
+ * The scope, kept in this browser, so admin.html draws a team admin's frame (only Teams)
+ * before the code loads, and nothing moves when the app mounts. It is only a hint: the
+ * server checks every call.
+ */
+function rememberScope(value: string | null) {
+	try {
+		if (value === "team") localStorage.setItem("ponder-admin-scope", "team");
+		else localStorage.removeItem("ponder-admin-scope");
+	} catch {
+		// Storage can be off, such as in a private window: the frame is then the org admin's.
+	}
 }
