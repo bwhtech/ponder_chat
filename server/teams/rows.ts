@@ -8,7 +8,10 @@ import * as SqlSchema from "effect/sql/SqlSchema";
 /**
  * The SQL that Teams.ts reads with. Rows that do not decode are bugs: defects.
  */
-const RoleSchema = Schema.Literals(["member", "admin"]);
+export const RoleSchema = Schema.Literals(["member", "admin"]);
+
+/** A team and a role in it, such as an invite that went or a team joined. */
+export const TeamPlaceRow = Schema.Struct({ team: Schema.String, name: Schema.String, role: RoleSchema });
 
 /** What the rules of access.ts are decided from: the team, and the person's place in it. */
 const FactsRow = Schema.Struct({
@@ -46,32 +49,25 @@ const PersonRow = Schema.Struct({ email: Schema.String, banned: Schema.Boolean, 
 const NameRow = Schema.Struct({ name: Schema.String, email: Schema.String });
 
 export type FactsRow = typeof FactsRow.Type;
-export type SummaryRow = typeof SummaryRow.Type;
-export type MatchRow = typeof MatchRow.Type;
-export type TeamRow = typeof TeamRow.Type;
-export type MemberRow = typeof MemberRow.Type;
-export type InviteRow = typeof InviteRow.Type;
-export type MyTeamRow = typeof MyTeamRow.Type;
-export type TeamMemberRow = typeof TeamMemberRow.Type;
 
 export type Rows = {
 	/** The team and the person's role in it; none when there is no such team. */
 	facts: (request: { userId: string; teamId: string }) => Effect.Effect<Option.Option<FactsRow>, SqlError>;
 	/** Whether the person is a team admin of an active team. */
-	adminsActiveTeam: (userId: string) => Effect.Effect<boolean, SqlError>;
+	isActiveTeamAdmin: (userId: string) => Effect.Effect<boolean, SqlError>;
 	/** Every team, or only the active ones that the person admins: active first, then by name. */
-	summaries: (request: { adminOf: string | null }) => Effect.Effect<ReadonlyArray<SummaryRow>, SqlError>;
+	summaries: (request: { adminOf: string | null }) => Effect.Effect<ReadonlyArray<typeof SummaryRow.Type>, SqlError>;
 	/** Active teams whose name has this LIKE pattern, without case, by name: at most 20. */
-	matches: (pattern: string) => Effect.Effect<ReadonlyArray<MatchRow>, SqlError>;
-	team: (teamId: string) => Effect.Effect<Option.Option<TeamRow>, SqlError>;
+	matches: (pattern: string) => Effect.Effect<ReadonlyArray<typeof MatchRow.Type>, SqlError>;
+	team: (teamId: string) => Effect.Effect<Option.Option<typeof TeamRow.Type>, SqlError>;
 	/** By name, or by email for a person with no name, as the page names them. */
-	members: (teamId: string) => Effect.Effect<ReadonlyArray<MemberRow>, SqlError>;
+	members: (teamId: string) => Effect.Effect<ReadonlyArray<typeof MemberRow.Type>, SqlError>;
 	/** The person's active teams, by name, with their role. */
-	mine: (userId: string) => Effect.Effect<ReadonlyArray<MyTeamRow>, SqlError>;
+	mine: (userId: string) => Effect.Effect<ReadonlyArray<typeof MyTeamRow.Type>, SqlError>;
 	/** The members of these teams, each team's in the order of `members`. */
-	membersOf: (teamIds: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<TeamMemberRow>, SqlError>;
+	membersOf: (teamIds: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<typeof TeamMemberRow.Type>, SqlError>;
 	/** Oldest first. */
-	invites: (teamId: string) => Effect.Effect<ReadonlyArray<InviteRow>, SqlError>;
+	invites: (teamId: string) => Effect.Effect<ReadonlyArray<typeof InviteRow.Type>, SqlError>;
 	/** A person with an account: their email, whether they are banned, and their role in the team. None without an account. */
 	person: (request: { userId: string; teamId: string }) => Effect.Effect<Option.Option<typeof PersonRow.Type>, SqlError>;
 	/** A person's name ('' when they set none) and email, for an email that names them. */
@@ -175,7 +171,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		Result: NameRow,
 		execute: (userId) => sql`select coalesce(name, '') as name, email from users where id = ${userId}`,
 	});
-	const adminsActiveTeam = (userId: string) =>
+	const isActiveTeamAdmin = (userId: string) =>
 		Effect.map(
 			sql`select 1 from team_members m join teams t on t.id = m.team_id where m.user_id = ${userId} and m.role = 'admin' and t.archived_at is null limit 1`,
 			(found) => found.length > 0,
@@ -184,7 +180,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 	const decoded = <A, E, R>(effect: Effect.Effect<A, E | Schema.SchemaError, R>) => effect.pipe(Effect.catchTags({ SchemaError: Effect.die }));
 	return {
 		facts: (request) => decoded(facts(request)),
-		adminsActiveTeam,
+		isActiveTeamAdmin,
 		summaries: (request) => decoded(summaries(request)),
 		matches: (pattern) => decoded(matches(pattern)),
 		team: (teamId) => decoded(team(teamId)),

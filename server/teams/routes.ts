@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import { z } from "zod";
 import type { SignedInEnv } from "../auth.ts";
 import * as Auth from "../auth/Auth.ts";
+import { normalize } from "../people/Invites.ts";
 import { route } from "../runtime/route.ts";
 import { validate } from "../validate.ts";
 import * as Teams from "./Teams.ts";
@@ -27,7 +28,6 @@ const teams = <A, E>(c: Context<Env>, use: (service: Teams.Teams["Service"], act
 /** A JSON body that fits the schema, or a 400 with the first problem. */
 const body = <Schema extends z.ZodType>(schema: Schema) => validate("json", schema, { error: "Check the values and try again." });
 
-const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const name = z.string().trim().min(1).max(80);
 const description = z.string().trim().max(500);
 const role = z.enum(["member", "admin"]);
@@ -35,7 +35,8 @@ const role = z.enum(["member", "admin"]);
 const createBody = z.object({ name, description: description.default(""), adminUserId: z.string().min(1) });
 const updateBody = z.object({ name: name.optional(), description: description.optional() });
 const memberBody = z.object({ role });
-const inviteBody = z.object({ email: z.string().trim().toLowerCase().max(320).regex(EMAIL), role });
+// z.email(), as Better Auth's sign-in by code checks it: an email it refuses could never join.
+const inviteBody = z.object({ email: z.string().transform(normalize).pipe(z.email().max(320)), role });
 // A repeated or odd query value is ignored, not refused.
 const searchQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
 
@@ -90,7 +91,7 @@ export const teamsAdminApi = new Hono<Env>()
 	.delete("/:id/invites/:email", (c) =>
 		route(
 			c,
-			Effect.map(teams(c, (service, actor) => service.cancelInvite(actor, c.req.param("id"), c.req.param("email").trim().toLowerCase())), (team) => c.json({ team })),
+			Effect.map(teams(c, (service, actor) => service.cancelInvite(actor, c.req.param("id"), normalize(c.req.param("email")))), (team) => c.json({ team })),
 			errors,
 		),
 	);

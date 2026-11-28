@@ -7,7 +7,8 @@ import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import * as PonderConfig from "../config.ts";
-import type { TeamRole } from "../teams/access.ts";
+import { decodeRows } from "../runtime/Database.ts";
+import { TeamPlaceRow } from "../teams/rows.ts";
 
 /**
  * Who may sign in. The pilot is invite-only: an email must be in `allowed_emails`
@@ -27,7 +28,7 @@ const CountRow = Schema.Struct({ count: Schema.Number });
 export type InviteRow = typeof InviteRow.Type;
 
 /** A team's pending invite of the email, cancelled with it (Invites.disallow). */
-export type CancelledTeamInvite = { team: string; name: string; role: TeamRole };
+export type CancelledTeamInvite = typeof TeamPlaceRow.Type;
 /** What Invites.disallow took: whether the email was invited, and its team invites. */
 export type Removal = { invited: boolean; teamInvites: ReadonlyArray<CancelledTeamInvite> };
 
@@ -37,6 +38,19 @@ export type Removal = { invited: boolean; teamInvites: ReadonlyArray<CancelledTe
  * they take turns: an invite, a cancel, a removal and the first sign-in's join.
  */
 export const lockInvitesOf = (sql: PgClient.PgClient, email: string) => sql`select pg_advisory_xact_lock(hashtext(${`ponder-invite:${email}`}))`;
+
+/**
+ * After team invites of these lowercase emails went, under their locks: an email that only
+ * team invites let in may no longer sign in. Not when an org admin invited it, another team
+ * still invites it, or it has an account and signs in with it.
+ */
+export const closeWayIn = (sql: PgClient.PgClient, emails: ReadonlyArray<string>) => sql`
+	delete from allowed_emails a where a.email in ${sql.in(emails)} and a.team_only
+	and not exists (select 1 from team_invites i where i.email = a.email)
+	and not exists (select 1 from users u where lower(u.email) = a.email)`;
+
+/** An email as allowed_emails and team_invites keep it. */
+export const normalize = (email: string) => email.trim().toLowerCase();
 
 export class Invites extends Context.Service<
 	Invites,
@@ -73,8 +87,6 @@ export class Invites extends Context.Service<
 		readonly list: Effect.Effect<ReadonlyArray<InviteRow>, SqlError>;
 	}
 >()("ponder/people/Invites") {}
-
-const normalize = (email: string) => email.trim().toLowerCase();
 
 const make = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
@@ -171,9 +183,9 @@ const make = Effect.gen(function* () {
 			Effect.gen(function* () {
 				yield* lockInvitesOf(sql, normalized);
 				// The teams' rows are not locked: one removal can touch many teams, in any order.
-				const teamInvites = yield* sql<CancelledTeamInvite>`
+				const teamInvites = yield* sql`
 					with gone as (delete from team_invites where email = ${normalized} returning team_id, role)
-					select teams.id as team, teams.name, gone.role from gone join teams on teams.id = gone.team_id order by teams.name`;
+					select teams.id as team, teams.name, gone.role from gone join teams on teams.id = gone.team_id order by teams.name`.pipe(decodeRows(TeamPlaceRow));
 				const rows = yield* sql`delete from allowed_emails where email = ${normalized} returning email`;
 				return { invited: rows.length > 0, teamInvites } satisfies Removal;
 			}),

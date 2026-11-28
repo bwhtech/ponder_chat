@@ -4,14 +4,15 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as AdminEvents from "../admin/AdminEvents.ts";
 import * as SignInProviders from "../auth/SignInProviders.ts";
 import * as Mailer from "../email/Mailer.ts";
 import * as Accounts from "../people/Accounts.ts";
-import { roleFrom } from "../people/Accounts.ts";
-import { lockInvitesOf } from "../people/Invites.ts";
-import { pgCode } from "../runtime/Database.ts";
+import { containsPattern, roleFrom } from "../people/Accounts.ts";
+import { closeWayIn, lockInvitesOf } from "../people/Invites.ts";
+import { decodeRows, pgCode } from "../runtime/Database.ts";
 import { canAdminister, canChangePeople, canOrganise, leavesNoAdmin, type TeamRole, type TeamViewer } from "./access.ts";
 import { teamEmails } from "./emails.ts";
 import { lifecycleOf } from "./lifecycle.ts";
@@ -29,7 +30,7 @@ import {
 	TeamRefused,
 	type TeamSummary,
 } from "./model.ts";
-import { type FactsRow, type Rows, rowsOf } from "./rows.ts";
+import { type FactsRow, RoleSchema, type Rows, rowsOf } from "./rows.ts";
 import { migrateTeams } from "./tables.ts";
 
 /**
@@ -47,6 +48,8 @@ import { migrateTeams } from "./tables.ts";
  * team's row, so they can't deadlock. Archive, restore and delete are in lifecycle.ts.
  */
 export * from "./model.ts";
+
+const RoleRow = Schema.Struct({ role: RoleSchema });
 
 export class Teams extends Context.Service<
 	Teams,
@@ -168,7 +171,7 @@ const make = Effect.gen(function* () {
 
 	const adminScope = Effect.fn("Teams.adminScope")(function* (userId: string) {
 		if (yield* accounts.isAdmin(userId)) return Option.some<AdminScope>("org");
-		return (yield* rows.adminsActiveTeam(userId)) ? Option.some<AdminScope>("team") : Option.none<AdminScope>();
+		return (yield* rows.isActiveTeamAdmin(userId)) ? Option.some<AdminScope>("team") : Option.none<AdminScope>();
 	});
 
 	const list = Effect.fn("Teams.list")(function* (actor: Actor) {
@@ -202,9 +205,7 @@ const make = Effect.gen(function* () {
 	});
 
 	const search = Effect.fn("Teams.search")(function* (text: string) {
-		// The text is matched as it is: % and _ in it are not wildcards (as Accounts.search).
-		const pattern = `%${text.trim().replace(/[\\%_]/g, (special) => `\\${special}`)}%`;
-		const found = yield* rows.matches(pattern);
+		const found = yield* rows.matches(containsPattern(text));
 		return found.map((row): TeamMatch => ({ id: row.id, name: row.name, memberCount: row.member_count }));
 	});
 
@@ -222,7 +223,7 @@ const make = Effect.gen(function* () {
 				return person.value.email;
 			}),
 		);
-		yield* emails.added(email, actor.origin, { team: input.name, byUserId: actor.id, admin: true });
+		yield* emails.added(email, actor.origin, { team: input.name, byUserId: actor.id, role: "admin" });
 		return yield* detail(id, { orgAdmin: true, role: null });
 	});
 
@@ -278,7 +279,7 @@ const make = Effect.gen(function* () {
 
 	/** The email to a person added to the team, once the change is in. */
 	const tellAdded = (actor: Actor, teamName: string, role: TeamRole) => (added: Option.Option<string>) =>
-		Option.isSome(added) ? emails.added(added.value, actor.origin, { team: teamName, byUserId: actor.id, admin: role === "admin" }) : Effect.void;
+		Option.isSome(added) ? emails.added(added.value, actor.origin, { team: teamName, byUserId: actor.id, role }) : Effect.void;
 
 	const setMember = Effect.fn("Teams.setMember")(function* (actor: Actor, teamId: string, userId: string, role: TeamRole) {
 		const { name, added } = yield* sql.withTransaction(
@@ -295,7 +296,7 @@ const make = Effect.gen(function* () {
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				const { facts, viewer } = yield* lockForPeople(actor, teamId);
-				const [found] = yield* sql<{ role: TeamRole }>`select role from team_members where team_id = ${teamId} and user_id = ${userId}`;
+				const [found] = yield* sql`select role from team_members where team_id = ${teamId} and user_id = ${userId}`.pipe(decodeRows(RoleRow));
 				if (!found) return;
 				if (leavesNoAdmin(viewer, facts, { from: found.role, to: null })) return yield* new TeamRefused({ reason: "last-admin" });
 				yield* sql`delete from team_members where team_id = ${teamId} and user_id = ${userId}`;
@@ -308,10 +309,10 @@ const make = Effect.gen(function* () {
 
 	/** In lockForPeople's transaction: invites an email with no account. Whether the invite is new. */
 	const putInvite = Effect.fnUntraced(function* (actor: Actor, facts: FactsRow, teamId: string, email: string, role: TeamRole) {
-		// The way in, with the default daily credits. An org admin's own invite stays as it is.
-		// Also for an invite made before: its email may have been removed since.
+		// Let the email sign in, with the default daily credits. If an org admin invited it, keep
+		// their invite. Do this for a repeated invite too: someone may have removed the email since.
 		yield* sql`insert into allowed_emails (email, invited_by, team_only) values (${email}, ${actor.id}, true) on conflict (email) do nothing`;
-		const [found] = yield* sql<{ role: TeamRole }>`select role from team_invites where team_id = ${teamId} and email = ${email}`;
+		const [found] = yield* sql`select role from team_invites where team_id = ${teamId} and email = ${email}`.pipe(decodeRows(RoleRow));
 		if (found?.role === role) return false;
 		yield* sql`
 			insert into team_invites (team_id, email, role, invited_by) values (${teamId}, ${email}, ${role}, ${actor.id})
@@ -345,13 +346,9 @@ const make = Effect.gen(function* () {
 				// So it sees another team's invite of this email that is being made now.
 				yield* lockInvitesOf(sql, email);
 				const { facts } = yield* lockForPeople(actor, teamId);
-				const [found] = yield* sql<{ role: TeamRole }>`delete from team_invites where team_id = ${teamId} and email = ${email} returning role`;
+				const [found] = yield* sql`delete from team_invites where team_id = ${teamId} and email = ${email} returning role`.pipe(decodeRows(RoleRow));
 				if (!found) return;
-				// Not an email that an org admin invited, another team still invites, or that has an account and signs in with it.
-				yield* sql`
-					delete from allowed_emails a where a.email = ${email} and a.team_only
-					and not exists (select 1 from team_invites i where i.email = a.email)
-					and not exists (select 1 from users u where lower(u.email) = a.email)`;
+				yield* closeWayIn(sql, [email]);
 				yield* sql`update teams set updated_at = now() where id = ${teamId}`;
 				yield* events.record({ actor, action: "cancel-team-invite", target: email, before: { team: teamId, name: facts.name, role: found.role } });
 			}),
