@@ -27,6 +27,7 @@ import * as Settings from "../settings/Settings.ts";
 import * as ModelCalls from "../telemetry/ModelCalls.ts";
 import * as Runs from "../telemetry/Runs.ts";
 import * as Telemetry from "../telemetry/Telemetry.ts";
+import * as Teams from "../teams/Teams.ts";
 import * as Threads from "../threads/Threads.ts";
 import * as Logger from "../tracing/Logger.ts";
 import * as Tracing from "../tracing/Tracing.ts";
@@ -52,7 +53,7 @@ import * as Http from "./Http.ts";
  * runs, logs and traces through them.
  */
 export const layer = Layer.mergeAll(Replies.layer, ChatModels.layer, Documents.layer).pipe(
-	Layer.provideMerge(Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer, Workspaces.layer, Indexer.layer)),
+	Layer.provideMerge(Layer.mergeAll(Summarizer.layer, RunPython.layer, SearchBackend.layer, Workspaces.layer, Indexer.layer, Teams.layer)),
 	Layer.provideMerge(
 		Layer.mergeAll(
 			Threads.layer,
