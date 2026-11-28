@@ -22,6 +22,7 @@ import * as PonderConfig from "../config.ts";
 import * as Mailer from "../email/Mailer.ts";
 import { isLocalHost } from "../hosts.ts";
 import * as Invites from "../people/Invites.ts";
+import { joinInvitedTeams } from "../teams/joins.ts";
 import * as AdminAuthEvents from "./AdminAuthEvents.ts";
 import { emailOf, MICROSOFT, refusal, type MicrosoftProvider } from "./microsoft.ts";
 import { SessionCache, sessionKey } from "./session-cache.ts";
@@ -180,7 +181,7 @@ function build(pool: Pool, hosts: ReadonlyArray<string>, secret: string | undefi
 		},
 		// Invite-only (people/Invites.ts): no account for an email that was not invited. Throwing, not
 		// returning false, gives a clean error: the email-OTP plugin would crash on no user.
-		// A new account gets the daily limit its invite set.
+		// A new account gets the daily limit its invite set, and joins the teams that invited it.
 		databaseHooks: {
 			user: {
 				create: {
@@ -342,7 +343,8 @@ const make = Effect.gen(function* () {
 
 	const callbacks: Callbacks = {
 		isAllowed: (email) => run(invites.isAllowed(email)),
-		applyInvite: (user) => run(invites.applyInvite(user)),
+		// The limit from the invite, and the teams that invited the email (teams/joins.ts).
+		applyInvite: (user) => run(Effect.andThen(invites.applyInvite(user), joinInvitedTeams(sql, user))),
 		hasProviderAccount: (userId, providerId) =>
 			run(Effect.map(sql`select 1 from accounts where "userId" = ${userId} and "providerId" = ${providerId} limit 1`, (rows) => rows.length > 0)),
 		isSavedMicrosoft: (revision) => run(signInProviders.isSaved(revision)),

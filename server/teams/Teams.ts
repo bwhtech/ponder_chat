@@ -4,120 +4,84 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as AdminEvents from "../admin/AdminEvents.ts";
+import * as SignInProviders from "../auth/SignInProviders.ts";
+import * as Mailer from "../email/Mailer.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { roleFrom } from "../people/Accounts.ts";
+import { lockInvitesOf } from "../people/Invites.ts";
 import { pgCode } from "../runtime/Database.ts";
 import { canAdminister, canChangePeople, canOrganise, leavesNoAdmin, type TeamRole, type TeamViewer } from "./access.ts";
-import { migrateTeams } from "./tables.ts";
+import { teamEmails } from "./emails.ts";
+import {
+	type Actor,
+	type AdminScope,
+	type InviteResult,
+	type NewTeam,
+	type TeamChanges,
+	type TeamDetail,
+	type TeamMatch,
+	TeamNameTaken,
+	TeamNotFound,
+	TeamRefused,
+	type TeamSummary,
+} from "./model.ts";
 import { type FactsRow, type Rows, rowsOf } from "./rows.ts";
+import { migrateTeams } from "./tables.ts";
 
 /**
  * Teams (docs/teams-plan.md): named groups of people in the org, such as HR. Org admins
  * make and rename them, and name the first team admin. Team admins and org admins add
- * people, remove them and change their roles. A team keeps at least one team admin, unless
- * an org admin decides otherwise (access.ts).
+ * people, invite emails that have no account yet, remove people and change their roles. A
+ * team keeps at least one team admin, unless an org admin decides otherwise (access.ts).
  *
  * Every change to a team locks its row first, in a transaction, and reads the person's
  * role only then. So two admins who change the team at once take turns, and the last-admin
- * rule sees the other's change. Every change goes to the admin activity log.
+ * rule sees the other's change. Every change goes to the admin activity log. The emails go
+ * after the commit (emails.ts).
+ *
+ * An invite or a cancel takes its email's lock (Invites.lockInvitesOf) before the team's
+ * row. Nothing takes them the other way round, so they can't deadlock.
  */
-export type { TeamRole } from "./access.ts";
-
-/** Who asks for a change: their id, and their email for the activity log. */
-export type Actor = { id: string; email: string };
-
-/** A row of /admin/teams. */
-export type TeamSummary = {
-	id: string;
-	name: string;
-	description: string;
-	memberCount: number;
-	adminCount: number;
-	/** Pending invites: emails with no account yet. */
-	inviteCount: number;
-	archived: boolean;
-};
-
-/** A team in the share picker (GET /api/teams?q=): for every signed-in person, so never its members. */
-export type TeamMatch = { id: string; name: string; memberCount: number };
-
-export type TeamMember = { id: string; name: string; email: string; role: TeamRole; addedAt: string };
-export type TeamInvite = { email: string; role: TeamRole; invitedBy: string; createdAt: string };
-
-/** One team (/admin/teams/:id), as an org admin or one of its team admins sees it. */
-export type TeamDetail = {
-	id: string;
-	name: string;
-	description: string;
-	archived: boolean;
-	createdAt: string;
-	members: TeamMember[];
-	invites: TeamInvite[];
-	/** Renames it, and archives, restores or deletes it: org admins. */
-	canOrganise: boolean;
-	/** Adds and removes people and changes their roles. */
-	canChangePeople: boolean;
-};
-
-export type NewTeam = { name: string; description: string; adminUserId: string };
-export type TeamChanges = { name?: string; description?: string };
-
-/** No such team. Routes answer 404. */
-export class TeamNotFound extends Schema.TaggedError<TeamNotFound>()("TeamNotFound", {
-	teamId: Schema.String,
-}) {
-	override get message() {
-		return "This team was not found.";
-	}
-}
-
-const REFUSALS = {
-	"needs-org-admin": "Only org admins can do this.",
-	"needs-team-admin": "Only this team's admins and org admins can do this.",
-	archived: "This team is archived. Restore it to change it.",
-	"last-admin": "A team needs at least one team admin. Make someone else a team admin first.",
-	banned: "This person is banned, so they can't join a team.",
-	"no-account": "That person has no account.",
-} as const;
-
-/** The person may not do this to the team. Routes answer 403 with the message ("no-account": 400). */
-export class TeamRefused extends Schema.TaggedError<TeamRefused>()("TeamRefused", {
-	reason: Schema.Literals(["needs-org-admin", "needs-team-admin", "archived", "last-admin", "banned", "no-account"]),
-}) {
-	override get message() {
-		return REFUSALS[this.reason];
-	}
-}
-
-/** Another team has this name, in any case. Routes answer 409. */
-export class TeamNameTaken extends Schema.TaggedError<TeamNameTaken>()("TeamNameTaken", {}) {
-	override get message() {
-		return "A team with this name already exists.";
-	}
-}
+export * from "./model.ts";
 
 export class Teams extends Context.Service<
 	Teams,
 	{
 		/** Every team table (tables.ts). After Auth (users), Workspaces and Invites (allowed_emails). */
 		readonly migrate: Effect.Effect<void, SqlError>;
+		/** "org" for an org admin, "team" for the admin of an active team, else none. */
+		readonly adminScope: (userId: string) => Effect.Effect<Option.Option<AdminScope>, SqlError>;
 		/** Org admins: every team, archived too. Team admins: the active teams they admin. */
 		readonly list: (actor: Actor) => Effect.Effect<TeamSummary[], SqlError>;
 		/** Active teams whose name has this text, without case: at most 20. Any signed-in person. */
 		readonly search: (text: string) => Effect.Effect<TeamMatch[], SqlError>;
-		/** Org admins only. The first team admin must have an account and not be banned. */
+		/** Org admins only. The first team admin must have an account and not be banned. They get an email. */
 		readonly create: (actor: Actor, input: NewTeam) => Effect.Effect<TeamDetail, TeamRefused | TeamNameTaken | SqlError>;
 		/** Name and description: org admins only. */
 		readonly update: (actor: Actor, teamId: string, changes: TeamChanges) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | TeamNameTaken | SqlError>;
 		/** Org admins and the team's admins. */
 		readonly get: (actor: Actor, teamId: string) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | SqlError>;
-		/** Adds a person with this role, or gives a member this role. Never a banned person. Null when the person demoted themselves. */
+		/**
+		 * Adds a person with this role, or gives a member this role. Never a banned person. A
+		 * person added gets an email. Null when the person demoted themselves.
+		 */
 		readonly setMember: (actor: Actor, teamId: string, userId: string, role: TeamRole) => Effect.Effect<TeamDetail | null, TeamNotFound | TeamRefused | SqlError>;
 		/** Removes a person, themselves too. Removing someone who is no member changes nothing. Null when the person removed themselves. */
 		readonly removeMember: (actor: Actor, teamId: string, userId: string) => Effect.Effect<TeamDetail | null, TeamNotFound | TeamRefused | SqlError>;
+		/**
+		 * A lowercase email: the account with it joins with this role, as setMember. With no
+		 * account, the email is invited: it may sign in, and joins at its first sign-in
+		 * (joins.ts). A new invite gets the invite email; a second one changes the role. The
+		 * team is null when the person invited their own email as a member.
+		 */
+		readonly invite: (actor: Actor, teamId: string, email: string, role: TeamRole) => Effect.Effect<InviteResult, TeamNotFound | TeamRefused | SqlError>;
+		/**
+		 * Cancels the team's invite of a lowercase email. The email may then no longer sign in,
+		 * unless an org admin invited it or another team's invite holds it. No invite: no change.
+		 */
+		readonly cancelInvite: (actor: Actor, teamId: string, email: string) => Effect.Effect<TeamDetail | null, TeamNotFound | TeamRefused | SqlError>;
 	}
 >()("ponder/teams/Teams") {}
 
@@ -126,6 +90,7 @@ const make = Effect.gen(function* () {
 	const accounts = yield* Accounts.Accounts;
 	const events = yield* AdminEvents.AdminEvents;
 	const rows: Rows = rowsOf(sql);
+	const emails = teamEmails(yield* Mailer.Mailer, yield* SignInProviders.SignInProviders, rows);
 
 	const migrate = migrateTeams(sql);
 
@@ -188,6 +153,11 @@ const make = Effect.gen(function* () {
 	const nameTaken = <A>(effect: Effect.Effect<A, SqlError>) =>
 		effect.pipe(Effect.catchTags({ SqlError: (error) => Effect.fail(pgCode(error) === "23505" ? new TeamNameTaken() : error) }));
 
+	const adminScope = Effect.fn("Teams.adminScope")(function* (userId: string) {
+		if (yield* accounts.isAdmin(userId)) return Option.some<AdminScope>("org");
+		return (yield* rows.adminsActiveTeam(userId)) ? Option.some<AdminScope>("team") : Option.none<AdminScope>();
+	});
+
 	const list = Effect.fn("Teams.list")(function* (actor: Actor) {
 		const orgAdmin = yield* accounts.isAdmin(actor.id);
 		const found = yield* rows.summaries({ adminOf: orgAdmin ? null : actor.id });
@@ -214,7 +184,7 @@ const make = Effect.gen(function* () {
 	const create = Effect.fn("Teams.create")(function* (actor: Actor, input: NewTeam) {
 		if (!(yield* accounts.isAdmin(actor.id))) return yield* new TeamRefused({ reason: "needs-org-admin" });
 		const id = randomUUID();
-		yield* sql.withTransaction(
+		const email = yield* sql.withTransaction(
 			Effect.gen(function* () {
 				const person = yield* rows.person({ userId: input.adminUserId, teamId: id });
 				if (Option.isNone(person)) return yield* new TeamRefused({ reason: "no-account" });
@@ -222,8 +192,10 @@ const make = Effect.gen(function* () {
 				yield* nameTaken(sql`insert into teams (id, name, description, created_by) values (${id}, ${input.name}, ${input.description}, ${actor.id})`);
 				yield* sql`insert into team_members (team_id, user_id, role, added_by) values (${id}, ${input.adminUserId}, 'admin', ${actor.id})`;
 				yield* events.record({ actor, action: "create-team", target: input.adminUserId, after: { team: id, name: input.name, description: input.description, role: "admin" } });
+				return person.value.email;
 			}),
 		);
+		yield* emails.added(email, actor.origin, { team: input.name, byUserId: actor.id, admin: true });
 		return yield* detail(id, { orgAdmin: true, role: null });
 	});
 
@@ -250,31 +222,45 @@ const make = Effect.gen(function* () {
 		return yield* detail(teamId, viewer);
 	});
 
+	/**
+	 * In lockForPeople's transaction: adds the person with this role, or gives them this role.
+	 * Their email when they were not in the team, for the email after the commit.
+	 */
+	const putMember = Effect.fnUntraced(function* (actor: Actor, locked: { facts: FactsRow; viewer: TeamViewer }, teamId: string, userId: string, role: TeamRole) {
+		const person = yield* rows.person({ userId, teamId });
+		if (Option.isNone(person)) return yield* new TeamRefused({ reason: "no-account" });
+		const from = person.value.role;
+		if (from === null && person.value.banned) return yield* new TeamRefused({ reason: "banned" });
+		if (from === role) return Option.none<string>();
+		if (leavesNoAdmin(locked.viewer, locked.facts, { from, to: role })) return yield* new TeamRefused({ reason: "last-admin" });
+		// A member who stays keeps when and by whom they were added.
+		yield* sql`
+			insert into team_members (team_id, user_id, role, added_by) values (${teamId}, ${userId}, ${role}, ${actor.id})
+			on conflict (team_id, user_id) do update set role = excluded.role`;
+		yield* sql`update teams set updated_at = now() where id = ${teamId}`;
+		const team = { team: teamId, name: locked.facts.name };
+		yield* events.record({
+			actor,
+			action: from === null ? "add-team-member" : "set-team-role",
+			target: userId,
+			before: from === null ? null : { ...team, role: from },
+			after: { ...team, role },
+		});
+		return from === null ? Option.some(person.value.email) : Option.none<string>();
+	});
+
+	/** The email to a person added to the team, once the change is in. */
+	const tellAdded = (actor: Actor, teamName: string, role: TeamRole) => (added: Option.Option<string>) =>
+		Option.isSome(added) ? emails.added(added.value, actor.origin, { team: teamName, byUserId: actor.id, admin: role === "admin" }) : Effect.void;
+
 	const setMember = Effect.fn("Teams.setMember")(function* (actor: Actor, teamId: string, userId: string, role: TeamRole) {
-		yield* sql.withTransaction(
+		const { name, added } = yield* sql.withTransaction(
 			Effect.gen(function* () {
-				const { facts, viewer } = yield* lockForPeople(actor, teamId);
-				const person = yield* rows.person({ userId, teamId });
-				if (Option.isNone(person)) return yield* new TeamRefused({ reason: "no-account" });
-				const from = person.value.role;
-				if (from === null && person.value.banned) return yield* new TeamRefused({ reason: "banned" });
-				if (from === role) return;
-				if (leavesNoAdmin(viewer, facts, { from, to: role })) return yield* new TeamRefused({ reason: "last-admin" });
-				// A member who stays keeps when and by whom they were added.
-				yield* sql`
-					insert into team_members (team_id, user_id, role, added_by) values (${teamId}, ${userId}, ${role}, ${actor.id})
-					on conflict (team_id, user_id) do update set role = excluded.role`;
-				yield* sql`update teams set updated_at = now() where id = ${teamId}`;
-				const team = { team: teamId, name: facts.name };
-				yield* events.record({
-					actor,
-					action: from === null ? "add-team-member" : "set-team-role",
-					target: userId,
-					before: from === null ? null : { ...team, role: from },
-					after: { ...team, role },
-				});
+				const locked = yield* lockForPeople(actor, teamId);
+				return { name: locked.facts.name, added: yield* putMember(actor, locked, teamId, userId, role) };
 			}),
 		);
+		yield* tellAdded(actor, name, role)(added);
 		return yield* detailNow(actor, teamId);
 	});
 
@@ -293,7 +279,60 @@ const make = Effect.gen(function* () {
 		return yield* detailNow(actor, teamId);
 	});
 
-	return Teams.of({ migrate, list, search, create, update, get, setMember, removeMember });
+	/** In lockForPeople's transaction: invites an email with no account. Whether the invite is new. */
+	const putInvite = Effect.fnUntraced(function* (actor: Actor, facts: FactsRow, teamId: string, email: string, role: TeamRole) {
+		// The way in, with the default daily credits. An org admin's own invite stays as it is.
+		// Also for an invite made before: its email may have been removed since.
+		yield* sql`insert into allowed_emails (email, invited_by, team_only) values (${email}, ${actor.id}, true) on conflict (email) do nothing`;
+		const [found] = yield* sql<{ role: TeamRole }>`select role from team_invites where team_id = ${teamId} and email = ${email}`;
+		if (found?.role === role) return false;
+		yield* sql`
+			insert into team_invites (team_id, email, role, invited_by) values (${teamId}, ${email}, ${role}, ${actor.id})
+			on conflict (team_id, email) do update set role = excluded.role`;
+		yield* sql`update teams set updated_at = now() where id = ${teamId}`;
+		const team = { team: teamId, name: facts.name };
+		yield* events.record({ actor, action: "invite-to-team", target: email, before: found ? { ...team, role: found.role } : null, after: { ...team, role } });
+		return !found;
+	});
+
+	const invite = Effect.fn("Teams.invite")(function* (actor: Actor, teamId: string, email: string, role: TeamRole) {
+		const { name, account, added, invited } = yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* lockInvitesOf(sql, email);
+				const locked = yield* lockForPeople(actor, teamId);
+				const account = yield* accounts.idOfEmail(email);
+				const added = Option.isSome(account) ? yield* putMember(actor, locked, teamId, account.value, role) : Option.none<string>();
+				const invited = Option.isNone(account) && (yield* putInvite(actor, locked.facts, teamId, email, role));
+				return { name: locked.facts.name, account, added, invited };
+			}),
+		);
+		yield* tellAdded(actor, name, role)(added);
+		if (invited) yield* emails.invited(email, actor.origin, { team: name, byUserId: actor.id });
+		const team = yield* detailNow(actor, teamId);
+		return Option.isSome(account) ? { added: true as const, team } : { invited: true as const, team };
+	});
+
+	const cancelInvite = Effect.fn("Teams.cancelInvite")(function* (actor: Actor, teamId: string, email: string) {
+		yield* sql.withTransaction(
+			Effect.gen(function* () {
+				// So it sees another team's invite of this email that is being made now.
+				yield* lockInvitesOf(sql, email);
+				const { facts } = yield* lockForPeople(actor, teamId);
+				const [found] = yield* sql<{ role: TeamRole }>`delete from team_invites where team_id = ${teamId} and email = ${email} returning role`;
+				if (!found) return;
+				// Not an email that an org admin invited, another team still invites, or that has an account and signs in with it.
+				yield* sql`
+					delete from allowed_emails a where a.email = ${email} and a.team_only
+					and not exists (select 1 from team_invites i where i.email = a.email)
+					and not exists (select 1 from users u where lower(u.email) = a.email)`;
+				yield* sql`update teams set updated_at = now() where id = ${teamId}`;
+				yield* events.record({ actor, action: "cancel-team-invite", target: email, before: { team: teamId, name: facts.name, role: found.role } });
+			}),
+		);
+		return yield* detailNow(actor, teamId);
+	});
+
+	return Teams.of({ migrate, adminScope, list, search, create, update, get, setMember, removeMember, invite, cancelInvite });
 });
 
 export const layer = Layer.effect(Teams, make);

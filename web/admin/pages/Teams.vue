@@ -9,11 +9,14 @@ import TeamFormDialog from "../components/TeamFormDialog.vue";
 import EmptyState from "../../EmptyState.vue";
 import { count } from "../../numbers";
 import { isMobile } from "../lib/viewport";
+import { scope } from "../store";
 
 /**
  * Teams (server/teams/Teams.ts): named groups of people, such as HR. Org admins see every
- * team, archived ones last, and make new ones. A row opens the team's page.
+ * team, archived ones last, and make new ones. Team admins see the active teams they admin,
+ * and this is their first page. A row opens the team's page.
  */
+const orgAdmin = computed(() => scope.value === "org");
 const teams = ref<TeamSummary[]>([]);
 const status = ref<{ kind: "loading" } | { kind: "loaded" } | { kind: "error"; message: string }>({ kind: "loading" });
 const loading = computed(() => status.value.kind !== "loaded");
@@ -47,7 +50,9 @@ const rows = computed(() => {
 const emptyText = computed(() =>
 	teams.value.length
 		? { title: "No teams match", body: "Try another search." }
-		: { title: "No teams yet", body: "Make a team, such as HR, and name its first team admin. Team admins add the rest of the team." },
+		: orgAdmin.value
+			? { title: "No teams yet", body: "Make a team, such as HR, and name its first team admin. Team admins add the rest of the team." }
+			: { title: "No teams to manage", body: "You are not a team admin of an active team now." },
 );
 
 /** "12 members · 2 admins", or with pending invites. */
@@ -63,18 +68,19 @@ const creating = ref(false);
 <template>
 	<PageHeaderMobile v-if="isMobile" title="Teams">
 		<template #prefix><AccountMenu compact /></template>
-		<template #suffix><Button variant="ghost" icon="lucide-plus" aria-label="New team" @click="creating = true" /></template>
+		<template v-if="orgAdmin" #suffix><Button variant="ghost" icon="lucide-plus" aria-label="New team" @click="creating = true" /></template>
 	</PageHeaderMobile>
 	<PageHeader v-else>
 		<div class="mx-auto flex w-full max-w-[61.5rem] items-center gap-2">
 			<h1 class="text-lg-semibold text-ink-gray-9">Teams</h1>
-			<Button variant="solid" theme="gray" icon-left="lucide-plus" label="New team" class="ml-auto" @click="creating = true" />
+			<Button v-if="orgAdmin" variant="solid" theme="gray" icon-left="lucide-plus" label="New team" class="ml-auto" @click="creating = true" />
 		</div>
 	</PageHeader>
 
 	<div class="mx-auto w-full max-w-5xl px-3 pb-16 pt-4 sm:px-5 md:pt-6">
 		<p class="max-w-[640px] pb-4 text-p-sm text-ink-gray-6">
-			A team is a group of people, such as HR. Its team admins add and remove its people. Teams give no access on their own.
+			<template v-if="orgAdmin">A team is a group of people, such as HR. Its team admins add and remove its people. Teams give no access on their own.</template>
+			<template v-else>The teams you manage. Add people, invite new ones by email, change roles and remove people.</template>
 		</p>
 
 		<div v-if="teams.length" class="flex pb-3">
@@ -138,7 +144,7 @@ const creating = ref(false);
 		<ListSkeleton v-else-if="loading" :rows="4" :avatar="false" two-lines label="Loading teams" />
 
 		<EmptyState v-else-if="!rows.length" icon="lucide-users-round" :title="emptyText.title" :body="emptyText.body">
-			<Button v-if="!teams.length" variant="solid" theme="gray" icon-left="lucide-plus" label="New team" @click="creating = true" />
+			<Button v-if="!teams.length && orgAdmin" variant="solid" theme="gray" icon-left="lucide-plus" label="New team" @click="creating = true" />
 		</EmptyState>
 	</div>
 

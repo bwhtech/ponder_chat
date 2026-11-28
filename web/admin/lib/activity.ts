@@ -89,7 +89,7 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"update-workspace": (before, after) => ({ text: `Edited ${theWorkspace(after)}`, details: workspaceChanges(before, after) }),
 	"share-workspace": (before, after) => ({ text: sharingText(before, after), details: sharingChanges(before, after) }),
 	"delete-workspace": (before) => ({ text: `Deleted ${theWorkspace(before)}`, details: [] }),
-	// Teams (server/teams/Teams.ts). The person is the event's target: the first team admin, or who was added, changed or removed.
+	// Teams (server/teams/Teams.ts). The person is the event's target: the first team admin, who was added, changed or removed, or the email invited.
 	"create-team": (_, after) => ({ text: `Made the team ${teamName(after)}, with them as team admin`, details: [] }),
 	"update-team": (before, after) => ({
 		text: `Edited the team ${teamName(after)}`,
@@ -98,6 +98,12 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 	"add-team-member": (_, after) => ({ text: `Added them to ${teamName(after)} as ${roleName(after.role)}`, details: [] }),
 	"set-team-role": (_, after) => ({ text: `Made them ${roleName(after.role)} of ${teamName(after)}`, details: [] }),
 	"remove-team-member": (before) => ({ text: `Removed them from ${teamName(before)}`, details: [] }),
+	// The target is the email: it has no account yet.
+	"invite-to-team": (before, after) => ({
+		text: `Invited them to ${teamName(after)} as ${roleName(after.role)}`,
+		details: before.role ? [`In place of ${roleName(before.role)}`] : [],
+	}),
+	"cancel-team-invite": (before) => ({ text: `Cancelled their invite to ${teamName(before)}`, details: [] }),
 };
 
 /** “HR”, as the team was named then. */

@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import * as SqlSchema from "effect/sql/SqlSchema";
 import * as PonderConfig from "../config.ts";
+import type { TeamRole } from "../teams/access.ts";
 
 /**
  * Who may sign in. The pilot is invite-only: an email must be in `allowed_emails`
@@ -25,13 +26,28 @@ const CountRow = Schema.Struct({ count: Schema.Number });
 
 export type InviteRow = typeof InviteRow.Type;
 
+/** A team's pending invite of the email, cancelled with it (Invites.disallow). */
+export type CancelledTeamInvite = { team: string; name: string; role: TeamRole };
+/** What Invites.disallow took: whether the email was invited, and its team invites. */
+export type Removal = { invited: boolean; teamInvites: ReadonlyArray<CancelledTeamInvite> };
+
+/**
+ * In a transaction, the lock of this lowercase email's invites, held until it ends. Each
+ * change to its allowed_emails or team_invites rows takes it before it reads them, so
+ * they take turns: an invite, a cancel, a removal and the first sign-in's join.
+ */
+export const lockInvitesOf = (sql: PgClient.PgClient, email: string) => sql`select pg_advisory_xact_lock(hashtext(${`ponder-invite:${email}`}))`;
+
 export class Invites extends Context.Service<
 	Invites,
 	{
 		/** Creates and updates the `allowed_emails` table. */
 		readonly migrate: Effect.Effect<void, SqlError>;
 		readonly isAllowed: (email: string) => Effect.Effect<boolean, SqlError>;
-		/** Invites an email, or updates the note of one invited before. */
+		/**
+		 * Invites an email, or updates the note of one invited before. An email that only
+		 * teams invited becomes this invite: its inviter and its daily limit.
+		 */
 		readonly allow: (email: string, invite?: Invite) => Effect.Effect<void, SqlError>;
 		/** Sets the daily limit an invited person starts with; null for the default. False when the email was not invited. */
 		readonly setInviteCredits: (email: string, credits: number | null) => Effect.Effect<boolean, SqlError>;
@@ -42,11 +58,14 @@ export class Invites extends Context.Service<
 		 * their own limit. Later changes are made to the person, not the invite.
 		 */
 		readonly applyInvite: (user: { id: string; email: string }) => Effect.Effect<void, SqlError>;
-		/** False when the email was not invited. */
-		readonly disallow: (email: string) => Effect.Effect<boolean, SqlError>;
+		/**
+		 * Takes the email out, with its pending team invites: without the email they could
+		 * never be used. The caller logs them (as "cancel-team-invite").
+		 */
+		readonly disallow: (email: string) => Effect.Effect<Removal, SqlError>;
 		/** Whether this lowercase email was invited. */
 		readonly invited: (email: string) => Effect.Effect<boolean, SqlError>;
-		/** Of these lowercase emails, those invited already or with an account. */
+		/** Of these lowercase emails, those invited already (not by teams only) or with an account. */
 		readonly taken: (emails: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<string>, SqlError>;
 		/** Invites that have no account yet, for the sidebar's count. */
 		readonly waiting: Effect.Effect<number, SqlError>;
@@ -72,6 +91,8 @@ const make = Effect.gen(function* () {
 		// Who invited them (a user id; null for scripts/invite.ts), and their own daily limit, if any.
 		yield* sql`alter table allowed_emails add column if not exists invited_by text`;
 		yield* sql`alter table allowed_emails add column if not exists daily_credits integer`;
+		// True when only team invites put the email here (teams/Teams.ts). An org admin's own invite sets it to false.
+		yield* sql`alter table allowed_emails add column if not exists team_only boolean not null default false`;
 	});
 
 	const findLimit = SqlSchema.findOneOption({
@@ -83,7 +104,7 @@ const make = Effect.gen(function* () {
 		Request: Schema.Array(Schema.String),
 		Result: EmailRow,
 		execute: (emails) => sql`
-			select email from allowed_emails where email in ${sql.in(emails)}
+			select email from allowed_emails where email in ${sql.in(emails)} and not team_only
 			union select lower(email) from users where lower(email) in ${sql.in(emails)}`,
 	});
 	const countWaiting = SqlSchema.findOne({
@@ -110,10 +131,20 @@ const make = Effect.gen(function* () {
 	});
 
 	const allow = Effect.fn("Invites.allow")(function* (email: string, { note = "", invitedBy = null, dailyCredits = null }: Invite = {}) {
-		yield* sql`
-			insert into allowed_emails (email, note, invited_by, daily_credits)
-			values (${normalize(email)}, ${note}, ${invitedBy}, ${dailyCredits})
-			on conflict (email) do update set note = excluded.note`;
+		const normalized = normalize(email);
+		yield* sql.withTransaction(
+			Effect.andThen(
+				lockInvitesOf(sql, normalized),
+				sql`
+					insert into allowed_emails (email, note, invited_by, daily_credits)
+					values (${normalized}, ${note}, ${invitedBy}, ${dailyCredits})
+					on conflict (email) do update set
+						note = excluded.note,
+						invited_by = case when allowed_emails.team_only then excluded.invited_by else allowed_emails.invited_by end,
+						daily_credits = case when allowed_emails.team_only then excluded.daily_credits else allowed_emails.daily_credits end,
+						team_only = false`,
+			),
+		);
 	});
 
 	const setInviteCredits = Effect.fn("Invites.setInviteCredits")(function* (email: string, credits: number | null) {
@@ -135,8 +166,18 @@ const make = Effect.gen(function* () {
 	});
 
 	const disallow = Effect.fn("Invites.disallow")(function* (email: string) {
-		const rows = yield* sql`delete from allowed_emails where email = ${normalize(email)} returning email`;
-		return rows.length > 0;
+		const normalized = normalize(email);
+		return yield* sql.withTransaction(
+			Effect.gen(function* () {
+				yield* lockInvitesOf(sql, normalized);
+				// The teams' rows are not locked: one removal can touch many teams, in any order.
+				const teamInvites = yield* sql<CancelledTeamInvite>`
+					with gone as (delete from team_invites where email = ${normalized} returning team_id, role)
+					select teams.id as team, teams.name, gone.role from gone join teams on teams.id = gone.team_id order by teams.name`;
+				const rows = yield* sql`delete from allowed_emails where email = ${normalized} returning email`;
+				return { invited: rows.length > 0, teamInvites } satisfies Removal;
+			}),
+		);
 	});
 
 	const taken = Effect.fn("Invites.taken")(function* (emails: ReadonlyArray<string>) {

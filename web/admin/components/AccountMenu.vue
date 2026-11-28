@@ -7,9 +7,12 @@ import { signOut } from "../../account";
 import BrandLogo from "../../BrandLogo.vue";
 import { useThemeMenu } from "../../theme-menu";
 import { isMobile } from "../lib/viewport";
-import { settingsOpen, viewer } from "../store";
+import { scope, settingsOpen, viewer } from "../store";
 
-/** Settings, Workspaces and Activity on phones, back to chat, theme and sign out. `compact` is the avatar for a mobile header. */
+/**
+ * Settings, Workspaces and Activity on phones, back to chat, theme and sign out. A team admin
+ * gets only the last three. `compact` is the avatar for a mobile header.
+ */
 defineProps<{ compact?: boolean }>();
 
 const me = computed(() => viewer.value ? displayName(viewer.value.user.name, viewer.value.user.email) : "");
@@ -18,8 +21,8 @@ const theme = useThemeMenu();
 
 // Phones have no room for Workspaces and Activity in the tab bar, so they are here; wider screens have them in the sidebar.
 const menu = computed(() => [
-	{ label: "Settings", icon: "lucide-settings", onClick: () => (isMobile.value ? void router.push("/settings") : (settingsOpen.value = true)) },
-	...(isMobile.value
+	...(scope.value === "org" ? [{ label: "Settings", icon: "lucide-settings", onClick: () => (isMobile.value ? void router.push("/settings") : (settingsOpen.value = true)) }] : []),
+	...(isMobile.value && scope.value === "org"
 		? [
 				{ label: "Workspaces", icon: "lucide-layers", onClick: () => void router.push("/workspaces") },
 				{ label: "Activity", icon: "lucide-history", onClick: () => void router.push("/activity") },

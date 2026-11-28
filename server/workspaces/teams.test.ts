@@ -54,7 +54,7 @@ async function call<Body = unknown>(person: Who, method: string, path: string, j
 	return { status: response.status, body: await jsonBody<Body>(response) };
 }
 const database = <A>(work: (sql: PgClient.PgClient) => Effect.Effect<A, unknown>) => runPromise(PgClient.PgClient.use(work).pipe(Effect.orDie));
-const actor = (person: Who) => ({ id: who[person], email: `${who[person]}@example.invalid` });
+const actor = (person: Who) => ({ id: who[person], email: `${who[person]}@example.invalid`, origin: "http://localhost" });
 const access = (person: Who, workspaceId: string) => runPromise(Workspaces.Workspaces.use((workspaces) => workspaces.accessOf(who[person], workspaceId)));
 
 /** A team made by the org admin, with its first admin and members. */

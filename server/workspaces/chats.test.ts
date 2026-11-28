@@ -63,7 +63,7 @@ const onFakeWorkflow = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provi
 const ana = `ana-${tag}`;
 const bob = `bob-${tag}`;
 const dan = `dan-${tag}`;
-const actor = (id: string) => ({ id, email: `${id}@example.invalid` });
+const actor = (id: string) => ({ id, email: `${id}@example.invalid`, origin: "http://localhost" });
 const message = (id: string, text: string): UIMessage => ({ id, role: "user", parts: [{ type: "text", text }] });
 
 /** GET /api/threads/:id as the app answers it (thread-cache.ts). */

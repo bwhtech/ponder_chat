@@ -22,9 +22,11 @@ import * as AdminReports from "./AdminReports.ts";
 import { validate } from "../validate.ts";
 import * as AdminWorkspaces from "../workspaces/admin.ts";
 import { teamsAdminApi } from "../teams/routes.ts";
+import * as Teams from "../teams/Teams.ts";
 
 /**
- * The API behind /admin, mounted at /api/admin. Every route needs an admin (requireAdmin).
+ * The API behind /admin, mounted at /api/admin. Every route needs an org admin, but /me
+ * and /teams*, which team admins reach too (the guards below).
  * It returns usage numbers only: no route reads messages or thread titles. Workspaces
  * show in full only while they are open to everyone; private ones as totals (workspaces/admin.ts).
  *
@@ -100,17 +102,41 @@ const notFound = (_: unknown, c: Context) => c.json({ error: "No one here." }, 4
 const refused = (error: Auth.AuthRefused, c: Context) => c.json({ error: error.reason }, error.status as ContentfulStatusCode);
 const ok = (c: Context) => () => c.json({ ok: true });
 
+const forbidden = (c: Context) => c.json({ error: "Only admins can do this." }, 403);
+const adminScope = (c: Context<Env>) => Teams.Teams.use((teams) => teams.adminScope(c.get("user").id));
+
 /**
- * Guards /api/admin/*: 403 unless the signed-in person is an admin. It reads the role from
- * the database (people/Accounts.ts), because the session in the cookie can be five minutes old.
+ * Guards every route but /me and /teams*: 403 unless the signed-in person is an org admin.
+ * It reads the role from the database (people/Accounts.ts), because the session in the
+ * cookie can be five minutes old.
  */
-const requireAdmin: MiddlewareHandler<Env> = async (c, next) => {
-	if (!(await route(c, Accounts.Accounts.use((accounts) => accounts.isAdmin(c.get("user").id))))) return c.json({ error: "Only admins can do this." }, 403);
+const requireOrgAdmin: MiddlewareHandler<Env> = async (c, next) => {
+	if (!(await route(c, Accounts.Accounts.use((accounts) => accounts.isAdmin(c.get("user").id))))) return forbidden(c);
 	await next();
 };
 
+/** Guards /me and /teams*: org admins, and the admins of an active team (docs/teams-plan.md). */
+const requireAnyAdmin: MiddlewareHandler<Env> = async (c, next) => {
+	if (Option.isNone(await route(c, adminScope(c)))) return forbidden(c);
+	await next();
+};
+
+/**
+ * A team admin reaches only the first routes, /me and /teams*. Their handlers answer, so the
+ * org-admin guard after them never runs for those. Every route after that guard is for org
+ * admins only. admin-guard.test.ts checks each route.
+ */
 export const adminApi = new Hono<Env>()
-	.use("*", requireAdmin)
+	.use("/me", requireAnyAdmin)
+	.use("/teams/*", requireAnyAdmin)
+
+	// What the admin shell shows: all of /admin, or only the Teams page.
+	.get("/me", (c) => route(c, Effect.map(adminScope(c), (scope) => c.json({ scope: Option.getOrThrow(scope) }))))
+
+	// Teams (teams/routes.ts): its service checks the person's role in each team again.
+	.route("/teams", teamsAdminApi)
+
+	.use("*", requireOrgAdmin)
 
 	// For the sidebar's counts.
 	.get("/summary", (c) => route(c, Effect.map(reports((service) => service.summary), (summary) => c.json(summary))))
@@ -124,9 +150,6 @@ export const adminApi = new Hono<Env>()
 		const { before, person } = c.req.valid("query");
 		return route(c, Effect.map(reports((service) => service.activity({ olderThan: before, person })), (page) => c.json(page)));
 	})
-
-	// Teams (teams/routes.ts): its service checks the person's role in each team again.
-	.route("/teams", teamsAdminApi)
 
 	// Workspaces (workspaces/admin.ts): organisation ones in full, private ones as totals with no names.
 	.get("/workspaces", (c) => route(c, Effect.map(workspaces((service) => service.report), (report) => c.json(report))))

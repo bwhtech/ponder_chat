@@ -69,7 +69,7 @@ async function emailInvite(person: Person) {
 function cancelInvite(person: Person, handlers: Handlers) {
 	dialog.danger({
 		title: `Cancel the invite for ${person.email}?`,
-		message: "They won't be able to sign in. You can invite them again later.",
+		message: "They won't be able to sign in, and their team invites are cancelled too. You can invite them again later.",
 		confirmLabel: "Cancel invite",
 		cancelLabel: "Keep",
 		onConfirm: async () => {

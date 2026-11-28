@@ -25,6 +25,7 @@ import * as AdminAuthEvents from "./AdminAuthEvents.ts";
 import * as Auth from "./Auth.ts";
 import type { MicrosoftSettings } from "./microsoft.ts";
 import * as SignInProviders from "./SignInProviders.ts";
+import { migrateTeams } from "../teams/tables.ts";
 
 const run = Math.random().toString(36).slice(2, 10);
 const schema = `test_microsoft_${run}`;
@@ -148,6 +149,9 @@ describe.skipIf(!base)("Sign in with Microsoft", () => {
 				// What a new account's invite is applied to (credits/Credits.ts).
 				yield* sql`create table credit_limits (user_id text primary key, daily_credits integer not null)`;
 				yield* Auth.Auth.use((auth) => auth.migrate);
+				// The teams that a new account joins (teams/joins.ts). Their workspace grants need a workspaces table.
+				yield* sql`create table workspaces (id text primary key)`;
+				yield* migrateTeams(sql);
 			}),
 		);
 
@@ -189,6 +193,22 @@ describe.skipIf(!base)("Sign in with Microsoft", () => {
 				const accounts = yield* sql<{ accountId: string; accessToken: string | null; idToken: string | null; refreshToken: string | null }>`
 					select "accountId", "accessToken", "idToken", "refreshToken" from accounts where "userId" = ${user?.id ?? ""} and "providerId" = 'microsoft'`;
 				assert.deepStrictEqual(accounts, [{ accountId: objectId(ana), accessToken: null, idToken: null, refreshToken: null }]);
+			}),
+		);
+
+		it.effect("makes a person a member of the teams that invited them, at their first sign-in", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const ben = person("ben");
+				const team = `team-${run}`;
+				yield* sql`insert into teams (id, name, created_by) values (${team}, ${`Finance ${run}`}, 'test-admin')`;
+				yield* sql`insert into team_invites (team_id, email, role, invited_by) values (${team}, ${ben}, 'admin', 'test-admin')`;
+				yield* sql`insert into allowed_emails (email, invited_by, team_only) values (${ben}, 'test-admin', true)`;
+				const { jar } = yield* signIn(ben);
+				const user = yield* signedInAs(jar);
+				const members = yield* sql<{ user_id: string; role: string }>`select user_id, role from team_members where team_id = ${team}`;
+				assert.deepStrictEqual(members, [{ user_id: user?.id ?? "", role: "admin" }]);
+				assert.lengthOf(yield* sql`select 1 from team_invites where email = ${ben}`, 0);
 			}),
 		);
 
