@@ -40,11 +40,12 @@ onBeforeUnmount(() => removeEventListener("online", retryViewer));
 
 // Phones: the pages past the first four share the tab bar's last tab, More.
 const MORE = [
+	{ label: "Teams", icon: "lucide-users-round", route: "/teams" },
 	{ label: "Workspaces", icon: "lucide-layers", route: "/workspaces" },
 	{ label: "Activity", icon: "lucide-history", route: "/activity" },
 	{ label: "Settings", icon: "lucide-settings", route: "/settings" },
 ];
-const inMore = computed(() => MORE.some((item) => route.path === item.route));
+const inMore = computed(() => MORE.some((item) => route.path === item.route || route.path.startsWith(`${item.route}/`)));
 
 // The sidebar's counts: on each page change, and every minute for requests that come in.
 watch([isAdmin, () => route.path], ([admin]) => admin && void refreshCounts(), { immediate: true });
@@ -116,6 +117,7 @@ onBeforeUnmount(() => clearInterval(timer));
 											<span v-if="counts.invited" class="mr-2 text-xs tabular-nums text-ink-gray-5">{{ counts.invited }} invited</span>
 										</template>
 									</SidebarItem>
+									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Teams" icon="lucide-users-round" route="/teams" :active="route.path.startsWith('/teams')" />
 									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Skills" icon="lucide-sparkles" route="/skills" :active="route.path.startsWith('/skills')" />
 									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Workspaces" icon="lucide-layers" route="/workspaces" :active="route.path === '/workspaces'" />
 									<SidebarItem class="!h-7 [@media(pointer:coarse)]:!h-11" label="Activity" icon="lucide-history" route="/activity" :active="route.path === '/activity'" />
