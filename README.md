@@ -109,6 +109,20 @@ Sources are PDF, text, Markdown, CSV and JSON files. Ponder reads each file once
 
 ![The Details of Annual report 2025.pdf in the side panel: a PDF of 40 pages, indexing at page 12 of 40, with a progress bar. The log says that it was uploaded and that two pages were read from pictures. On the left, its row in Sources shows the same progress.](docs/images/workspace-sources.webp)
 
+### Teams
+
+An org admin makes teams, such as HR, and names their team admins. Team admins add people, remove them and invite new emails. They see only their own teams in /admin, and they get no extra rights on workspaces.
+
+![The HR team in /admin: five members, two of them team admins, and two pending invites. "Add people" takes a person from search or an email, with a role.](docs/images/teams-team.webp)
+
+Share finds teams as well as people. A workspace shared with a team is shared with each person in it, at Can ask or Can edit, and a person who leaves the team loses that access at once. An archived team gives no access, and Share shows its grant greyed out.
+
+![Share for the Leave policies workspace: the HR team can edit, TFSS can ask, and the archived Facilities team has only Remove.](docs/images/teams-share.webp)
+
+Settings › Teams lists the teams you are in and who else is in them.
+
+![Settings open on Teams: the HR team with its five members, and Manage for a team admin.](docs/images/teams-settings.webp)
+
 ### Memory you can see
 
 After a reply, Ponder decides if you said something about yourself worth keeping. A note under the reply shows what it kept, with Undo. Settings › Memory lists every memory and the chat it came from. Ponder never keeps passwords, contact details, ID numbers, health details or what you say about other people.
@@ -310,6 +324,17 @@ Documents (`server/workspaces/documents/`):
 | `GET /api/workspaces/:id/documents/:doc/file` | `ask` and above | The uploaded file, inline, as `/api/files/:id` sends it, with `Cache-Control: private, no-cache`. A click on a document's name opens it in the side panel. |
 | `GET /api/people?q=` | Anyone | `{ people }`: at most 20, by name or email, with id, name and email |
 | `POST /api/chat` | `ask` and above | The body takes `workspaceId`, read on a new chat's first message only. |
+
+### Teams
+
+A team is a named group of people under the org, such as HR. The plan is in `docs/teams-plan.md`.
+
+- Roles: an org admin (`users.role = 'admin'`) makes, renames, archives, restores and deletes teams. A team member is a `member` or an `admin` (a team admin). A team must keep one team admin; only an org admin can remove or demote the last one.
+- Team admins reach `/api/admin/teams*` and `/api/admin/me` only, and only for the teams they admin. Every other admin route answers 403 to them.
+- Invites: a team admin adds a person with an account at once, or invites an email. The invite puts the email in `allowed_emails` (`team_only`) and in `team_invites`; the person joins the team at their first sign-in. Invites, cancels, removals and the join for one email take turns on one lock (`lockInvitesOf`).
+- Access (`server/workspaces/access.ts`): a workspace can grant a team Can ask or Can edit (`workspace_teams`). A person's access is the highest of their own grant, the grants of their active teams and General access. Archived teams give nothing.
+- Archive keeps a team's members, invites and grants, and nobody can change them. Restore brings them back. Delete takes an archived team with all of them.
+- Every team change goes to the admin activity log.
 
 ### Credits
 
