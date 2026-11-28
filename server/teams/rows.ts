@@ -46,7 +46,7 @@ export type Rows = {
 	/** Every team, or only the active ones that the person admins: active first, then by name. */
 	summaries: (request: { adminOf: string | null }) => Effect.Effect<ReadonlyArray<SummaryRow>, SqlError>;
 	team: (teamId: string) => Effect.Effect<Option.Option<TeamRow>, SqlError>;
-	/** By name, then email. */
+	/** By name, or by email for a person with no name, as the page names them. */
 	members: (teamId: string) => Effect.Effect<ReadonlyArray<MemberRow>, SqlError>;
 	/** Oldest first. */
 	invites: (teamId: string) => Effect.Effect<ReadonlyArray<InviteRow>, SqlError>;
@@ -93,7 +93,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 			select u.id, coalesce(u.name, '') as name, u.email, m.role, m.added_at
 			from team_members m join users u on u.id = m.user_id
 			where m.team_id = ${teamId}
-			order by lower(coalesce(u.name, '')), lower(u.email)`,
+			order by lower(coalesce(nullif(u.name, ''), u.email)), lower(u.email)`,
 	});
 	const invites = SqlSchema.findAll({
 		Request: Schema.String,
