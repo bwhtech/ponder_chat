@@ -59,7 +59,7 @@ export const GENERAL_ACCESS = {
 	none: { label: "Only people added", icon: "lucide-lock" },
 	ask: { label: "Everyone in the organisation", icon: "lucide-building-2" },
 } as const;
-export const ADD_PEOPLE = "Add people by name or email";
+export const ADD_PEOPLE = "Add people or teams";
 
 /** The line under General access: what it means, or, for a person who can't change it, who can. */
 export function generalAccessNote(orgAccess: "none" | "ask", canChange: boolean) {

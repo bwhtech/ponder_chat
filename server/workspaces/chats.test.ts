@@ -1,7 +1,7 @@
 /**
  * Chats in a workspace (workflow/replies.ts): the first message binds the chat to a
  * workspace, it never changes after, and a person who lost access can read the chat but
- * not send in it. On a real Postgres (TEST_DATABASE_URL), in a schema of its own, which
+ * not send in it, also when they lost it with a team. On a real Postgres (TEST_DATABASE_URL), in a schema of its own, which
  * the last test drops. Workflow's runtime is a fake that records each turn it starts.
  */
 import type { ModelCallStreamPart } from "@ai-sdk/workflow";
@@ -30,6 +30,8 @@ const Replies = await import("../workflow/replies.ts");
 const WorkflowRuns = await import("../workflow/WorkflowRuns.ts");
 const Threads = await import("../threads/Threads.ts");
 const Workspaces = await import("./Workspaces.ts");
+const Invites = await import("../people/Invites.ts");
+const Teams = await import("../teams/Teams.ts");
 const AdminEvents = await import("../admin/AdminEvents.ts");
 const ThreadRuns = await import("../workflow/runs.ts");
 const Runs = await import("../telemetry/Runs.ts");
@@ -93,6 +95,9 @@ describe.skipIf(!base)("chats in a workspace", () => {
 				// Before Workspaces, as at start-up: a document's log references `runs`.
 				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
+				// The team tables (teams/tables.ts): a person's access reads their teams' grants.
+				yield* Invites.Invites.use((invites) => invites.migrate);
+				yield* Teams.Teams.use((teams) => teams.migrate);
 				yield* ThreadRuns.ThreadRuns.use((runs) => runs.migrate);
 				yield* Settings.Settings.use((settings) => settings.migrate);
 				yield* Credits.Credits.use((credits) => credits.migrate);
@@ -209,6 +214,39 @@ describe.skipIf(!base)("chats in a workspace", () => {
 				assert.deepStrictEqual((yield* read(ana, threadId)).messages, []);
 				const detail = yield* Workspaces.Workspaces.use((workspaces) => workspaces.get(ana, ids.notes));
 				assert.notInclude(JSON.stringify(detail), threadId);
+			}).pipe(onFakeWorkflow),
+		);
+
+		it.effect("a person removed from a team can read their chat in the team's workspace, but not send in it; an archived team too", () =>
+			Effect.gen(function* () {
+				const sql = yield* PgClient.PgClient;
+				const workspaces = yield* Workspaces.Workspaces;
+				const teams = yield* Teams.Teams;
+				const replies = yield* Replies.Replies;
+				const shared = (yield* workspaces.create(actor(ana), { name: "Team notes", description: "", instructions: "", icon: null })).id;
+				const team = (yield* teams.create(actor(ana), { name: `Chat team ${tag}`, description: "", adminUserId: ana })).id;
+				yield* teams.setMember(actor(ana), team, dan, "member");
+				yield* workspaces.setTeam(actor(ana), shared, team, "ask");
+
+				const threadId = `chat-team-${tag}`;
+				yield* replies.start({ threadId, owner: dan, messages: [message("m1", "Hi team")], workspaceId: shared });
+				assert.strictEqual(turns.at(-1)?.workspaceId, shared);
+				const lost = () => Effect.flip(replies.start({ threadId, owner: dan, messages: [message("m1", "Hi team"), message("m2", "Still here?")] }));
+
+				yield* teams.removeMember(actor(ana), team, dan);
+				const started = turns.length;
+				const refused = yield* lost();
+				assert.strictEqual(refused._tag, "WorkspaceAccessLost");
+				assert.strictEqual(turns.length, started);
+				assert.deepStrictEqual(
+					(yield* read(dan, threadId)).messages.map((each) => each.id),
+					["m1"],
+				);
+
+				yield* teams.setMember(actor(ana), team, dan, "member");
+				yield* sql`update teams set archived_at = now() where id = ${team}`;
+				assert.strictEqual((yield* lost())._tag, "WorkspaceAccessLost", "an archived team gives nothing");
+				assert.strictEqual((yield* read(dan, threadId)).workspaceId, shared);
 			}).pipe(onFakeWorkflow),
 		);
 

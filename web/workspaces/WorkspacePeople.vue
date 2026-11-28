@@ -4,12 +4,12 @@ import { computed } from "vue";
 import { displayName } from "../../shared/display-name";
 import { me } from "../account";
 import { count } from "../numbers";
-import type { Member, WorkspaceDetail } from "./store";
+import type { Member, WorkspaceDetail, WorkspaceTeam } from "./store";
 
 /**
  * Who can use the workspace, on its page: everyone in the organisation first while it is open
- * to everyone, then its owner, whom to ask for changes, then each person with what they can do.
- * Whoever can share it sees every member. Anyone else sees the owner, themself if they were
+ * to everyone, then its owner, whom to ask for changes, then each person and team with what they
+ * can do. Whoever can share it sees every member and team; an archived team is greyed out. Anyone else sees the owner, themself if they were
  * added, and how many others there are: the server sends the members only to whoever can
  * change them. Share, in the page's header, changes them.
  */
@@ -27,6 +27,15 @@ const rows = computed<Row[]>(() => {
 	// While it is open, a person who can only ask may not have been added: they are among "everyone".
 	return detail.orgAccess !== "none" || detail.access === "none" ? [owner] : [owner, you(detail.access)];
 });
+
+const teams = computed(() =>
+	(props.detail.teams ?? []).map((team: WorkspaceTeam) => ({
+		key: team.id,
+		name: team.archived ? `${team.name} (archived)` : team.name,
+		access: ACCESS_LABELS[team.access],
+		archived: team.archived,
+	})),
+);
 
 /** Members a member can't see by name. */
 const others = computed(() => {
@@ -58,6 +67,16 @@ function you(access: keyof typeof ACCESS_LABELS): Row {
 				<Avatar :label="row.avatar" size="sm" class="shrink-0" />
 				<span class="min-w-0 flex-1 truncate text-sm text-ink-gray-8">{{ row.name }}</span>
 				<span class="shrink-0 text-sm text-ink-gray-6">{{ row.access }}</span>
+			</li>
+			<li v-for="team in teams" :key="`team:${team.key}`" class="flex h-8 items-center gap-2.5" data-slot="workspace-team">
+				<span
+					class="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-gray-2"
+					:class="team.archived ? 'text-ink-gray-4' : 'text-ink-gray-6'"
+					aria-hidden="true"
+					><span class="lucide-users size-3"
+				/></span>
+				<span class="min-w-0 flex-1 truncate text-sm" :class="team.archived ? 'text-ink-gray-6' : 'text-ink-gray-8'">{{ team.name }}</span>
+				<span class="shrink-0 text-sm text-ink-gray-6">{{ team.archived ? "No access" : team.access }}</span>
 			</li>
 			<li v-if="others" class="flex h-8 items-center gap-2.5">
 				<span class="flex size-5 shrink-0 items-center justify-center rounded-full bg-surface-gray-2 text-ink-gray-6" aria-hidden="true"><span class="lucide-users size-3" /></span>

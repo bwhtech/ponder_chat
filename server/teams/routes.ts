@@ -10,6 +10,8 @@ import * as Teams from "./Teams.ts";
  * /api/admin/teams (Teams.ts), mounted in admin/routes.ts behind its admin check. The
  * service checks each person's role in each team again. A team that does not exist answers
  * 404; a change the person may not make, 403 with a message the page can show.
+ *
+ * /api/teams, for every signed-in person, mounted in app.ts: the share picker's search.
  */
 type Env = SignedInEnv;
 
@@ -26,6 +28,8 @@ const role = z.enum(["member", "admin"]);
 const createBody = z.object({ name, description: description.default(""), adminUserId: z.string().min(1) });
 const updateBody = z.object({ name: name.optional(), description: description.optional() });
 const memberBody = z.object({ role });
+// A repeated or odd query value is ignored, not refused.
+const searchQuery = z.object({ q: z.string().default("").catch("").transform((q) => q.slice(0, 200)) });
 
 const notFound = (_: Teams.TeamNotFound, c: Context) => c.json({ error: "Not found" }, 404);
 const refused = (error: Teams.TeamRefused, c: Context) => c.json({ error: error.message }, error.reason === "no-account" ? 400 : 403);
@@ -63,3 +67,8 @@ export const teamsAdminApi = new Hono<Env>()
 	.delete("/:id/members/:userId", (c) =>
 		route(c, Effect.map(teams((service) => service.removeMember(actorOf(c), c.req.param("id"), c.req.param("userId"))), (team) => c.json({ team })), errors),
 	);
+
+/** GET /api/teams?q=: active teams by name, at most 20, with their member count. Never their members. */
+export const teamsApi = new Hono<Env>().get("/", validate("query", searchQuery), (c) =>
+	route(c, Effect.map(teams((service) => service.search(c.req.valid("query").q)), (found) => c.json({ teams: found }))),
+);
