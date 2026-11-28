@@ -9,12 +9,30 @@ import { dialogTitle, GENERAL_ACCESS, generalAccessNote, ROLE_LABELS, useFrameFo
 import PeoplePicker from "./PeoplePicker.vue";
 import ShareRow from "./ShareRow.vue";
 import { useSharing } from "./sharing";
-import { fetchWorkspace, isAdmin, removeMember, setMember, setOrgAccess, workspaceHref, type Member, type MemberAccess, type OrgAccess, type Person } from "./store";
+import { count } from "../numbers";
+import {
+	fetchWorkspace,
+	isAdmin,
+	removeMember,
+	removeTeam,
+	setMember,
+	setOrgAccess,
+	setTeam,
+	workspaceHref,
+	type Member,
+	type MemberAccess,
+	type OrgAccess,
+	type Person,
+	type TeamMatch,
+	type WorkspaceTeam,
+} from "./store";
 
 /**
- * Share, as Google Docs has it: the people with access, each with their own role, then General
- * access, which an admin can open to everyone in the organisation. Everyone who can edit adds
- * people, changes their roles and removes them; nobody changes the owner. Each change applies at
+ * Share, as Google Docs has it: the people and teams with access, each with their own role, then
+ * General access, which an admin can open to everyone in the organisation. Everyone who can edit
+ * adds people and teams, changes their roles and removes them; nobody changes the owner. A team's
+ * role is every member's. An archived team gives no access: its row is greyed out and can only
+ * be removed. Each change applies at
  * once and is saved in the background (sharing.ts), so the footer has Copy link and Done, not
  * Save. Opening to everyone, or closing it, asks first, in place. Removing yourself, or giving
  * yourself Can ask, asks first too, when it takes your right to share: the dialog then closes.
@@ -42,6 +60,8 @@ const sharing = useSharing(
 		setMember: (userId, access) => setMember(workspace.id, userId, access),
 		removeMember: (userId) => removeMember(workspace.id, userId),
 		setOrgAccess: (orgAccess) => setOrgAccess(workspace.id, orgAccess),
+		setTeam: (teamId, access) => setTeam(workspace.id, teamId, access),
+		removeTeam: (teamId) => removeTeam(workspace.id, teamId),
 		refresh: () => fetchWorkspace(workspace.id),
 	},
 	{
@@ -62,15 +82,22 @@ const sharing = useSharing(
 useFrameFocus();
 
 const members = sharing.members;
+const teams = sharing.teams;
 const orgAccess = sharing.orgAccess;
 const canChangeGeneral = computed(() => sharing.saved.value.canChangeOrgAccess);
 const excluded = computed(() => [workspace.owner.id, ...members.value.map((member) => member.id)]);
+const excludedTeams = computed(() => teams.value.map((team) => team.id));
 const nameOf = (person: Person) => displayName(person.name, person.email);
 
-/** A person added while everyone can ask already is there to edit it. */
+/** A person or a team added while everyone can ask already is there to edit it. */
 function pick(person: Person) {
 	error.value = "";
 	sharing.add(person, orgAccess.value === "ask" ? "edit" : "ask");
+}
+
+function pickTeam(team: TeamMatch) {
+	error.value = "";
+	sharing.addTeam(team, orgAccess.value === "ask" ? "edit" : "ask");
 }
 
 function choose(member: Member, access: MemberAccess) {
@@ -119,6 +146,30 @@ function roleMenu(member: Member) {
 	];
 }
 
+function teamMenu(team: WorkspaceTeam) {
+	const role = (access: MemberAccess, description: string) => ({
+		label: ROLE_LABELS[access],
+		description,
+		onClick: () => {
+			error.value = "";
+			if (access !== team.access) sharing.setTeamRole(team.id, access);
+		},
+		slots: check(team.access === access),
+	});
+	return [
+		{ group: "Role", hideLabel: true, options: [role("ask", "Its members ask with its sources"), role("edit", "Its members also change and share it")] },
+		{ group: "Remove", hideLabel: true, options: [{ label: "Remove", theme: "red" as const, onClick: () => removeTeamRow(team) }] },
+	];
+}
+
+function removeTeamRow(team: WorkspaceTeam) {
+	error.value = "";
+	sharing.removeTeam(team.id);
+}
+
+const teamName = (team: WorkspaceTeam) => (team.archived ? `${team.name} (archived)` : team.name);
+const memberCount = (total: number) => `${count(total)} ${total === 1 ? "member" : "members"}`;
+
 /** General access, chosen but not yet confirmed: opening it to everyone, or closing it, asks first. */
 const pendingGeneral = ref<OrgAccess | null>(null);
 const generalMenu = computed(() =>
@@ -163,11 +214,11 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
 <template>
 	<Dialog v-model:open="open" :title="dialogTitle(request)" size="lg">
 		<div class="space-y-4">
-			<PeoplePicker :exclude="excluded" @pick="pick" />
+			<PeoplePicker :exclude="excluded" :exclude-teams="excludedTeams" @pick="pick" @pick-team="pickTeam" />
 
 			<section class="space-y-1" aria-labelledby="share-people-label">
 				<h4 id="share-people-label" class="flex h-7 items-center text-sm text-ink-gray-6">People with access</h4>
-				<!-- A person added fades in under the others; a person removed fades out, and the rows under them close up. -->
+				<!-- A person or team added fades in under the others; one removed fades out, and the rows under it close up. -->
 				<TransitionGroup
 					tag="ul"
 					class="relative"
@@ -202,6 +253,36 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
 								:aria-label="`What ${member.id === myId ? 'you' : nameOf(member)} can do: ${ROLE_LABELS[member.access]}`"
 							>
 								{{ ROLE_LABELS[member.access] }}
+							</Button>
+						</Dropdown>
+					</ShareRow>
+					<ShareRow
+						v-for="team in teams"
+						:key="`team:${team.id}`"
+						icon="lucide-users"
+						:name="teamName(team)"
+						:email="memberCount(team.memberCount)"
+						:muted="team.archived"
+						data-slot="workspace-team"
+					>
+						<!-- An archived team gives no access, so it has only Remove. -->
+						<Button
+							v-if="team.archived"
+							variant="ghost"
+							class="touch-target w-28 !justify-start !text-ink-gray-6"
+							:aria-label="`Remove ${teamName(team)}`"
+							@click="removeTeamRow(team)"
+						>
+							Remove
+						</Button>
+						<Dropdown v-else :options="teamMenu(team)" align="end">
+							<Button
+								variant="ghost"
+								class="touch-target w-28 !justify-between"
+								icon-right="lucide-chevron-down"
+								:aria-label="`What ${team.name} can do: ${ROLE_LABELS[team.access]}`"
+							>
+								{{ ROLE_LABELS[team.access] }}
 							</Button>
 						</Dropdown>
 					</ShareRow>

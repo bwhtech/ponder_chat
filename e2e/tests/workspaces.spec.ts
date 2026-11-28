@@ -1266,7 +1266,7 @@ async function chooseFromMenu(page: Page, name: string, item: "Pin" | "Unpin") {
 
 /** Adds a person in Share by their email: they are added at once. */
 async function addPerson(share: Locator, email: string) {
-	await share.getByRole("combobox", { name: "Add people by name or email" }).fill(email);
+	await share.getByRole("combobox", { name: "Add people or teams" }).fill(email);
 	await share.page().getByRole("option", { name: new RegExp(escape(email)) }).click();
 }
 

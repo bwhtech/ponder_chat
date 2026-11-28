@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
-import { chat, expect, test } from "../fixtures.ts";
+import { e2e } from "../env.ts";
+import { chat, expect, jsonOf, test } from "../fixtures.ts";
 import { addChats, createWorkspace, newPerson, share, textFile, uploadReady, workspacePage } from "../workspaces.ts";
 
 const about = (page: Page) => page.locator('[data-slot="workspace-about"]');
@@ -165,4 +166,30 @@ test("on a phone, Share puts each role on its own line under the name, every con
 	await page.getByRole("menuitem", { name: /^Can ask/ }).tap();
 	await expect(role).toHaveText("Can ask");
 	await member.context.close();
+});
+
+test("on a phone, in dark mode, Share finds a team and adds it, its role can be tapped, and nothing scrolls sideways", async ({ page, admin }) => {
+	const name = `Customer support and success ${admin.id.slice(0, 6)}`;
+	const made = await page.request.post("/api/admin/teams", { data: { name, adminUserId: admin.id }, headers: { Origin: e2e.baseUrl } });
+	expect(made.status(), await made.text()).toBe(201);
+	const { team } = await jsonOf<{ team: { id: string } }>(made);
+	const { slug } = await createWorkspace(page, `Phone teams ${admin.id.slice(0, 6)}`);
+
+	await page.emulateMedia({ colorScheme: "dark" });
+	await page.goto(`/?w=${slug}`);
+	await page.getByRole("button", { name: "Workspace actions" }).tap();
+	await page.getByRole("menuitem", { name: "Share" }).tap();
+	const dialog = page.getByRole("dialog", { name: /^Share “Phone teams/ });
+	await dialog.getByRole("combobox", { name: "Add people or teams" }).fill(name);
+	await page.getByRole("option", { name: new RegExp(`${name}.*1 member`) }).tap();
+	const row = dialog.locator('[data-slot="workspace-team"]');
+	const role = row.getByRole("button", { name: /^What / });
+	await expect(role).toHaveText("Can ask");
+	expect((await role.boundingBox())!.y, "the role is under the name").toBeGreaterThan((await row.getByText(name).boundingBox())!.y);
+	expect(await dialog.evaluate((box) => box.scrollWidth - box.clientWidth)).toBe(0);
+	await role.tap();
+	await page.getByRole("menuitem", { name: /^Can edit/ }).tap();
+	await expect(role).toHaveText("Can edit");
+	const saved = await jsonOf<{ workspace: { teams: { id: string; access: string }[] } }>(await page.request.get(`/api/workspaces/${slug}`));
+	expect(saved.workspace.teams).toEqual([expect.objectContaining({ id: team.id, access: "edit" })]);
 });

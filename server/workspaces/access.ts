@@ -3,28 +3,33 @@
  * table is in one place and its cells can be tested without a database. Workspaces.ts
  * reads the rows and asks these functions.
  *
- * A workspace has people, each added with their own role, and a General access setting
- * (`org_access`) that opens it to everyone in the organisation. A person's access is the
- * higher of their own role and the one General access gives them.
+ * A workspace has people, each added with their own role, teams, each added with a role
+ * for all their members (docs/teams-plan.md), and a General access setting (`org_access`)
+ * that opens it to everyone in the organisation. A person's own access is the higher of
+ * their own role and their teams' grants. Their access is the higher of that and the one
+ * General access gives them.
  *
- * | General access                  | Owner | Member      | Admin, not a member | Anyone else |
- * | ------------------------------- | ----- | ----------- | ------------------- | ----------- |
- * | Only people added (`none`)      | owner | ask or edit | none                | none        |
- * | Everyone in the organisation    | owner | ask or edit | edit                | ask         |
+ * | General access                  | Owner | Member, or in a team added | Admin, not added | Anyone else |
+ * | ------------------------------- | ----- | -------------------------- | ---------------- | ----------- |
+ * | Only people added (`none`)      | owner | ask or edit                | none             | none        |
+ * | Everyone in the organisation    | owner | ask or edit                | edit             | ask         |
  */
 export type OrgAccess = "none" | "ask";
 export type MemberAccess = "ask" | "edit";
 export type Access = "none" | MemberAccess | "owner";
 
-/** What access is decided from: the workspace, and the person's member row in it, if any. */
-export type AccessFacts = { orgAccess: OrgAccess; ownerId: string; member: MemberAccess | null };
+/**
+ * What access is decided from: the workspace, the person's member row in it, if any, and
+ * the highest grant among the active teams that the person is in. An archived team gives nothing.
+ */
+export type AccessFacts = { orgAccess: OrgAccess; ownerId: string; member: MemberAccess | null; team: MemberAccess | null };
 
 const RANK: Record<Access, number> = { none: 0, ask: 1, edit: 2, owner: 3 };
 
 /** The person's access to a workspace that is not deleted. */
 export function accessFrom(facts: AccessFacts, userId: string, admin: boolean): Access {
 	if (facts.ownerId === userId) return "owner";
-	const own: Access = facts.member ?? "none";
+	const own = highest(facts.member ?? "none", facts.team ?? "none");
 	// An admin is no one special in a private workspace: chats and documents there are the owner's to share.
 	if (facts.orgAccess === "none") return own;
 	// Open to everyone: it is organisation content, which admins edit.

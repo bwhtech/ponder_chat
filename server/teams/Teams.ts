@@ -20,6 +20,7 @@ import {
 	type NewTeam,
 	type TeamChanges,
 	type TeamDetail,
+	type TeamMatch,
 	TeamNameTaken,
 	TeamNotFound,
 	TeamRefused,
@@ -50,6 +51,8 @@ export class Teams extends Context.Service<
 		readonly adminScope: (userId: string) => Effect.Effect<Option.Option<AdminScope>, SqlError>;
 		/** Org admins: every team, archived too. Team admins: the active teams they admin. */
 		readonly list: (actor: Actor) => Effect.Effect<TeamSummary[], SqlError>;
+		/** Active teams whose name has this text, without case: at most 20. Any signed-in person. */
+		readonly search: (text: string) => Effect.Effect<TeamMatch[], SqlError>;
 		/** Org admins only. The first team admin must have an account and not be banned. They get an email. */
 		readonly create: (actor: Actor, input: NewTeam) => Effect.Effect<TeamDetail, TeamRefused | TeamNameTaken | SqlError>;
 		/** Name and description: org admins only. */
@@ -165,6 +168,13 @@ const make = Effect.gen(function* () {
 				archived: row.archived,
 			}),
 		);
+	});
+
+	const search = Effect.fn("Teams.search")(function* (text: string) {
+		// The text is matched as it is: % and _ in it are not wildcards (as Accounts.search).
+		const pattern = `%${text.trim().replace(/[\\%_]/g, (special) => `\\${special}`)}%`;
+		const found = yield* rows.matches(pattern);
+		return found.map((row): TeamMatch => ({ id: row.id, name: row.name, memberCount: row.member_count }));
 	});
 
 	const create = Effect.fn("Teams.create")(function* (actor: Actor, input: NewTeam) {
@@ -316,7 +326,7 @@ const make = Effect.gen(function* () {
 		return yield* detailNow(actor, teamId);
 	});
 
-	return Teams.of({ migrate, adminScope, list, create, update, get, setMember, removeMember, invite, cancelInvite });
+	return Teams.of({ migrate, adminScope, list, search, create, update, get, setMember, removeMember, invite, cancelInvite });
 });
 
 export const layer = Layer.effect(Teams, make);

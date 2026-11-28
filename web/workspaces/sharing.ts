@@ -1,10 +1,10 @@
 import { computed, reactive, ref, shallowRef } from "vue";
 import { ApiError } from "../api";
 import { displayName } from "../../shared/display-name";
-import type { Member, MemberAccess, OrgAccess, Person, WorkspaceDetail } from "./store";
+import type { Member, MemberAccess, OrgAccess, Person, TeamMatch, WorkspaceDetail, WorkspaceTeam } from "./store";
 
 /**
- * What Share shows and saves (ShareDialog.vue). Each change applies at once: the dialog shows
+ * What Share shows and saves (ShareDialog.vue): people, teams and General access. Each change applies at once: the dialog shows
  * it straight away, and it is saved in the background, one request at a time, in the order the
  * changes were made. So the answers come in order, each newer than the one before, and two
  * changes to one person never pass each other. A change the person makes to someone whose last
@@ -25,6 +25,8 @@ export type SharingApi = {
 	setMember: (userId: string, access: MemberAccess) => Promise<WorkspaceDetail>;
 	removeMember: (userId: string) => Promise<WorkspaceDetail>;
 	setOrgAccess: (orgAccess: OrgAccess) => Promise<WorkspaceDetail>;
+	setTeam: (teamId: string, access: MemberAccess) => Promise<WorkspaceDetail>;
+	removeTeam: (teamId: string) => Promise<WorkspaceDetail>;
 	/** The workspace as the person sees it now: after a 403, to learn whether they can still share. */
 	refresh: () => Promise<WorkspaceDetail>;
 };
@@ -43,8 +45,10 @@ export type SharingEvents = {
 	failed: (message: string) => void;
 };
 
-/** The row of General access in the queue: member rows are keyed by the person's id. */
+/** The row of General access in the queue: member rows are keyed by the person's id, team rows by TEAM and the team's id. */
 const GENERAL = "\u0000general";
+const TEAM = "\u0000team:";
+const teamIdOf = (key: string) => (key.startsWith(TEAM) ? key.slice(TEAM.length) : null);
 
 type Choice<T> = { value: T; number: number };
 type Session = ReturnType<typeof createSession>;
@@ -80,10 +84,12 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 	/** The person's choice for each row while it is not yet answered: null removes the person. */
 	const wanted = reactive(new Map<string, Choice<MemberAccess | null>>());
 	const wantedOrg = ref<Choice<OrgAccess> | null>(null);
-	/** People added here, by id, until an answer has them. */
+	/** People added here, by id, until an answer has them. Teams too, by their key. */
 	const added = new Map<string, Person>();
+	const addedTeams = new Map<string, TeamMatch>();
 	/** The rows' order: as Share first opened, then each person in the order they were added. Nothing moves meanwhile. */
 	const order = ref<string[]>((initial.members ?? []).map((member: Member) => member.id));
+	const teamOrder = ref<string[]>((initial.teams ?? []).map((team: WorkspaceTeam) => team.id));
 	const queue: string[] = [];
 	let numbers = 0;
 	let running = false;
@@ -98,6 +104,17 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 			return person && access ? [{ id, name: person.name, email: person.email, access }] : [];
 		});
 	});
+	/** An archived team stays as the server has it: it can only be removed. */
+	const teams = computed<WorkspaceTeam[]>(() => {
+		const byId = new Map<string, WorkspaceTeam>((saved.value.teams ?? []).map((team: WorkspaceTeam) => [team.id, team]));
+		const ids = [...teamOrder.value, ...[...byId.keys()].filter((id) => !teamOrder.value.includes(id))];
+		return ids.flatMap((id) => {
+			const key = TEAM + id;
+			const team = byId.get(id) ?? addedTeams.get(id);
+			const access = wanted.has(key) ? wanted.get(key)?.value : byId.get(id)?.access;
+			return team && access ? [{ id, name: team.name, memberCount: team.memberCount, access, archived: byId.get(id)?.archived ?? false }] : [];
+		});
+	});
 	const orgAccess = computed<OrgAccess>(() => wantedOrg.value?.value ?? saved.value.orgAccess);
 
 	function add(person: Person, access: MemberAccess) {
@@ -106,9 +123,16 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 		choose(person.id, access);
 	}
 
-	function choose(userId: string, access: MemberAccess | null) {
-		wanted.set(userId, { value: access, number: ++numbers });
-		enqueue(userId);
+	function addTeam(team: TeamMatch, access: MemberAccess) {
+		addedTeams.set(team.id, team);
+		if (!teamOrder.value.includes(team.id)) teamOrder.value = [...teamOrder.value, team.id];
+		choose(TEAM + team.id, access);
+	}
+
+	/** A row's choice: a person's id, or a team's key. */
+	function choose(key: string, access: MemberAccess | null) {
+		wanted.set(key, { value: access, number: ++numbers });
+		enqueue(key);
 	}
 
 	function setGeneral(value: OrgAccess) {
@@ -129,8 +153,10 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 		running = false;
 	}
 
-	function savedAccess(userId: string) {
-		return saved.value.members?.find((member: Member) => member.id === userId)?.access ?? null;
+	function savedAccess(key: string) {
+		const teamId = teamIdOf(key);
+		if (teamId !== null) return saved.value.teams?.find((team: WorkspaceTeam) => team.id === teamId)?.access ?? null;
+		return saved.value.members?.find((member: Member) => member.id === key)?.access ?? null;
 	}
 
 	async function write(key: string) {
@@ -147,7 +173,8 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 			// The choices this answers give way to the server's state; a newer one stays, and is queued.
 			forget(key, choice.number);
 			events.saved(answer);
-			if (answer.access === "none" || !answer.canShare) end(answer, key === me ? "self" : "changed");
+			// A change to their own row, or to a team they may be in, took it themselves.
+			if (answer.access === "none" || !answer.canShare) end(answer, key === me || teamIdOf(key) !== null ? "self" : "changed");
 		} catch (error) {
 			if (stopped) return;
 			// Gone for the person: nothing queued can be saved, newer choices or not.
@@ -182,6 +209,8 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 
 	function send(key: string, value: MemberAccess | OrgAccess | null) {
 		if (key === GENERAL) return api.setOrgAccess(value === "ask" ? "ask" : "none");
+		const teamId = teamIdOf(key);
+		if (teamId !== null) return value === null ? api.removeTeam(teamId) : api.setTeam(teamId, value === "edit" ? "edit" : "ask");
 		if (value === null) return api.removeMember(key);
 		return api.setMember(key, value === "edit" ? "edit" : "ask");
 	}
@@ -212,10 +241,16 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 	function failure(key: string, value: MemberAccess | OrgAccess | null, before: MemberAccess | null, error: unknown) {
 		const why = error instanceof ApiError && error.status < 500 ? error.message : "Try again.";
 		if (key === GENERAL) return `General access could not be changed. ${why}`;
-		const person = saved.value.members?.find((member: Member) => member.id === key) ?? added.get(key);
-		const name = person ? displayName(person.name, person.email) : "This person";
+		const name = rowName(key);
 		if (value === null) return `${name} could not be removed. ${why}`;
 		return before === null ? `${name} could not be added. ${why}` : `${name}'s role could not be changed. ${why}`;
+	}
+
+	function rowName(key: string) {
+		const teamId = teamIdOf(key);
+		if (teamId !== null) return (saved.value.teams?.find((team: WorkspaceTeam) => team.id === teamId) ?? addedTeams.get(teamId))?.name ?? "This team";
+		const person = saved.value.members?.find((member: Member) => member.id === key) ?? added.get(key);
+		return person ? displayName(person.name, person.email) : "This person";
 	}
 
 	function busy() {
@@ -230,10 +265,14 @@ function createSession(initial: WorkspaceDetail, firstApi: SharingApi, firstEven
 	const view = {
 		saved,
 		members,
+		teams,
 		orgAccess,
 		add,
 		setRole: (userId: string, access: MemberAccess) => choose(userId, access),
 		remove: (userId: string) => choose(userId, null),
+		addTeam,
+		setTeamRole: (teamId: string, access: MemberAccess) => choose(TEAM + teamId, access),
+		removeTeam: (teamId: string) => choose(TEAM + teamId, null),
 		setGeneral,
 	};
 	const session = { view, busy, attach };

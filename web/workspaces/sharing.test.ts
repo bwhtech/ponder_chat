@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api";
 import { useSharing, type SharingApi } from "./sharing";
-import type { Member, MemberAccess, OrgAccess, WorkspaceDetail } from "./store";
+import type { Member, MemberAccess, OrgAccess, WorkspaceDetail, WorkspaceTeam } from "./store";
 
 const owner = { id: "ana", name: "Ana", email: "ana@example.test" };
 const bea = { id: "bea", name: "Bea", email: "bea@example.test" };
 const cal = { id: "cal", name: "Cal", email: "cal@example.test" };
+const hr = { id: "hr", name: "HR", memberCount: 12 };
+const ops = { id: "ops", name: "Ops", memberCount: 3 };
 let workspaces = 0;
 
 function detail(members: Member[], orgAccess: OrgAccess = "none", changes: Partial<WorkspaceDetail> = {}): WorkspaceDetail {
@@ -18,6 +20,7 @@ function detail(members: Member[], orgAccess: OrgAccess = "none", changes: Parti
 		icon: null,
 		access: "owner",
 		memberCount: members.length,
+		teamCount: 0,
 		createdAt: "2026-11-18T10:00:00.000000Z",
 		updatedAt: "2026-11-18T10:00:00.000Z",
 		instructions: "",
@@ -26,6 +29,7 @@ function detail(members: Member[], orgAccess: OrgAccess = "none", changes: Parti
 		canDelete: true,
 		canChangeOrgAccess: true,
 		members,
+		teams: [],
 		documents: [],
 		...changes,
 	};
@@ -39,9 +43,10 @@ function detail(members: Member[], orgAccess: OrgAccess = "none", changes: Parti
 function fakeServer(start: WorkspaceDetail) {
 	let members = [...(start.members ?? [])];
 	let orgAccess = start.orgAccess;
+	let teams: WorkspaceTeam[] = [...(start.teams ?? [])];
 	const sent: string[] = [];
 	const waiting: { answer: (answer?: WorkspaceDetail) => void; refuse: (error: Error) => void }[] = [];
-	const now = () => ({ ...start, ...detail(members, orgAccess), id: start.id });
+	const now = () => ({ ...start, ...detail(members, orgAccess), teams, id: start.id });
 	const request = (line: string, change: () => void) =>
 		new Promise<WorkspaceDetail>((resolve, reject) => {
 			sent.push(line);
@@ -65,6 +70,12 @@ function fakeServer(start: WorkspaceDetail) {
 				}),
 			removeMember: (userId: string) => request(`DELETE ${userId}`, () => (members = members.filter((member) => member.id !== userId))),
 			setOrgAccess: (value: OrgAccess) => request(`ACCESS ${value}`, () => (orgAccess = value)),
+			setTeam: (teamId: string, access: MemberAccess) =>
+				request(`TEAM ${teamId} ${access}`, () => {
+					const team = [hr, ops].find((each) => each.id === teamId)!;
+					teams = [...teams.filter((each) => each.id !== teamId), { ...team, access, archived: false }];
+				}),
+			removeTeam: (teamId: string) => request(`TEAM ${teamId} removed`, () => (teams = teams.filter((each) => each.id !== teamId))),
 			refresh: () => refresh.answer(),
 		} satisfies SharingApi,
 		/** Settles the oldest request still waiting, then lets the next one go out. */
@@ -83,6 +94,7 @@ function fakeServer(start: WorkspaceDetail) {
 			await settle();
 		},
 		saved: () => members.map((member) => `${member.id}:${member.access}`),
+		savedTeams: () => teams.map((team) => `${team.id}:${team.access}`),
 	};
 }
 
@@ -105,7 +117,8 @@ function openShare(start: WorkspaceDetail, server: ReturnType<typeof fakeServer>
 		me,
 	);
 	const shown = () => sharing.members.value.map((member) => `${member.id}:${member.access}`);
-	return { sharing, said, answers, ended, shown };
+	const shownTeams = () => sharing.teams.value.map((team) => `${team.id}:${team.access}${team.archived ? ":archived" : ""}`);
+	return { sharing, said, answers, ended, shown, shownTeams };
 }
 
 /** A workspace of the test's own (the queues are kept by workspace), its server, and Share open on it. */
@@ -284,5 +297,48 @@ describe("Share applies each change at once", () => {
 		await gone.server.next(new ApiError("Not found", 404));
 		expect(gone.ended).toEqual(["gone"]);
 		expect(gone.said).toEqual([]);
+	});
+});
+
+describe("Share applies each change to a team at once", () => {
+	it("shows a team at once, in the order added, in the same queue as people", async () => {
+		const { sharing, server, shownTeams, shown } = setup();
+		sharing.addTeam(hr, "ask");
+		sharing.add(bea, "ask");
+		sharing.addTeam(ops, "edit");
+		expect(shownTeams()).toEqual(["hr:ask", "ops:edit"]);
+		expect(shown()).toEqual(["bea:ask"]);
+		await server.next();
+		await server.next();
+		await server.next();
+		expect(server.sent).toEqual(["TEAM hr ask", "PUT bea ask", "TEAM ops edit"]);
+		expect(server.savedTeams()).toEqual(["hr:ask", "ops:edit"]);
+		expect(shownTeams()).toEqual(["hr:ask", "ops:edit"]);
+	});
+
+	it("changes a team's role and removes it, sending only the last choice", async () => {
+		const { sharing, server, shownTeams } = setup(detail([], "none", { teams: [{ ...hr, access: "ask", archived: false }] }));
+		sharing.setTeamRole("hr", "edit");
+		sharing.setTeamRole("hr", "ask");
+		sharing.removeTeam("hr");
+		expect(shownTeams()).toEqual([]);
+		await server.next();
+		await server.next();
+		expect(server.sent).toEqual(["TEAM hr edit", "TEAM hr removed"]);
+		expect(server.savedTeams()).toEqual([]);
+	});
+
+	it("takes a refused team change back and names the team; an archived grant stays as it is", async () => {
+		const archived = { ...ops, access: "ask" as const, archived: true };
+		const { sharing, server, said, shownTeams } = setup(detail([], "none", { teams: [archived] }));
+		expect(shownTeams()).toEqual(["ops:ask:archived"]);
+		sharing.addTeam(hr, "ask");
+		await server.next(new ApiError("This team is archived, so it can't be added.", 403));
+		expect(shownTeams()).toEqual(["ops:ask:archived"]);
+		expect(said).toEqual(["HR could not be added. This team is archived, so it can't be added."]);
+		sharing.removeTeam("ops");
+		await server.next(new ApiError("Down", 500));
+		expect(said.at(-1)).toBe("Ops could not be removed. Try again.");
+		expect(shownTeams()).toEqual(["ops:ask:archived"]);
 	});
 });

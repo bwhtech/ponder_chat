@@ -16,6 +16,7 @@ function workspace(changes: Partial<WorkspaceDetail> = {}): WorkspaceDetail {
 		icon: null,
 		access: "owner",
 		memberCount: 0,
+		teamCount: 0,
 		updatedAt: "2026-11-18T10:00:00.000Z",
 		instructions: "",
 		owner,
@@ -24,6 +25,7 @@ function workspace(changes: Partial<WorkspaceDetail> = {}): WorkspaceDetail {
 		canChangeOrgAccess: false,
 		createdAt: "2026-11-18T10:00:00.000Z",
 		members: [],
+		teams: [],
 		documents: [],
 		...changes,
 	};
@@ -68,7 +70,7 @@ describe("a new workspace's setup steps", () => {
 });
 
 describe("who can use a workspace, in a word and an icon", () => {
-	const summary = (orgAccess: "none" | "ask", access: string, memberCount: number) => ({ orgAccess, access, memberCount });
+	const summary = (orgAccess: "none" | "ask", access: string, memberCount: number, teamCount = 0) => ({ orgAccess, access, memberCount, teamCount });
 
 	it("is open to everyone, shared, or the owner's alone", () => {
 		expect(accessIcon(summary("ask", "ask", 0))).toBe("lucide-building-2");
@@ -80,5 +82,12 @@ describe("who can use a workspace, in a word and an icon", () => {
 		expect(sharedWith(summary("none", "owner", 1))).toBe("You and 1 person");
 		expect(sharedWith(summary("none", "owner", 0))).toBe("Only you");
 		expect([isShared(summary("ask", "owner", 0)), isShared(summary("none", "owner", 1)), isShared(summary("none", "owner", 0))]).toEqual([true, true, false]);
+	});
+
+	it("counts the teams added as sharing it", () => {
+		expect(accessIcon(summary("none", "owner", 0, 1))).toBe("lucide-users");
+		expect(sharedWith(summary("none", "owner", 0, 1))).toBe("You and 1 team");
+		expect(sharedWith(summary("none", "owner", 2, 3))).toBe("You, 2 people and 3 teams");
+		expect(isShared(summary("none", "owner", 0, 2))).toBe(true);
 	});
 });

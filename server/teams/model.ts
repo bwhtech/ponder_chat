@@ -25,6 +25,9 @@ export type TeamSummary = {
 	archived: boolean;
 };
 
+/** A team in the share picker (GET /api/teams?q=): for every signed-in person, so never its members. */
+export type TeamMatch = { id: string; name: string; memberCount: number };
+
 export type TeamMember = { id: string; name: string; email: string; role: TeamRole; addedAt: string };
 export type TeamInvite = { email: string; role: TeamRole; invitedBy: string; createdAt: string };
 

@@ -92,6 +92,18 @@ export const workspacesApi = new Hono<Env>()
 		route(c, Effect.map(workspaces((service) => service.removeMember(actorOf(c), c.req.param("id"), c.req.param("userId"))), (workspace) => c.json({ workspace })), sharingErrors),
 	)
 
+	// A team, at Can ask or Can edit: every member of the team has it while the team is active.
+	.put("/:id/teams/:teamId", body(memberBody), (c) =>
+		route(c, Effect.map(workspaces((service) => service.setTeam(actorOf(c), c.req.param("id"), c.req.param("teamId"), c.req.valid("json").access)), (workspace) => c.json({ workspace })), {
+			...sharingErrors,
+			TeamNotFound: (_, c) => c.json({ error: "Not found" }, 404),
+		}),
+	)
+
+	.delete("/:id/teams/:teamId", (c) =>
+		route(c, Effect.map(workspaces((service) => service.removeTeam(actorOf(c), c.req.param("id"), c.req.param("teamId"))), (workspace) => c.json({ workspace })), sharingErrors),
+	)
+
 	// General access: everyone in the organisation can ask ("ask"), or only the people added ("none").
 	.put("/:id/access", body(orgAccessBody), (c) =>
 		route(c, Effect.map(workspaces((service) => service.setOrgAccess(actorOf(c), c.req.param("id"), c.req.valid("json").orgAccess)), (workspace) => c.json({ workspace })), sharingErrors),

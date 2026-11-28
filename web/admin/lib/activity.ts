@@ -150,7 +150,36 @@ function sharingChanges(before: Fields, after: Fields) {
 		changed("General access", general(before), general(after)),
 		members(before) === members(after) ? "" : `Members: ${count(members(before))} → ${count(members(after))}`,
 		members(before) === members(after) && roles(before) !== roles(after) ? "A member's role changed" : "",
+		...teamChanges(before, after),
 	].filter(Boolean);
+}
+
+/** The teams added, removed or given another role, by name. Events from before teams have no `teams`. */
+function teamChanges(before: Fields, after: Fields) {
+	const old = new Map(teamsOf(before).map((team) => [team.id, team]));
+	const now = new Map(teamsOf(after).map((team) => [team.id, team]));
+	const added = [...now.values()].filter((team) => !old.has(team.id)).map((team) => `Added the team ${team.name} (${accessName(team.access)})`);
+	const removed = [...old.values()].filter((team) => !now.has(team.id)).map((team) => `Removed the team ${team.name}`);
+	const changedRole = [...now.values()].flatMap((team) => {
+		const was = old.get(team.id);
+		return was && was.access !== team.access ? [`Team ${team.name}: ${accessName(was.access)} → ${accessName(team.access)}`] : [];
+	});
+	return [...added, ...changedRole, ...removed];
+}
+
+type TeamGrant = { id: string; name: string; access: string };
+
+function teamsOf(fields: Fields): TeamGrant[] {
+	if (!Array.isArray(fields.teams)) return [];
+	return fields.teams.flatMap((raw: unknown) => {
+		if (typeof raw !== "object" || raw === null) return [];
+		const { id, name, access } = raw as Record<string, unknown>;
+		return typeof id === "string" && typeof name === "string" && typeof access === "string" ? [{ id, name, access }] : [];
+	});
+}
+
+function accessName(access: string) {
+	return access === "edit" ? "can edit" : "can ask";
 }
 
 /** The logo's theme (server/branding/Branding.ts). */
