@@ -41,8 +41,7 @@ export const migrateTeams = (sql: PgClient.PgClient) =>
 				primary key (team_id, email)
 			)`;
 		yield* sql`create index if not exists team_invites_email on team_invites (email)`;
-		// True when only team invites put the email in allowed_emails. An org admin's own invite sets it to false.
-		yield* sql`alter table allowed_emails add column if not exists team_only boolean not null default false`;
+		// allowed_emails.team_only is made by people/Invites.ts, which owns that table.
 		yield* sql`
 			create table if not exists workspace_teams (
 				workspace_id text not null references workspaces (id) on delete cascade,

@@ -32,7 +32,8 @@ const SummaryRow = Schema.Struct({
 const TeamRow = Schema.Struct({ id: Schema.String, name: Schema.String, description: Schema.String, archived: Schema.Boolean, created_at: Schema.Date });
 const MemberRow = Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String, role: RoleSchema, added_at: Schema.Date });
 const InviteRow = Schema.Struct({ email: Schema.String, role: RoleSchema, invited_by: Schema.String, created_at: Schema.Date });
-const PersonRow = Schema.Struct({ banned: Schema.Boolean, role: Schema.NullOr(RoleSchema) });
+const PersonRow = Schema.Struct({ email: Schema.String, banned: Schema.Boolean, role: Schema.NullOr(RoleSchema) });
+const NameRow = Schema.Struct({ name: Schema.String, email: Schema.String });
 
 export type FactsRow = typeof FactsRow.Type;
 export type SummaryRow = typeof SummaryRow.Type;
@@ -43,6 +44,8 @@ export type InviteRow = typeof InviteRow.Type;
 export type Rows = {
 	/** The team and the person's role in it; none when there is no such team. */
 	facts: (request: { userId: string; teamId: string }) => Effect.Effect<Option.Option<FactsRow>, SqlError>;
+	/** Whether the person is a team admin of an active team. */
+	adminsActiveTeam: (userId: string) => Effect.Effect<boolean, SqlError>;
 	/** Every team, or only the active ones that the person admins: active first, then by name. */
 	summaries: (request: { adminOf: string | null }) => Effect.Effect<ReadonlyArray<SummaryRow>, SqlError>;
 	team: (teamId: string) => Effect.Effect<Option.Option<TeamRow>, SqlError>;
@@ -50,8 +53,10 @@ export type Rows = {
 	members: (teamId: string) => Effect.Effect<ReadonlyArray<MemberRow>, SqlError>;
 	/** Oldest first. */
 	invites: (teamId: string) => Effect.Effect<ReadonlyArray<InviteRow>, SqlError>;
-	/** A person with an account: whether they are banned, and their role in the team. None without an account. */
+	/** A person with an account: their email, whether they are banned, and their role in the team. None without an account. */
 	person: (request: { userId: string; teamId: string }) => Effect.Effect<Option.Option<typeof PersonRow.Type>, SqlError>;
+	/** A person's name ('' when they set none) and email, for an email that names them. */
+	name: (userId: string) => Effect.Effect<Option.Option<typeof NameRow.Type>, SqlError>;
 };
 
 const ADMIN_COUNT = "(select count(*)::int from team_members a where a.team_id = t.id and a.role = 'admin')";
@@ -109,18 +114,31 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 		Request: Schema.Struct({ userId: Schema.String, teamId: Schema.String }),
 		Result: PersonRow,
 		execute: ({ userId, teamId }) => sql`
-			select u.banned is true as banned, m.role
+			select u.email, u.banned is true as banned, m.role
 			from users u left join team_members m on m.user_id = u.id and m.team_id = ${teamId}
 			where u.id = ${userId}`,
 	});
 
+	const name = SqlSchema.findOneOption({
+		Request: Schema.String,
+		Result: NameRow,
+		execute: (userId) => sql`select coalesce(name, '') as name, email from users where id = ${userId}`,
+	});
+	const adminsActiveTeam = (userId: string) =>
+		Effect.map(
+			sql`select 1 from team_members m join teams t on t.id = m.team_id where m.user_id = ${userId} and m.role = 'admin' and t.archived_at is null limit 1`,
+			(found) => found.length > 0,
+		);
+
 	const decoded = <A, E, R>(effect: Effect.Effect<A, E | Schema.SchemaError, R>) => effect.pipe(Effect.catchTags({ SchemaError: Effect.die }));
 	return {
 		facts: (request) => decoded(facts(request)),
+		adminsActiveTeam,
 		summaries: (request) => decoded(summaries(request)),
 		team: (teamId) => decoded(team(teamId)),
 		members: (teamId) => decoded(members(teamId)),
 		invites: (teamId) => decoded(invites(teamId)),
 		person: (request) => decoded(person(request)),
+		name: (userId) => decoded(name(userId)),
 	};
 }

@@ -2,90 +2,14 @@
  * Teams through their HTTP routes (routes.ts, under /api/admin), on a real Postgres
  * (TEST_DATABASE_URL), in a schema of their own that the last step drops: who makes and
  * changes a team, who is in it with which role, the last-admin rule, and the activity log.
- * The routes run behind a stand-in for the session check of app.ts, which takes the
- * person from a header.
+ * The app and the people are in test-app.ts.
  */
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
-import * as PgClient from "@effect/sql-pg/PgClient";
-import * as Effect from "effect/Effect";
-import { Hono } from "hono";
-import type { SignedInEnv } from "../auth.ts";
-import { jsonBody } from "../test-json.ts";
-import { base, USERS_TABLE, useTestSchema } from "../workspaces/test-env.ts";
-import type { Actor, TeamDetail, Teams as TeamsService, TeamSummary } from "./Teams.ts";
-
-const tag = Math.random().toString(36).slice(2, 10);
-const schema = `test_teams_${tag}`;
-useTestSchema(schema);
-
-const { runPromise, dispose } = await import("../runtime/runtime.ts");
-const Threads = await import("../threads/Threads.ts");
-const AdminEvents = await import("../admin/AdminEvents.ts");
-const Invites = await import("../people/Invites.ts");
-const Runs = await import("../telemetry/Runs.ts");
-const Workspaces = await import("../workspaces/Workspaces.ts");
-const Teams = await import("./Teams.ts");
-const { adminApi } = await import("../admin/routes.ts");
-
-/** The people: two org admins and five others, one of them banned. */
-const who = { boss: `boss-${tag}`, boss2: `boss2-${tag}`, ana: `ana-${tag}`, bob: `bob-${tag}`, cy: `cy-${tag}`, dan: `dan-${tag}`, eve: `eve-${tag}` } as const;
-type Who = keyof typeof who;
-
-const app = new Hono<SignedInEnv>()
-	.use("*", async (c, next) => {
-		const id = c.req.header("x-test-user")!;
-		c.set("user", { id, email: `${id}@example.invalid`, name: id } as SignedInEnv["Variables"]["user"]);
-		await next();
-	})
-	.route("/api/admin", adminApi);
-
-type One = { team: TeamDetail };
-type List = { teams: TeamSummary[] };
-type Refusal = { error: string };
-async function call<Body = unknown>(person: Who, method: string, path: string, json?: unknown): Promise<{ status: number; body: Body }> {
-	const headers: Record<string, string> = { "x-test-user": who[person] };
-	if (json !== undefined) headers["Content-Type"] = "application/json";
-	const response = await app.request(path, { method, headers, body: json === undefined ? undefined : JSON.stringify(json) });
-	return { status: response.status, body: await jsonBody<Body>(response) };
-}
-const database = <A>(work: (sql: PgClient.PgClient) => Effect.Effect<A, unknown>) => runPromise(PgClient.PgClient.use(work).pipe(Effect.orDie));
-
-const create = (by: Who, name: string, admin: Who, description = "") =>
-	call<One & Refusal>(by, "POST", "/api/admin/teams", { name, description, adminUserId: who[admin] });
-const setMember = (by: Who, teamId: string, person: Who | string, role: "member" | "admin" | "owner") =>
-	call<One & Refusal>(by, "PUT", `/api/admin/teams/${teamId}/members/${person in who ? who[person as Who] : person}`, { role });
-const removeMember = (by: Who, teamId: string, person: Who) => call<One & Refusal>(by, "DELETE", `/api/admin/teams/${teamId}/members/${who[person]}`);
-const roles = (team: TeamDetail): string[][] => team.members.map((member) => [member.id, member.role]);
+import { base, call, create, database, type List, type One, type Refusal, removeMember, roles, setMember, setUp, tag, tearDown, who } from "./test-app.ts";
 
 describe.skipIf(!base)("teams through their routes", () => {
-	beforeAll(async () => {
-		await database((sql) =>
-			Effect.gen(function* () {
-				yield* sql.unsafe(`create schema if not exists ${schema}`);
-				yield* sql.unsafe(USERS_TABLE);
-				for (const person of Object.keys(who) as Who[]) {
-					yield* sql`insert into users (id, name, email, role, banned) values (${who[person]}, ${person}, ${`${person}-${tag}@example.invalid`}, ${person.startsWith("boss") ? "admin" : "user"}, ${person === "eve"})`;
-				}
-			}),
-		);
-		await runPromise(
-			Effect.gen(function* () {
-				yield* Threads.Threads.use((threads) => threads.migrate);
-				yield* AdminEvents.AdminEvents.use((events) => events.migrate);
-				yield* Runs.Runs.use((runs) => runs.migrate);
-				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
-				yield* Invites.Invites.use((invites) => invites.migrate);
-				yield* Teams.Teams.use((teams) => teams.migrate);
-				// Twice, without a change.
-				yield* Teams.Teams.use((teams) => teams.migrate);
-			}),
-		);
-	});
-
-	afterAll(async () => {
-		if (base) await database((sql) => sql.unsafe(`drop schema if exists ${schema} cascade`));
-		await dispose();
-	});
+	beforeAll(setUp);
+	afterAll(tearDown);
 
 	it("lets an org admin make a team with its first team admin, and lists it", async () => {
 		const made = await create("boss", "  Human resources ", "ana", "People and pay");
@@ -121,20 +45,26 @@ describe.skipIf(!base)("teams through their routes", () => {
 		assert.notInclude(names, "Ghosts");
 	});
 
-	it("answers 403 to people who are not org admins, team admins too, on every team route", async () => {
+	it("answers 403 on every team route to people who admin no team: a member, and someone in no team", async () => {
 		const team = (await create("boss", "Guarded", "ana")).body.team.id;
+		await setMember("boss", team, "fay", "member");
 		const routes: [string, string, unknown?][] = [
 			["GET", "/api/admin/teams"],
-			["POST", "/api/admin/teams", { name: "Mine", adminUserId: who.ana }],
+			["POST", "/api/admin/teams", { name: "Mine", adminUserId: who.fay }],
 			["GET", `/api/admin/teams/${team}`],
 			["PATCH", `/api/admin/teams/${team}`, { name: "Renamed" }],
-			["PUT", `/api/admin/teams/${team}/members/${who.bob}`, { role: "member" }],
+			["PUT", `/api/admin/teams/${team}/members/${who.gus}`, { role: "member" }],
 			["DELETE", `/api/admin/teams/${team}/members/${who.ana}`],
+			["POST", `/api/admin/teams/${team}/invites`, { email: "new@example.invalid", role: "member" }],
+			["DELETE", `/api/admin/teams/${team}/invites/new@example.invalid`],
 		];
-		for (const person of ["ana", "bob"] as const) {
+		for (const person of ["fay", "gus"] as const) {
 			for (const [method, path, json] of routes) assert.strictEqual((await call(person, method, path, json)).status, 403, `${person} ${method} ${path}`);
 		}
-		assert.deepStrictEqual(roles((await call<One>("boss", "GET", `/api/admin/teams/${team}`)).body.team), [[who.ana, "admin"]], "nothing changed");
+		assert.deepStrictEqual(roles((await call<One>("boss", "GET", `/api/admin/teams/${team}`)).body.team), [
+			[who.ana, "admin"],
+			[who.fay, "member"],
+		], "nothing changed");
 	});
 
 	it("lets an org admin add people with a role, change roles and remove people, never a banned person", async () => {
@@ -210,51 +140,49 @@ describe.skipIf(!base)("teams through their routes", () => {
 		const renamed = await call<One>("boss", "PATCH", `/api/admin/teams/${team}`, { name: "LEGAL" });
 		assert.deepInclude(renamed.body.team, { name: "LEGAL" }, "its own name, in another case");
 	});
-	/**
-	 * Team admins reach the service only from ticket 2's /api/admin guard on. Until then, these
-	 * call the service as the routes will.
-	 */
-	describe("a team admin, through the service", () => {
-		const actor = (person: Who): Actor => ({ id: who[person], email: `${person}@example.invalid` });
-		const service = <A, E>(use: (teams: TeamsService["Service"]) => Effect.Effect<A, E>) => runPromise(Teams.Teams.use(use));
-		const attempt = <A, E>(use: (teams: TeamsService["Service"]) => Effect.Effect<A, E>) =>
-			runPromise(Teams.Teams.use(use).pipe(Effect.match({ onSuccess: () => "ok", onFailure: (error) => (error instanceof Teams.TeamRefused ? error.reason : String(error)) })));
+	describe("a team admin", () => {
+		const outcome = (answer: { status: number; body: Refusal }) => (answer.status === 200 ? "ok" : `${answer.status} ${answer.body.error}`);
+		const LAST_ADMIN = "403 A team needs at least one team admin. Make someone else a team admin first.";
+		const NEEDS_TEAM_ADMIN = "403 Only this team's admins and org admins can do this.";
+		const NEEDS_ORG_ADMIN = "403 Only org admins can do this.";
 
 		it("manages the people of their own team, but never leaves it without a team admin", async () => {
-			const team = (await service((teams) => teams.create(actor("boss"), { name: `Ops ${tag}`, description: "", adminUserId: who.ana }))).id;
-			assert.strictEqual(await attempt((teams) => teams.setMember(actor("ana"), team, who.bob, "member")), "ok");
-			assert.strictEqual(await attempt((teams) => teams.setMember(actor("ana"), team, who.ana, "member")), "last-admin", "demotes themselves");
-			assert.strictEqual(await attempt((teams) => teams.removeMember(actor("ana"), team, who.ana)), "last-admin", "removes themselves");
-			assert.strictEqual(await attempt((teams) => teams.setMember(actor("ana"), team, who.bob, "admin")), "ok");
-			assert.strictEqual(await attempt((teams) => teams.removeMember(actor("ana"), team, who.ana)), "ok", "another admin stays");
-			assert.strictEqual(await attempt((teams) => teams.removeMember(actor("bob"), team, who.bob)), "last-admin");
-			const detail = await service((teams) => teams.get(actor("bob"), team));
-			assert.deepInclude(detail, { canOrganise: false, canChangePeople: true });
+			const team = (await create("boss", `Ops ${tag}`, "ana")).body.team.id;
+			assert.strictEqual(outcome(await setMember("ana", team, "bob", "member")), "ok");
+			assert.strictEqual(outcome(await setMember("ana", team, "ana", "member")), LAST_ADMIN, "demotes themselves");
+			assert.strictEqual(outcome(await removeMember("ana", team, "ana")), LAST_ADMIN, "removes themselves");
+			assert.strictEqual(outcome(await setMember("ana", team, "bob", "admin")), "ok");
+			assert.strictEqual(outcome(await removeMember("ana", team, "ana")), "ok", "another admin stays");
+			assert.strictEqual(outcome(await removeMember("bob", team, "bob")), LAST_ADMIN);
+			const detail = await call<One>("bob", "GET", `/api/admin/teams/${team}`);
+			assert.deepInclude(detail.body.team, { canOrganise: false, canChangePeople: true });
 		});
 
 		it("refuses members, other teams' admins and the org-admin actions", async () => {
-			const team = (await service((teams) => teams.create(actor("boss"), { name: `Desk ${tag}`, description: "", adminUserId: who.ana }))).id;
-			await service((teams) => teams.setMember(actor("ana"), team, who.bob, "member"));
-			const other = (await service((teams) => teams.create(actor("boss"), { name: `Other ${tag}`, description: "", adminUserId: who.cy }))).id;
-			assert.strictEqual(await attempt((teams) => teams.setMember(actor("bob"), team, who.dan, "member")), "needs-team-admin", "a member");
-			assert.strictEqual(await attempt((teams) => teams.get(actor("bob"), team)), "needs-team-admin", "a member in /admin");
-			assert.strictEqual(await attempt((teams) => teams.setMember(actor("cy"), team, who.dan, "member")), "needs-team-admin", "another team's admin");
-			assert.strictEqual(await attempt((teams) => teams.get(actor("ana"), other)), "needs-team-admin");
-			assert.strictEqual(await attempt((teams) => teams.update(actor("ana"), team, { name: "Mine now" })), "needs-org-admin");
-			assert.strictEqual(await attempt((teams) => teams.create(actor("ana"), { name: "Another", description: "", adminUserId: who.ana })), "needs-org-admin");
-			const listed = (await service((teams) => teams.list(actor("ana")))).map((each) => each.id);
+			const team = (await create("boss", `Desk ${tag}`, "ana")).body.team.id;
+			await setMember("ana", team, "bob", "member");
+			const other = (await create("boss", `Other ${tag}`, "cy")).body.team.id;
+			assert.strictEqual(outcome(await setMember("bob", team, "dan", "member")), NEEDS_TEAM_ADMIN, "a member");
+			assert.strictEqual(outcome(await call<Refusal>("bob", "GET", `/api/admin/teams/${team}`)), NEEDS_TEAM_ADMIN, "a member in /admin");
+			assert.strictEqual(outcome(await setMember("cy", team, "dan", "member")), NEEDS_TEAM_ADMIN, "another team's admin");
+			assert.strictEqual(outcome(await removeMember("cy", team, "ana")), NEEDS_TEAM_ADMIN, "another team's admin");
+			assert.strictEqual(outcome(await call<Refusal>("ana", "GET", `/api/admin/teams/${other}`)), NEEDS_TEAM_ADMIN);
+			assert.strictEqual(outcome(await call<Refusal>("ana", "PATCH", `/api/admin/teams/${team}`, { name: "Mine now" })), NEEDS_ORG_ADMIN);
+			assert.strictEqual(outcome(await create("ana", "Another", "ana")), NEEDS_ORG_ADMIN);
+			const listed = (await call<List>("ana", "GET", "/api/admin/teams")).body.teams.map((each) => each.id);
 			assert.include(listed, team);
 			assert.notInclude(listed, other, "only the teams they admin");
 		});
 
-		it("changes nothing in an archived team", async () => {
-			const team = (await service((teams) => teams.create(actor("boss"), { name: `Shelf ${tag}`, description: "", adminUserId: who.ana }))).id;
+		it("changes nothing in an archived team, and no longer sees it", async () => {
+			const team = (await create("boss", `Shelf ${tag}`, "ana")).body.team.id;
 			await database((sql) => sql`update teams set archived_at = now() where id = ${team}`);
-			assert.strictEqual(await attempt((teams) => teams.setMember(actor("boss"), team, who.bob, "member")), "archived");
-			assert.strictEqual(await attempt((teams) => teams.setMember(actor("ana"), team, who.bob, "member")), "archived");
-			assert.strictEqual(await attempt((teams) => teams.update(actor("boss"), team, { name: "Dusty" })), "archived");
-			assert.notInclude((await service((teams) => teams.list(actor("ana")))).map((each) => each.id), team, "not in a team admin's list");
-			assert.deepInclude((await service((teams) => teams.list(actor("boss")))).find((each) => each.id === team), { archived: true });
+			const archived = "403 This team is archived. Restore it to change it.";
+			assert.strictEqual(outcome(await setMember("boss", team, "bob", "member")), archived);
+			assert.strictEqual(outcome(await setMember("ana", team, "bob", "member")), archived);
+			assert.strictEqual(outcome(await call<Refusal>("boss", "PATCH", `/api/admin/teams/${team}`, { name: "Dusty" })), archived);
+			assert.notInclude((await call<List>("ana", "GET", "/api/admin/teams")).body.teams.map((each) => each.id), team, "not in a team admin's list");
+			assert.deepInclude((await call<List>("boss", "GET", "/api/admin/teams")).body.teams.find((each) => each.id === team), { archived: true });
 		});
 	});
 });

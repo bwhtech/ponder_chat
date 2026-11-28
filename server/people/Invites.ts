@@ -31,7 +31,10 @@ export class Invites extends Context.Service<
 		/** Creates and updates the `allowed_emails` table. */
 		readonly migrate: Effect.Effect<void, SqlError>;
 		readonly isAllowed: (email: string) => Effect.Effect<boolean, SqlError>;
-		/** Invites an email, or updates the note of one invited before. */
+		/**
+		 * Invites an email, or updates the note of one invited before. An email that only
+		 * teams invited becomes this invite: its inviter and its daily limit.
+		 */
 		readonly allow: (email: string, invite?: Invite) => Effect.Effect<void, SqlError>;
 		/** Sets the daily limit an invited person starts with; null for the default. False when the email was not invited. */
 		readonly setInviteCredits: (email: string, credits: number | null) => Effect.Effect<boolean, SqlError>;
@@ -46,7 +49,7 @@ export class Invites extends Context.Service<
 		readonly disallow: (email: string) => Effect.Effect<boolean, SqlError>;
 		/** Whether this lowercase email was invited. */
 		readonly invited: (email: string) => Effect.Effect<boolean, SqlError>;
-		/** Of these lowercase emails, those invited already or with an account. */
+		/** Of these lowercase emails, those invited already (not by teams only) or with an account. */
 		readonly taken: (emails: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<string>, SqlError>;
 		/** Invites that have no account yet, for the sidebar's count. */
 		readonly waiting: Effect.Effect<number, SqlError>;
@@ -72,6 +75,8 @@ const make = Effect.gen(function* () {
 		// Who invited them (a user id; null for scripts/invite.ts), and their own daily limit, if any.
 		yield* sql`alter table allowed_emails add column if not exists invited_by text`;
 		yield* sql`alter table allowed_emails add column if not exists daily_credits integer`;
+		// True when only team invites put the email here (teams/Teams.ts). An org admin's own invite sets it to false.
+		yield* sql`alter table allowed_emails add column if not exists team_only boolean not null default false`;
 	});
 
 	const findLimit = SqlSchema.findOneOption({
@@ -83,7 +88,7 @@ const make = Effect.gen(function* () {
 		Request: Schema.Array(Schema.String),
 		Result: EmailRow,
 		execute: (emails) => sql`
-			select email from allowed_emails where email in ${sql.in(emails)}
+			select email from allowed_emails where email in ${sql.in(emails)} and not team_only
 			union select lower(email) from users where lower(email) in ${sql.in(emails)}`,
 	});
 	const countWaiting = SqlSchema.findOne({
@@ -113,7 +118,11 @@ const make = Effect.gen(function* () {
 		yield* sql`
 			insert into allowed_emails (email, note, invited_by, daily_credits)
 			values (${normalize(email)}, ${note}, ${invitedBy}, ${dailyCredits})
-			on conflict (email) do update set note = excluded.note`;
+			on conflict (email) do update set
+				note = excluded.note,
+				invited_by = case when allowed_emails.team_only then excluded.invited_by else allowed_emails.invited_by end,
+				daily_credits = case when allowed_emails.team_only then excluded.daily_credits else allowed_emails.daily_credits end,
+				team_only = false`;
 	});
 
 	const setInviteCredits = Effect.fn("Invites.setInviteCredits")(function* (email: string, credits: number | null) {
