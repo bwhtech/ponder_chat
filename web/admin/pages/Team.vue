@@ -9,7 +9,8 @@ import PersonSearch from "../components/PersonSearch.vue";
 import TeamFormDialog from "../components/TeamFormDialog.vue";
 import EmptyState from "../../EmptyState.vue";
 import { when } from "../../dates";
-import { count } from "../../numbers";
+import { plural } from "../../numbers";
+import { teamRoleName } from "../../../shared/team-role";
 import { teamActions } from "../lib/team-actions";
 import { isMobile } from "../lib/viewport";
 
@@ -82,7 +83,7 @@ const memberIds = computed(() => team.value?.members.map((member) => member.id) 
 const summary = computed(() => {
 	const members = team.value?.members ?? [];
 	const admins = members.filter((member) => member.role === "admin").length;
-	return `${count(members.length)} ${members.length === 1 ? "member" : "members"} · ${count(admins)} ${admins === 1 ? "team admin" : "team admins"}`;
+	return `${plural(members.length, "member")} · ${plural(admins, "team admin")}`;
 });
 
 const nameOf = (person: { name: string; email: string }) => displayName(person.name, person.email);
@@ -92,7 +93,7 @@ async function setRole(person: { id: string; name: string; email: string }, role
 	const id = props.id;
 	try {
 		show(id, (await unwrap(admin.teams[":id"].members[":userId"].$put({ param: param(person), json: { role } }))).team);
-		const as = role === "admin" ? "a team admin" : "a member";
+		const as = teamRoleName(role);
 		toast.success(added ? `Added ${nameOf(person)} as ${as}` : `${nameOf(person)} is now ${as}`);
 	} catch (e) {
 		toast.error((e as Error).message);
@@ -113,7 +114,6 @@ const add = (person: PersonFound) => void setRole(person, newRole.value, true);
 
 const email = ref("");
 const inviting = ref(false);
-const roleName = (role: TeamRole) => (role === "admin" ? "a team admin" : "a member");
 
 async function invite() {
 	const [address, role, id] = [email.value.trim(), newRole.value, props.id];
@@ -122,7 +122,7 @@ async function invite() {
 	try {
 		const answer = await unwrap(admin.teams[":id"].invites.$post({ param: { id: encodeURIComponent(id) }, json: { email: address, role } }));
 		show(id, answer.team);
-		toast.success("added" in answer ? `Added ${address} as ${roleName(role)}` : `Invited ${address} as ${roleName(role)}`);
+		toast.success("added" in answer ? `Added ${address} as ${teamRoleName(role)}` : `Invited ${address} as ${teamRoleName(role)}`);
 		email.value = "";
 	} catch (e) {
 		toast.error((e as Error).message);

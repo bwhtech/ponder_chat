@@ -18,6 +18,7 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import type { SqlError } from "effect/sql/SqlError";
 import { Pool } from "pg";
+import * as AdminEvents from "../admin/AdminEvents.ts";
 import * as PonderConfig from "../config.ts";
 import * as Mailer from "../email/Mailer.ts";
 import { isLocalHost } from "../hosts.ts";
@@ -335,6 +336,7 @@ const make = Effect.gen(function* () {
 	const signInProviders = yield* SignInProviders.SignInProviders;
 	const mailer = yield* Mailer.Mailer;
 	const adminAuthEvents = yield* AdminAuthEvents.AdminAuthEvents;
+	const adminEvents = yield* AdminEvents.AdminEvents;
 	const scope = yield* Effect.scope;
 	// Better Auth calls back from outside Effect: the callbacks run on this layer's services
 	// (the runtime's pool, logger and tracer). A failure rejects, and Better Auth answers it as before.
@@ -344,7 +346,7 @@ const make = Effect.gen(function* () {
 	const callbacks: Callbacks = {
 		isAllowed: (email) => run(invites.isAllowed(email)),
 		// The limit from the invite, and the teams that invited the email (teams/joins.ts).
-		applyInvite: (user) => run(Effect.andThen(invites.applyInvite(user), joinInvitedTeams(sql, user))),
+		applyInvite: (user) => run(Effect.andThen(invites.applyInvite(user), joinInvitedTeams(sql, adminEvents, user))),
 		hasProviderAccount: (userId, providerId) =>
 			run(Effect.map(sql`select 1 from accounts where "userId" = ${userId} and "providerId" = ${providerId} limit 1`, (rows) => rows.length > 0)),
 		isSavedMicrosoft: (revision) => run(signInProviders.isSaved(revision)),

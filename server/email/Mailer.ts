@@ -6,6 +6,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Redacted from "effect/Redacted";
 import * as Schema from "effect/Schema";
+import { teamRoleName } from "../../shared/team-role.ts";
 import * as PonderConfig from "../config.ts";
 
 /**
@@ -86,15 +87,15 @@ export function signInEmail(to: string, code: string, url?: string): Email {
 	};
 }
 
-/** The team an invite is for, and who invited, by name (teams/Teams.ts). */
-export type TeamInvite = { team: string; by: string };
+/** The team an email is about, and who invited or added the person, by name (teams/Teams.ts). */
+export type TeamNotice = { team: string; by: string };
 
 /**
  * An admin invited this email (/admin, People), or a team admin to their team. `url` is
  * Ponder's sign-in page. With `withMicrosoft`, sign-in by email is off and the person signs
  * in with Microsoft.
  */
-export function inviteEmail(to: string, url: string, withMicrosoft = false, team?: TeamInvite): Email {
+export function inviteEmail(to: string, url: string, withMicrosoft = false, team?: TeamNotice): Email {
 	const how = withMicrosoft ? `choose Sign in with Microsoft, and use your work account (${to}).` : `type this email address (${to}), and Ponder Chat sends you a code to sign in.`;
 	const note = withMicrosoft ? "You sign in as you do to Microsoft 365." : "You do not need a password.";
 	const joins = team ? `${team.by} invited you to the team “${team.team}”. You join it when you first sign in.` : "";
@@ -111,8 +112,8 @@ export function inviteEmail(to: string, url: string, withMicrosoft = false, team
 }
 
 /** A team admin or an org admin added a person who has an account to a team (teams/Teams.ts). */
-export function addedToTeamEmail(to: string, url: string, { team, by, admin }: TeamInvite & { admin: boolean }): Email {
-	const added = `You were added to ${team} as ${admin ? "a team admin" : "a member"} by ${by}.`;
+export function addedToTeamEmail(to: string, url: string, { team, by, role }: TeamNotice & { role: string }): Email {
+	const added = `You were added to ${team} as ${teamRoleName(role)} by ${by}.`;
 	return {
 		to,
 		subject: `You were added to ${team}`,

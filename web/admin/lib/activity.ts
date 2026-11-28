@@ -1,5 +1,6 @@
 import { skillTitle } from "../../../shared/skill-file";
 import type { Activity } from "../api";
+import { teamRoleName } from "../../../shared/team-role";
 import { count, plural } from "../../numbers";
 import { credits, date } from "./format";
 import { AUTO_COST_OPTIONS } from "./settings-form";
@@ -95,13 +96,17 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 		text: `Edited the team ${teamName(after)}`,
 		details: [changed("Name", before.name, after.name), before.description !== after.description ? "New description" : ""].filter(Boolean),
 	}),
-	"add-team-member": (_, after) => ({ text: `Added them to ${teamName(after)} as ${roleName(after.role)}`, details: [] }),
-	"set-team-role": (_, after) => ({ text: `Made them ${roleName(after.role)} of ${teamName(after)}`, details: [] }),
+	// At their first sign-in, the person joins each team that invited them (server/teams/joins.ts): they are the actor.
+	"add-team-member": (_, after) => ({
+		text: after.byInvite ? `Joined ${teamName(after)} as ${teamRoleName(after.role)}, by invite` : `Added them to ${teamName(after)} as ${teamRoleName(after.role)}`,
+		details: [],
+	}),
+	"set-team-role": (_, after) => ({ text: `Made them ${teamRoleName(after.role)} of ${teamName(after)}`, details: [] }),
 	"remove-team-member": (before) => ({ text: `Removed them from ${teamName(before)}`, details: [] }),
 	// The target is the email: it has no account yet.
 	"invite-to-team": (before, after) => ({
-		text: `Invited them to ${teamName(after)} as ${roleName(after.role)}`,
-		details: before.role ? [`In place of ${roleName(before.role)}`] : [],
+		text: `Invited them to ${teamName(after)} as ${teamRoleName(after.role)}`,
+		details: before.role ? [`In place of ${teamRoleName(before.role)}`] : [],
 	}),
 	"cancel-team-invite": (before) => ({ text: `Cancelled their invite to ${teamName(before)}`, details: [] }),
 	// No target: about the team, not one person.
@@ -117,10 +122,6 @@ const DESCRIBERS: Record<string, (before: Fields, after: Fields) => Described> =
 /** “HR”, as the team was named then. */
 function teamName(fields: Fields) {
 	return `“${String(fields.name ?? "")}”`;
-}
-
-function roleName(role: unknown) {
-	return role === "admin" ? "a team admin" : "a member";
 }
 
 /** “the workspace “Handbook””, or “a workspace”: the server names a workspace only while it is open to everyone (server/admin/activity.ts). */

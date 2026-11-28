@@ -9,7 +9,7 @@ import { dialogTitle, GENERAL_ACCESS, generalAccessNote, ROLE_LABELS, useFrameFo
 import PeoplePicker from "./PeoplePicker.vue";
 import ShareRow from "./ShareRow.vue";
 import { useSharing } from "./sharing";
-import { count } from "../numbers";
+import { plural } from "../numbers";
 import {
 	fetchWorkspace,
 	isAdmin,
@@ -168,7 +168,6 @@ function removeTeamRow(team: WorkspaceTeam) {
 }
 
 const teamName = (team: WorkspaceTeam) => (team.archived ? `${team.name} (archived)` : team.name);
-const memberCount = (total: number) => `${count(total)} ${total === 1 ? "member" : "members"}`;
 
 /** General access, chosen but not yet confirmed: opening it to everyone, or closing it, asks first. */
 const pendingGeneral = ref<OrgAccess | null>(null);
@@ -261,7 +260,7 @@ onBeforeUnmount(() => clearTimeout(copiedTimer));
 						:key="`team:${team.id}`"
 						icon="lucide-users"
 						:name="teamName(team)"
-						:email="memberCount(team.memberCount)"
+						:email="plural(team.memberCount, 'member')"
 						:muted="team.archived"
 						data-slot="workspace-team"
 					>

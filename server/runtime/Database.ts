@@ -5,6 +5,7 @@ import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Predicate from "effect/Predicate";
+import * as Schema from "effect/Schema";
 import { isSqlError, type SqlError } from "effect/sql/SqlError";
 import * as PonderConfig from "../config.ts";
 
@@ -81,3 +82,12 @@ export function problem(error: unknown): unknown {
 	if (isSqlError(error)) return sqlMessage(error);
 	return error instanceof Error ? error.message : error;
 }
+
+/**
+ * A statement's rows, decoded with the row's schema, for a one-off query that is not worth an
+ * SqlSchema request. A row that does not decode is a bug: a defect.
+ */
+export const decodeRows =
+	<T, E>(row: Schema.Codec<T, E>) =>
+	<Err, R>(statement: Effect.Effect<ReadonlyArray<unknown>, Err, R>) =>
+		Effect.flatMap(statement, (rows) => Effect.orDie(Schema.decodeUnknownEffect(Schema.Array(row))(rows)));

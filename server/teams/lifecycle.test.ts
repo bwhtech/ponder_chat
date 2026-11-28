@@ -7,7 +7,6 @@
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import type { WorkspaceDetail } from "../workspaces/Workspaces.ts";
-import { joinInvitedTeams } from "./joins.ts";
 import type { MyTeam } from "./Teams.ts";
 import {
 	base,
@@ -16,8 +15,10 @@ import {
 	database,
 	emailOf,
 	holdEvents,
+	holdOpen,
+	joinTeams,
+	type List,
 	type One,
-	pause,
 	type Refusal,
 	removeMember,
 	runPromise,
@@ -70,6 +71,16 @@ describe.skipIf(!base)("archive, restore and delete a team, and my teams", () =>
 		assert.strictEqual((await archive("boss", "no-such-team")).status, 404);
 	});
 
+	it("hides an archived team from its team admins, as their list does, but not from org admins", async () => {
+		const team = (await create("boss", "Shelved", "ana")).body.team.id;
+		await archive("boss", team);
+		assert.strictEqual((await call("ana", "GET", `/api/admin/teams/${team}`)).status, 404);
+		assert.notInclude((await call<List>("ana", "GET", "/api/admin/teams")).body.teams.map((each) => each.id), team);
+		assert.deepInclude((await call<One>("boss", "GET", `/api/admin/teams/${team}`)).body.team, { id: team, archived: true });
+		await restore("boss", team);
+		assert.strictEqual((await call("ana", "GET", `/api/admin/teams/${team}`)).status, 200);
+	});
+
 	it("stops the team's grants at once, keeps them, and brings them back on restore", async () => {
 		const team = (await create("boss", "Readers", "ana")).body.team.id;
 		await setMember("boss", team, "bob", "member");
@@ -119,7 +130,7 @@ describe.skipIf(!base)("archive, restore and delete a team, and my teams", () =>
 
 		const id = `kai-${tag}`;
 		await database((sql) => sql`insert into users (id, name, email, role) values (${id}, '', ${email}, 'user')`);
-		await database((sql) => joinInvitedTeams(sql, { id, email }));
+		await joinTeams({ id, email });
 		const restored = (await restore("boss", team)).body.team;
 		assert.deepInclude(restored.members.find((member) => member.id === id), { role: "admin" });
 		assert.deepStrictEqual(restored.invites, []);
@@ -233,23 +244,14 @@ describe.skipIf(!base)("archive, restore and delete a team, and my teams", () =>
 		const email = newEmail("late");
 
 		// G holds the team's row, as a restore, invite and archive again would. Delete D waits for it.
-		let releaseG!: () => void;
-		const gGate = new Promise<void>((resolve) => (releaseG = resolve));
-		let gHolds!: () => void;
-		const gHeld = new Promise<void>((resolve) => (gHolds = resolve));
-		const g = database((sql) =>
-			sql.withTransaction(
-				Effect.gen(function* () {
-					yield* sql`select id from teams where id = ${team} for no key update`;
-					yield* sql`insert into team_invites (team_id, email, role, invited_by) values (${team}, ${email}, 'member', ${who.boss})`;
-					yield* Effect.sync(gHolds);
-					yield* Effect.promise(() => gGate);
-				}),
-			),
+		const g = await holdOpen((sql) =>
+			Effect.gen(function* () {
+				yield* sql`select id from teams where id = ${team} for no key update`;
+				yield* sql`insert into team_invites (team_id, email, role, invited_by) values (${team}, ${email}, 'member', ${who.boss})`;
+			}),
 		);
-		await gHeld;
 		const deleted = remove("boss", team);
-		await pause(300);
+		await g.waiting([deleted]);
 		// H takes the new email's lock, then waits for the team's row behind D: the order of Teams.ts.
 		const h = database((sql) =>
 			sql.withTransaction(
@@ -259,9 +261,8 @@ describe.skipIf(!base)("archive, restore and delete a team, and my teams", () =>
 				}),
 			),
 		);
-		await pause(300);
-		releaseG();
-		await g;
+		await g.waiting([deleted, h]);
+		await g.release();
 		await h;
 		const answer = await deleted;
 		assert.strictEqual(answer.status, 200, JSON.stringify(answer.body));
@@ -274,10 +275,10 @@ describe.skipIf(!base)("archive, restore and delete a team, and my teams", () =>
 		const events = await holdEvents();
 		// The archive wrote its row and waits to commit.
 		const archived = archive("boss", team);
-		await events.waiting(1);
+		await events.waiting([archived]);
 		const invited = invite("ana", team, newEmail("quo"));
 		const shared = call<Refusal>("cy", "PUT", `/api/workspaces/${workspace}/teams/${team}`, { access: "ask" });
-		await pause(300);
+		await events.waiting([archived, invited, shared]);
 		await events.release();
 		const [a, i, s] = await Promise.all([archived, invited, shared]);
 		assert.strictEqual(a.status, 200);

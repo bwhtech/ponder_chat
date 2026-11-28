@@ -1,4 +1,4 @@
-import { count } from "../numbers";
+import { plural } from "../numbers";
 
 /** Who can change and share a workspace, who can use it, and how many: no state here, so a test can import them. store.ts hands them on. */
 export function canEdit(workspace: { access: string }) {
@@ -34,9 +34,9 @@ export function sharedWith(workspace: Sharing & { access: string }) {
 }
 
 export function people(total: number) {
-	return `${count(total)} ${total === 1 ? "person" : "people"}`;
+	return plural(total, "person", "people");
 }
 
 function teams(total: number) {
-	return `${count(total)} ${total === 1 ? "team" : "teams"}`;
+	return plural(total, "team");
 }

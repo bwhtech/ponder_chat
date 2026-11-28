@@ -7,7 +7,7 @@ import AccountMenu from "../components/AccountMenu.vue";
 import ListSkeleton from "../components/ListSkeleton.vue";
 import TeamFormDialog from "../components/TeamFormDialog.vue";
 import EmptyState from "../../EmptyState.vue";
-import { count } from "../../numbers";
+import { count, plural } from "../../numbers";
 import { isMobile } from "../lib/viewport";
 import { scope } from "../store";
 
@@ -57,7 +57,7 @@ const emptyText = computed(() =>
 
 /** "12 members · 2 admins", or with pending invites. */
 function counts(team: TeamSummary) {
-	const parts = [`${count(team.memberCount)} ${team.memberCount === 1 ? "member" : "members"}`, `${count(team.adminCount)} ${team.adminCount === 1 ? "admin" : "admins"}`];
+	const parts = [plural(team.memberCount, "member"), plural(team.adminCount, "admin")];
 	if (team.inviteCount) parts.push(`${count(team.inviteCount)} invited`);
 	return parts.join(" · ");
 }

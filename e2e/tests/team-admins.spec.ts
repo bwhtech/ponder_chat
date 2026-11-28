@@ -109,6 +109,11 @@ test("an invited email joins the team at its first sign-in", async ({ page, admi
 	const after = await jsonOf<Team>(await lead.page.request.get(`/api/admin/teams/${team.id}`));
 	expect(after.team.members.map((member) => [member.email, member.role])).toContainEqual([newcomer, "member"]);
 	expect(after.team.invites).toEqual([]);
+
+	// The activity log: they joined, nobody added them.
+	const [account] = await db<{ id: string }[]>`select id from users where lower(email) = ${newcomer}`;
+	await page.goto(`/admin/activity?person=${encodeURIComponent(account!.id)}`);
+	await expect(page.getByText(`Joined “${name}” as a member, by invite`)).toBeVisible();
 	await Promise.all([lead.context.close(), context.close()]);
 });
 

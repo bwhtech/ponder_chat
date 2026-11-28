@@ -3,6 +3,8 @@ import * as Option from "effect/Option";
 import type * as SignInProviders from "../auth/SignInProviders.ts";
 import * as Mailer from "../email/Mailer.ts";
 import { displayName } from "../../shared/display-name.ts";
+import { problem } from "../runtime/Database.ts";
+import type { TeamRole } from "./access.ts";
 import type { Rows } from "./rows.ts";
 
 /**
@@ -11,7 +13,7 @@ import type { Rows } from "./rows.ts";
  * after the change is committed. A failed email is logged and changes nothing.
  */
 export type TeamEmails = {
-	added: (to: string, origin: string, notice: { team: string; byUserId: string; admin: boolean }) => Effect.Effect<void>;
+	added: (to: string, origin: string, notice: { team: string; byUserId: string; role: TeamRole }) => Effect.Effect<void>;
 	invited: (to: string, origin: string, notice: { team: string; byUserId: string }) => Effect.Effect<void>;
 };
 
@@ -22,12 +24,12 @@ export function teamEmails(mailer: Mailer.Mailer["Service"], providers: SignInPr
 
 	const send = (email: Effect.Effect<Mailer.Email, unknown>) =>
 		Effect.flatMap(email, (built) => mailer.send(built)).pipe(
-			Effect.catch((error) => Effect.logError("team email:", error instanceof Mailer.EmailNotSent ? error.message : error)),
+			Effect.catch((error) => Effect.logError("team email:", problem(error))),
 			Effect.withSpan("Teams.email"),
 		);
 
 	return {
-		added: (to, origin, { team, byUserId, admin }) => send(Effect.map(nameOf(byUserId), (by) => Mailer.addedToTeamEmail(to, origin, { team, by, admin }))),
+		added: (to, origin, { team, byUserId, role }) => send(Effect.map(nameOf(byUserId), (by) => Mailer.addedToTeamEmail(to, origin, { team, by, role }))),
 		invited: (to, origin, { team, byUserId }) =>
 			send(
 				Effect.gen(function* () {

@@ -3,7 +3,8 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import type * as AdminEvents from "../admin/AdminEvents.ts";
-import { lockInvitesOf } from "../people/Invites.ts";
+import { closeWayIn, lockInvitesOf } from "../people/Invites.ts";
+import { decodeRows } from "../runtime/Database.ts";
 import { canDelete, canOrganise, type TeamViewer } from "./access.ts";
 import { type Actor, type TeamDetail, type TeamNotFound, TeamRefused } from "./model.ts";
 import type { FactsRow } from "./rows.ts";
@@ -25,6 +26,9 @@ export type Lifecycle = {
 
 /** Delete found an invite that came after it locked the emails: it starts again. */
 class InvitesMoved extends Schema.TaggedError<InvitesMoved>()("InvitesMoved", {}) {}
+
+const CountsRow = Schema.Struct({ members: Schema.Number, grants: Schema.Number });
+const EmailRow = Schema.Struct({ email: Schema.String });
 
 type Needs = {
 	sql: PgClient.PgClient;
@@ -54,7 +58,7 @@ export function lifecycleOf({ sql, events, lockTeam, viewerOf, get }: Needs): Li
 	const remove = Effect.fnUntraced(function* (actor: Actor, teamId: string) {
 		yield* removeOnce(actor, teamId).pipe(
 			Effect.retry({ while: (error) => error._tag === "InvitesMoved", times: 5 }),
-			Effect.catchTag("InvitesMoved", () => Effect.die(new Error(`Team ${teamId}: its invites kept changing during delete.`))),
+			Effect.catchTags({ InvitesMoved: () => Effect.die(new Error(`Team ${teamId}: its invites kept changing during delete.`)) }),
 		);
 	});
 
@@ -74,12 +78,12 @@ export function lifecycleOf({ sql, events, lockTeam, viewerOf, get }: Needs): Li
 				const now = yield* inviteEmails(teamId);
 				if (now.some((each) => !emails.includes(each))) return yield* new InvitesMoved();
 
-				const [counts] = yield* sql<{ members: number; grants: number }>`
+				const [counts] = yield* sql`
 					select (select count(*)::int from team_members where team_id = ${teamId}) as members,
-						(select count(*)::int from workspace_teams where team_id = ${teamId}) as grants`;
+						(select count(*)::int from workspace_teams where team_id = ${teamId}) as grants`.pipe(decodeRows(CountsRow));
 				// Its members, invites and grants go with it (on delete cascade).
 				yield* sql`delete from teams where id = ${teamId}`;
-				if (now.length > 0) yield* closeWayIn(now);
+				if (now.length > 0) yield* closeWayIn(sql, now);
 				yield* events.record({
 					actor,
 					action: "delete-team",
@@ -90,13 +94,7 @@ export function lifecycleOf({ sql, events, lockTeam, viewerOf, get }: Needs): Li
 	});
 
 	const inviteEmails = (teamId: string) =>
-		Effect.map(sql<{ email: string }>`select email from team_invites where team_id = ${teamId} order by email`, (rows) => rows.map((row) => row.email));
-
-	/** As Teams.cancelInvite: the emails that only this team's invites let in may no longer sign in. */
-	const closeWayIn = (emails: string[]) => sql`
-		delete from allowed_emails a where a.email in ${sql.in(emails)} and a.team_only
-		and not exists (select 1 from team_invites i where i.email = a.email)
-		and not exists (select 1 from users u where lower(u.email) = a.email)`;
+		Effect.map(sql`select email from team_invites where team_id = ${teamId} order by email`.pipe(decodeRows(EmailRow)), (rows) => rows.map((row) => row.email));
 
 	return { archive: setArchived(true), restore: setArchived(false), remove };
 }

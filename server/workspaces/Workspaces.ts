@@ -11,6 +11,7 @@ import * as AdminEvents from "../admin/AdminEvents.ts";
 import * as ObjectStore from "../files/ObjectStore.ts";
 import * as Accounts from "../people/Accounts.ts";
 import { roleFrom } from "../people/Accounts.ts";
+import { decodeRows } from "../runtime/Database.ts";
 import { TeamNotFound } from "../teams/Teams.ts";
 import { type Access, accessFrom, atLeast, canChangeOrgAccess, canDelete, canShare, type MemberAccess, type OrgAccess } from "./access.ts";
 import { documentStore, type DocumentSummary } from "./documents/store.ts";
@@ -187,6 +188,8 @@ export class Workspaces extends Context.Service<
 
 /** What a person's access was decided from, for the checks after it. */
 type Resolved = { access: Access; admin: boolean; orgAccess: OrgAccess; ownerId: string };
+
+const ArchivedRow = Schema.Struct({ archived: Schema.Boolean });
 
 const make = Effect.gen(function* () {
 	const sql = yield* PgClient.PgClient;
@@ -475,7 +478,7 @@ const make = Effect.gen(function* () {
 		return yield* changeSharing(actor, workspaceId, () =>
 			Effect.gen(function* () {
 				// The team's row, shared until the end: an archive waits for the grant, or the grant sees it archived.
-				const [team] = yield* sql<{ archived: boolean }>`select archived_at is not null as archived from teams where id = ${teamId} for share`;
+				const [team] = yield* sql`select archived_at is not null as archived from teams where id = ${teamId} for share`.pipe(decodeRows(ArchivedRow));
 				if (!team) return yield* new TeamNotFound({ teamId });
 				if (team.archived) {
 					const changed = yield* sql`update workspace_teams set access = ${access} where workspace_id = ${workspaceId} and team_id = ${teamId} returning team_id`;
