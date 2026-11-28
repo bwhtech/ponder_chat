@@ -29,6 +29,7 @@ const SummaryRow = Schema.Struct({
 	invite_count: Schema.Number,
 });
 
+const MatchRow = Schema.Struct({ id: Schema.String, name: Schema.String, member_count: Schema.Number });
 const TeamRow = Schema.Struct({ id: Schema.String, name: Schema.String, description: Schema.String, archived: Schema.Boolean, created_at: Schema.Date });
 const MemberRow = Schema.Struct({ id: Schema.String, name: Schema.String, email: Schema.String, role: RoleSchema, added_at: Schema.Date });
 const InviteRow = Schema.Struct({ email: Schema.String, role: RoleSchema, invited_by: Schema.String, created_at: Schema.Date });
@@ -36,6 +37,7 @@ const PersonRow = Schema.Struct({ banned: Schema.Boolean, role: Schema.NullOr(Ro
 
 export type FactsRow = typeof FactsRow.Type;
 export type SummaryRow = typeof SummaryRow.Type;
+export type MatchRow = typeof MatchRow.Type;
 export type TeamRow = typeof TeamRow.Type;
 export type MemberRow = typeof MemberRow.Type;
 export type InviteRow = typeof InviteRow.Type;
@@ -45,6 +47,8 @@ export type Rows = {
 	facts: (request: { userId: string; teamId: string }) => Effect.Effect<Option.Option<FactsRow>, SqlError>;
 	/** Every team, or only the active ones that the person admins: active first, then by name. */
 	summaries: (request: { adminOf: string | null }) => Effect.Effect<ReadonlyArray<SummaryRow>, SqlError>;
+	/** Active teams whose name has this LIKE pattern, without case, by name: at most 20. */
+	matches: (pattern: string) => Effect.Effect<ReadonlyArray<MatchRow>, SqlError>;
 	team: (teamId: string) => Effect.Effect<Option.Option<TeamRow>, SqlError>;
 	/** By name, or by email for a person with no name, as the page names them. */
 	members: (teamId: string) => Effect.Effect<ReadonlyArray<MemberRow>, SqlError>;
@@ -54,6 +58,7 @@ export type Rows = {
 	person: (request: { userId: string; teamId: string }) => Effect.Effect<Option.Option<typeof PersonRow.Type>, SqlError>;
 };
 
+const MEMBER_COUNT = "(select count(*)::int from team_members c where c.team_id = t.id)";
 const ADMIN_COUNT = "(select count(*)::int from team_members a where a.team_id = t.id and a.role = 'admin')";
 
 export function rowsOf(sql: PgClient.PgClient): Rows {
@@ -73,13 +78,23 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 			const mine = adminOf === null ? sql`` : sql`and t.archived_at is null and exists (select 1 from team_members s where s.team_id = t.id and s.user_id = ${adminOf} and s.role = 'admin')`;
 			return sql`
 				select t.id, t.name, t.description, t.archived_at is not null as archived,
-					(select count(*)::int from team_members c where c.team_id = t.id) as member_count,
+					${sql.literal(MEMBER_COUNT)} as member_count,
 					${sql.literal(ADMIN_COUNT)} as admin_count,
 					(select count(*)::int from team_invites i where i.team_id = t.id) as invite_count
 				from teams t
 				where true ${mine}
 				order by t.archived_at is not null, lower(t.name)`;
 		},
+	});
+	const matches = SqlSchema.findAll({
+		Request: Schema.String,
+		Result: MatchRow,
+		execute: (pattern) => sql`
+			select t.id, t.name, ${sql.literal(MEMBER_COUNT)} as member_count
+			from teams t
+			where t.archived_at is null and t.name ilike ${pattern}
+			order by lower(t.name), t.id
+			limit 20`,
 	});
 	const team = SqlSchema.findOneOption({
 		Request: Schema.String,
@@ -118,6 +133,7 @@ export function rowsOf(sql: PgClient.PgClient): Rows {
 	return {
 		facts: (request) => decoded(facts(request)),
 		summaries: (request) => decoded(summaries(request)),
+		matches: (pattern) => decoded(matches(pattern)),
 		team: (teamId) => decoded(team(teamId)),
 		members: (teamId) => decoded(members(teamId)),
 		invites: (teamId) => decoded(invites(teamId)),

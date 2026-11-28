@@ -26,6 +26,8 @@ const AdminEvents = await import("./AdminEvents.ts");
 const Credits = await import("../credits/Credits.ts");
 const Runs = await import("../telemetry/Runs.ts");
 const Workspaces = await import("../workspaces/Workspaces.ts");
+const Invites = await import("../people/Invites.ts");
+const Teams = await import("../teams/Teams.ts");
 const { indexLog } = await import("../workspaces/documents/log.ts");
 const { adminApi } = await import("./routes.ts");
 
@@ -121,6 +123,9 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Credits.Credits.use((credits) => credits.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
+				// The team tables (teams/tables.ts): a person's access reads their teams' grants.
+				yield* Invites.Invites.use((invites) => invites.migrate);
+				yield* Teams.Teams.use((teams) => teams.migrate);
 				const workspaces = yield* Workspaces.Workspaces;
 				ids.org = (yield* workspaces.create(actor("admin"), { name: "Handbook", description: "For everyone", instructions: "Be brief.", icon: null })).id;
 				yield* workspaces.setOrgAccess(actor("admin"), ids.org, "ask");

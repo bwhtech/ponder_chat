@@ -29,6 +29,8 @@ const Threads = await import("../../threads/Threads.ts");
 const AdminEvents = await import("../../admin/AdminEvents.ts");
 const Runs = await import("../../telemetry/Runs.ts");
 const Workspaces = await import("../Workspaces.ts");
+const Invites = await import("../../people/Invites.ts");
+const Teams = await import("../../teams/Teams.ts");
 const Documents = await import("./Documents.ts");
 const Indexer = await import("./Indexer.ts");
 const IndexRuns = await import("./IndexRuns.ts");
@@ -112,6 +114,9 @@ describe.skipIf(!base)("workspace document lifecycle", () => {
 				yield* AdminEvents.AdminEvents.use((events) => events.migrate);
 				yield* Runs.Runs.use((runs) => runs.migrate);
 				yield* Workspaces.Workspaces.use((workspaces) => workspaces.migrate);
+				// The team tables (teams/tables.ts): a person's access reads their teams' grants.
+				yield* Invites.Invites.use((invites) => invites.migrate);
+				yield* Teams.Teams.use((teams) => teams.migrate);
 			}),
 		);
 	});

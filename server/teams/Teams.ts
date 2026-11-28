@@ -41,6 +41,9 @@ export type TeamSummary = {
 	archived: boolean;
 };
 
+/** A team in the share picker (GET /api/teams?q=): for every signed-in person, so never its members. */
+export type TeamMatch = { id: string; name: string; memberCount: number };
+
 export type TeamMember = { id: string; name: string; email: string; role: TeamRole; addedAt: string };
 export type TeamInvite = { email: string; role: TeamRole; invitedBy: string; createdAt: string };
 
@@ -103,6 +106,8 @@ export class Teams extends Context.Service<
 		readonly migrate: Effect.Effect<void, SqlError>;
 		/** Org admins: every team, archived too. Team admins: the active teams they admin. */
 		readonly list: (actor: Actor) => Effect.Effect<TeamSummary[], SqlError>;
+		/** Active teams whose name has this text, without case: at most 20. Any signed-in person. */
+		readonly search: (text: string) => Effect.Effect<TeamMatch[], SqlError>;
 		/** Org admins only. The first team admin must have an account and not be banned. */
 		readonly create: (actor: Actor, input: NewTeam) => Effect.Effect<TeamDetail, TeamRefused | TeamNameTaken | SqlError>;
 		/** Name and description: org admins only. */
@@ -195,6 +200,13 @@ const make = Effect.gen(function* () {
 		);
 	});
 
+	const search = Effect.fn("Teams.search")(function* (text: string) {
+		// The text is matched as it is: % and _ in it are not wildcards (as Accounts.search).
+		const pattern = `%${text.trim().replace(/[\\%_]/g, (special) => `\\${special}`)}%`;
+		const found = yield* rows.matches(pattern);
+		return found.map((row): TeamMatch => ({ id: row.id, name: row.name, memberCount: row.member_count }));
+	});
+
 	const create = Effect.fn("Teams.create")(function* (actor: Actor, input: NewTeam) {
 		if (!(yield* accounts.isAdmin(actor.id))) return yield* new TeamRefused({ reason: "needs-org-admin" });
 		const id = randomUUID();
@@ -277,7 +289,7 @@ const make = Effect.gen(function* () {
 		return yield* detailNow(actor, teamId);
 	});
 
-	return Teams.of({ migrate, list, create, update, get, setMember, removeMember });
+	return Teams.of({ migrate, list, search, create, update, get, setMember, removeMember });
 });
 
 export const layer = Layer.effect(Teams, make);
