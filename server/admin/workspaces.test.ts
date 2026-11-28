@@ -247,12 +247,12 @@ describe.skipIf(!base)("workspaces and system spend on /admin", () => {
 			shares.map((event) => [event.before, event.after]),
 			[
 				[
-					{ workspace: ids.org, orgAccess: "ask", members: [] },
-					{ workspace: ids.org, orgAccess: "ask", members: [{ id: who.ana, access: "edit" }], name: "Handbook" },
+					{ workspace: ids.org, orgAccess: "ask", members: [], teams: [] },
+					{ workspace: ids.org, orgAccess: "ask", members: [{ id: who.ana, access: "edit" }], teams: [], name: "Handbook" },
 				],
 				[
-					{ workspace: ids.org, orgAccess: "none", members: [] },
-					{ workspace: ids.org, orgAccess: "ask", members: [], name: "Handbook" },
+					{ workspace: ids.org, orgAccess: "none", members: [], teams: [] },
+					{ workspace: ids.org, orgAccess: "ask", members: [], teams: [], name: "Handbook" },
 				],
 			],
 			"one event for each change, the newest first",
