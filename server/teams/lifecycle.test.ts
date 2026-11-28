@@ -5,6 +5,7 @@
  * an archive that a concurrent invite and share wait for.
  */
 import { afterAll, assert, beforeAll, describe, it } from "@effect/vitest";
+import * as Effect from "effect/Effect";
 import type { WorkspaceDetail } from "../workspaces/Workspaces.ts";
 import { joinInvitedTeams } from "./joins.ts";
 import type { MyTeam } from "./Teams.ts";
@@ -224,6 +225,47 @@ describe.skipIf(!base)("archive, restore and delete a team, and my teams", () =>
 			{ action: "archive-team", target: null, before: null, after: named },
 			{ action: "delete-team", target: null, before: { ...named, members: 2, invites: 1, grants: 1 }, after: null },
 		]);
+	});
+
+	it("starts a delete again, rather than deadlock, when an invite came in while it waited for the team", async () => {
+		const team = (await create("boss", "Deadlock", "ana")).body.team.id;
+		await archive("boss", team);
+		const email = newEmail("late");
+
+		// G holds the team's row, as a restore, invite and archive again would. Delete D waits for it.
+		let releaseG!: () => void;
+		const gGate = new Promise<void>((resolve) => (releaseG = resolve));
+		let gHolds!: () => void;
+		const gHeld = new Promise<void>((resolve) => (gHolds = resolve));
+		const g = database((sql) =>
+			sql.withTransaction(
+				Effect.gen(function* () {
+					yield* sql`select id from teams where id = ${team} for no key update`;
+					yield* sql`insert into team_invites (team_id, email, role, invited_by) values (${team}, ${email}, 'member', ${who.boss})`;
+					yield* Effect.sync(gHolds);
+					yield* Effect.promise(() => gGate);
+				}),
+			),
+		);
+		await gHeld;
+		const deleted = remove("boss", team);
+		await pause(300);
+		// H takes the new email's lock, then waits for the team's row behind D: the order of Teams.ts.
+		const h = database((sql) =>
+			sql.withTransaction(
+				Effect.gen(function* () {
+					yield* sql`select pg_advisory_xact_lock(hashtext(${`ponder-invite:${email}`}))`;
+					yield* sql`select id from teams where id = ${team} for no key update`;
+				}),
+			),
+		);
+		await pause(300);
+		releaseG();
+		await g;
+		await h;
+		const answer = await deleted;
+		assert.strictEqual(answer.status, 200, JSON.stringify(answer.body));
+		assert.deepEqual([...(await database((sql) => sql`select id from teams where id = ${team}`))], []);
 	});
 
 	it("makes an invite and a share wait for an archive, and then refuses them", async () => {

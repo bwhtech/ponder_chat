@@ -1,5 +1,6 @@
 import type * as PgClient from "@effect/sql-pg/PgClient";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 import type { SqlError } from "effect/sql/SqlError";
 import type * as AdminEvents from "../admin/AdminEvents.ts";
 import { lockInvitesOf } from "../people/Invites.ts";
@@ -21,6 +22,9 @@ export type Lifecycle = {
 	restore: (actor: Actor, teamId: string) => Effect.Effect<TeamDetail, TeamNotFound | TeamRefused | SqlError>;
 	remove: (actor: Actor, teamId: string) => Effect.Effect<void, TeamNotFound | TeamRefused | SqlError>;
 };
+
+/** Delete found an invite that came after it locked the emails: it starts again. */
+class InvitesMoved extends Schema.TaggedError<InvitesMoved>()("InvitesMoved", {}) {}
 
 type Needs = {
 	sql: PgClient.PgClient;
@@ -48,6 +52,13 @@ export function lifecycleOf({ sql, events, lockTeam, viewerOf, get }: Needs): Li
 		});
 
 	const remove = Effect.fnUntraced(function* (actor: Actor, teamId: string) {
+		yield* removeOnce(actor, teamId).pipe(
+			Effect.retry({ while: (error) => error._tag === "InvitesMoved", times: 5 }),
+			Effect.catchTag("InvitesMoved", () => Effect.die(new Error(`Team ${teamId}: its invites kept changing during delete.`))),
+		);
+	});
+
+	const removeOnce = Effect.fnUntraced(function* (actor: Actor, teamId: string) {
 		yield* sql.withTransaction(
 			Effect.gen(function* () {
 				// Sorted, so two deletes take the same emails' locks in the same order.
@@ -57,9 +68,11 @@ export function lifecycleOf({ sql, events, lockTeam, viewerOf, get }: Needs): Li
 				const viewer = viewerOf(facts);
 				if (!canOrganise(viewer)) return yield* new TeamRefused({ reason: "needs-org-admin" });
 				if (!canDelete(viewer, facts.archived)) return yield* new TeamRefused({ reason: "not-archived" });
-				// Archived, so no invite comes now. One may have come before the lock, if the team was restored and archived again meanwhile.
+				// Archived, so no invite comes now. One may have come before the lock, if the team was
+				// restored and archived again meanwhile. Its email's lock would come after the team's,
+				// against the order of Teams.ts, so start again instead.
 				const now = yield* inviteEmails(teamId);
-				for (const email of now.filter((each) => !emails.includes(each))) yield* lockInvitesOf(sql, email);
+				if (now.some((each) => !emails.includes(each))) return yield* new InvitesMoved();
 
 				const [counts] = yield* sql<{ members: number; grants: number }>`
 					select (select count(*)::int from team_members where team_id = ${teamId}) as members,

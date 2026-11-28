@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Avatar, Badge, Breadcrumbs, Button, Dropdown, PageHeader, PageHeaderBackButton, PageHeaderMobile, Select, Skeleton, TextInput, toast } from "frappe-ui";
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { displayName } from "../../../shared/display-name";
 import { admin, ApiError, unwrap, type PersonFound, type TeamDetail, type TeamInvite, type TeamMember, type TeamRole } from "../api";
@@ -62,11 +62,16 @@ function retry() {
  * person removed or demoted themselves, so the team is no longer theirs to manage.
  */
 function show(id: string, changed: TeamDetail | null) {
-	if (id !== props.id) return;
+	if (!shows(id)) return;
 	asked++;
 	if (changed) state.value = { kind: "loaded", team: changed };
 	else void router.push("/teams");
 }
+
+// Whether the page still shows team `id`: not after a move to another team or another page.
+let left = false;
+onBeforeUnmount(() => (left = true));
+const shows = (id: string) => !left && id === props.id;
 
 const ROLES = [
 	{ label: "Member", value: "member" },
@@ -148,7 +153,17 @@ const actionsFor = (member: TeamMember) => [
 const editing = ref(false);
 
 // Org admins: archive and restore, and delete an archived team (team-actions.ts).
-const organise = computed(() => (team.value ? teamActions(team.value, { shown: (changed) => show(changed.id, changed), deleted: () => void router.push("/teams") }) : []));
+const organise = computed(() => {
+	const shown = team.value;
+	if (!shown) return [];
+	return teamActions(shown, {
+		shown: (changed) => show(changed.id, changed),
+		// A delete that answers after a move elsewhere leaves that page alone.
+		deleted: () => {
+			if (shows(shown.id)) void router.push("/teams");
+		},
+	});
+});
 const canEdit = computed(() => Boolean(team.value?.canOrganise && !team.value.archived));
 const mobileActions = computed(() => [...(canEdit.value ? [{ label: "Edit team", icon: "lucide-pencil", onClick: () => (editing.value = true) }] : []), ...organise.value]);
 </script>
